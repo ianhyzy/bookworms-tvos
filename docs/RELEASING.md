@@ -51,7 +51,7 @@ The verifier checks display names, the arm64 requirement, the CloudKit push enti
 
 Local preparation ends before upload. When distribution is authorized, open the archive in Xcode Organizer, validate and distribute through App Store Connect. Verify production entitlements after distribution signing. Keep the manually selected build number consistent; if Xcode changes it, record and verify the final uploaded number.
 
-Before testing iCloud in TestFlight, deploy and verify the production CloudKit schema. Complete beta metadata and export compliance in App Store Connect. Start with internal testing; external testing requires Apple's beta review. Verify launch, navigation, source credentials, refresh/cache behavior, Top Shelf, offline recovery, and production iCloud on the exact distributed candidate.
+The production CloudKit schema contains `LibraryArchive` with its `archive` asset. Deploy any new record type or field to production before a TestFlight build uses it. Complete beta metadata and export compliance in App Store Connect. Start with internal testing; external testing requires Apple's beta review. Verify launch, navigation, source credentials, refresh/cache behavior, Top Shelf, offline recovery, and production iCloud on the exact distributed candidate.
 
 Compilation and local signature verification do not establish distribution or physical-device readiness.
 
@@ -64,7 +64,7 @@ Compilation and local signature verification do not establish distribution or ph
 | Contact | bookworms@ian.gay |
 | App Store Connect version | 1.0.0, matching `MARKETING_VERSION` |
 
-Keep the published privacy policy consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update it before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage stays off by default until the production CloudKit schema is deployed.
+Keep the published privacy policy consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update it before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
 
 ## Verify the release candidate
 

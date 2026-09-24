@@ -6,7 +6,7 @@ CWA redirects and catalog paging stay within the configured HTTPS origin. The ap
 
 ## iCloud
 
-**Settings → General → iCloud storage** enables private CloudKit storage. It is off by default until the production CloudKit schema is deployed. The archive contains source snapshots and saved AI design records. Credentials are excluded. Covers and downloadable fonts stay in local caches. The cloud archive uses a file asset so it can exceed the local preferences budget.
+**Settings → General → iCloud storage** enables private CloudKit storage. It is off by default; users turn it on. The `LibraryArchive` record type is deployed to the production schema. The archive contains source snapshots and saved AI design records. Credentials are excluded. Covers and downloadable fonts stay in local caches. The cloud archive uses a file asset so it can exceed the local preferences budget.
 
 Cloud sync merges sources by identity and sync date, and designs by book ID and generation date. Conditional saves retry concurrent updates instead of overwriting another device's newer data. Unchanged archives are not uploaded again. A source sync queues a cloud update, and paid designs are saved to iCloud before relying on cloud storage beyond the local preferences budget.
 

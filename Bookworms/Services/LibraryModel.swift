@@ -200,7 +200,7 @@ final class LibraryModel {
             defaults.data(forKey: "shelfPreferences")
             .flatMap { try? JSONDecoder().decode(ShelfPreferences.self, from: $0) }
             ?? ShelfPreferences()
-        // Off by default until the production CloudKit schema is deployed for testers.
+        // Opt-in: the published privacy policy describes iCloud storage as off by default.
         iCloudEnabled = defaults.object(forKey: "iCloudEnabled") as? Bool ?? false
         sourceErrors = defaults.dictionary(forKey: "sourceErrors") as? [String: String] ?? [:]
     }
