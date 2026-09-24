@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="1280" height="768" viewBox="0 0 800 480" role="img" aria-labelledby="title description">
+  <title id="title">Two bookworms reading together</title>
+  <desc id="description">Two smiling pink worms look down at a shared open purple book against a warm cream background. Editable vector artwork with separate background, character, and book groups for a future tvOS parallax icon.</desc>
+
+  <!-- Full-bleed opaque background. tvOS supplies the final corner mask. -->
+  <g id="background" inkscape:groupmode="layer" inkscape:label="01 Background">
+    <path fill="#F7EEDB" d="M0 0H800V480H0Z"/>
+  </g>
+
+  <g id="worms" inkscape:groupmode="layer" inkscape:label="02 Pink bookworms" stroke="#50344D" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <g id="left-worm">
+      <path fill="#EF9DAE" d="M232 352C221 307 217 258 220 207L221 172C222 125 249 95 289 97C333 99 359 133 362 176L367 274C369 310 374 333 384 355Z"/>
+      <path fill="#F6B4BF" stroke="none" d="M239 202L240 172C241 140 260 118 287 118C306 118 321 127 331 143C318 136 304 133 291 137C267 144 259 164 258 194L260 281C251 262 243 231 239 202Z"/>
+      <g fill="none" stroke="#CA718F" stroke-width="5">
+        <path d="M223 273Q242 286 263 284"/>
+        <path d="M225 300Q244 311 266 308"/>
+        <path d="M229 326Q247 336 269 333"/>
+      </g>
+      <g fill="#FFF9ED" stroke-width="6">
+        <ellipse cx="273" cy="180" rx="25" ry="29" transform="rotate(-9 273 180)"/>
+        <ellipse cx="332" cy="185" rx="25" ry="29" transform="rotate(-9 332 185)"/>
+      </g>
+      <g fill="#50344D" stroke="none">
+        <ellipse cx="282" cy="192" rx="8" ry="11"/>
+        <ellipse cx="338" cy="198" rx="8" ry="11"/>
+      </g>
+      <g fill="#FFF9ED" stroke="none">
+        <circle cx="284" cy="188" r="2.5"/>
+        <circle cx="340" cy="194" r="2.5"/>
+      </g>
+      <ellipse cx="258" cy="222" rx="14" ry="8" fill="#E881A0" stroke="none"/>
+      <path fill="none" stroke-width="6" d="M285 224Q298 245 322 229"/>
+    </g>
+
+    <g id="right-worm">
+      <path fill="#F3ACBB" d="M416 355C429 331 434 302 434 270L437 182C438 137 465 109 505 110C548 111 576 142 578 188L580 235C582 279 577 321 566 353Z"/>
+      <path fill="#F9C4CB" stroke="none" d="M455 204L457 180C459 148 477 130 502 130C523 130 539 141 548 158C534 148 516 146 502 151C482 157 475 177 474 204L471 268C461 250 455 228 455 204Z"/>
+      <g fill="none" stroke="#D8829B" stroke-width="5">
+        <path d="M540 285Q561 288 579 275"/>
+        <path d="M537 310Q558 313 576 301"/>
+        <path d="M533 335Q554 337 571 326"/>
+      </g>
+      <g fill="#FFF9ED" stroke-width="6">
+        <ellipse cx="465" cy="195" rx="25" ry="29" transform="rotate(8 465 195)"/>
+        <ellipse cx="524" cy="190" rx="25" ry="29" transform="rotate(8 524 190)"/>
+      </g>
+      <g fill="#50344D" stroke="none">
+        <ellipse cx="459" cy="208" rx="8" ry="11"/>
+        <ellipse cx="515" cy="202" rx="8" ry="11"/>
+      </g>
+      <g fill="#FFF9ED" stroke="none">
+        <circle cx="461" cy="204" r="2.5"/>
+        <circle cx="517" cy="198" r="2.5"/>
+      </g>
+      <ellipse cx="540" cy="232" rx="14" ry="8" fill="#EA8BA5" stroke="none"/>
+      <path fill="none" stroke-width="6" d="M476 239Q497 254 512 233"/>
+    </g>
+  </g>
+
+  <g id="book" inkscape:groupmode="layer" inkscape:label="03 Purple book" stroke="#50344D" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <!-- A visible purple hardback, with warm pages along its open upper edge. -->
+    <path fill="#8761B2" d="M250 275Q334 265 400 306Q466 265 550 275L550 378Q468 372 400 405Q332 372 250 378Z"/>
+    <path fill="#A884CC" stroke="none" d="M260 289Q332 283 392 316L392 391Q331 365 260 367Z"/>
+    <path fill="#926DBB" stroke="none" d="M408 316Q468 283 540 289L540 367Q469 365 408 391Z"/>
+    <path fill="#FFF9ED" stroke-width="5" d="M261 267Q336 264 400 299Q464 264 539 267L539 282Q463 281 400 315Q337 281 261 282Z"/>
+    <path fill="none" stroke="#DCCDBA" stroke-width="3" d="M272 275Q336 275 387 300M528 275Q464 275 413 300"/>
+    <path fill="none" stroke-width="6" d="M400 315V403"/>
+    <path fill="none" stroke="#BD9FDC" stroke-width="5" d="M270 301V353Q329 351 376 373"/>
+    <path fill="none" stroke="#B08DD0" stroke-width="5" d="M528 301V353Q473 352 425 373"/>
+  </g>
+</svg>

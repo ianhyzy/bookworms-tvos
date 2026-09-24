@@ -1,0 +1,25 @@
+.DS_Store
+.build/
+.build-device/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.xcodebuildmcp/
+.local/
+*.xcresult
+.env*
+__pycache__/
+
+.build-release/
+.build-tests/
+
+.build-social/
+
+# All local build variants and private credentials.
+.build*/
+*.p12
+*.p8
+*.mobileprovision
+
+# Real-library visual review artifacts.

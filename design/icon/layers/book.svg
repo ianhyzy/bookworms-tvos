@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="1280" height="768" viewBox="0 0 800 480" role="img" aria-labelledby="title description">
+  <title id="title">Two bookworms reading together</title>
+  <desc id="description">Two symmetrical pink worms with plain black pupils aimed at the shared book's center and small smiles read together on a cream background. Cream pages sit behind the purple outer cover. Minimal flat vector artwork with separate background, character, and book groups for a future tvOS parallax icon.</desc>
+
+
+  <g id="book" inkscape:groupmode="layer" inkscape:label="03 Purple book" stroke="#50344D" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+
+    <path id="pages" fill="#F7EEDB" stroke-width="5" d="M261 267Q336 264 400 299Q464 264 539 267L539 366Q464 363 400 393Q336 363 261 366Z" />
+    <path id="outer-cover" fill="#9874BC" d="M250 280Q334 270 400 311Q466 270 550 280L550 378Q468 372 400 405Q332 372 250 378Z" />
+    <path fill="none" stroke-width="6" d="M400 311V403" />
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+{
+  "images": [
+    {
+      "idiom": "tv",
+      "filename": "background@1x.png",
+      "scale": "1x"
+    },
+    {
+      "idiom": "tv",
+      "filename": "background@2x.png",
+      "scale": "2x"
+    }
+  ],
+  "info": {
+    "author": "gay.ian.Bookworms",
+    "version": 1
+  }
+}

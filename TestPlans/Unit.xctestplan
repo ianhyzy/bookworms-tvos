@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "configurations": [
+    {
+      "id": "B0000000-0000-0000-0000-000000000001",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": true,
+    "targetForVariableExpansion": {
+      "containerPath": "container:Bookworms.xcodeproj",
+      "identifier": "2381CA1928C0457CA7AF1E65",
+      "name": "Bookworms"
+    }
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Bookworms.xcodeproj",
+        "identifier": "1D657F4B12EC9E7CE94C5150",
+        "name": "BookwormsTests"
+      },
+      "parallelizable": false
+    }
+  ]
+}

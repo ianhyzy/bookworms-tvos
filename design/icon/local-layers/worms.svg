@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="1280" height="768" viewBox="0 0 800 480" role="img" aria-labelledby="title description">
+  <title id="title">Two bookworms reading together</title>
+  <desc id="description">Two symmetrical pink worms with plain black pupils aimed at the shared book's center and small smiles read together on a cream background. Cream pages sit behind the purple outer cover. Minimal flat vector artwork with separate background, character, and book groups for a future tvOS parallax icon.</desc>
+
+  
+  <g id="worms" inkscape:groupmode="layer" inkscape:label="02 Pink bookworms" stroke="#50344D" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <g id="left-worm">
+      <path fill="#EF9DAE" d="M232 352C221 307 217 258 220 207L221 172C222 125 249 95 289 97C333 99 359 133 362 176L367 274C369 310 374 333 384 355Z" />
+      <g id="segment-lines" fill="none" stroke-width="5" stroke-opacity="0.5">
+        <path d="M225 300Q243 310 260 308" />
+        <path d="M229 326Q245 335 260 333" />
+      </g>
+      <g fill="#F7EEDB" stroke-width="6">
+        <ellipse cx="273" cy="180" rx="25" ry="29" transform="rotate(-9 273 180)" />
+        <ellipse cx="332" cy="185" rx="25" ry="29" transform="rotate(-9 332 185)" />
+      </g>
+      
+      <g id="pupils" fill="#000000" stroke="none">
+        <circle cx="283.216" cy="189.572" r="8" />
+        <circle cx="339.172" cy="197.024" r="8" />
+      </g>
+      <path fill="none" stroke-width="6" d="M285 224Q298 245 322 229" />
+    </g>
+    
+    <g id="right-worm" transform="translate(800 0) scale(-1 1)">
+      <use href="#left-worm" />
+    </g>
+  </g>
+
+  </svg>

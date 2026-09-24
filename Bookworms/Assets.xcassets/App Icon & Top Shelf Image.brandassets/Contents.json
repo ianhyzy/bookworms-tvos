@@ -1,0 +1,32 @@
+{
+  "assets": [
+    {
+      "idiom": "tv",
+      "size": "400x240",
+      "filename": "App Icon.imagestack",
+      "role": "primary-app-icon"
+    },
+    {
+      "idiom": "tv",
+      "size": "1280x768",
+      "filename": "App Icon - App Store.imagestack",
+      "role": "primary-app-icon"
+    },
+    {
+      "idiom": "tv",
+      "size": "1920x720",
+      "filename": "Top Shelf Image.imageset",
+      "role": "top-shelf-image"
+    },
+    {
+      "idiom": "tv",
+      "size": "2320x720",
+      "filename": "Top Shelf Image Wide.imageset",
+      "role": "top-shelf-image-wide"
+    }
+  ],
+  "info": {
+    "author": "gay.ian.Bookworms",
+    "version": 1
+  }
+}
