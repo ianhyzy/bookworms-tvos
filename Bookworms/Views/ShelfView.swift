@@ -784,9 +784,11 @@ struct ReadingLine: View {
     let dateFormat: AppDateFormat
 
     var body: some View {
-        HStack(spacing: 10) {
+        // A full-size symbol makes this line read larger than the author line at the same point
+        // size, so it uses the small scale and sits on the text baseline.
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             if book.formatLabel != nil {
-                Image(systemName: book.formatSymbol).accessibilityHidden(true)
+                Image(systemName: book.formatSymbol).imageScale(.small).accessibilityHidden(true)
             }
             Text(book.readingSummary(dateFormat: dateFormat))
         }
