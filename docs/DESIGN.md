@@ -16,6 +16,10 @@ The caption shows the selected title, the author (with genres on My Shelf), and 
 
 **Settings → General → Appearance** offers System, Light, and Dark. Light uses pale oak and Dark uses dark walnut, or a plain background when **Wood background** is off. See [texture credits](TEXTURE_CREDITS.md).
 
+## Year in Review
+
+Material tiles show the year's totals above a books-by-month bar chart and a panel of genres, the most-read author, and formats. Bars use the gold of the star ratings and are static. The year's covers stand on a shelf board below, in equal-width columns, with a caption for the focused book. The year menu sits in the top-right header.
+
 ## Details
 
 Details show the full cover in its original proportions, title, author, description, completion date, personal rating, format, and length when available. Hardcover community ratings appear as an average and distribution chart. Up and Down scroll long descriptions directly. Missing metadata is described as unavailable rather than invented.

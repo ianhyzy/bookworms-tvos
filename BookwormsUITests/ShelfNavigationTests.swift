@@ -99,4 +99,38 @@ final class ShelfNavigationTests: XCTestCase {
         }
     }
 
+    /// The sample library finishes every dated book in 2026; its shelf runs earliest first.
+    func testYearInReviewCoversHeaderAndDetailsMoveDirectly() {
+        continueAfterFailure = false
+        let app = RemoteNavigation.open("Year in Review")
+        let first = app.buttons["year-book-8"]
+        let second = app.buttons["year-book-7"]
+        let year = app.buttons["review-year-options"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        XCTAssertEqual(year.value as? String, "2026")
+        XCTAssertFalse(app.buttons["year-book-4"].exists, "Books without a finish date are omitted")
+        RemoteNavigation.waitForFocus(first)
+        RemoteNavigation.press(.right, in: app, expecting: second)
+        XCTAssertEqual(first.frame.maxY, second.frame.maxY, accuracy: 10)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: second)
+        RemoteNavigation.press(.up, in: app, expecting: year)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: year)
+        RemoteNavigation.press(.down, in: app, expecting: second)
+        RemoteNavigation.press(.left, in: app, expecting: first)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 5))
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(first)
+        XCUIRemote.shared.press(.left)
+        let leftContent = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasFocus == false"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [leftContent], timeout: 3), .completed)
+        XCTAssertNil(RemoteNavigation.focused(app, prefix: "year-book-"))
+        RemoteNavigation.press(.right, in: app, expecting: first)
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Year in Review"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
 }

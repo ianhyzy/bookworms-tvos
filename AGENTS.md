@@ -13,6 +13,7 @@ This repository contains **Bookworms - eBook Display**, a Swift 6 and SwiftUI ap
 | App lifecycle and library state | [BookwormsApp.swift](Bookworms/BookwormsApp.swift), [LibraryModel.swift](Bookworms/Services/LibraryModel.swift) |
 | Navigation and view preparation | [ShelfView.swift](Bookworms/Views/ShelfView.swift) |
 | Focus and remote navigation | [FOCUS_NAVIGATION.md](docs/FOCUS_NAVIGATION.md), [RemoteNavigation.swift](BookwormsUITests/RemoteNavigation.swift) |
+| Year in Review | [YearInReview.swift](Bookworms/Models/YearInReview.swift), [YearInReviewView.swift](Bookworms/Views/YearInReviewView.swift) |
 | Social data and comparisons | [SocialLibraryModel.swift](Bookworms/Services/SocialLibraryModel.swift), [SocialPresentation.swift](Bookworms/Models/SocialPresentation.swift) |
 | Cover caching and appearance | [ArtworkStore.swift](Bookworms/Services/ArtworkStore.swift), [CoverView.swift](Bookworms/Views/CoverView.swift) |
 | Snapshots and iCloud | [SourceLibraryStore.swift](Bookworms/Services/SourceLibraryStore.swift), [CloudLibraryStore.swift](Bookworms/Services/CloudLibraryStore.swift) |
@@ -121,6 +122,6 @@ Maintain [VIEWS.md](VIEWS.md) for tvOS view options and [DATASOURCES.md](DATASOU
 
 ## Visual revision evidence
 
-- For each major visual revision, capture the main views on the owner’s Apple TV with the real library: launch with `--start-view=shelf|following|comparison|shared` and use `xcrun devicectl device capture screenshot`. Store the original PNGs and a `capture.json` (commit, date, device) in a new dated folder under the ignored `.local/screenshots/`; never overwrite prior captures. These images contain real library and reader data; do not publish them without authorization.
+- For each major visual revision, capture the main views on the owner’s Apple TV with the real library: launch with `--start-view=shelf|yearInReview|following|comparison|shared` and use `xcrun devicectl device capture screenshot`. Store the original PNGs and a `capture.json` (commit, date, device) in a new dated folder under the ignored `.local/screenshots/`; never overwrite prior captures. These images contain real library and reader data; do not publish them without authorization.
 - The tracked `screenshots/` folder holds only images the README displays.
 - Local installs through `scripts/device-build.py` use the LOCAL icon and Bookworms Local display name. Keep the standard icon and public name for release archives.

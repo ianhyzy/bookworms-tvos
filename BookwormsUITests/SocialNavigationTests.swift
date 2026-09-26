@@ -24,8 +24,8 @@ final class SocialNavigationTests: XCTestCase {
         let app = RemoteNavigation.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
         let destinations = [
-            ("Following", "activity-"), ("Compare Shelves", "book-"), ("Book Club", "shared-"),
-            ("My Shelf", "book-"),
+            ("Year in Review", "year-book-"), ("Following", "activity-"),
+            ("Compare Shelves", "book-"), ("Book Club", "shared-"), ("My Shelf", "book-"),
         ]
         for (title, prefix) in destinations {
             RemoteNavigation.selectView(title, in: app)

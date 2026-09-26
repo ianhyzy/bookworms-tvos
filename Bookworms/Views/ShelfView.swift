@@ -314,6 +314,13 @@ struct ShelfView: View {
         if enabled.contains(.shared) {
             books += social.presentation.shared.prefix(BookLimit.maximum).map { $0.mine.book }
         }
+        // Only the chosen year; choosing another year prepares its covers, as choosing a reader
+        // does for Compare Shelves.
+        if enabled.contains(.yearInReview),
+            let review = library.yearInReview(coordinator.reviewYear)
+        {
+            books += review.shelf
+        }
         var seen = Set<Int>()
         return ViewArtworkKey(
             libraryRevision: library.artworkRevision,
@@ -411,6 +418,16 @@ struct ShelfView: View {
                     if !hasPreparedArtwork {
                         ProgressView("Loading view…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if view == .yearInReview {
+                        YearInReviewView(
+                            library: library, coordinator: coordinator, palette: palette,
+                            onSelect: {
+                                selectedBook = $0
+                                recordActivity()
+                            }, onActivity: recordActivity,
+                            returnRevision: socialReturnRevision
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if view != .shelf {
                         SocialViews(
                             library: library, social: social, coordinator: coordinator,
@@ -438,19 +455,16 @@ struct ShelfView: View {
                     }
                 }
                 .padding(.horizontal, view == .following || view == .comparison ? 48 : 80)
-                .padding(
-                    .top,
-                    view == .comparison || view == .shared ? 0 : ShelfScreenLayout.verticalPadding
-                )
+                .padding(.top, view.hasHeader ? 0 : ShelfScreenLayout.verticalPadding)
                 .padding(.bottom, ShelfScreenLayout.verticalPadding)
 
-                if view != .shared && view != .comparison {
+                if !view.hasHeader {
                     controls
                         .padding(.trailing, 80)
                         .padding(.bottom, ShelfScreenLayout.verticalPadding)
                 }
             }
-            .ignoresSafeArea(edges: view == .comparison || view == .shared ? .top : [])
+            .ignoresSafeArea(edges: view.hasHeader ? .top : [])
             .task(
                 id: ShelfPreparationKey(
                     revision: library.presentationRevision, fontRevision: library.fontRevision,
@@ -568,7 +582,7 @@ struct ShelfView: View {
                     .foregroundStyle(palette.text)
                     .padding(.top, 10)
                 HStack(spacing: 20) {
-                    ForEach(BookwormsView.allCases.filter { $0 != .shelf }) { view in
+                    ForEach(ambientChoices) { view in
                         Toggle(
                             view.rawValue,
                             isOn: Binding(
@@ -604,6 +618,11 @@ struct ShelfView: View {
         // controls stay legible.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { WoodBackground(palette: palette) }
+    }
+
+    /// Views the Ambient page offers as toggles; My Shelf always plays.
+    private var ambientChoices: [BookwormsView] {
+        BookwormsView.allCases.filter { $0 != .shelf && $0.supportsAmbient }
     }
 
     private var controls: some View {
@@ -686,6 +705,13 @@ struct ShelfView: View {
             }
         }
         .foregroundStyle(palette.text)
+    }
+}
+
+extension BookwormsView {
+    /// Views whose top-right header holds their options, level with the sidebar title.
+    fileprivate var hasHeader: Bool {
+        self == .comparison || self == .shared || self == .yearInReview
     }
 }
 

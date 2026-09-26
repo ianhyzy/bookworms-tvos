@@ -22,6 +22,7 @@ Credentials stay in Keychain. Disabling a source hides its books but retains its
 - **Combined shelf:** Match the full title and author string after normalizing case, accents, and whitespace. Use IDs instead when the title is empty or the author is unknown. Hardcover takes precedence; CWA adds ownership and missing metadata. Different normalized titles or author strings remain separate. Matching does not infer edition differences.
 - **Following:** Deduplicate activity IDs, then retain the newest event per book across all followed readers. Break timestamp ties by descending activity ID. Events without books remain separate. Apply the display limit after deduplication.
 - **Reader libraries:** Deduplicate profiles by reader ID and books by Hardcover book ID. For duplicate reader-library rows, the later row in ascending record-ID order wins. Fetch books with a rating or completion date. **Top rated · All time** requires a rating; **Recently read** requires a completion date. Ties use title, then book ID.
+- **Year in Review:** Group the combined library by the year and month of each book's finish date; skip books without a valid date. Statistics use every book in the year. Genres count the first three genres of each book. The cover shelf keeps every book when the year has at most 40; otherwise it keeps the 40 highest rated (unrated last, ties by most recent finish), in reading order. The app recomputes all years when the library changes.
 - **Book Club:** Intersect complete fetched reader libraries by Hardcover book ID before limiting results. Both ratings must be in the range 0–5. Sort by their sum, highest first, then title and ID. Keep each reader's review separate. CWA data does not supply social ratings.
 
 ## Display limits
@@ -34,6 +35,7 @@ Counts apply to each collection, not to the total cached library. Available data
 | Following | Up to 20 activities | 20; fixed. Four cards fit in the viewport. |
 | Compare Shelves | 40 books per reader | 40 per reader; count controls step by five. |
 | Book Club | 40 books | 40; shares the comparison count. |
+| Year in Review | Up to 40 covers for the chosen year | 40; fixed. Statistics include every book finished that year. |
 | Home Screen Top Shelf | Up to 10 eligible books | 10; fixed. |
 | Details and ambient | Selected book or prepared collection | No additional collection allowance. |
 
@@ -52,4 +54,4 @@ Hardcover pagination requires a short final page to confirm completion. Reaching
 
 Successful datasets stay fresh for 24 hours. Automatic checks run at startup or activation; failed attempts back off five minutes. **Settings → Sources → Sync now** bypasses freshness; **Settings → General → Sync social data** refreshes social datasets only. Manual requests have a ten-second cooldown.
 
-Only views shown in the sidebar or chosen for ambient mode request their required social datasets. The app prepares artwork for entire displayed collections before browsing. Sorting, scrolling, details, and ambient playback use prepared data; they do not trigger per-book Hardcover queries. Concurrent requests share work. See [storage and performance](docs/STORAGE_AND_PERFORMANCE.md) for image-cache budgets and eviction rules.
+Only views shown in the sidebar or chosen for ambient mode request their required social datasets. Year in Review needs no social data; the app prepares covers for the chosen year, and choosing another year prepares that year's covers. The app prepares artwork for entire displayed collections before browsing. Sorting, scrolling, details, and ambient playback use prepared data; they do not trigger per-book Hardcover queries. Concurrent requests share work. See [storage and performance](docs/STORAGE_AND_PERFORMANCE.md) for image-cache budgets and eviction rules.

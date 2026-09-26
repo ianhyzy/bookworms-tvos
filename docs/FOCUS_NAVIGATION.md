@@ -19,6 +19,7 @@ Each view divides its focusable content into focus sections with `.focusSection(
 | View | Sections, top to bottom | Item that receives focus on entry |
 | --- | --- | --- |
 | **My Shelf** | Book row | The last focused book |
+| **Year in Review** | Header (year menu), cover row | The last focused book in the chosen year, or its first book |
 | **Following** | Activity row, in pages of 4; each card can have a **Read review** button below it | The last focused activity |
 | **Compare Shelves** | Header (ordering menu, reader picker), your row, the reader's row | The book in the same column as the last focused book, on the entered row's visible page |
 | **Book Club** | Header (reader picker, sort menu), cover row, review actions | The selected cover |
@@ -41,9 +42,9 @@ The following entry points are the only places the app assigns focus. Each runs 
 | Event | Implementation |
 | --- | --- |
 | A shelf row appears | `ShelfRow` sets its focus binding in `onAppear` when `activatesOnAppear` is true, with a `task` fallback if focus was not yet available. |
-| Following or Book Club appears | The view's `onAppear` focuses the remembered item. |
+| Following, Book Club, or Year in Review appears | The view's `onAppear` focuses the remembered item. |
 | The first artwork preparation finishes while a main view is showing | `ShelfView` requests focus on the first shelf book, or advances `socialReturnRevision`, only on the first preparation. |
-| The user returns from details or ambient mode to a main view | `ShelfView.restoreSelection` issues a `ShelfBookFocusRequest` or advances `socialReturnRevision`. `SocialViews.restoreContentFocus` acts only when nothing in the content has focus. |
+| The user returns from details or ambient mode to a main view | `ShelfView.restoreSelection` issues a `ShelfBookFocusRequest` or advances `socialReturnRevision`. `SocialViews.restoreContentFocus` and `YearInReviewView` act only when nothing in the content has focus. |
 
 Data changes never move focus. After the first artwork preparation, content stays mounted while later preparations finish; covers reload from the local cache when `artworkGeneration` changes. Sorting, reader changes, and background refreshes update the mounted views in place.
 
@@ -89,6 +90,6 @@ UI tests launch the app with `--focus-probe`. In Debug simulator builds, this in
 
 The settle window is an observation period for late focus updates, not synchronization. Do not shorten it to speed up a test or lengthen it to make a failing test pass.
 
-[ShelfNavigationTests](../BookwormsUITests/ShelfNavigationTests.swift) and [SocialNavigationTests](../BookwormsUITests/SocialNavigationTests.swift) cover the current views. Use `openSettings`, `showShelf`, and `startAmbient` to reach sidebar destinations.
+[ShelfNavigationTests](../BookwormsUITests/ShelfNavigationTests.swift) covers My Shelf and Year in Review, and [SocialNavigationTests](../BookwormsUITests/SocialNavigationTests.swift) covers the social views. Use `openSettings`, `showShelf`, and `startAmbient` to reach sidebar destinations.
 
 Simulator tests use discrete remote presses. Verify Siri Remote swipes, rapid input, and paging animation on the physical Apple TV.

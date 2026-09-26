@@ -198,7 +198,8 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(preferences.sessionMinutes, 0)
         XCTAssertEqual(preferences.comparisonCount, BookLimit.maximum)
         // Ambient views are independent of the menu; data covers both.
-        XCTAssertEqual(preferences.ambientOrderedViews, BookwormsView.allCases)
+        XCTAssertEqual(
+            preferences.ambientOrderedViews, BookwormsView.allCases.filter(\.supportsAmbient))
         preferences.ambientViews = [.shared]
         XCTAssertEqual(preferences.ambientOrderedViews, [.shelf, .shared])
         XCTAssertEqual(preferences.activeViews, [.shelf, .following, .shared])

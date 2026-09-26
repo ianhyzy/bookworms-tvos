@@ -88,7 +88,7 @@ final class SocialLibraryModel {
             status = "Connect Hardcover in Sources to use social views."
             return
         }
-        let socialViews = enabledViews.subtracting([.shelf])
+        let socialViews = enabledViews.filter(\.isSocial)
         guard !socialViews.isEmpty else {
             activeTask?.cancel()
             requestRevision += 1

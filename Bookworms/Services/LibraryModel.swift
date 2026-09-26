@@ -7,7 +7,15 @@ final class LibraryModel {
     private(set) var books: [Book] = [] {
         didSet { if books != oldValue { presentationRevision += 1 } }
     }
-    @ObservationIgnored private var allBooks: [Book] = []
+    @ObservationIgnored private var allBooks: [Book] = [] {
+        didSet {
+            let years = YearInReview.all(from: allBooks)
+            if years != readingYears { readingYears = years }
+        }
+    }
+    /// Year in Review statistics for every year with a finished book, most recent first.
+    /// Prepared when the library changes, so the view only reads them.
+    private(set) var readingYears: [YearInReview] = []
     @ObservationIgnored private let dependencies: LibraryDependencies
     @ObservationIgnored private var sourceRevision = 0
     @ObservationIgnored private var cloudRevision = 0
@@ -170,6 +178,10 @@ final class LibraryModel {
     @ObservationIgnored private var hardcoverPollingTask: Task<Void, Never>?
     var requestedBookID: Int?
     func book(withID id: Int) -> Book? { allBooks.first { $0.id == id } }
+    /// The review for `year`, or the most recent year's when `year` is `nil` or has no books.
+    func yearInReview(_ year: Int?) -> YearInReview? {
+        readingYears.first { $0.year == year } ?? readingYears.first
+    }
     func isBookReadByUser(_ id: Int) -> Bool {
         guard hardcoverConnected || isSample else { return false }
         guard let book = allBooks.first(where: { $0.id == id }) else { return false }
