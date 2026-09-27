@@ -268,6 +268,8 @@ struct BookReviewsView: View {
     @State private var reviews: [BookReview]?
     @State private var failure: String?
     @State private var reading: BookReview?
+    /// The review the reader last showed; the list's default focus when the reader closes.
+    @State private var lastReadID: Int?
     @State private var readerScroll = ScrollPosition(y: 0)
     @State private var readerOffset: CGFloat = 0
     @State private var readerMaximumOffset: CGFloat = 0
@@ -310,18 +312,19 @@ struct BookReviewsView: View {
         .onExitCommand {
             // Back closes an open review first. Handling it here, not only on the reader pane,
             // keeps a Back press from dismissing the popup if the pane hasn't taken focus yet.
-            if let review = reading {
-                closeReader(review)
+            if reading != nil {
+                closeReader()
             } else {
                 dismiss()
             }
         }
     }
 
-    private func closeReader(_ review: BookReview) {
+    /// Closing removes the focused reader, so the focus engine picks the list's default focus:
+    /// the card that opened the review. The list is disabled until this update, so an explicit
+    /// focus write here would target a disabled card.
+    private func closeReader() {
         withAnimation(readerAnimation) { reading = nil }
-        // Returning from the reader is an entry event for the list; restore the opened card.
-        focus = .review(review.id)
     }
 
     private var readerAnimation: Animation {
@@ -341,6 +344,7 @@ struct BookReviewsView: View {
                         ) {
                             readerScroll = ScrollPosition(y: 0)
                             readerOffset = 0
+                            lastReadID = review.id
                             withAnimation(readerAnimation) { reading = review }
                         }
                         .focused($focus, equals: .review(review.id))
@@ -352,6 +356,7 @@ struct BookReviewsView: View {
             // card's shadow may spread past the sides of the list.
             .scrollClipDisabled()
             .mask { Rectangle().padding(.horizontal, -Self.liftMargin * 2) }
+            .defaultFocus($focus, lastReadID.map { Focus.review($0) }, priority: .userInitiated)
         } else {
             Group {
                 if let failure {
@@ -401,7 +406,7 @@ struct BookReviewsView: View {
             }
         }
         .onAppear { focus = .reader }
-        .onExitCommand { closeReader(review) }
+        .onExitCommand { closeReader() }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Press up or down to read more. Press Back to return to the reviews.")
     }
