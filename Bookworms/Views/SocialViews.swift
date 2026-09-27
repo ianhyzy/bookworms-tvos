@@ -55,7 +55,7 @@ struct SocialViews: View {
             case .following: following
             case .comparison: comparison
             case .shared: shared
-            case .shelf: EmptyView()
+            case .shelf, .yearInReview: EmptyView()
             }
         }
         .task(id: social.following.map(\.id)) {
@@ -113,7 +113,7 @@ struct SocialViews: View {
             } else if !social.following.isEmpty {
                 isReaderPickerFocused = true
             }
-        case .shelf: break
+        case .shelf, .yearInReview: break
         }
     }
 
@@ -572,7 +572,8 @@ struct SocialViews: View {
 }
 
 extension Array {
-    fileprivate func chunked(into size: Int) -> [[Element]] {
+    /// Consecutive groups of `size` elements; the last group can be shorter.
+    func chunked(into size: Int) -> [[Element]] {
         stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
     }
 }

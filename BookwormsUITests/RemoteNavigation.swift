@@ -143,7 +143,8 @@ enum RemoteNavigation {
     }
 
     private static let sidebarItems = [
-        "My Shelf", "Following", "Compare Shelves", "Book Club", "Ambient", "Settings",
+        "My Shelf", "Year in Review", "Following", "Compare Shelves", "Book Club", "Ambient",
+        "Settings",
     ]
 
     /// Opens the view named `title` from the sidebar and enters its content.

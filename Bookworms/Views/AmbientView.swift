@@ -27,6 +27,7 @@ struct AmbientView: View {
                 !social.presentation.mine.isEmpty || !social.presentation.theirs.isEmpty
             case .shared:
                 !social.presentation.shared.isEmpty
+            case .yearInReview: false
             }
         }
     }
@@ -148,6 +149,8 @@ struct AmbientView: View {
                     }
                 }
             }
+        case .yearInReview:
+            EmptyView()
         }
     }
 

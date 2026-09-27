@@ -3,6 +3,7 @@ import Observation
 
 enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     case shelf = "My Shelf"
+    case yearInReview = "Year in Review"
     case following = "Following"
     case comparison = "Compare Shelves"
     case shared = "Book Club"
@@ -11,11 +12,18 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .shelf: "books.vertical.fill"
+        case .yearInReview: "calendar"
         case .following: "person.2.fill"
         case .comparison: "rectangle.split.2x1.fill"
         case .shared: "shared.with.you"
         }
     }
+
+    /// Whether the view needs Hardcover social data.
+    var isSocial: Bool { self == .following || self == .comparison || self == .shared }
+
+    /// Whether ambient mode can show this view. Year in Review is interactive only.
+    var supportsAmbient: Bool { self != .yearInReview }
 }
 
 enum SharedReadsSort: String, Codable, CaseIterable, Identifiable {
@@ -50,13 +58,18 @@ struct ViewPreferences: Codable, Equatable {
     var ambientViews: [BookwormsView]?
     var ambientMinutes = 10
     var sessionMinutes = 0
+    /// Views the user has been offered in the sidebar. Preferences saved before a view existed
+    /// decode as `nil` here, so `validate()` adds later views to the sidebar once.
+    var offeredViews: [BookwormsView]? = BookwormsView.allCases
     /// Views in the sidebar, in display order. My Shelf is always included.
     var orderedViews: [BookwormsView] {
         BookwormsView.allCases.filter { $0 == .shelf || enabled.contains($0) }
     }
     /// Views ambient mode may show, in display order. My Shelf is always included.
     var ambientOrderedViews: [BookwormsView] {
-        BookwormsView.allCases.filter { $0 == .shelf || ambientViews?.contains($0) ?? true }
+        BookwormsView.allCases.filter {
+            $0.supportsAmbient && ($0 == .shelf || ambientViews?.contains($0) ?? true)
+        }
     }
     /// Views that need prepared data and artwork: those in the sidebar or in ambient mode.
     var activeViews: [BookwormsView] {
@@ -65,6 +78,9 @@ struct ViewPreferences: Codable, Equatable {
         }
     }
     mutating func validate() {
+        let offered = offeredViews ?? [.shelf, .following, .comparison, .shared]
+        enabled += BookwormsView.allCases.filter { !offered.contains($0) }
+        offeredViews = BookwormsView.allCases
         enabled = orderedViews
         comparisonCount = min(BookLimit.maximum, max(1, comparisonCount))
         if ![5, 10, 15].contains(ambientMinutes) { ambientMinutes = 10 }
@@ -85,6 +101,9 @@ final class BookwormsCoordinator {
     }
     var feedSelection: Int?
     var sharedSelection: Int?
+    /// The year Year in Review shows for this session. `nil` shows the most recent year.
+    var reviewYear: Int?
+    var reviewSelection: Int?
     var comparisonRow = 0
     /// The focused book's position within its visible Compare Shelves page, shared by both rows.
     var comparisonColumn = 0
