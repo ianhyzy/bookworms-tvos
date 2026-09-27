@@ -15,26 +15,27 @@ struct RatingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The row keeps its height without the cue so the average aligns with other values.
-            HStack(spacing: 7) {
-                Spacer(minLength: 0)
-                Text("Reviews")
-                Image(systemName: "chevron.right")
-            }
-            .appFont(size: 18).foregroundStyle(.secondary)
-            .opacity(opensReviews ? 1 : 0)
-            .accessibilityHidden(!opensReviews)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if let average = book.communityRating {
-                    Text("\(average.formatted(.number.precision(.fractionLength(2)))) ★")
-                        .appFont(size: 23, weight: .medium).monospacedDigit()
-                    Text("\((book.ratingsCount ?? 0).formatted()) ratings")
-                        .appFont(size: 18).foregroundStyle(.secondary)
-                } else {
-                    Text("Unavailable").appFont(size: 23, weight: .medium)
+                Group {
+                    if let average = book.communityRating {
+                        Text("\(average.formatted(.number.precision(.fractionLength(2)))) ★")
+                            .appFont(size: 23, weight: .medium).monospacedDigit()
+                        Text("\((book.ratingsCount ?? 0).formatted()) ratings")
+                            .appFont(size: 18).foregroundStyle(.secondary)
+                    } else {
+                        Text("Unavailable").appFont(size: 23, weight: .medium)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                if opensReviews {
+                    Spacer(minLength: 12)
+                    HStack(spacing: 7) {
+                        Text("Reviews")
+                        Image(systemName: "chevron.right")
+                    }
+                    .appFont(size: 18).foregroundStyle(.secondary)
                 }
             }
-            .accessibilityElement(children: .combine)
             if let distribution = book.ratingDistribution, !distribution.isEmpty {
                 Chart(buckets) { bucket in
                     BarMark(

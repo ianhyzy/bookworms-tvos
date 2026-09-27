@@ -188,7 +188,9 @@ struct BookDetailView: View {
             .fixedSize()
             if !genres.isEmpty {
                 metadataItem(
-                    "Genres", value: genres.joined(separator: " · "), symbol: "tag", lines: 5
+                    "Genres",
+                    // A non-breaking space keeps each dot with the genre before it when wrapping.
+                    value: genres.joined(separator: "\u{00A0}· "), symbol: "tag", lines: 5
                 )
                 .frame(width: 330, alignment: .leading)
             }
