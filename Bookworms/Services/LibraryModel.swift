@@ -111,6 +111,9 @@ final class LibraryModel {
     private(set) var styles: [Int: SpineStyle] = [:]
     private(set) var isLoading = false
     private(set) var hardcoverConnected = false
+    /// Whether Hardcover rejected the saved login during the latest sync. The credential stays
+    /// saved; Settings offers a new link code instead of showing the account as connected.
+    private(set) var hardcoverSessionExpired = false
     private(set) var connectionRevision = 0
     var isConnected: Bool {
         !isSample && ((hardcoverEnabled && hardcoverConnected) || (cwaEnabled && hasCWAPassword))
@@ -436,6 +439,7 @@ final class LibraryModel {
                 guard revision == sourceRevision, !Task.isCancelled else { return false }
                 try dependencies.saveCredential(token, "hardcover-token")
                 hardcoverConnected = true
+                hardcoverSessionExpired = false
                 connectionRevision += 1
                 isSample = false
                 hardcoverEnabled = true
@@ -452,6 +456,7 @@ final class LibraryModel {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
             try dependencies.saveCredential(token, "hardcover-token")
             hardcoverConnected = true
+            hardcoverSessionExpired = false
             connectionRevision += 1
             hardcoverEnabled = true
             install(result, source: .hardcover, accountID: "hardcover")
@@ -504,6 +509,10 @@ final class LibraryModel {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
                 failures.append("Hardcover: " + readable(error))
+                switch error as? HardcoverError {
+                case .invalidToken, .personalAccessTokenRequired: hardcoverSessionExpired = true
+                default: break
+                }
             }
         }
         if cwaEnabled,
@@ -625,6 +634,7 @@ final class LibraryModel {
         cancelShelfWork()
         dependencies.removeCredential("hardcover-token")
         hardcoverConnected = false
+        hardcoverSessionExpired = false
         hardcoverEnabled = false
         isSample = false
         message = nil
@@ -643,6 +653,7 @@ final class LibraryModel {
 
     private func install(_ result: [Book], source: LibrarySource, accountID: String) {
         sourceErrors[source.rawValue] = nil
+        if source == .hardcover { hardcoverSessionExpired = false }
         let snapshot = SourceSnapshot(
             source: source, accountID: accountID, books: result, syncedAt: dependencies.now())
         sourceSnapshots.removeAll { $0.source == source && $0.accountID == accountID }

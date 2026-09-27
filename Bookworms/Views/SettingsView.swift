@@ -90,9 +90,16 @@ struct SettingsView: View {
                 }
                 .font(.system(size: 26))
                 .performanceGlassButton()
+                // The scroll view clips, so inset its content far enough for focused buttons'
+                // lift and shadow, then pull it back out to keep the content aligned with Back.
                 ScrollView {
-                    if source == .hardcover { accountSettings } else { cwaSettings }
+                    Group {
+                        if source == .hardcover { accountSettings } else { cwaSettings }
+                    }
+                    .padding(Self.focusMargin)
                 }
+                .padding(.horizontal, -Self.focusMargin)
+                .padding(.top, -Self.focusMargin / 2)
             }
             .padding(65)
             .font(.system(size: 26))
@@ -102,7 +109,13 @@ struct SettingsView: View {
                 sourceEditor = nil
             }
             .onAppear {
-                if source == .hardcover, !library.hardcoverConnected {
+                if source == .hardcover, needsHardcoverLink { library.startHardcoverDeviceAuth() }
+            }
+            .onChange(of: needsHardcoverLink) { _, needsLink in
+                // A sync can find the saved login expired while this sheet is open.
+                if source == .hardcover, needsLink, library.hardcoverDeviceAuth == nil,
+                    !library.hardcoverDeviceAuthLoading
+                {
                     library.startHardcoverDeviceAuth()
                 }
             }
@@ -537,10 +550,18 @@ struct SettingsView: View {
         }
     }
 
+    /// Space inside the source sheet's scroll view for a focused button's lift and shadow.
+    private static let focusMargin: CGFloat = 40
+
+    /// Whether Settings should show the link-code flow: no saved login, or one Hardcover rejected.
+    private var needsHardcoverLink: Bool {
+        !library.hardcoverConnected || library.hardcoverSessionExpired
+    }
+
     private var accountSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Hardcover").font(.system(size: 42, weight: .medium))
-            if library.hardcoverConnected {
+            if !needsHardcoverLink {
                 Text("Hardcover is connected to your library.")
                     .font(.system(size: 23))
                     .foregroundStyle(.secondary)
@@ -560,6 +581,12 @@ struct SettingsView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 14) {
+                    if library.hardcoverSessionExpired {
+                        Text(
+                            "Your Hardcover login expired. Link Bookworms again to resume syncing."
+                        )
+                        .foregroundStyle(.orange)
+                    }
                     Text("1. On your phone or computer, go to **hardcover.app/link**")
                         .accessibilityIdentifier("hardcover-step-1")
                     Text("2. Enter this code and select **Authorize**:")
@@ -601,6 +628,9 @@ struct SettingsView: View {
                             }
                             .font(.system(size: 26))
                             .buttonStyle(.glassProminent)
+                            if let failure = library.hardcoverDeviceAuthMessage {
+                                Text(failure).font(.system(size: 23)).foregroundStyle(.orange)
+                            }
                         }
                     }
 

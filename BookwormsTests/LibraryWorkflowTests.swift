@@ -75,7 +75,31 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_original")
         XCTAssertEqual(model.books.map(\.id), [1])
         XCTAssertTrue(model.hardcoverConnected)
+        XCTAssertFalse(
+            model.hardcoverSessionExpired, "A rejected replacement keeps the saved login")
         XCTAssertEqual(model.connectionRevision, 0)
+    }
+
+    func testRejectedSyncMarksSessionExpiredUntilASuccessfulSync() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var rejects = true
+        dependencies.fetchHardcover = { _ in
+            if rejects { throw HardcoverError.invalidToken }
+            return [fixture.book(2)]
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.refresh(manual: true)
+        XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_original")
+        XCTAssertEqual(model.books.map(\.id), [1])
+        rejects = false
+        fixture.time += 10
+        await model.refresh(manual: true)
+        XCTAssertFalse(model.hardcoverSessionExpired)
     }
 
     func testValidatedHardcoverReplacementPreservesDailySnapshotAndSavesCredential() async throws {

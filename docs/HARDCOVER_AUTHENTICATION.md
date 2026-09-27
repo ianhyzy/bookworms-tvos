@@ -27,4 +27,6 @@ On the empty start screen, **Choose sources** opens **Settings → Sources**. Se
 2. Enter the 8-character code shown on your Apple TV screen and select **Authorize**.
 3. Your Apple TV connects automatically as soon as you approve.
 
+The Hardcover sheet requests a code as soon as it opens when no login is saved or when the last sync reported the saved login as invalid or expired. The saved login stays in Keychain until a new link replaces it or you disconnect.
+
 The bundled QR image points to `https://hardcover.app/link` and is generated offline with Apple Core Image and verified by decoding it with Vision. To regenerate it on macOS, run `swift scripts/generate-hardcover-qr.swift Bookworms/Assets.xcassets/HardcoverTokenQR.imageset/hardcover-token.png`.

@@ -329,9 +329,12 @@ struct BookReviewsView: View {
                         .focused($focus, equals: .review(review.id))
                     }
                 }
-                // The scroll view clips; leave room for the focused card's scale and shadow.
                 .padding(.horizontal, Self.liftMargin).padding(.vertical, Self.liftMargin)
             }
+            // Clip only the top and bottom, where cards scroll under the header. The focused
+            // card's shadow may spread past the sides of the list.
+            .scrollClipDisabled()
+            .mask { Rectangle().padding(.horizontal, -Self.liftMargin * 2) }
         } else {
             Group {
                 if let failure {
