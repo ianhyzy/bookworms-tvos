@@ -826,12 +826,17 @@ struct BookCaption: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 16) {
-                if book.formatLabel != nil {
-                    // Format symbols differ in width; a fixed frame keeps titles aligned.
-                    Image(systemName: book.formatSymbol)
-                        .appFont(size: 28, weight: .medium)
-                        .frame(width: 40, height: 40)
-                        .accessibilityLabel(book.formatLabel ?? "")
+                if !book.formatParts.isEmpty {
+                    // One icon per format. Symbols differ in width; fixed frames keep them even.
+                    HStack(spacing: 4) {
+                        ForEach(book.formatParts, id: \.self) { format in
+                            Image(systemName: Book.formatSymbol(forLabel: format))
+                                .appFont(size: 28, weight: .medium)
+                                .frame(width: 40, height: 40)
+                        }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(book.formatLabel ?? "")
                 }
                 Text(book.title).appFont(size: 33, weight: .medium).lineLimit(1)
             }

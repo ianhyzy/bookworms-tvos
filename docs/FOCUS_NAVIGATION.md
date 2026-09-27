@@ -19,7 +19,7 @@ Each view divides its focusable content into focus sections with `.focusSection(
 | View | Sections, top to bottom | Item that receives focus on entry |
 | --- | --- | --- |
 | **My Shelf** | Book row | The last focused book |
-| **Year in Review** | Header (year menu), cover row | The last focused book in the chosen year, or its first book |
+| **Year in Review** | Header (year menu), cover row | The last focused book in the chosen year, or its first book. Right from the sidebar reaches the year menu, which sits level with it. |
 | **Following** | Activity row, in pages of 4; each card can have a **Read review** button below it | The last focused activity |
 | **Compare Shelves** | Header (ordering menu, reader picker), your row, the reader's row | The book in the same column as the last focused book, on the entered row's visible page |
 | **Book Club** | Header (reader picker, sort menu), cover row, review actions | The selected cover |

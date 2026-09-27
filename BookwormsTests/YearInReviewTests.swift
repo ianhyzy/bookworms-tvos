@@ -34,7 +34,7 @@ final class YearInReviewTests: XCTestCase {
                 book(1, finished: "2025-05-01", rating: 5, pages: 300, format: "Listened"),
                 book(2, finished: "2025-05-02", rating: 4, pages: 200, format: "Ebook"),
                 book(3, finished: "2025-06-01", pages: 0, format: "Listened"),
-                book(4, finished: "2025-07-01", rating: 7),
+                book(4, finished: "2025-07-01", rating: 7, format: "Both"),
             ])
             .first)
         XCTAssertEqual(review.pages, 500)
@@ -44,7 +44,11 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(review.busiestMonth, 5)
         XCTAssertEqual(
             review.formats,
-            [.init(name: "Audiobook", count: 2), .init(name: "Ebook", count: 1)])
+            [
+                .init(name: "Audiobook", count: 3), .init(name: "Ebook", count: 1),
+                .init(name: "Physical", count: 1),
+            ],
+            "A book read in two formats counts toward both")
         XCTAssertEqual(review.topAuthor, .init(name: "Author", count: 4))
     }
 

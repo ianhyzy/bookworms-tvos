@@ -33,6 +33,12 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
 
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
 
+    /// Each format the book was read in, splitting "Physical & audiobook" into both.
+    var formatParts: [String] {
+        guard let formatLabel else { return [] }
+        return formatLabel == "Physical & audiobook" ? ["Physical", "Audiobook"] : [formatLabel]
+    }
+
     /// The SF Symbol for a `formatLabel` value, such as "headphones" for "Audiobook".
     static func formatSymbol(forLabel label: String?) -> String {
         switch label {

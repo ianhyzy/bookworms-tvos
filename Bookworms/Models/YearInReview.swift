@@ -27,7 +27,8 @@ struct YearInReview: Equatable, Identifiable, Sendable {
     let monthlyCounts: [Int]
     /// The month (1–12) with the most finished books; the earliest wins a tie.
     let busiestMonth: Int?
-    /// Recorded reading formats, most common first.
+    /// Recorded reading formats, most common first. A book read in two formats counts toward
+    /// both.
     let formats: [Tally]
     /// Up to five genres, most common first.
     let genres: [Tally]
@@ -84,7 +85,7 @@ struct YearInReview: Equatable, Identifiable, Sendable {
         let most = months.max() ?? 0
         busiestMonth = most > 0 ? months.firstIndex(of: most).map { $0 + 1 } : nil
 
-        formats = Self.tally(books.compactMap(\.formatLabel))
+        formats = Self.tally(books.flatMap(\.formatParts))
         genres = Array(
             Self.tally(
                 books.flatMap {

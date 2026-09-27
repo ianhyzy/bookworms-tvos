@@ -143,7 +143,8 @@ final class ShelfNavigationTests: XCTestCase {
             predicate: NSPredicate(format: "hasFocus == false"), object: first)
         XCTAssertEqual(XCTWaiter.wait(for: [leftContent], timeout: 3), .completed)
         XCTAssertNil(RemoteNavigation.focused(app, prefix: "year-book-"))
-        RemoteNavigation.press(.right, in: app, expecting: first)
+        // The header sits level with the sidebar, so Right from the sidebar reaches the year menu.
+        RemoteNavigation.press(.right, in: app, expecting: year)
         let capture = XCTAttachment(screenshot: app.screenshot())
         capture.name = "Year in Review"
         capture.lifetime = .keepAlways
