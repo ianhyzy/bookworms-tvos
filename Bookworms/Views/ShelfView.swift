@@ -812,16 +812,14 @@ struct ShelfPhoto: View {
     }
 }
 
-/// The focused book's format icon, title, and rating, then its author, primary genre, and finish
-/// date. My Shelf and Year in Review share it so their captions match.
+/// The focused book's format icon and title, its author, primary genre, and finish date, then its
+/// rating. My Shelf and Year in Review share it so their captions match.
 struct BookCaption: View {
     let book: Book
     let dateFormat: AppDateFormat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Center alignment keeps the icon and stars level with the title; baseline alignment
-            // drops the stars.
             HStack(alignment: .center, spacing: 16) {
                 if book.formatLabel != nil {
                     // Format symbols differ in width; a fixed frame keeps titles aligned.
@@ -831,9 +829,6 @@ struct BookCaption: View {
                         .accessibilityLabel(book.formatLabel ?? "")
                 }
                 Text(book.title).appFont(size: 33, weight: .medium).lineLimit(1)
-                if let rating = book.rating {
-                    StarRating(rating: rating, size: 26).padding(.leading, 4)
-                }
             }
             Text(
                 [
@@ -845,6 +840,7 @@ struct BookCaption: View {
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             )
             .appFont(size: 29).opacity(0.82).lineLimit(1)
+            if let rating = book.rating { StarRating(rating: rating, size: 26).padding(.top, 4) }
         }
     }
 }

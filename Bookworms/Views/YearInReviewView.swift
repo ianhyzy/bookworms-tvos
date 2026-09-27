@@ -47,7 +47,7 @@ struct YearInReviewView: View {
                         )
                         .frame(maxHeight: .infinity, alignment: .bottom)
                     }
-                    caption(review).frame(height: 80, alignment: .topLeading)
+                    caption(review).frame(height: 118, alignment: .topLeading)
                 } else {
                     empty
                 }

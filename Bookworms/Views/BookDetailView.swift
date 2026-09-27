@@ -12,8 +12,8 @@ struct BookDetailView: View {
     @State private var readingDescription: ReviewPresentation?
     @State private var descriptionHeight: CGFloat = 0
     @State private var fullDescriptionHeight: CGFloat = 0
-    /// Genres that read as English, filtered once when details open so saved snapshots from any
-    /// source benefit without a sync.
+    /// Up to three most-tagged genres that read as English, filtered once when details open so
+    /// saved snapshots from any source benefit without a sync.
     private let genres: [String]
 
     init(
@@ -23,7 +23,8 @@ struct BookDetailView: View {
         self.book = book
         self.style = style
         self.loadReviews = loadReviews
-        genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag)
+        genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
+            .map(Book.displayGenre)
     }
 
     var body: some View {
