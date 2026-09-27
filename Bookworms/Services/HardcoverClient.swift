@@ -1,5 +1,6 @@
 import Foundation
 import NaturalLanguage
+import Synchronization
 
 enum HardcoverError: LocalizedError {
     case invalidToken, invalidAuthorizationCode, personalAccessTokenRequired
@@ -91,6 +92,17 @@ actor HardcoverClient {
     /// Hardcover can return tags such as "Féminisme" beside "Feminism". A strong English prior
     /// keeps short or ambiguous English tags; only clearly foreign tags fall below the threshold.
     static func isEnglishTag(_ tag: String) -> Bool {
+        if let known = englishTags.withLock({ $0[tag] }) { return known }
+        let isEnglish = recognizesEnglish(tag)
+        englishTags.withLock { $0[tag] = isEnglish }
+        return isEnglish
+    }
+
+    /// Results by tag. Views and Year in Review preparation check the same few hundred tags
+    /// repeatedly. ponytail: unbounded, but limited by the library's distinct tags.
+    private static let englishTags = Mutex<[String: Bool]>([:])
+
+    private static func recognizesEnglish(_ tag: String) -> Bool {
         let recognizer = NLLanguageRecognizer()
         let languages: [NLLanguage] = [
             .english, .french, .spanish, .german, .italian, .portuguese, .dutch, .swedish, .polish,

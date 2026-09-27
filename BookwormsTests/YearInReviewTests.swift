@@ -64,6 +64,18 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(review.topAuthor, .init(name: "Rowan", count: 2))
     }
 
+    func testGenresSkipForeignTagsAndCapitalizeLowercaseOnes() throws {
+        let review = try XCTUnwrap(
+            YearInReview.all(from: [
+                book(
+                    1, finished: "2025-01-01", genres: ["Féminisme", "litrpg", "LGBTQ", "Fantasy"])
+            ])
+            .first)
+        XCTAssertEqual(
+            review.genres.map(\.name), ["Fantasy", "LGBTQ", "Litrpg"],
+            "Foreign tags don't use up a book's three genre slots")
+    }
+
     func testLargeYearsShelveTheHighestRatedBooksInReadingOrder() throws {
         let count = BookLimit.maximum + 5
         let books = (1...count)

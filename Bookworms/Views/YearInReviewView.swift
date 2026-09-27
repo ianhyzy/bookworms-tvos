@@ -22,7 +22,7 @@ struct YearInReviewView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 20) {
                     Spacer()
                     if review != nil { yearMenu }
@@ -31,16 +31,23 @@ struct YearInReviewView: View {
                 .focusSection()
 
                 if let review {
-                    // The header, tiles, panels, shelf board, and caption take about 790 points.
-                    let rowHeight = max(150, min(300, geometry.size.height - 790))
                     totals(review)
+                    // Tall enough for the highlights panel's three labeled rows; a shorter frame
+                    // lets its background spill into the tiles and shelf.
                     HStack(alignment: .top, spacing: 24) {
                         monthlyChart(review)
-                        highlights(review).frame(width: 560)
+                        highlights(review).frame(width: 620)
                     }
-                    .frame(height: 250)
-                    coverShelf(review, width: geometry.size.width, rowHeight: rowHeight)
-                    caption(review).frame(height: 84, alignment: .topLeading)
+                    .frame(height: 300)
+                    // The shelf takes whatever height the fixed rows and caption leave.
+                    GeometryReader { space in
+                        coverShelf(
+                            review, width: geometry.size.width,
+                            rowHeight: min(360, max(150, space.size.height - Self.boardHeight))
+                        )
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                    caption(review).frame(height: 80, alignment: .topLeading)
                 } else {
                     empty
                 }
@@ -119,7 +126,7 @@ struct YearInReviewView: View {
                     Self.bookCount(review.monthlyCounts[$0 - 1])
                 } ?? "")
         }
-        .frame(height: 170)
+        .frame(height: 150)
     }
 
     private func tile(_ title: String, value: String, detail: String) -> some View {
@@ -200,26 +207,26 @@ struct YearInReviewView: View {
     }
 
     private func highlights(_ review: YearInReview) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Top genres").appFont(size: 24).foregroundStyle(.secondary)
             if review.genres.isEmpty {
-                Text("No genres recorded").appFont(size: 26)
+                Text("No genres recorded").appFont(size: 28, weight: .medium)
             } else {
                 Text(review.genres.prefix(4).map(\.name).joined(separator: " · "))
-                    .appFont(size: 28, weight: .medium).lineLimit(2)
+                    .appFont(size: 28, weight: .medium).lineLimit(1).minimumScaleFactor(0.8)
             }
             if let author = review.topAuthor {
                 Text("Most-read author").appFont(size: 24).foregroundStyle(.secondary)
-                    .padding(.top, 4)
+                    .padding(.top, 10)
                 Text("\(author.name) · \(Self.bookCount(author.count))")
                     .appFont(size: 28, weight: .medium).lineLimit(1)
             }
             if !review.formats.isEmpty {
                 Text("Formats").appFont(size: 24).foregroundStyle(.secondary)
-                    .padding(.top, 4)
+                    .padding(.top, 10)
                 Text(review.formats.map { "\($0.name) \($0.count)" }.joined(separator: " · "))
                     .appFont(size: 28, weight: .medium).lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .minimumScaleFactor(0.8)
             }
         }
         .padding(24)
@@ -330,6 +337,9 @@ struct YearInReviewView: View {
     }()
     private static let monthNames = calendar.standaloneMonthSymbols
     private static let shortMonthNames = calendar.shortStandaloneMonthSymbols
+
+    /// `ShelfBoard`'s default surface depth plus edge height.
+    private static let boardHeight: CGFloat = 26
 
     private static func bookCount(_ count: Int) -> String {
         count == 1 ? "1 book" : "\(count.formatted()) books"
