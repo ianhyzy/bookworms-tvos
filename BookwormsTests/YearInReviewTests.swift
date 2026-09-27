@@ -35,7 +35,8 @@ final class YearInReviewTests: XCTestCase {
                 book(2, finished: "2025-05-02", rating: 4, pages: 200, format: "Ebook"),
                 book(3, finished: "2025-06-01", pages: 0, format: "Listened"),
                 book(4, finished: "2025-07-01", rating: 7),
-            ]).first)
+            ])
+            .first)
         XCTAssertEqual(review.pages, 500)
         XCTAssertEqual(review.booksWithPages, 2)
         XCTAssertEqual(review.ratedBooks, 2, "Out-of-range ratings are ignored")
@@ -55,7 +56,8 @@ final class YearInReviewTests: XCTestCase {
                     genres: ["Fantasy", "Mystery", "Horror", "Ignored"]),
                 book(2, finished: "2025-02-01", author: "Rowan", genres: ["Mystery", "Fantasy"]),
                 book(3, finished: "2025-03-01", author: "Vale", genres: ["Poetry"]),
-            ]).first)
+            ])
+            .first)
         XCTAssertEqual(
             review.genres.map(\.name), ["Fantasy", "Mystery", "Horror", "Poetry"],
             "Only each book's first \(YearInReview.genresPerBook) genres count")
@@ -64,11 +66,12 @@ final class YearInReviewTests: XCTestCase {
 
     func testLargeYearsShelveTheHighestRatedBooksInReadingOrder() throws {
         let count = BookLimit.maximum + 5
-        let books = (1...count).map { id in
-            book(
-                id, finished: String(format: "2025-%02d-%02d", id % 12 + 1, id % 28 + 1),
-                rating: id <= 5 ? nil : Double(id % 5 + 1))
-        }
+        let books = (1...count)
+            .map { id in
+                book(
+                    id, finished: String(format: "2025-%02d-%02d", id % 12 + 1, id % 28 + 1),
+                    rating: id <= 5 ? nil : Double(id % 5 + 1))
+            }
         let review = try XCTUnwrap(YearInReview.all(from: books).first)
         XCTAssertEqual(review.books.count, count, "Statistics keep every book")
         XCTAssertEqual(review.shelf.count, BookLimit.maximum)
@@ -89,8 +92,9 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(saved.orderedViews, [.shelf, .yearInReview, .following])
         // Turning it off afterward persists.
         saved.enabled.removeAll { $0 == .yearInReview }
-        var reloaded = try JSONDecoder().decode(
-            ViewPreferences.self, from: JSONEncoder().encode(saved))
+        var reloaded = try JSONDecoder()
+            .decode(
+                ViewPreferences.self, from: JSONEncoder().encode(saved))
         reloaded.validate()
         XCTAssertEqual(reloaded.orderedViews, [.shelf, .following])
         XCTAssertFalse(reloaded.ambientOrderedViews.contains(.yearInReview))

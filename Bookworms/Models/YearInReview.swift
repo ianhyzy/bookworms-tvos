@@ -46,17 +46,19 @@ struct YearInReview: Equatable, Identifiable, Sendable {
             guard let finish = book.finishedYearMonth else { continue }
             byYear[finish.year, default: []].append((book, finish.month))
         }
-        return byYear.keys.sorted(by: >).map { year in
-            YearInReview(year: year, entries: byYear[year] ?? [])
-        }
+        return byYear.keys.sorted(by: >)
+            .map { year in
+                YearInReview(year: year, entries: byYear[year] ?? [])
+            }
     }
 
     private init(year: Int, entries: [(book: Book, month: Int)]) {
         self.year = year
-        let books = entries.map(\.book).sorted { lhs, rhs in
-            lhs.finished == rhs.finished
-                ? lhs.id < rhs.id : (lhs.finished ?? "") < (rhs.finished ?? "")
-        }
+        let books = entries.map(\.book)
+            .sorted { lhs, rhs in
+                lhs.finished == rhs.finished
+                    ? lhs.id < rhs.id : (lhs.finished ?? "") < (rhs.finished ?? "")
+            }
         self.books = books
         if books.count > BookLimit.maximum {
             let favorites = books.sorted { lhs, rhs in
