@@ -116,9 +116,6 @@ struct CoverView: View {
             } else {
                 Rectangle().fill(.gray.opacity(0.18))
                 VStack(spacing: compact ? 12 : 20) {
-                    Image(systemName: "book.closed")
-                        .appFont(size: compact ? 32 : 48)
-                        .accessibilityHidden(true)
                     Text(book.title).appFont(size: compact ? 23 : 30)
                         .multilineTextAlignment(.center).lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)

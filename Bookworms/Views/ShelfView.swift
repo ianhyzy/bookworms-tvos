@@ -812,27 +812,39 @@ struct ShelfPhoto: View {
     }
 }
 
-/// The focused book's title and rating, then its author, primary genre, and reading line. My
-/// Shelf and Year in Review share it so their captions match.
+/// The focused book's format icon, title, and rating, then its author, primary genre, and finish
+/// date. My Shelf and Year in Review share it so their captions match.
 struct BookCaption: View {
     let book: Book
     let dateFormat: AppDateFormat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Center alignment keeps the stars level with the title; baseline alignment drops them.
-            HStack(alignment: .center, spacing: 20) {
+            // Center alignment keeps the icon and stars level with the title; baseline alignment
+            // drops the stars.
+            HStack(alignment: .center, spacing: 16) {
+                if book.formatLabel != nil {
+                    // Format symbols differ in width; a fixed frame keeps titles aligned.
+                    Image(systemName: book.formatSymbol)
+                        .appFont(size: 28, weight: .medium)
+                        .frame(width: 40, height: 40)
+                        .accessibilityLabel(book.formatLabel ?? "")
+                }
                 Text(book.title).appFont(size: 33, weight: .medium).lineLimit(1)
-                if let rating = book.rating { StarRating(rating: rating, size: 26) }
+                if let rating = book.rating {
+                    StarRating(rating: rating, size: 26).padding(.leading, 4)
+                }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                let details = [book.author, book.primaryGenre].compactMap { $0 }
-                    .filter { !$0.isEmpty }.joined(separator: " · ")
-                let hasReading = book.formatLabel != nil || book.finished != nil
-                Text(hasReading ? details + " · " : details)
-                    .appFont(size: 29).opacity(0.82).lineLimit(1)
-                if hasReading { ReadingLine(book: book, dateFormat: dateFormat) }
-            }
+            Text(
+                [
+                    book.author, book.primaryGenre,
+                    book.finished.map { _ in
+                        book.finishedLabel(format: dateFormat)
+                    },
+                ]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+            )
+            .appFont(size: 29).opacity(0.82).lineLimit(1)
         }
     }
 }
