@@ -646,20 +646,14 @@ struct ShelfView: View {
 
     private var selectionCaption: some View {
         let book = library.books.first { $0.id == (focusedBook ?? lastFocusedID) }
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(book?.title ?? "Select a book to look inside")
-                .appFont(size: 33, weight: .medium).lineLimit(1)
-            Text(
-                book.map {
-                    [$0.author, $0.genres?.prefix(2).joined(separator: ", ")].compactMap { $0 }
-                        .filter { !$0.isEmpty }.joined(separator: " · ")
-                } ?? "Use the remote to explore your shelf"
-            )
-            .appFont(size: 29).opacity(0.82).lineLimit(1)
+        return Group {
             if let book {
-                ReadingLine(book: book, dateFormat: dateFormat)
+                BookCaption(book: book, dateFormat: dateFormat)
             } else {
-                Text(" ").appFont(size: 29)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Select a book to look inside").appFont(size: 33, weight: .medium)
+                    Text("Use the remote to explore your shelf").appFont(size: 29).opacity(0.82)
+                }
             }
         }
         .foregroundStyle(palette.text)
@@ -815,6 +809,31 @@ struct ShelfPhoto: View {
             .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .bottom)
             .accessibilityHidden(true)
             .allowsHitTesting(false)
+    }
+}
+
+/// The focused book's title and rating, then its author, primary genre, and reading line. My
+/// Shelf and Year in Review share it so their captions match.
+struct BookCaption: View {
+    let book: Book
+    let dateFormat: AppDateFormat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Center alignment keeps the stars level with the title; baseline alignment drops them.
+            HStack(alignment: .center, spacing: 20) {
+                Text(book.title).appFont(size: 33, weight: .medium).lineLimit(1)
+                if let rating = book.rating { StarRating(rating: rating, size: 26) }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                let details = [book.author, book.primaryGenre].compactMap { $0 }
+                    .filter { !$0.isEmpty }.joined(separator: " · ")
+                let hasReading = book.formatLabel != nil || book.finished != nil
+                Text(hasReading ? details + " · " : details)
+                    .appFont(size: 29).opacity(0.82).lineLimit(1)
+                if hasReading { ReadingLine(book: book, dateFormat: dateFormat) }
+            }
+        }
     }
 }
 

@@ -31,13 +31,28 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         return String(title[title.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
     }
 
-    var formatSymbol: String {
-        switch format?.lowercased() {
-        case "listened", "audio", "audiobook": "headphones"
-        case "ebook", "e-book", "digital": "ipad"
-        case "both": "books.vertical"
+    var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
+
+    /// The SF Symbol for a `formatLabel` value, such as "headphones" for "Audiobook".
+    static func formatSymbol(forLabel label: String?) -> String {
+        switch label {
+        case "Audiobook": "headphones"
+        case "Ebook": "ipad"
+        case "Physical & audiobook": "books.vertical"
         default: "book.closed"
         }
+    }
+
+    /// The book's most-tagged English genre. Hardcover lists a book's genres by how many readers
+    /// applied each tag, and the snapshot keeps that order.
+    var primaryGenre: String? {
+        genres?.first(where: HardcoverClient.isEnglishTag).map(Self.displayGenre)
+    }
+
+    /// Capitalizes tags that readers entered in lowercase, such as "litrpg", and keeps any other
+    /// capitalization, such as "LGBTQ" or "LitRPG".
+    static func displayGenre(_ tag: String) -> String {
+        tag == tag.lowercased() ? tag.capitalized : tag
     }
 
     /// The reading format's display name. Hardcover records Read, Listened, Both, or Ebook.

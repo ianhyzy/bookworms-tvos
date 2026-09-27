@@ -224,9 +224,17 @@ struct YearInReviewView: View {
             if !review.formats.isEmpty {
                 Text("Formats").appFont(size: 24).foregroundStyle(.secondary)
                     .padding(.top, 10)
-                Text(review.formats.map { "\($0.name) \($0.count)" }.joined(separator: " · "))
-                    .appFont(size: 28, weight: .medium).lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                HStack(spacing: 32) {
+                    ForEach(review.formats, id: \.name) { format in
+                        HStack(spacing: 10) {
+                            Image(systemName: Book.formatSymbol(forLabel: format.name))
+                            Text(format.count.formatted())
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(format.name): \(Self.bookCount(format.count))")
+                    }
+                }
+                .appFont(size: 28, weight: .medium)
             }
         }
         .padding(24)
@@ -287,21 +295,14 @@ struct YearInReviewView: View {
     private func caption(_ review: YearInReview) -> some View {
         let book =
             review.shelf.first { $0.id == (focusedBook ?? coordinator.reviewSelection) }
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 20) {
-                Text(book?.title ?? shelfSummary(review))
-                    .appFont(size: 33, weight: .medium).lineLimit(1)
-                if let rating = book?.rating {
-                    StarRating(rating: rating, size: 26)
-                }
-            }
+        return Group {
             if let book {
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text("\(book.author) · ").appFont(size: 29).opacity(0.82).lineLimit(1)
-                    ReadingLine(book: book, dateFormat: dateFormat)
-                }
+                BookCaption(book: book, dateFormat: dateFormat)
             } else {
-                Text("Select a cover to look inside").appFont(size: 29).opacity(0.82)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(shelfSummary(review)).appFont(size: 33, weight: .medium).lineLimit(1)
+                    Text("Select a cover to look inside").appFont(size: 29).opacity(0.82)
+                }
             }
         }
         .foregroundStyle(palette.text)

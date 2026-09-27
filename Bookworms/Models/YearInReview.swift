@@ -89,18 +89,12 @@ struct YearInReview: Equatable, Identifiable, Sendable {
             Self.tally(
                 books.flatMap {
                     ($0.genres ?? []).filter(HardcoverClient.isEnglishTag)
-                        .prefix(Self.genresPerBook).map(Self.displayGenre)
+                        .prefix(Self.genresPerBook).map(Book.displayGenre)
                 }
             )
             .prefix(5))
         topAuthor = Self.tally(books.map(\.author).filter { !$0.isEmpty })
             .first { $0.count >= 2 }
-    }
-
-    /// Capitalizes tags that readers entered in lowercase, such as "litrpg", and keeps any other
-    /// capitalization, such as "LGBTQ" or "LitRPG".
-    static func displayGenre(_ tag: String) -> String {
-        tag == tag.lowercased() ? tag.capitalized : tag
     }
 
     /// Counts each distinct name, most common first, then alphabetically.
