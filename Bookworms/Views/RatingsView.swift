@@ -3,6 +3,8 @@ import SwiftUI
 
 struct RatingsView: View {
     let book: Book
+    /// Shows a **Reviews** cue when the chart is the label of a button that opens reviews.
+    var opensReviews = false
 
     private var buckets: [RatingBucket] {
         let counts = Dictionary(
@@ -12,17 +14,24 @@ struct RatingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            // The row keeps its height without the cue so the average aligns with other values.
+            HStack(spacing: 7) {
+                Spacer(minLength: 0)
+                Text("Reviews")
+                Image(systemName: "chevron.right")
+            }
+            .appFont(size: 18).foregroundStyle(.secondary)
+            .opacity(opensReviews ? 1 : 0)
+            .accessibilityHidden(!opensReviews)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 if let average = book.communityRating {
-                    Image(systemName: "star.fill").appFont(size: 22).foregroundStyle(.yellow)
-                    Text(average.formatted(.number.precision(.fractionLength(2))))
-                        .appFont(size: 34, weight: .semibold).monospacedDigit()
+                    Text("\(average.formatted(.number.precision(.fractionLength(2)))) ★")
+                        .appFont(size: 23, weight: .medium).monospacedDigit()
                     Text("\((book.ratingsCount ?? 0).formatted()) ratings")
-                        .appFont(size: 20).foregroundStyle(.secondary)
+                        .appFont(size: 18).foregroundStyle(.secondary)
                 } else {
-                    Text("Community ratings unavailable").appFont(size: 20)
-                        .foregroundStyle(.secondary)
+                    Text("Unavailable").appFont(size: 23, weight: .medium)
                 }
             }
             .accessibilityElement(children: .combine)
@@ -30,9 +39,11 @@ struct RatingsView: View {
                 Chart(buckets) { bucket in
                     BarMark(
                         x: .value("Rating", bucket.rating), y: .value("Readers", bucket.count),
-                        width: .fixed(22)
+                        width: .fixed(20)
                     )
-                    .foregroundStyle(Color.primary.opacity(0.65))
+                    .foregroundStyle(
+                        Color.primary.opacity(bucket.rating == bucket.rating.rounded() ? 0.6 : 0.35)
+                    )
                     .cornerRadius(3)
                     .accessibilityLabel("\(bucket.rating.formatted()) stars")
                     .accessibilityValue("\(bucket.count) ratings")
@@ -41,11 +52,12 @@ struct RatingsView: View {
                 .chartXAxis {
                     AxisMarks(values: [1, 2, 3, 4, 5]) { _ in
                         // Hierarchical chart styles can inherit the series palette.
-                        AxisValueLabel().foregroundStyle(Color.primary)
+                        AxisValueLabel().foregroundStyle(Color.secondary)
                     }
                 }
                 .chartYAxis(.hidden)
-                .frame(height: 95)
+                .frame(height: 64)
+                .padding(.top, 6)
                 .accessibilityLabel("Community rating distribution")
                 .accessibilityIdentifier("rating-distribution")
             }

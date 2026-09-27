@@ -25,7 +25,7 @@ Source code is in [Bookworms](../Bookworms), [BookwormsTopShelf](../BookwormsTop
 2. Refresh enabled sources and social datasets when due or explicitly requested. Missing caches recover independently of daily freshness; failed requests use a short backoff.
 3. Merge source metadata and compute the selected shelves and shared-book intersections.
 4. Prepare covers and feed avatars for every enabled bounded collection using existing cover URLs. Share source downloads and persist one reusable image per URL.
-5. Mount cover-only views. Paging, details, and ambient playback read caches without network calls.
+5. Mount cover-only views. Paging, details, and ambient playback read caches without network calls; only selecting the details rating histogram fetches community reviews.
 6. Save snapshots and queue cloud updates. Spine generation and spine font restoration remain disabled; their implementation and data are retained.
 
 Service actors own asynchronous I/O and caches. The main-actor library model publishes UI state. Internal task handles and caches are excluded from Observation to avoid unrelated view updates.

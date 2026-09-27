@@ -44,6 +44,7 @@ The following entry points are the only places the app assigns focus. Each runs 
 | Following or Book Club appears | The view's `onAppear` focuses the remembered item. |
 | The first artwork preparation finishes while a main view is showing | `ShelfView` requests focus on the first shelf book, or advances `socialReturnRevision`, only on the first preparation. |
 | The user returns from details or ambient mode to a main view | `ShelfView.restoreSelection` issues a `ShelfBookFocusRequest` or advances `socialReturnRevision`. `SocialViews.restoreContentFocus` acts only when nothing in the content has focus. |
+| The user closes a full review in the book reviews popup | `BookReviewsView` focuses the card that opened the review. Opening a review disables the list, so the focus engine moves to the only focusable reader pane without a focus write. |
 
 Data changes never move focus. After the first artwork preparation, content stays mounted while later preparations finish; covers reload from the local cache when `artworkGeneration` changes. Sorting, reader changes, and background refreshes update the mounted views in place.
 

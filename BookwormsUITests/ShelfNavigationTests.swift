@@ -3,9 +3,7 @@ import XCTest
 @MainActor
 final class ShelfNavigationTests: XCTestCase {
     func testSelectBookReadDetailsAndReturnToShelf() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--reset-test-settings", "--sample-library"]
-        app.launch()
+        let app = RemoteNavigation.launch()
         let first = app.buttons["book-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         if !first.hasFocus { XCUIRemote.shared.press(.up) }
@@ -17,11 +15,30 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["HARDCOVER"].exists)
         XCTAssertFalse(app.staticTexts["About this book"].exists)
         XCTAssertTrue(app.otherElements["rating-distribution"].exists)
-        let initialY = app.staticTexts["book-description"].frame.minY
-        XCUIRemote.shared.press(.down)
-        XCTAssertLessThan(
-            app.staticTexts["book-description"].frame.minY, initialY,
-            "The first Down press must scroll without selecting a scrollbar.")
+        let back = app.buttons["back-to-shelf"]
+        let reviews = app.buttons["community-reviews"]
+        RemoteNavigation.waitForFocus(back)
+        RemoteNavigation.press(.right, in: app, expecting: reviews)
+        RemoteNavigation.press(.left, in: app, expecting: back)
+        RemoteNavigation.press(.right, in: app, expecting: reviews)
+        XCUIRemote.shared.press(.select)
+        let longReview = app.buttons["book-review-1"]
+        XCTAssertTrue(longReview.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(longReview)
+        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(longReview)
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(reviews)
+        let showMore = app.buttons["show-full-description"]
+        XCTAssertTrue(showMore.exists)
+        RemoteNavigation.press(.down, in: app, expecting: showMore)
+        RemoteNavigation.press(.up, in: app, expecting: reviews)
+        RemoteNavigation.press(.down, in: app, expecting: showMore)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 5))
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(showMore.waitForExistence(timeout: 5))
         let detail = XCTAttachment(screenshot: app.screenshot())
         detail.name = "Book details"
         detail.lifetime = .keepAlways

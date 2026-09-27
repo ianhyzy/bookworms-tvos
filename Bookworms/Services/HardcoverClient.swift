@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 enum HardcoverError: LocalizedError {
     case invalidToken, invalidAuthorizationCode, personalAccessTokenRequired
@@ -85,6 +86,21 @@ actor HardcoverClient {
     private var nextRequestAt = Date.distantPast
     private let session: URLSession
     init(session: URLSession = .shared) { self.session = session }
+
+    /// Reports whether a community tag reads as English. Readers tag in their own languages, so
+    /// Hardcover can return tags such as "Féminisme" beside "Feminism". A strong English prior
+    /// keeps short or ambiguous English tags; only clearly foreign tags fall below the threshold.
+    static func isEnglishTag(_ tag: String) -> Bool {
+        let recognizer = NLLanguageRecognizer()
+        let languages: [NLLanguage] = [
+            .english, .french, .spanish, .german, .italian, .portuguese, .dutch, .swedish, .polish,
+        ]
+        recognizer.languageConstraints = languages
+        recognizer.languageHints = Dictionary(
+            uniqueKeysWithValues: languages.map { ($0, $0 == .english ? 0.9 : 0.1 / 8) })
+        recognizer.processString(tag)
+        return recognizer.languageHypotheses(withMaximum: 1)[.english, default: 0] >= 0.7
+    }
 
     func requestDeviceAuth() async throws -> HardcoverDeviceAuth {
         var request = URLRequest(url: URL(string: "https://hardcover.app/oauth2/device")!)

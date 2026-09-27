@@ -253,7 +253,8 @@ struct ShelfView: View {
         ) { book in
             BookDetailView(
                 book: library.book(withID: book.id) ?? book,
-                style: library.style(for: book)
+                style: library.style(for: book),
+                loadReviews: reviewLoader(for: book)
             )
             .appTypography()
             .id(book.id)
@@ -372,6 +373,20 @@ struct ShelfView: View {
         guard let id else { return }
         bookFocusRequest = ShelfBookFocusRequest(
             id: id, revision: (bookFocusRequest?.revision ?? 0) &+ 1)
+    }
+
+    /// Returns a loader for community reviews, or `nil` when Hardcover can't supply them. It
+    /// checks cached credential flags now and reads the token only when the reviews sheet opens.
+    private func reviewLoader(for book: Book) -> (@MainActor () async throws -> [BookReview])? {
+        if library.isSample { return { SampleLibrary.reviews } }
+        guard book.isHardcoverBook, library.hardcoverEnabled, library.hardcoverConnected
+        else { return nil }
+        return { [library] in
+            guard let token = library.hardcoverTokenForSync() else {
+                throw HardcoverError.invalidToken
+            }
+            return try await HardcoverSocialClient().reviews(book: book.id, token: token)
+        }
     }
 
     private func restoreSelection() {

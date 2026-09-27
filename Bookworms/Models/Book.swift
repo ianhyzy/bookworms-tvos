@@ -91,6 +91,28 @@ struct LibrarySnapshot: Codable, Sendable {
 }
 
 enum SampleLibrary {
+    /// Fictional community reviews shown for any sample book, including one long enough to
+    /// truncate and one with spoilers.
+    static let reviews: [BookReview] = [
+        BookReview(
+            id: 1,
+            reader: ReaderProfile(
+                id: 1, username: "quietreader", name: "Sam Ellery", avatarURL: nil),
+            rating: 4.5,
+            text: String(
+                repeating:
+                    "The pacing rewards patience, and the final chapters gather every thread. ",
+                count: 12), hasSpoilers: false),
+        BookReview(
+            id: 2,
+            reader: ReaderProfile(id: 2, username: "margins", name: nil, avatarURL: nil),
+            rating: 3, text: "Lovely atmosphere, though the middle drags.", hasSpoilers: false),
+        BookReview(
+            id: 3,
+            reader: ReaderProfile(id: 3, username: "endings", name: "Jo Park", avatarURL: nil),
+            rating: 5, text: "The archive belonged to the narrator all along.", hasSpoilers: true),
+    ]
+
     // Fictional fixtures keep previews and UI tests independent of private reading history.
     static let books: [Book] = [
         Book(

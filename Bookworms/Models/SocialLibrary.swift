@@ -18,6 +18,15 @@ struct ReaderBook: Codable, Identifiable, Hashable, Sendable {
     var reviewText: String? { ReviewText.clean(review) }
 }
 
+/// A community member's written review of a book, fetched on demand for the detail view.
+struct BookReview: Identifiable, Hashable, Sendable {
+    let id: Int
+    let reader: ReaderProfile
+    let rating: Double?
+    let text: String
+    let hasSpoilers: Bool
+}
+
 struct SharedRead: Identifiable, Hashable, Sendable {
     let mine: ReaderBook
     let theirs: ReaderBook

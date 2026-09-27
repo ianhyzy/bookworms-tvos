@@ -17,6 +17,15 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(invalid.finishedLabel(format: .iso), "Date not recorded")
     }
 
+    func testGenreTagsKeepEnglishAndDropForeignLanguages() {
+        for tag in ["Science Fiction", "LGBTQ", "Aliens", "Manga", "Dystopian", "Culture"] {
+            XCTAssertTrue(HardcoverClient.isEnglishTag(tag), tag)
+        }
+        for tag in ["Féminisme", "Classique", "Fantasía", "Politique", "Horreur"] {
+            XCTAssertFalse(HardcoverClient.isEnglishTag(tag), tag)
+        }
+    }
+
     func testShelfDistributionAnchorsEdgesAndSharesGaps() {
         let widths: [CGFloat] = [120, 200, 80, 160]
         let available: CGFloat = 1000

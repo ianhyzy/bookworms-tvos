@@ -23,7 +23,7 @@ Social views require a connected, enabled Hardcover source and social permission
 
 | Display | Data source | User options |
 | --- | --- | --- |
-| **Book details** | The selected book's prepared metadata and cached artwork. | Open from a cover. No independent source, filter, or ordering settings. |
+| **Book details** | The selected book's prepared metadata and cached artwork. Selecting the rating histogram fetches up to 50 Hardcover community reviews, most liked first. | Open from a cover. Shows finish date, your rating, length, format, and all genres beside the community rating histogram. Select **Show more** to read a description that doesn't fit. For Hardcover books with a connected account, select the histogram to browse reviews; each card shows five lines, and selecting it opens the full review. Spoiler reviews follow the spoiler setting. No independent source, filter, or ordering settings. |
 | **Ambient mode** | Prepared content from the views chosen on the Ambient page that have content. | Select **Ambient** in the sidebar. On that page, choose which social views to include (all by default; **My Shelf** always plays, and hiding a view from the sidebar does not remove it), a view interval of 5, 10 (default), or 15 minutes and a session of 30 minutes, 1 hour, 2 hours, or **Until stopped** (default). Content changes every minute. Select **Start ambient mode** to begin. |
 | **Home Screen Top Shelf** | Eligible books from the current shelf snapshot. CWA-only authenticated covers are excluded. | Uses My Shelf choices; no separate app settings. |
 

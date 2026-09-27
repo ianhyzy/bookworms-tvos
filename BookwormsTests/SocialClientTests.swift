@@ -122,6 +122,6 @@ private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
 
 extension SocialQuery {
     fileprivate static var allDocuments: [String] {
-        [owner, following, feed, library].map(\.rawValue)
+        [owner, following, feed, library, bookReviews].map(\.rawValue)
     }
 }

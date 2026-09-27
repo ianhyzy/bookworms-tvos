@@ -28,12 +28,21 @@ enum SocialQuery: String {
           }
         }
         """
+    case bookReviews = """
+        query BookReviews($book: Int!) {
+          user_books(where: {book_id: {_eq: $book}, has_review: {_eq: true}},
+            order_by: [{likes_count: desc}, {reviewed_at: desc_nulls_last}], limit: 50) {
+            id rating review review_has_spoilers user { id username name image { url } }
+          }
+        }
+        """
 }
 
 struct SocialVariables: Encodable, Sendable {
     var user: Int? = nil
     var offset: Int? = nil
     var users: [Int]? = nil
+    var book: Int? = nil
 }
 
 protocol SocialLibraryFetching: Sendable {
@@ -137,6 +146,54 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             if result.userBooks.count < 100 { return books.values.sorted { $0.id < $1.id } }
         }
         throw HardcoverError.incomplete
+    }
+
+    /// Fetches up to 50 written reviews of a book, most liked first as on Hardcover, dropping reviews that are empty
+    /// after sanitization. Callers invoke this only on an explicit request, never while browsing.
+    func reviews(book: Int, token: String) async throws -> [BookReview] {
+        // Hardcover can return null or partial reviewer profiles, for example for private
+        // accounts. Show those reviews anonymously and skip only rows that can't be read at all.
+        struct Row: Decodable {
+            let id: Int
+            let rating: Double?
+            let review: String?
+            let reviewHasSpoilers: Bool
+            let user: Profile?
+            enum CodingKeys: String, CodingKey {
+                case id, rating, review, user
+                case reviewHasSpoilers = "review_has_spoilers"
+            }
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                id = try container.decode(Int.self, forKey: .id)
+                rating = try? container.decodeIfPresent(Double.self, forKey: .rating)
+                review = try? container.decodeIfPresent(String.self, forKey: .review)
+                reviewHasSpoilers =
+                    (try? container.decodeIfPresent(Bool.self, forKey: .reviewHasSpoilers)) ?? false
+                user = try? container.decodeIfPresent(Profile.self, forKey: .user)
+            }
+        }
+        struct OptionalRow: Decodable {
+            let row: Row?
+            init(from decoder: Decoder) throws { row = try? Row(from: decoder) }
+        }
+        struct Result: Decodable {
+            let userBooks: [OptionalRow]
+            enum CodingKeys: String, CodingKey { case userBooks = "user_books" }
+        }
+        let result: Result = try await fetch(
+            .bookReviews, variables: SocialVariables(book: book), token: token)
+        let anonymous = ReaderProfile(
+            id: 0, username: "reader", name: "Hardcover reader", avatarURL: nil)
+        return result.userBooks.compactMap(\.row)
+            .compactMap { row in
+                ReviewText.clean(row.review)
+                    .map {
+                        BookReview(
+                            id: row.id, reader: row.user?.model ?? anonymous, rating: row.rating,
+                            text: $0, hasSpoilers: row.reviewHasSpoilers)
+                    }
+            }
     }
 
     /// Maps a Hardcover book, choosing its cover as the shelf does: the reader's edition image when
