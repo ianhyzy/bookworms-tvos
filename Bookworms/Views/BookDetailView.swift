@@ -307,7 +307,21 @@ struct BookReviewsView: View {
                 failure = error.localizedDescription
             }
         }
-        .onExitCommand { dismiss() }
+        .onExitCommand {
+            // Back closes an open review first. Handling it here, not only on the reader pane,
+            // keeps a Back press from dismissing the popup if the pane hasn't taken focus yet.
+            if let review = reading {
+                closeReader(review)
+            } else {
+                dismiss()
+            }
+        }
+    }
+
+    private func closeReader(_ review: BookReview) {
+        withAnimation(readerAnimation) { reading = nil }
+        // Returning from the reader is an entry event for the list; restore the opened card.
+        focus = .review(review.id)
     }
 
     private var readerAnimation: Animation {
@@ -353,8 +367,8 @@ struct BookReviewsView: View {
         }
     }
 
-    /// The whole review. Disabling the list leaves this pane as the only focusable view, so the
-    /// focus engine moves to it without an explicit focus write.
+    /// The whole review. Opening it disables the list, and the pane takes focus when it appears so
+    /// that Up, Down, and Back reach it.
     private func reader(_ review: BookReview) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             BookReviewHeader(review: review)
@@ -386,11 +400,8 @@ struct BookReviewsView: View {
                 readerScroll.scrollTo(y: readerOffset)
             }
         }
-        .onExitCommand {
-            // Returning from the reader is an entry event for the list; restore the opened card.
-            withAnimation(readerAnimation) { reading = nil }
-            focus = .review(review.id)
-        }
+        .onAppear { focus = .reader }
+        .onExitCommand { closeReader(review) }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Press up or down to read more. Press Back to return to the reviews.")
     }
