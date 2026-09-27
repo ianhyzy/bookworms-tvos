@@ -56,7 +56,7 @@ struct BookDetailView: View {
                 // The left column is a full-height focus section, so Left from any control in the
                 // text column returns to Back.
                 HStack(alignment: .top, spacing: 56) {
-                    VStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 64) {
                         Button {
                             dismiss()
                         } label: {
@@ -66,12 +66,12 @@ struct BookDetailView: View {
                         .accessibilityIdentifier("back-to-shelf")
                         CoverView(book: book)
                             .frame(
-                                width: geometry.size.width * 0.22,
-                                height: geometry.size.height * 0.52
+                                width: geometry.size.width * 0.24,
+                                height: geometry.size.height * 0.6
                             )
-                            .frame(maxHeight: .infinity)
+                        Spacer(minLength: 0)
                     }
-                    .frame(width: geometry.size.width * 0.22)
+                    .frame(width: geometry.size.width * 0.24)
                     .focusSection()
                     // Two sibling sections, not nested ones: the header starts level with Back, so
                     // Right from Back and Up from Show more both reach the histogram, and the
