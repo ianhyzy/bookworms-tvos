@@ -471,7 +471,12 @@ struct ShelfView: View {
                 }
                 .padding(.horizontal, view == .following || view == .comparison ? 48 : 80)
                 .padding(.top, view.hasHeader ? 0 : ShelfScreenLayout.verticalPadding)
-                .padding(.bottom, ShelfScreenLayout.verticalPadding)
+                // Year in Review's covers need the height more than the caption needs the margin.
+                .padding(
+                    .bottom,
+                    view == .yearInReview
+                        ? ShelfScreenLayout.verticalPadding / 2 : ShelfScreenLayout.verticalPadding
+                )
 
                 if !view.hasHeader {
                     controls
