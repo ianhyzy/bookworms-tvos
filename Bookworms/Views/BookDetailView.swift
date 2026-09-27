@@ -272,13 +272,16 @@ struct BookReviewsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
 
+    /// Space inside the clipping scroll view for a focused card's lift and shadow.
+    private static let liftMargin: CGFloat = 56
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Reviews").appFont(size: 44, weight: .semibold)
                 Text(book.title).appFont(size: 24).foregroundStyle(.secondary).lineLimit(1)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Self.liftMargin)
             ZStack {
                 // The list stays mounted while reading so its scroll position survives.
                 list
@@ -292,7 +295,7 @@ struct BookReviewsView: View {
                 }
             }
         }
-        .padding(60)
+        .padding(.horizontal, 28).padding(.vertical, 50)
         .frame(width: 1500, height: 920)
         .task {
             do {
@@ -326,8 +329,8 @@ struct BookReviewsView: View {
                         .focused($focus, equals: .review(review.id))
                     }
                 }
-                // Room for the card focus lift.
-                .padding(.horizontal, 24).padding(.vertical, 20)
+                // The scroll view clips; leave room for the focused card's scale and shadow.
+                .padding(.horizontal, Self.liftMargin).padding(.vertical, Self.liftMargin)
             }
         } else {
             Group {
@@ -365,7 +368,7 @@ struct BookReviewsView: View {
         .padding(30)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.primary.opacity(0.08), in: .rect(cornerRadius: 24))
-        .padding(.horizontal, 24).padding(.vertical, 20)
+        .padding(.horizontal, Self.liftMargin).padding(.vertical, Self.liftMargin)
         .focusable()
         .focusEffectDisabled()
         .focused($focus, equals: .reader)
