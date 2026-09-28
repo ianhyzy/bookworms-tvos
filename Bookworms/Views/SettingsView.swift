@@ -281,17 +281,17 @@ struct SettingsView: View {
         columns {
             settingLabel(
                 "Views",
-                "Choose which views appear in the menu. My Shelf stays on. Choose ambient views on the Ambient page."
+                "Choose which views appear in the menu. At least one stays on. Choose ambient views on the Ambient page."
             )
-            ForEach(BookwormsView.allCases.filter { $0 != .shelf }) { view in
+            ForEach(BookwormsView.allCases) { view in
+                let isOn = coordinator.preferences.orderedViews.contains(view)
                 Toggle(
                     view.rawValue,
-                    isOn: Binding(
-                        get: { coordinator.preferences.enabled.contains(view) },
-                        set: { coordinator.setEnabled(view, $0) }
-                    )
+                    isOn: Binding(get: { isOn }, set: { coordinator.setEnabled(view, $0) })
                 )
                 .font(.system(size: 26))
+                .disabled(isOn && coordinator.preferences.orderedViews.count == 1)
+                .accessibilityIdentifier("menu-view-\(view)")
             }
         } trailing: {
             countCard(
@@ -300,6 +300,7 @@ struct SettingsView: View {
                 count: $coordinator.preferences.comparisonCount,
                 identifiers: ("fewer-comparison-books", "comparison-limit", "more-comparison-books")
             )
+            spoilerSettings
         }
     }
 
@@ -319,6 +320,22 @@ struct SettingsView: View {
                 .performanceGlassButton()
                 note("Reading history, ratings, and followed readers.")
                 note(library.sourceStatus(.hardcover, dateFormat: dateFormat))
+                Button {
+                    Task {
+                        await social.load(
+                            token: library.hardcoverTokenForSync(),
+                            readerID: coordinator.preferences.readerID, manual: true,
+                            enabledViews: Set(coordinator.preferences.activeViews))
+                    }
+                } label: {
+                    Label("Sync social data", systemImage: "arrow.clockwise")
+                }
+                .font(.system(size: 26))
+                .performanceGlassButton().accessibilityIdentifier("sync-social")
+                .disabled(
+                    social.isLoading || library.isSample || !library.hardcoverConnected
+                        || !library.hardcoverEnabled)
+                note(social.status).accessibilityIdentifier("social-status")
             } trailing: {
                 if BookPresentation.offersCWA {
                     Toggle("Calibre Web Automated", isOn: $library.cwaEnabled)
@@ -365,7 +382,7 @@ struct SettingsView: View {
                 .font(.system(size: 26))
                 .accessibilityIdentifier("wood-background-toggle")
             note("Turn off for a plain dark or light background across all views.")
-            settingLabel("Font", "Used throughout the app except Settings.")
+            settingLabel("Font", "Used throughout the app except Settings and the Ambient page.")
             Picker("Font", selection: $fontStyle) {
                 ForEach(AppFontStyle.allCases) {
                     Text($0.title).font(.system(size: 26)).tag($0)
@@ -390,37 +407,6 @@ struct SettingsView: View {
             .accessibilityValue(dateFormat.title)
             .font(.system(size: 26))
         } trailing: {
-            settingLabel("Spoilers", "Control review spoilers across views.")
-            Toggle(
-                "Show spoilers for read books",
-                isOn: Binding(
-                    get: { spoilerPolicy == .showIfRead },
-                    set: { spoilerPolicy = $0 ? .showIfRead : .alwaysHide }
-                )
-            )
-            .font(.system(size: 26))
-            .accessibilityIdentifier("spoilers-toggle")
-            note(
-                spoilerPolicy == .showIfRead
-                    ? "Automatically showing spoilers for books you have read on Hardcover."
-                    : "Always hiding review spoilers across all views.")
-            settingLabel("Social data", "Refresh enabled social views.")
-            Button {
-                Task {
-                    await social.load(
-                        token: library.hardcoverTokenForSync(),
-                        readerID: coordinator.preferences.readerID, manual: true,
-                        enabledViews: Set(coordinator.preferences.activeViews))
-                }
-            } label: {
-                Label("Sync social data", systemImage: "arrow.clockwise")
-            }
-            .font(.system(size: 26))
-            .performanceGlassButton().accessibilityIdentifier("sync-social")
-            .disabled(
-                social.isLoading || library.isSample || !library.hardcoverConnected
-                    || !library.hardcoverEnabled)
-            note(social.status).accessibilityIdentifier("social-status")
             settingLabel(
                 "iCloud storage",
                 "Save library data privately in iCloud. Credentials stay on this Apple TV.")
@@ -434,6 +420,24 @@ struct SettingsView: View {
                 .disabled(!library.iCloudEnabled)
             note("Turning this off keeps saved cloud data. Covers stay cached locally.")
         }
+    }
+
+    @ViewBuilder
+    private var spoilerSettings: some View {
+        settingLabel("Spoilers", "Control review spoilers across views.")
+        Toggle(
+            "Show spoilers for read books",
+            isOn: Binding(
+                get: { spoilerPolicy == .showIfRead },
+                set: { spoilerPolicy = $0 ? .showIfRead : .alwaysHide }
+            )
+        )
+        .font(.system(size: 26))
+        .accessibilityIdentifier("spoilers-toggle")
+        note(
+            spoilerPolicy == .showIfRead
+                ? "Automatically showing spoilers for books you have read on Hardcover."
+                : "Always hiding review spoilers across all views.")
     }
 
     private var cwaSettings: some View {

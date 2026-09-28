@@ -91,9 +91,13 @@ struct ShelfView: View {
             })
     }
 
+    /// Selects `view`, or the first sidebar view when the user has hidden it.
     private func showView(_ view: BookwormsView) {
-        sidebarItem = .view(view)
-        coordinator.current = view
+        let shown =
+            coordinator.preferences.orderedViews.contains(view)
+            ? view : coordinator.preferences.orderedViews[0]
+        sidebarItem = .view(shown)
+        coordinator.current = shown
     }
 
     var body: some View {
@@ -621,11 +625,9 @@ struct ShelfView: View {
                         .font(.system(size: 24))
                         .accessibilityIdentifier("ambient-view-\(view)")
                     }
-                    Text(
-                        "My Shelf always plays. Hiding a view from the menu doesn't remove it here."
-                    )
-                    .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text("Hiding a view from the menu doesn't remove it here.")
+                        .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(width: 460)
                 .focusSection()
@@ -656,9 +658,9 @@ struct ShelfView: View {
         .background { WoodBackground(palette: palette) }
     }
 
-    /// Views the Ambient page offers as toggles; My Shelf always plays.
+    /// Views the Ambient page offers as toggles, in sidebar order.
     private var ambientChoices: [BookwormsView] {
-        BookwormsView.allCases.filter { $0 != .shelf && $0.supportsAmbient }
+        BookwormsView.allCases.filter(\.supportsAmbient)
     }
 
     private var controls: some View {

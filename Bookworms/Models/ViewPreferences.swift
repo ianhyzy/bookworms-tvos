@@ -54,21 +54,28 @@ struct ViewPreferences: Codable, Equatable {
     var sharedReadsSort = SharedReadsSort.agreement
     var comparisonCount = BookLimit.maximum
     /// Views ambient mode cycles through, chosen on the Ambient page. `nil` includes every view.
-    /// Independent of `enabled`, which only controls the sidebar.
+    /// Independent of `enabled`, which only controls the sidebar. My Shelf follows
+    /// `ambientExcludesShelf` instead, because lists saved before it could be turned off omit it.
     var ambientViews: [BookwormsView]?
+    /// Whether the user turned My Shelf off in ambient mode; `nil` keeps it on.
+    var ambientExcludesShelf: Bool?
     var ambientMinutes = 10
     var sessionMinutes = 0
     /// Views the user has been offered in the sidebar. Preferences saved before a view existed
     /// decode as `nil` here, so `validate()` adds later views to the sidebar once.
     var offeredViews: [BookwormsView]? = BookwormsView.allCases
-    /// Views in the sidebar, in display order. My Shelf is always included.
+    /// Views in the sidebar, in display order. At least one view stays: My Shelf if none are on.
     var orderedViews: [BookwormsView] {
-        BookwormsView.allCases.filter { $0 == .shelf || enabled.contains($0) }
+        let views = BookwormsView.allCases.filter { enabled.contains($0) }
+        return views.isEmpty ? [.shelf] : views
     }
-    /// Views ambient mode may show, in display order. My Shelf is always included.
+    /// Views ambient mode may show, in display order. It can be empty; the Ambient page then
+    /// disables **Start ambient mode**.
     var ambientOrderedViews: [BookwormsView] {
         BookwormsView.allCases.filter {
-            $0.supportsAmbient && ($0 == .shelf || ambientViews?.contains($0) ?? true)
+            guard $0.supportsAmbient else { return false }
+            return $0 == .shelf
+                ? ambientExcludesShelf != true : ambientViews?.contains($0) ?? true
         }
     }
     /// Views that need prepared data and artwork: those in the sidebar or in ambient mode.
@@ -96,7 +103,9 @@ final class BookwormsCoordinator {
             if let data = try? JSONEncoder().encode(preferences) {
                 defaults.set(data, forKey: "viewPreferences")
             }
-            if !preferences.orderedViews.contains(current) { current = .shelf }
+            if !preferences.orderedViews.contains(current) {
+                current = preferences.orderedViews[0]
+            }
         }
     }
     var feedSelection: Int?
@@ -118,6 +127,7 @@ final class BookwormsCoordinator {
             ?? ViewPreferences()
         saved.validate()
         preferences = saved
+        current = saved.orderedViews[0]
         if let argument = ProcessInfo.processInfo.arguments.first(where: {
             $0.hasPrefix("--start-view=")
         }) {
@@ -136,14 +146,18 @@ final class BookwormsCoordinator {
         current = views[(index + direction + views.count) % views.count]
     }
     func setInAmbient(_ view: BookwormsView, _ included: Bool) {
-        guard view != .shelf else { return }
+        guard view != .shelf else {
+            preferences.ambientExcludesShelf = !included
+            return
+        }
         var views = preferences.ambientOrderedViews
         views.removeAll { $0 == view }
         if included { views.append(view) }
         preferences.ambientViews = views
     }
+    /// Shows or hides `view` in the sidebar. The last view in the sidebar can't be hidden.
     func setEnabled(_ view: BookwormsView, _ enabled: Bool) {
-        guard view != .shelf else { return }
+        guard enabled || preferences.orderedViews != [view] else { return }
         preferences.enabled.removeAll { $0 == view }
         if enabled { preferences.enabled.append(view) }
     }

@@ -177,23 +177,33 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertNil(book.reviewText)
     }
 
-    func testViewPreferencesStayBoundedAndMyShelfCannotBeDisabled() throws {
+    func testViewPreferencesStayBoundedAndKeepOneSidebarView() throws {
         let suite = "ViewsTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let coordinator = BookwormsCoordinator(defaults: defaults)
         coordinator.setEnabled(.shelf, false)
+        XCTAssertEqual(
+            coordinator.current, .yearInReview, "Hiding the current view moves to the first")
         coordinator.switchView(-1)
         XCTAssertEqual(coordinator.current, .shared)
         coordinator.switchView(1)
-        XCTAssertEqual(coordinator.current, .shelf)
+        XCTAssertEqual(coordinator.current, .yearInReview)
+        for view in [BookwormsView.yearInReview, .following, .comparison, .shared] {
+            coordinator.setEnabled(view, false)
+        }
+        XCTAssertEqual(coordinator.preferences.orderedViews, [.shared], "The last view stays")
+        coordinator.setInAmbient(.shelf, false)
+        XCTAssertFalse(coordinator.preferences.ambientOrderedViews.contains(.shelf))
+        coordinator.setInAmbient(.shelf, true)
+        XCTAssertTrue(coordinator.preferences.ambientOrderedViews.contains(.shelf))
         var preferences = ViewPreferences()
         preferences.enabled = [.following, .following]
         preferences.ambientMinutes = -1
         preferences.sessionMinutes = 4
         preferences.comparisonCount = 500
         preferences.validate()
-        XCTAssertEqual(preferences.orderedViews, [.shelf, .following])
+        XCTAssertEqual(preferences.orderedViews, [.following])
         XCTAssertEqual(preferences.ambientMinutes, 10)
         XCTAssertEqual(preferences.sessionMinutes, 0)
         XCTAssertEqual(preferences.comparisonCount, BookLimit.maximum)
