@@ -603,7 +603,8 @@ struct ShelfView: View {
                     }
                     .pickerStyle(.segmented)
                 }
-                .frame(width: 780)
+                // Wide enough for four session segments, including "Until stopped".
+                .frame(width: 920)
                 .focusSection()
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Views").appFont(size: 26, weight: .medium)
@@ -617,10 +618,7 @@ struct ShelfView: View {
                                 set: { coordinator.setInAmbient(view, $0) }
                             )
                         )
-                        // System font, like the segmented pickers, whose native segments don't
-                        // take the app font; the page's text keeps the app font. The default
-                        // design overrides the serif design set at the root.
-                        .font(.system(size: 24)).fontDesign(.default)
+                        .font(.system(size: 24))
                         .accessibilityIdentifier("ambient-view-\(view)")
                     }
                     Text(
@@ -629,7 +627,7 @@ struct ShelfView: View {
                     .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
                     .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(width: 520)
+                .frame(width: 460)
                 .focusSection()
             }
             .padding(.top, 10)
@@ -643,7 +641,6 @@ struct ShelfView: View {
                 }
             }
             .buttonStyle(.glassProminent)
-            .fontDesign(.default)
             .disabled(!available)
             .accessibilityIdentifier("start-ambient")
             // A full-width section catches Down from any view toggle, not only the centered one.
@@ -651,7 +648,10 @@ struct ShelfView: View {
             .focusSection()
         }
         // Text takes the palette color individually; controls keep system colors so focused
-        // controls stay legible.
+        // controls stay legible. The page uses the system font throughout, like Settings: its
+        // native segmented pickers can't take the app font, so matching them avoids mixed faces.
+        .fontDesign(.default)
+        .environment(\.appFontStyle, .sansSerif)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { WoodBackground(palette: palette) }
     }
