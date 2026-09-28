@@ -268,6 +268,17 @@ final class LibraryTests: XCTestCase {
             HardcoverClient.coverURLs(edition: square, book: small).preferred, square.url,
             "A large square image beats no cover")
         XCTAssertNil(HardcoverClient.coverURLs(edition: square, book: small).alternate)
+        XCTAssertEqual(
+            HardcoverClient.coverURLs(
+                edition: edition, book: nil, otherEditions: [otherPrint],
+                editionIsInLanguage: false
+            )
+            .preferred, otherPrint.url,
+            "An edition in another language loses to a cover in the reader's language")
+        XCTAssertEqual(
+            HardcoverClient.coverURLs(edition: edition, book: nil, editionIsInLanguage: false)
+                .preferred, edition.url,
+            "It still beats no cover")
     }
 
     func testGenresAndCommunityRatingsRemainSeparateFromPersonalScore() throws {

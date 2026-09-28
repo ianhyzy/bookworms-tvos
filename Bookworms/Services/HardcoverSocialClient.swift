@@ -19,12 +19,18 @@ enum SocialQuery: String {
         }
         """
     case library = """
-        query SocialLibrary($user: Int!, $offset: Int!) {
+        query SocialLibrary($user: Int!, $offset: Int!, $language: String!) {
           user_books(where: {user_id: {_eq: $user}, _or: [{rating: {_is_null: false}}, {last_read_date: {_is_null: false}}]},
             order_by: {id: asc}, limit: 100, offset: $offset) {
             id rating review review_has_spoilers last_read_date likes_count
-            book { id title description pages cached_contributors image { url width height } }
-            edition { id image { url width height } reading_format { format } }
+            book { id title description pages cached_contributors image { url width height }
+              editions(where: {image_id: {_is_null: false},
+                  _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
+                order_by: {users_count: desc}, limit: 5) {
+                image { url width height }
+              }
+            }
+            edition { id image { url width height } reading_format { format } language { code2 } }
           }
         }
         """
@@ -43,6 +49,7 @@ struct SocialVariables: Encodable, Sendable {
     var offset: Int? = nil
     var users: [Int]? = nil
     var book: Int? = nil
+    var language: String? = nil
 }
 
 protocol SocialLibraryFetching: Sendable {
@@ -138,7 +145,10 @@ actor HardcoverSocialClient: SocialLibraryFetching {
         for offset in stride(from: 0, to: 100_000, by: 100) {
             try Task.checkCancellation()
             let result: Result = try await fetch(
-                .library, variables: SocialVariables(user: user, offset: offset), token: token)
+                .library,
+                variables: SocialVariables(
+                    user: user, offset: offset, language: HardcoverClient.coverLanguage),
+                token: token)
             for row in result.userBooks {
                 books[row.book.id] = ReaderBook(
                     book: Self.book(row.book, edition: row.edition), rating: row.rating,
@@ -202,10 +212,13 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             }
     }
 
-    /// Maps a Hardcover book, choosing its cover as the shelf does: the reader's edition image when
-    /// it is not clearly lower quality than the book's default image.
+    /// Maps a Hardcover book, choosing its cover as the library does from the reader's edition, the
+    /// book's default image, and any other editions the query returned.
     static func book(_ source: SourceBook, edition: Edition? = nil) -> Book {
-        let covers = HardcoverClient.coverURLs(edition: edition?.image, book: source.image)
+        let covers = HardcoverClient.coverURLs(
+            edition: edition?.image, book: source.image,
+            otherEditions: (source.editions ?? []).compactMap(\.image),
+            editionIsInLanguage: edition?.isInLanguage(HardcoverClient.coverLanguage) ?? true)
         let authors = (source.cachedContributors ?? [])
             .filter { $0.contribution == nil || $0.contribution == "Author" }
             .compactMap { $0.author?.name }.joined(separator: ", ")

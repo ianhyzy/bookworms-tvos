@@ -300,10 +300,10 @@ actor HardcoverClient {
                     image { url width height }
                   }
                 }
-                edition { id pages image { url width height } reading_format { format } }
+                edition { id pages image { url width height } reading_format { format } language { code2 } }
                 user_book_reads(where: {finished_at: {_is_null: false}},
                   order_by: [{finished_at: desc}, {id: desc}], limit: 1) {
-                  finished_at edition { id pages image { url width height } reading_format { format } }
+                  finished_at edition { id pages image { url width height } reading_format { format } language { code2 } }
                 }
               }
             }
@@ -499,8 +499,15 @@ actor HardcoverClient {
     /// portrait-shaped cover, the largest square image of at least 300 pixels is used rather than
     /// no cover.
     static func coverURLs(
-        edition: CoverImage?, book: CoverImage?, otherEditions: [CoverImage] = []
+        edition: CoverImage?, book: CoverImage?, otherEditions: [CoverImage] = [],
+        editionIsInLanguage: Bool = true
     ) -> (preferred: URL?, alternate: URL?) {
+        // A reader's edition in another language loses its preference and is used only when no
+        // other image can serve as a cover.
+        if !editionIsInLanguage, edition != nil {
+            let choice = coverURLs(edition: nil, book: book, otherEditions: otherEditions)
+            if choice.preferred != nil { return choice }
+        }
         var seen = Set<URL>()
         let images = ([edition, book].compactMap(\.self) + otherEditions)
             .filter { $0.url.map { seen.insert($0).inserted } ?? false }
@@ -532,7 +539,8 @@ actor HardcoverClient {
                 .compactMap { $0.author?.name }.joined(separator: ", ")
             let covers = Self.coverURLs(
                 edition: edition?.image, book: source.image,
-                otherEditions: (source.editions ?? []).compactMap(\.image))
+                otherEditions: (source.editions ?? []).compactMap(\.image),
+                editionIsInLanguage: edition?.isInLanguage(Self.coverLanguage) ?? true)
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,
@@ -636,13 +644,21 @@ struct Edition: Decodable, Sendable {
     let pages: Int?
     let image: CoverImage?
     let readingFormat: ReadingFormat?
+    var language: Language? = nil
     enum CodingKeys: String, CodingKey {
         case id
         case pages
         case image
         case readingFormat = "reading_format"
+        case language
     }
+    struct Language: Decodable, Sendable { let code2: String? }
 
+    /// Whether the edition is in `code`, an ISO 639-1 code; editions without a recorded language
+    /// count as matching.
+    func isInLanguage(_ code: String) -> Bool {
+        language?.code2.map { $0.lowercased() == code.lowercased() } ?? true
+    }
 }
 struct ReadingFormat: Decodable, Sendable { let format: String? }
 struct ReadEvent: Decodable, Sendable {
