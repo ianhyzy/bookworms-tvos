@@ -80,6 +80,23 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.connectionRevision, 0)
     }
 
+    func testNewestHardcoverSnapshotReplacesOnesKeyedByUserID() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        var stale = fixture.book(1)
+        stale.detailCoverURL = URL(string: "https://example.com/stale.jpg")
+        var fresh = fixture.book(1)
+        fresh.detailCoverURL = URL(string: "https://example.com/fresh.jpg")
+        var keyedByUser = fixture.snapshot(.hardcover, books: [stale], age: 86_400)
+        keyedByUser.accountID = "8696"
+        try fixture.save([keyedByUser, fixture.snapshot(.hardcover, books: [fresh])])
+        let model = LibraryModel(dependencies: fixture.dependencies())
+        await model.start()
+        XCTAssertEqual(
+            model.books.first?.detailCoverURL, fresh.detailCoverURL,
+            "The newest snapshot supplies covers even when an older one sorts first")
+    }
+
     func testRejectedSyncMarksSessionExpiredUntilASuccessfulSync() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

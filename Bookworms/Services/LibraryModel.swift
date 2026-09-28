@@ -499,7 +499,6 @@ final class LibraryModel {
         }
         let revision = sourceRevision
         var failures: [String] = []
-        var checked = false
         if hardcoverEnabled,
             manual
                 || schedule
@@ -508,7 +507,6 @@ final class LibraryModel {
                         hasSnapshot: sourceSnapshots.contains { $0.source == .hardcover }),
             let token = dependencies.readCredential("hardcover-token")
         {
-            checked = true
             do {
                 try schedule
                     .begin(
@@ -537,7 +535,6 @@ final class LibraryModel {
                         }),
             let password = dependencies.readCredential("cwa-password")
         {
-            checked = true
             do {
                 try schedule
                     .begin(
@@ -558,9 +555,6 @@ final class LibraryModel {
         }
         if !failures.isEmpty {
             message = failures.joined(separator: "\n")
-        } else if !checked {
-            message =
-                "No sources were synced. Automatic checks run once a day; use Sync now in Settings → Sources to check sooner."
         }
         queueCloudSync()
     }
@@ -668,7 +662,11 @@ final class LibraryModel {
         if source == .hardcover { hardcoverSessionExpired = false }
         let snapshot = SourceSnapshot(
             source: source, accountID: accountID, books: result, syncedAt: dependencies.now())
-        sourceSnapshots.removeAll { $0.source == source && $0.accountID == accountID }
+        // One Hardcover account at a time: a sync replaces every saved Hardcover snapshot,
+        // including ones other builds keyed by user ID.
+        sourceSnapshots.removeAll {
+            $0.source == source && (source == .hardcover || $0.accountID == accountID)
+        }
         sourceSnapshots.append(snapshot)
         schedule.seed(source, date: snapshot.syncedAt)
         isSample = false
@@ -684,10 +682,15 @@ final class LibraryModel {
         let measurement = PerformanceDiagnostics.begin("RebuildLibrary")
         defer { measurement.end() }
         guard !isSample else { return }
-        let enabled = sourceSnapshots.filter {
-            ($0.source == .hardcover && hardcoverEnabled)
-                || ($0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity)
-        }
+        // Only the newest Hardcover snapshot counts; an older one, for example restored from
+        // iCloud, would otherwise supply stale covers because the merge keeps the first copy.
+        let hardcover = sourceSnapshots.filter { $0.source == .hardcover }
+            .max { $0.syncedAt < $1.syncedAt }
+        let enabled =
+            (hardcoverEnabled ? [hardcover].compactMap(\.self) : [])
+            + sourceSnapshots.filter {
+                $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
+            }
         allBooks = LibraryMerge.books(from: enabled)
         syncedAt = enabled.map(\.syncedAt).max()
         styles = aiRecords.mapValues(\.style)
