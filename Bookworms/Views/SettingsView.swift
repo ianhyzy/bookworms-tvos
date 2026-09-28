@@ -334,7 +334,9 @@ struct SettingsView: View {
                 .performanceGlassButton().accessibilityIdentifier("sync-social")
                 .disabled(
                     social.isLoading || library.isSample || !library.hardcoverConnected
-                        || !library.hardcoverEnabled)
+                        || !library.hardcoverEnabled
+                )
+                .syncProgress(social.isLoading)
                 note(social.status).accessibilityIdentifier("social-status")
             } trailing: {
                 if BookPresentation.offersCWA {
@@ -362,6 +364,7 @@ struct SettingsView: View {
             }
             .font(.system(size: 26))
             .performanceGlassButton()
+            .syncProgress(library.isLoading || social.isLoading)
             if let message = library.message {
                 note(message)
             }
@@ -719,6 +722,18 @@ struct SettingsView: View {
                     Text(message).font(.system(size: 23))
                         .foregroundStyle(.orange)
                 }
+            }
+        }
+    }
+}
+
+extension View {
+    /// Shows a spinner beside a sync button while its sync runs.
+    fileprivate func syncProgress(_ isSyncing: Bool) -> some View {
+        HStack(spacing: 20) {
+            self
+            if isSyncing {
+                ProgressView().accessibilityLabel("Syncing")
             }
         }
     }
