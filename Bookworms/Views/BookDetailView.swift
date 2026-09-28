@@ -294,9 +294,14 @@ struct BookReviewsView: View {
                     .disabled(reading != nil)
                 if let reading {
                     // A slight zoom echoes the tvOS focus lift; Reduce Motion keeps only the fade.
+                    // The reader leaves at once: it holds focus until removed, so an animated
+                    // exit would delay focus returning to the card by the length of the fade.
                     reader(reading)
                         .transition(
-                            reduceMotion ? .opacity : .scale(scale: 0.94).combined(with: .opacity))
+                            .asymmetric(
+                                insertion: reduceMotion
+                                    ? .opacity : .scale(scale: 0.94).combined(with: .opacity),
+                                removal: .identity))
                 }
             }
         }
