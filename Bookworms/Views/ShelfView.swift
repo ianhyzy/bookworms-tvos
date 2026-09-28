@@ -580,28 +580,35 @@ struct ShelfView: View {
             )
             .appFont(size: 25).multilineTextAlignment(.center).frame(maxWidth: 850)
             .foregroundStyle(palette.text)
-            VStack(alignment: .leading, spacing: 14) {
-                Text("View interval").appFont(size: 26, weight: .medium)
-                    .foregroundStyle(palette.text)
-                Picker("Ambient view interval", selection: $coordinator.preferences.ambientMinutes)
-                {
-                    ForEach([5, 10, 15], id: \.self) { Text("\($0) minutes").tag($0) }
+            // Two columns, like Settings: timing on the left, views on the right. Each column is a
+            // focus section so Left and Right move between them from any row.
+            HStack(alignment: .top, spacing: 64) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("View interval").appFont(size: 26, weight: .medium)
+                        .foregroundStyle(palette.text)
+                    Picker(
+                        "Ambient view interval", selection: $coordinator.preferences.ambientMinutes
+                    ) {
+                        ForEach([5, 10, 15], id: \.self) { Text("\($0) minutes").tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Text("Session length").appFont(size: 26, weight: .medium)
+                        .foregroundStyle(palette.text)
+                        .padding(.top, 10)
+                    Picker("Ambient session", selection: $coordinator.preferences.sessionMinutes) {
+                        Text("30 minutes").tag(30)
+                        Text("1 hour").tag(60)
+                        Text("2 hours").tag(120)
+                        Text("Until stopped").tag(0)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
-                Text("Session length").appFont(size: 26, weight: .medium)
-                    .foregroundStyle(palette.text)
-                    .padding(.top, 10)
-                Picker("Ambient session", selection: $coordinator.preferences.sessionMinutes) {
-                    Text("30 minutes").tag(30)
-                    Text("1 hour").tag(60)
-                    Text("2 hours").tag(120)
-                    Text("Until stopped").tag(0)
-                }
-                .pickerStyle(.segmented)
-                Text("Views").appFont(size: 26, weight: .medium)
-                    .foregroundStyle(palette.text)
-                    .padding(.top, 10)
-                HStack(spacing: 20) {
+                .frame(width: 780)
+                .focusSection()
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Views").appFont(size: 26, weight: .medium)
+                        .foregroundStyle(palette.text)
+                    // One full-width row per view, in sidebar order, so names never truncate.
                     ForEach(ambientChoices) { view in
                         Toggle(
                             view.rawValue,
@@ -610,17 +617,22 @@ struct ShelfView: View {
                                 set: { coordinator.setInAmbient(view, $0) }
                             )
                         )
-                        // System font, like the segmented pickers above, whose native segments
-                        // don't take the app font; the page's text keeps the app font. The
-                        // default design overrides the serif design set at the root.
+                        // System font, like the segmented pickers, whose native segments don't
+                        // take the app font; the page's text keeps the app font. The default
+                        // design overrides the serif design set at the root.
                         .font(.system(size: 24)).fontDesign(.default)
                         .accessibilityIdentifier("ambient-view-\(view)")
                     }
-                }
-                Text("My Shelf always plays. Hiding a view from the menu doesn't remove it here.")
+                    Text(
+                        "My Shelf always plays. Hiding a view from the menu doesn't remove it here."
+                    )
                     .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(width: 520)
+                .focusSection()
             }
-            .frame(maxWidth: 1000)
+            .padding(.top, 10)
             Button("Start ambient mode") {
                 library.setAmbientActive(true)
                 if !ambient.start(

@@ -238,17 +238,21 @@ final class SocialNavigationTests: XCTestCase {
             "Ambient views are chosen on the Ambient page")
     }
 
-    func testAmbientViewTogglesSitBetweenSessionAndStart() {
+    func testAmbientViewTogglesStackInSidebarOrderAboveStart() {
         let app = RemoteNavigation.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
         RemoteNavigation.selectView("Ambient", in: app)
         let following = app.descendants(matching: .any)["ambient-view-following"].firstMatch
-        let middle = app.descendants(matching: .any)["ambient-view-comparison"].firstMatch
+        let comparison = app.descendants(matching: .any)["ambient-view-comparison"].firstMatch
+        let shared = app.descendants(matching: .any)["ambient-view-shared"].firstMatch
         let start = app.buttons["start-ambient"]
         XCTAssertTrue(following.waitForExistence(timeout: 5))
+        XCTAssertLessThan(following.frame.minY, comparison.frame.minY)
+        XCTAssertLessThan(comparison.frame.minY, shared.frame.minY)
         RemoteNavigation.moveFocus(to: following, in: app)
+        RemoteNavigation.press(.down, in: app, expecting: comparison)
+        RemoteNavigation.press(.down, in: app, expecting: shared)
         RemoteNavigation.press(.down, in: app, expecting: start)
-        RemoteNavigation.press(.up, in: app, expecting: middle)
         capture(app, name: "Ambient page")
     }
 

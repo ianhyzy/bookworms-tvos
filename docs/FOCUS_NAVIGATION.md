@@ -23,7 +23,7 @@ Each view divides its focusable content into focus sections with `.focusSection(
 | **Following** | Activity row, in pages of 4; each card can have a **Read review** button below it | The last focused activity |
 | **Compare Shelves** | Header (ordering menu, reader picker), your row, the reader's row | The book in the same column as the last focused book, on the entered row's visible page |
 | **Book Club** | Header (reader picker, sort menu), cover row, review actions | The selected cover |
-| **Ambient** | View interval, session length, view toggles, **Start ambient mode** | The control nearest the sidebar item |
+| **Ambient** | Two columns: view interval and session length on the left, view toggles in sidebar order on the right; **Start ambient mode** below both | The control nearest the sidebar item |
 
 Within a section, the focus engine picks the nearest item in the pressed direction. Up from a Compare Shelves row reaches the nearest header control, and Down from a Book Club cover reaches the nearest review action. Down where no item exists leaves focus unchanged.
 
