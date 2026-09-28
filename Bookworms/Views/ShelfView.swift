@@ -610,7 +610,9 @@ struct ShelfView: View {
                                 set: { coordinator.setInAmbient(view, $0) }
                             )
                         )
-                        .appFont(size: 24)
+                        // System font, like the segmented pickers above, whose native segments
+                        // don't take the app font; the page's text keeps the app font.
+                        .font(.system(size: 24))
                         .accessibilityIdentifier("ambient-view-\(view)")
                     }
                 }
