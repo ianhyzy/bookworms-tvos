@@ -289,12 +289,14 @@ actor HardcoverClient {
     private enum Query: String {
         case account = "query ShelfAccount { me { id } }"
         case library = """
-            query ShelfLibrary($user: Int!, $offset: Int!) {
+            query ShelfLibrary($user: Int!, $offset: Int!, $language: String!) {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
                 id last_read_date rating status_id
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
                   book_series { featured series { id } }
-                  editions(where: {image_id: {_is_null: false}}, order_by: {users_count: desc}, limit: 5) {
+                  editions(where: {image_id: {_is_null: false},
+                      _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
+                    order_by: {users_count: desc}, limit: 5) {
                     image { url width height }
                   }
                 }
@@ -321,7 +323,7 @@ actor HardcoverClient {
         enum CodingKeys: String, CodingKey { case userBooks = "user_books" }
     }
 
-    private func request<T: Decodable>(_ query: Query, variables: [String: Int], token: String)
+    private func request<T: Decodable>(_ query: Query, variables: [String: Any], token: String)
         async throws -> T
     {
         let body = try JSONSerialization.data(withJSONObject: [
@@ -437,7 +439,9 @@ actor HardcoverClient {
         for offset in stride(from: 0, to: 10000, by: 100) {
             try Task.checkCancellation()
             let result: Library = try await request(
-                .library, variables: ["user": user.id, "offset": offset], token: token)
+                .library,
+                variables: ["user": user.id, "offset": offset, "language": Self.coverLanguage],
+                token: token)
             rows += result.userBooks
             if result.userBooks.count < 100 { return Self.normalize(rows) }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
@@ -476,6 +480,15 @@ actor HardcoverClient {
         guard let width = image.width, let height = image.height else { return true }
         let ratio = Double(width) / Double(max(1, height))
         return min(width, height) >= 300 && abs(ratio - 1) > 0.03
+    }
+
+    /// The two-letter ISO 639-1 code of the Apple TV's preferred language, such as "en". Cover
+    /// choice considers other editions only in this language or with no language recorded;
+    /// Hardcover stores the same code in `languages.code2`.
+    static var coverLanguage: String {
+        Locale.preferredLanguages.first
+            .flatMap { Locale.Language(identifier: $0).languageCode?.identifier(.alpha2) }
+            ?? "en"
     }
 
     /// The preferred cover and a fallback for when it fails to download.
