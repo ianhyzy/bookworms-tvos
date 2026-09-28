@@ -2,6 +2,32 @@ import Foundation
 import NaturalLanguage
 import Synchronization
 
+/// Backoff for network failures that may pass: server errors (5xx), timeouts, and dropped
+/// connections. Hardcover's API and cover hosts are busy enough that a single failure is common.
+enum TransientRetry {
+    /// Waits before the second and third attempts. Each wait gains up to a second of random
+    /// jitter so concurrent requests don't retry in lockstep.
+    static let delays: [Double] = [2, 4]
+
+    /// The wait before retrying `error`, or `nil` when it won't pass by retrying or no retries
+    /// remain.
+    static func delay(after error: Error, attempt: Int) -> Double? {
+        guard attempt < delays.count else { return nil }
+        let transient: Bool
+        if case HardcoverError.http(let status) = error {
+            transient = (500...599).contains(status)
+        } else if let code = (error as? URLError)?.code {
+            transient = [
+                .timedOut, .networkConnectionLost, .cannotConnectToHost, .badServerResponse,
+            ]
+            .contains(code)
+        } else {
+            transient = false
+        }
+        return transient ? delays[attempt] + .random(in: 0..<1) : nil
+    }
+}
+
 enum HardcoverError: LocalizedError {
     case invalidToken, invalidAuthorizationCode, personalAccessTokenRequired
     case insufficientScope, forbidden
@@ -268,6 +294,9 @@ actor HardcoverClient {
                 id last_read_date rating status_id
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
                   book_series { featured series { id } }
+                  editions(where: {image_id: {_is_null: false}}, order_by: {users_count: desc}, limit: 5) {
+                    image { url width height }
+                  }
                 }
                 edition { id pages image { url width height } reading_format { format } }
                 user_book_reads(where: {finished_at: {_is_null: false}},
@@ -332,7 +361,30 @@ actor HardcoverClient {
         return try JSONSerialization.data(withJSONObject: result)
     }
 
+    /// Sends a query, retrying failures that may pass. Server errors, timeouts, and dropped
+    /// connections retry after about 2 and then 4 seconds. A rate limit retries once its
+    /// Retry-After passes if that is at most 30 seconds away; a longer limit ends the request.
     private func response(body: Data, token: String) async throws -> Data {
+        var attempt = 0
+        while true {
+            do {
+                return try await send(body: body, token: token)
+            } catch {
+                let delay: Double?
+                if case HardcoverError.http(429) = error {
+                    let wait = retryAfter.timeIntervalSinceNow
+                    delay = wait <= 30 ? max(0, wait) : nil
+                } else {
+                    delay = TransientRetry.delay(after: error, attempt: attempt)
+                }
+                guard attempt < TransientRetry.delays.count, let delay else { throw error }
+                attempt += 1
+                try await Task.sleep(for: .seconds(delay))
+            }
+        }
+    }
+
+    private func send(body: Data, token: String) async throws -> Data {
         let token = try HardcoverToken(token).value
         guard Date() >= retryAfter else { throw HardcoverError.http(429) }
         // Reserve a slot before suspending so concurrent catalog and social calls share a budget.
@@ -427,13 +479,31 @@ actor HardcoverClient {
     }
 
     /// The preferred cover and a fallback for when it fails to download.
-    static func coverURLs(edition: CoverImage?, book: CoverImage?) -> (
-        preferred: URL?, alternate: URL?
-    ) {
-        let images = [edition, book].compactMap(\.self)
-        let best = bestCover(in: images, preferring: edition)
-        let alternate = images.first { isCover($0) && $0.url != best?.url }?.url
-        return (best?.url, alternate)
+    ///
+    /// Candidates are the reader's edition, the book's default image, and `otherEditions`, the
+    /// book's most-read editions. The reader's edition wins unless another is clearly better; a
+    /// square audiobook image, for example, loses to any portrait cover. When no candidate is a
+    /// portrait-shaped cover, the largest square image of at least 300 pixels is used rather than
+    /// no cover.
+    static func coverURLs(
+        edition: CoverImage?, book: CoverImage?, otherEditions: [CoverImage] = []
+    ) -> (preferred: URL?, alternate: URL?) {
+        var seen = Set<URL>()
+        let images = ([edition, book].compactMap(\.self) + otherEditions)
+            .filter { $0.url.map { seen.insert($0).inserted } ?? false }
+        guard let best = bestCover(in: images, preferring: edition) else {
+            let square =
+                images.filter { image in
+                    guard image.url?.scheme == "https", let width = image.width,
+                        let height = image.height
+                    else { return false }
+                    return min(width, height) >= 300
+                }
+                .max { ($0.height ?? 0) < ($1.height ?? 0) }
+            return (square?.url, nil)
+        }
+        let alternate = images.first { isCover($0) && $0.url != best.url }?.url
+        return (best.url, alternate)
     }
 
     static func normalize(_ rows: [UserBook]) -> [Book] {
@@ -447,7 +517,9 @@ actor HardcoverClient {
                     $0.contribution == nil || $0.contribution == "Author"
                 }
                 .compactMap { $0.author?.name }.joined(separator: ", ")
-            let covers = Self.coverURLs(edition: edition?.image, book: source.image)
+            let covers = Self.coverURLs(
+                edition: edition?.image, book: source.image,
+                otherEditions: (source.editions ?? []).compactMap(\.image))
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,
@@ -510,6 +582,10 @@ struct SourceBook: Decodable, Sendable {
     let rating: Double?
     let ratingsCount: Int?
     let ratingsDistribution: [RatingBucket]?
+    /// The book's most-read editions that have images, for cover choice. Only the library query
+    /// requests them.
+    var editions: [EditionImage]? = nil
+    struct EditionImage: Decodable, Sendable { let image: CoverImage? }
     enum CodingKeys: String, CodingKey {
         case id
         case title
@@ -523,6 +599,7 @@ struct SourceBook: Decodable, Sendable {
         case rating
         case ratingsCount = "ratings_count"
         case ratingsDistribution = "ratings_distribution"
+        case editions
     }
 
 }

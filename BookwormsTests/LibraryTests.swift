@@ -253,6 +253,21 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(
             HardcoverClient.coverURLs(edition: nil, book: portrait).preferred, portrait.url)
         XCTAssertNil(HardcoverClient.coverURLs(edition: nil, book: portrait).alternate)
+
+        let otherPrint = CoverImage(
+            url: URL(string: "https://example.com/other-print"), width: 800, height: 1200)
+        XCTAssertEqual(
+            HardcoverClient.coverURLs(edition: square, book: nil, otherEditions: [otherPrint])
+                .preferred, otherPrint.url,
+            "Another edition's portrait cover replaces a square audiobook image")
+        XCTAssertEqual(
+            HardcoverClient.coverURLs(edition: edition, book: nil, otherEditions: [otherPrint])
+                .preferred, edition.url,
+            "The reader's edition wins against a similar cover from another edition")
+        XCTAssertEqual(
+            HardcoverClient.coverURLs(edition: square, book: small).preferred, square.url,
+            "A large square image beats no cover")
+        XCTAssertNil(HardcoverClient.coverURLs(edition: square, book: small).alternate)
     }
 
     func testGenresAndCommunityRatingsRemainSeparateFromPersonalScore() throws {

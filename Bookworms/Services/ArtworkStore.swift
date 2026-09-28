@@ -201,7 +201,23 @@ actor ArtworkStore {
         return output as Data
     }
 
+    /// Downloads an image, retrying failures that may pass with `TransientRetry` backoff.
     private func fetchOriginal(_ url: URL) async throws -> Data {
+        var attempt = 0
+        while true {
+            do {
+                return try await fetchOnce(url)
+            } catch {
+                guard let delay = TransientRetry.delay(after: error, attempt: attempt) else {
+                    throw error
+                }
+                attempt += 1
+                try await Task.sleep(for: .seconds(delay))
+            }
+        }
+    }
+
+    private func fetchOnce(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = 25
         let started = Date()
@@ -226,7 +242,9 @@ actor ArtworkStore {
             duration: Date().timeIntervalSince(started))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 429 || (500...599).contains(status) { throw URLError(.badServerResponse) }
-        guard status == 200, data.count <= 15_000_000 else {
+        // A guard on memory while the original is held before downsampling; covers are far
+        // smaller.
+        guard status == 200, data.count <= 30_000_000 else {
             throw URLError(.cannotDecodeContentData)
         }
         return data
