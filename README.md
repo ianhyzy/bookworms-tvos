@@ -11,20 +11,17 @@ Currently, Bookworms can pull data from Hardcover and Calibre Web Automated.
 
 Goodreads and StoryGraph prefer to hoard your reading data to themselves. However, you can [import data from those apps to Hardcover](https://hardcover.app/pages/faq).
 
-Bookworms has views for:
-
-* Your most recent reads
-* Recent updates from users on Hardcover
-* "Side-by-side" comparison of your book library with another user
-* Written review comparison of your Hardcover reviews with another user's
-
-Bookworms has an OLED-aware Ambient mode that dims the screen and cycles through selected views on a schedule you choose.
+Bookworms also has an OLED-aware Ambient mode that dims the screen and cycles through selected views on a schedule you choose.
 
 ## Screenshots
 
 My Shelf
 
 ![My Shelf](screenshots/1-my-shelf.jpg)
+
+Year in Review
+
+![Year in Review](screenshots/5-year-in-review.jpg)
 
 Following
 
@@ -37,6 +34,10 @@ Compare Shelves
 Book Club
 
 ![Book Club](screenshots/4-book-club.jpg)
+
+Book details
+
+![Book details](screenshots/6-book-details.jpg)
 
 Photo credits:
 * Gold frame: [ohamina - Magnific.com](https://www.magnific.com/free-psd/elegant-gold-ornate-picture-frame_409112548.htm#fromView=keyword&page=1&position=2&uuid=ff7f9ec6-72b7-402c-81cb-047760d51bf3&track=ais_hybrid&query=Gold+frame+template)
