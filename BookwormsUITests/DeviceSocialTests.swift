@@ -52,8 +52,8 @@ final class DeviceSocialTests: XCTestCase {
                 .firstMatch.waitForExistence(timeout: 60))
         RemoteNavigation.selectView("Compare Shelves", in: app)
         RemoteNavigation.chooseReader("Adam", in: app)
-        RemoteNavigation.openSettings(app, section: "General")
-        let sync = app.buttons["sync-social"]
+        RemoteNavigation.openSettings(app, section: "Sources")
+        let sync = app.buttons["sync-now"]
         let ready = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "enabled == true"), object: sync)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 90), .completed)

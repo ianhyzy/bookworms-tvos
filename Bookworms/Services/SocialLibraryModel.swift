@@ -211,7 +211,7 @@ final class SocialLibraryModel {
                     snapshot = nil
                     revision += 1
                     status =
-                        "Hardcover social access was denied. Reconnect with read:social and read:users as well as the library read permissions, then select Sync social data."
+                        "Hardcover social access was denied. Reconnect with read:social and read:users as well as the library read permissions, then select Sync now in Settings → Sources."
                 default:
                     status =
                         "Social data could not refresh. Cached data is retained. "

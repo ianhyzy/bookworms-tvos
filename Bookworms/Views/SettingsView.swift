@@ -320,23 +320,6 @@ struct SettingsView: View {
                 .performanceGlassButton()
                 note("Reading history, ratings, and followed readers.")
                 note(library.sourceStatus(.hardcover, dateFormat: dateFormat))
-                Button {
-                    Task {
-                        await social.load(
-                            token: library.hardcoverTokenForSync(),
-                            readerID: coordinator.preferences.readerID, manual: true,
-                            enabledViews: Set(coordinator.preferences.activeViews))
-                    }
-                } label: {
-                    Label("Sync social data", systemImage: "arrow.clockwise")
-                }
-                .font(.system(size: 26))
-                .performanceGlassButton().accessibilityIdentifier("sync-social")
-                .disabled(
-                    social.isLoading || library.isSample || !library.hardcoverConnected
-                        || !library.hardcoverEnabled
-                )
-                .syncProgress(social.isLoading)
                 note(social.status).accessibilityIdentifier("social-status")
             } trailing: {
                 if BookPresentation.offersCWA {
@@ -353,7 +336,8 @@ struct SettingsView: View {
                     note(library.sourceStatus(.cwa, dateFormat: dateFormat))
                 }
             }
-            Button("Sync now") {
+            // Syncs the library, then social data, bypassing both daily freshness checks.
+            Button {
                 Task {
                     await library.refresh(manual: true)
                     await social.load(
@@ -361,9 +345,13 @@ struct SettingsView: View {
                         readerID: coordinator.preferences.readerID, manual: true,
                         enabledViews: Set(coordinator.preferences.activeViews))
                 }
+            } label: {
+                Label("Sync now", systemImage: "arrow.clockwise")
             }
             .font(.system(size: 26))
             .performanceGlassButton()
+            .disabled(social.isLoading)
+            .accessibilityIdentifier("sync-now")
             .syncProgress(library.isLoading || social.isLoading)
             if let message = library.message {
                 note(message)
