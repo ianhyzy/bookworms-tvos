@@ -346,7 +346,7 @@ struct YearInReviewView: View {
         count == 1 ? "1 book" : "\(count.formatted()) books"
     }
 
-    /// The gold of `StarRating`, so bars and stars read as one palette.
+    /// Gold bars, the chart's one accent color.
     private static var barGradient: LinearGradient {
         LinearGradient(
             colors: [

@@ -874,13 +874,28 @@ struct ReadingLine: View {
     }
 }
 
-/// Five gold stars in half steps, like Hardcover's rating display. A static gradient and a small
-/// shadow give the stars some depth without animation.
+/// Five stars in half steps, like Hardcover's rating display, in the surrounding text color. A
+/// static top-lit highlight and a small shadow give the stars some depth without animation.
 struct StarRating: View {
     let rating: Double
     var size: CGFloat = 34
 
     var body: some View {
+        stars
+            .overlay {
+                LinearGradient(
+                    colors: [.white.opacity(0.35), .clear, .black.opacity(0.15)],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .mask { stars }
+            }
+            .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "\(rating.formatted(.number.precision(.fractionLength(0...1)))) out of 5 stars")
+    }
+
+    private var stars: some View {
         HStack(spacing: size * 0.12) {
             ForEach(0..<5, id: \.self) { index in
                 let fill = rating - Double(index)
@@ -894,17 +909,6 @@ struct StarRating: View {
                 .frame(width: size * 1.15, height: size * 1.1)
             }
         }
-        .foregroundStyle(
-            LinearGradient(
-                colors: [
-                    Color(red: 1, green: 0.87, blue: 0.36),
-                    Color(red: 0.95, green: 0.68, blue: 0.1),
-                ], startPoint: .top, endPoint: .bottom)
-        )
-        .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(rating.formatted(.number.precision(.fractionLength(0...1)))) out of 5 stars")
     }
 }
 
