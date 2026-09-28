@@ -611,8 +611,9 @@ struct ShelfView: View {
                             )
                         )
                         // System font, like the segmented pickers above, whose native segments
-                        // don't take the app font; the page's text keeps the app font.
-                        .font(.system(size: 24))
+                        // don't take the app font; the page's text keeps the app font. The
+                        // default design overrides the serif design set at the root.
+                        .font(.system(size: 24)).fontDesign(.default)
                         .accessibilityIdentifier("ambient-view-\(view)")
                     }
                 }
@@ -630,6 +631,7 @@ struct ShelfView: View {
                 }
             }
             .buttonStyle(.glassProminent)
+            .fontDesign(.default)
             .disabled(!available)
             .accessibilityIdentifier("start-ambient")
             // A full-width section catches Down from any view toggle, not only the centered one.
