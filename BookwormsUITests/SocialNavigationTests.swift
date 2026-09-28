@@ -262,7 +262,7 @@ final class SocialNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["Reveal spoilers"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["A memorable read with a distinctive voice."].isHittable)
-        XCUIRemote.shared.press(.down)
+        RemoteNavigation.waitForFocus(app.buttons["Reveal spoilers"])
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(
             app.staticTexts["A memorable read with a distinctive voice."]

@@ -47,7 +47,7 @@ struct SettingsView: View {
                 return requested
             }
         #endif
-        return .shelf
+        return .views
     }
 
     var body: some View {

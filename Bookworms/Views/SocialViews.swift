@@ -773,8 +773,8 @@ struct ReviewReadingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     var body: some View {
+        // No Back button: the remote's Back closes the sheet, and the text keeps the height.
         VStack(alignment: .leading, spacing: 30) {
-            Button("Back") { dismiss() }.buttonStyle(.glass)
             if let byline = review.byline {
                 HStack(alignment: .center, spacing: 28) {
                     ReaderLabel(
@@ -784,7 +784,7 @@ struct ReviewReadingView: View {
                     LikesLabel(count: byline.likes)
                 }
             } else {
-                Text(review.title).font(.title)
+                Text(review.title).appFont(size: 32, weight: .semibold).lineLimit(1)
             }
             if review.spoilers && !revealed {
                 Text("This review contains spoilers.")
@@ -801,6 +801,10 @@ struct ReviewReadingView: View {
                 } action: { _, value in
                     maximumOffset = value
                 }
+                // The text holds focus so Up, Down, and Back reach this sheet.
+                .focusable()
+                .focusEffectDisabled()
+                .accessibilityIdentifier("review-text")
             }
         }
         .onMoveCommand { direction in

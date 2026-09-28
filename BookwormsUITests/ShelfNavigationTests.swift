@@ -38,7 +38,8 @@ final class ShelfNavigationTests: XCTestCase {
         RemoteNavigation.press(.up, in: app, expecting: reviews)
         RemoteNavigation.press(.down, in: app, expecting: showMore)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-text"].waitForExistence(timeout: 5))
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(showMore.waitForExistence(timeout: 5))
         let detail = XCTAttachment(screenshot: app.screenshot())
