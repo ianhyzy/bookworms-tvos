@@ -409,6 +409,7 @@ struct BookReviewsView: View {
         .onExitCommand { closeReader() }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Press up or down to read more. Press Back to return to the reviews.")
+        .accessibilityIdentifier("review-reader")
     }
 }
 

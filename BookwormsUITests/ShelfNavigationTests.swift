@@ -26,6 +26,8 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertTrue(longReview.waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(longReview)
         XCUIRemote.shared.press(.select)
+        // Wait for the reader to take focus, as a person would, before pressing Back.
+        RemoteNavigation.waitForFocus(app.descendants(matching: .any)["review-reader"])
         XCUIRemote.shared.press(.menu)
         RemoteNavigation.waitForFocus(longReview)
         XCUIRemote.shared.press(.menu)
