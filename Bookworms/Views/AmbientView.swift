@@ -197,7 +197,9 @@ struct AmbientView: View {
                     let used =
                         page.books.reduce(0) { $0 + (page.dimensions[$1.id]?.width ?? 0) }
                         + ShelfLayout.gap * CGFloat(max(0, page.books.count - 1))
-                    if index == pages.count - 1, size.width - used >= 0.4 * size.width {
+                    if BookPresentation.showsShelfPhotos, index == pages.count - 1,
+                        size.width - used >= 0.4 * size.width
+                    {
                         ShelfPhoto(name: photo, rowHeight: size.height - 20)
                             .frame(width: size.width - used)
                     }

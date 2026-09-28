@@ -1078,7 +1078,8 @@ struct PagedRow<Item: Identifiable, Content: View>: View where Item.ID == Int {
             let lead = inset
             let empty = layoutWidth - used
             let photo =
-                !spreads && empty >= 0.4 * layoutWidth ? emptySpacePhoto : nil
+                BookPresentation.showsShelfPhotos && !spreads && empty >= 0.4 * layoutWidth
+                ? emptySpacePhoto : nil
             for (index, item) in page.enumerated() {
                 let isLast = index == page.count - 1
                 result.append(

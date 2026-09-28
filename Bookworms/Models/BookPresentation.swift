@@ -9,6 +9,9 @@ enum BookPresentation {
     /// Temporarily hide the Calibre Web Automated source in Settings. Its client, saved
     /// configuration, credentials, and sync remain.
     nonisolated static let offersCWA = false
+    /// Temporarily hide the photos that fill empty shelf space. `ShelfPhoto`, its assets, and
+    /// the layout that places it remain.
+    nonisolated static let showsShelfPhotos = false
 
     static func usesSpine(hasSavedKey: Bool, hasDesign: Bool, fontAvailable: Bool) -> Bool {
         hasSavedKey && hasDesign && fontAvailable

@@ -43,6 +43,7 @@ Maintain [VIEWS.md](VIEWS.md) for tvOS view options and [DATASOURCES.md](DATASOU
 ## Current feature constraints
 
 - Keep the CWA source hidden in Settings (`BookPresentation.offersCWA`) while preserving its client, configuration, credentials, and tests.
+- Keep the empty-shelf photos hidden (`BookPresentation.showsShelfPhotos`) while preserving `ShelfPhoto`, its assets, and its layout.
 - Keep generated-spine views, AI provider settings, generation entry points, and spine font restoration disabled. Preserve retained implementations, designs, and credentials. The feature switches live in [BookPresentation.swift](Bookworms/Models/BookPresentation.swift).
 - Use shared cover components for consistent focus effects across sizes and views. Respect Reduce Motion. On shelves, stand covers on `ShelfBoard` and pass `standsOnShelf: true` to `CoverView`. Keep shelf effects subtle and static: fade prebuilt shadows with opacity instead of animating a blur radius.
 - Show a reader's name with `ReaderLabel`, which adds their Hardcover profile photo. Include any new reader's avatar URL in artwork preparation so photos never download while browsing.
