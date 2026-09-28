@@ -318,8 +318,9 @@ struct SettingsView: View {
                 { sourceEditor = .hardcover }
                 .font(.system(size: 26))
                 .performanceGlassButton()
-                note("Reading history, ratings, and followed readers.")
-                note(library.sourceStatus(.hardcover, dateFormat: dateFormat))
+                if let status = library.sourceStatus(.hardcover, dateFormat: dateFormat) {
+                    note(status)
+                }
                 note(social.status).accessibilityIdentifier("social-status")
             } trailing: {
                 if BookPresentation.offersCWA {
@@ -333,7 +334,9 @@ struct SettingsView: View {
                     .font(.system(size: 26))
                     .performanceGlassButton()
                     note("Owned ebooks from your server.")
-                    note(library.sourceStatus(.cwa, dateFormat: dateFormat))
+                    if let status = library.sourceStatus(.cwa, dateFormat: dateFormat) {
+                        note(status)
+                    }
                 }
             }
             // Syncs the library, then social data, bypassing both daily freshness checks.

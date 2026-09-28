@@ -198,7 +198,7 @@ final class SocialLibraryModel {
                 }
                 try install(current, request: request)
                 status =
-                    "Social data is cached. Automatic checks run once a day; Sync now checks sooner."
+                    "Social data is cached. Automatic checks run once a day."
             } catch {
                 guard !Task.isCancelled, request == requestRevision else { return }
                 switch error {

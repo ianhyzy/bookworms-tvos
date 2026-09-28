@@ -594,7 +594,8 @@ final class LibraryModel {
         }
     }
 
-    func sourceStatus(_ source: LibrarySource, dateFormat: AppDateFormat = .monthName) -> String {
+    /// The source's sync error or next scheduled check, or `nil` when a check is already due.
+    func sourceStatus(_ source: LibrarySource, dateFormat: AppDateFormat = .monthName) -> String? {
         if let error = sourceErrors[source.rawValue] { return error }
         guard let last = schedule.lastAttempt(source) else { return "Not synced yet" }
         let successful = sourceSnapshots.first { $0.source == source }?.syncedAt
@@ -602,7 +603,7 @@ final class LibraryModel {
         return next > dependencies.now()
             ? "Next check: " + dateFormat.string(from: next) + " · "
                 + next.formatted(date: .omitted, time: .shortened)
-            : "Ready to sync"
+            : nil
     }
 
     func becameActive() async {

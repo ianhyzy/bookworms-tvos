@@ -129,7 +129,7 @@ final class SourceLibraryTests: XCTestCase {
         defer { defaults.set(previous, forKey: "sourceErrors") }
         defaults.set(
             ["hardcover": "Hardcover denied access to this request."], forKey: "sourceErrors")
-        XCTAssertTrue(LibraryModel().sourceStatus(.hardcover).contains("denied access"))
+        XCTAssertTrue(LibraryModel().sourceStatus(.hardcover)?.contains("denied access") == true)
     }
 
     @MainActor

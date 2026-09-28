@@ -563,7 +563,6 @@ struct ShelfView: View {
                 .lineLimit(1)
             Spacer()
         }
-        .padding(.vertical, 8)
     }
 
     /// Chooses ambient timing and starts playback. The sidebar item opens this page instead of
