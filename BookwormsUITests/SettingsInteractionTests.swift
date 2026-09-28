@@ -101,14 +101,15 @@ final class SettingsInteractionTests: XCTestCase {
         app.launchArguments = ["--sample-library"]
         app.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
-        RemoteNavigation.openSettings(app)
+        RemoteNavigation.openSettings(app, section: "Shelf")
         XCTAssertTrue(app.staticTexts["book-limit"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["book-limit"].label, "40")
     }
 
     func testProviderSettingsAreHiddenEvenWithLaunchShortcut() {
         let app = openSettings("AI spines")
-        XCTAssertTrue(app.staticTexts["book-limit"].exists)
+        // The hidden tab falls back to the default, Views.
+        XCTAssertTrue(app.staticTexts["comparison-limit"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["AI spines"].exists)
         XCTAssertFalse(app.textFields["Vision model ID"].exists)
         XCTAssertFalse(app.buttons["Save provider"].exists)
