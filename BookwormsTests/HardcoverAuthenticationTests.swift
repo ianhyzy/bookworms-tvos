@@ -278,7 +278,9 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             if query.contains("ShelfAccount") {
                 body = #"{"data":{"me":[{"id":1}]}}"#
             } else {
-                let offset = (object["variables"] as! [String: Int])["offset"]!
+                let variables = object["variables"] as! [String: Any]
+                XCTAssertNotNil(variables["language"] as? String)
+                let offset = variables["offset"] as! Int
                 if offset > 0
                     && request.value(forHTTPHeaderField: "Authorization") == "Bearer hc_pat_partial"
                 {
