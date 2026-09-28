@@ -123,15 +123,17 @@ enum SampleLibrary {
             text: String(
                 repeating:
                     "The pacing rewards patience, and the final chapters gather every thread. ",
-                count: 12), hasSpoilers: false),
+                count: 12), hasSpoilers: false, likes: 14),
         BookReview(
             id: 2,
             reader: ReaderProfile(id: 2, username: "margins", name: nil, avatarURL: nil),
-            rating: 3, text: "Lovely atmosphere, though the middle drags.", hasSpoilers: false),
+            rating: 3, text: "Lovely atmosphere, though the middle drags.", hasSpoilers: false,
+            likes: 0),
         BookReview(
             id: 3,
             reader: ReaderProfile(id: 3, username: "endings", name: "Jo Park", avatarURL: nil),
-            rating: 5, text: "The archive belonged to the narrator all along.", hasSpoilers: true),
+            rating: 5, text: "The archive belonged to the narrator all along.", hasSpoilers: true,
+            likes: 1),
     ]
 
     // Fictional fixtures keep previews and UI tests independent of private reading history.

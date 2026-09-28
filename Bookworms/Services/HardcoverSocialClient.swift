@@ -22,7 +22,7 @@ enum SocialQuery: String {
         query SocialLibrary($user: Int!, $offset: Int!) {
           user_books(where: {user_id: {_eq: $user}, _or: [{rating: {_is_null: false}}, {last_read_date: {_is_null: false}}]},
             order_by: {id: asc}, limit: 100, offset: $offset) {
-            id rating review review_has_spoilers last_read_date
+            id rating review review_has_spoilers last_read_date likes_count
             book { id title description pages cached_contributors image { url width height } }
             edition { id image { url width height } reading_format { format } }
           }
@@ -32,7 +32,7 @@ enum SocialQuery: String {
         query BookReviews($book: Int!) {
           user_books(where: {book_id: {_eq: $book}, has_review: {_eq: true}},
             order_by: [{likes_count: desc}, {reviewed_at: desc_nulls_last}], limit: 50) {
-            id rating review review_has_spoilers user { id username name image { url } }
+            id rating review review_has_spoilers likes_count user { id username name image { url } }
           }
         }
         """
@@ -120,12 +120,14 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             let review: String?
             let reviewHasSpoilers: Bool
             let lastReadDate: String?
+            let likesCount: Int?
             let book: SourceBook
             let edition: Edition?
             enum CodingKeys: String, CodingKey {
                 case id, rating, review, book, edition
                 case reviewHasSpoilers = "review_has_spoilers"
                 case lastReadDate = "last_read_date"
+                case likesCount = "likes_count"
             }
         }
         struct Result: Decodable {
@@ -141,7 +143,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                 books[row.book.id] = ReaderBook(
                     book: Self.book(row.book, edition: row.edition), rating: row.rating,
                     review: ReviewText.clean(row.review), hasSpoilers: row.reviewHasSpoilers,
-                    finished: row.lastReadDate)
+                    finished: row.lastReadDate, likes: row.likesCount.map { max(0, $0) })
             }
             if result.userBooks.count < 100 { return books.values.sorted { $0.id < $1.id } }
         }
@@ -158,10 +160,12 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             let rating: Double?
             let review: String?
             let reviewHasSpoilers: Bool
+            let likesCount: Int
             let user: Profile?
             enum CodingKeys: String, CodingKey {
                 case id, rating, review, user
                 case reviewHasSpoilers = "review_has_spoilers"
+                case likesCount = "likes_count"
             }
             init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -170,6 +174,8 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                 review = try? container.decodeIfPresent(String.self, forKey: .review)
                 reviewHasSpoilers =
                     (try? container.decodeIfPresent(Bool.self, forKey: .reviewHasSpoilers)) ?? false
+                likesCount = max(
+                    0, (try? container.decodeIfPresent(Int.self, forKey: .likesCount)) ?? 0)
                 user = try? container.decodeIfPresent(Profile.self, forKey: .user)
             }
         }
@@ -191,7 +197,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                     .map {
                         BookReview(
                             id: row.id, reader: row.user?.model ?? anonymous, rating: row.rating,
-                            text: $0, hasSpoilers: row.reviewHasSpoilers)
+                            text: $0, hasSpoilers: row.reviewHasSpoilers, likes: row.likesCount)
                     }
             }
     }

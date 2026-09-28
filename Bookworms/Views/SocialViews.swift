@@ -193,7 +193,11 @@ struct SocialViews: View {
                 Button("Read review") {
                     review = ReviewPresentation(
                         title: activity.reader.displayName, text: text,
-                        spoilers: hidesSpoilers)
+                        spoilers: hidesSpoilers,
+                        byline: .init(
+                            name: activity.reader.displayName,
+                            avatarURL: activity.reader.avatarURL, rating: activity.rating,
+                            likes: activity.likes))
                 }
                 .buttonStyle(.glass).frame(width: cardWidth)
                 .accessibilityIdentifier("activity-review-\(activity.id)")
@@ -321,8 +325,6 @@ struct SocialViews: View {
                     ratingRow("You", avatarURL: ownerAvatar, yourRating)
                     ratingRow(reader.displayName, avatarURL: reader.avatarURL, theirRating)
                 }
-                .padding(.vertical, 14).padding(.horizontal, 24)
-                .background(.regularMaterial, in: .rect(cornerRadius: 28))
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("comparison-ratings")
             }
@@ -436,7 +438,10 @@ struct SocialViews: View {
             // The card's own Reveal review press is the spoiler confirmation.
             onRead: {
                 review = ReviewPresentation(
-                    title: name, text: item.reviewText ?? "", spoilers: false)
+                    title: name, text: item.reviewText ?? "", spoilers: false,
+                    byline: .init(
+                        name: name, avatarURL: avatarURL, rating: item.rating,
+                        likes: item.likes))
             }
         )
         .id("\(name)-\(item.id)")
@@ -612,6 +617,7 @@ private struct SharedReviewCard: View {
             HStack {
                 ReaderLabel(name: name, avatarURL: avatarURL, size: 34)
                 Spacer()
+                LikesLabel(count: item.likes).padding(.trailing, 12)
                 Text(item.rating.map { String(format: "%.1f ★", $0) } ?? "Not rated")
                     .appFont(size: 34, weight: .semibold)
             }
@@ -734,10 +740,7 @@ struct ActivityCard: View {
                     Text(dateFormat.string(from: date))
                         .appFont(size: 21).foregroundStyle(.secondary)
                 }
-                if activity.likes > 0 {
-                    Label("\(activity.likes) likes", systemImage: "heart").appFont(size: 21)
-                        .foregroundStyle(.secondary)
-                }
+                LikesLabel(count: activity.likes)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -750,6 +753,15 @@ struct ReviewPresentation: Identifiable {
     let title: String
     let text: String
     let spoilers: Bool
+    /// The reviewer, shown instead of `title` with their photo, rating, and like count.
+    var byline: Byline? = nil
+
+    struct Byline {
+        let name: String
+        let avatarURL: URL?
+        let rating: Double?
+        let likes: Int?
+    }
 }
 
 struct ReviewReadingView: View {
@@ -763,7 +775,17 @@ struct ReviewReadingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 30) {
             Button("Back") { dismiss() }.buttonStyle(.glass)
-            Text(review.title).font(.title)
+            if let byline = review.byline {
+                HStack(alignment: .center, spacing: 28) {
+                    ReaderLabel(
+                        name: byline.name, avatarURL: byline.avatarURL, size: 32,
+                        weight: .semibold)
+                    if let rating = byline.rating { StarRating(rating: rating, size: 26) }
+                    LikesLabel(count: byline.likes)
+                }
+            } else {
+                Text(review.title).font(.title)
+            }
             if review.spoilers && !revealed {
                 Text("This review contains spoilers.")
                 Button("Reveal spoilers") { revealed = true }.buttonStyle(.glassProminent)
@@ -793,6 +815,18 @@ struct ReviewReadingView: View {
         .onExitCommand { dismiss() }
         .padding(70)
         .frame(width: 1400, height: 800)
+    }
+}
+
+/// A review or activity's Hardcover like count, hidden when there are none.
+struct LikesLabel: View {
+    let count: Int?
+
+    var body: some View {
+        if let count, count > 0 {
+            Label(count == 1 ? "1 like" : "\(count.formatted()) likes", systemImage: "heart")
+                .appFont(size: 21).foregroundStyle(.secondary)
+        }
     }
 }
 

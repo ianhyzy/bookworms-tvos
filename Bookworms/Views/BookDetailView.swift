@@ -282,11 +282,10 @@ struct BookReviewsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Reviews").appFont(size: 44, weight: .semibold)
-                Text(book.title).appFont(size: 24).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .padding(.horizontal, Self.liftMargin)
+            Text(book.title).appFont(size: 44, weight: .semibold).lineLimit(1)
+                .padding(.horizontal, Self.liftMargin)
+                // Space between the title and the edge where cards scroll out of view.
+                .padding(.bottom, 28)
             ZStack {
                 // The list stays mounted while reading so its scroll position survives.
                 list
@@ -427,6 +426,7 @@ private struct BookReviewHeader: View {
             ReaderLabel(
                 name: review.reader.displayName, avatarURL: review.reader.avatarURL, size: 28)
             Spacer()
+            LikesLabel(count: review.likes).padding(.trailing, 12)
             if let rating = review.rating {
                 Text(String(format: "%.1f ★", rating)).appFont(size: 28, weight: .semibold)
             }

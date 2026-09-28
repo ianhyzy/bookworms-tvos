@@ -14,6 +14,8 @@ struct ReaderBook: Codable, Identifiable, Hashable, Sendable {
     let review: String?
     let hasSpoilers: Bool
     let finished: String?
+    /// Hardcover likes on the review; `nil` in snapshots saved before likes were fetched.
+    var likes: Int? = nil
     var id: Int { book.id }
     var reviewText: String? { ReviewText.clean(review) }
 }
@@ -25,6 +27,7 @@ struct BookReview: Identifiable, Hashable, Sendable {
     let rating: Double?
     let text: String
     let hasSpoilers: Bool
+    let likes: Int
 }
 
 struct SharedRead: Identifiable, Hashable, Sendable {
