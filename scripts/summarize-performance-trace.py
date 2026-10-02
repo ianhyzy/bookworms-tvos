@@ -96,6 +96,8 @@ def phase_report(args, root, schemas, markers):
     if log.exists():
         for line in log.read_text().splitlines():
             entry = json.loads(line)
+            if 'submitted' not in entry:
+                continue  # Startup timings share the log.
             pipeline.append(((entry['epoch']-start)*1000, int(entry['submitted']),
                              int(entry['skipped']), entry.get('maxTickGapMS')))
     elif 'os-signpost' in schemas:

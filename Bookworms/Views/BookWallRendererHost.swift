@@ -192,6 +192,23 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
     }
 
     private func prepare(scene: BookWallScene, surface: BookWallRendererSurface) throws {
+        #if BOOKWORMS_DIAGNOSTICS
+            // Startup cost on the main thread, written to the pipeline log that profiles copy.
+            let startedAt = CACurrentMediaTime()
+            var shaderReadyAt = startedAt
+            var rendererStartedAt = startedAt
+            defer {
+                if PerformanceDiagnostics.enabled {
+                    let finishedAt = CACurrentMediaTime()
+                    BookWallPipelineLog.append([
+                        "epoch": Date().timeIntervalSince1970,
+                        "startupPrepareMS": (finishedAt - startedAt) * 1000,
+                        "startupShaderMS": (shaderReadyAt - startedAt) * 1000,
+                        "startupRendererMS": (finishedAt - rendererStartedAt) * 1000,
+                    ])
+                }
+            }
+        #endif
         guard let device = MTLCreateSystemDefaultDevice() else {
             throw RendererError.unavailableMetal
         }
@@ -211,6 +228,9 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         descriptor.fragmentFunction = library.makeFunction(name: "wallPresentationFragment")
         descriptor.colorAttachments[0].pixelFormat = surface.metalLayer.pixelFormat
         presentationPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+        #if BOOKWORMS_DIAGNOSTICS
+            shaderReadyAt = CACurrentMediaTime()
+        #endif
         // RealityKit renders into each slot's own texture, never into a drawable: on Apple TV,
         // rendering straight into drawables dropped much of the scene during detail flights.
         // Three slots let RealityKit finish one frame while it encodes the next.
@@ -227,6 +247,9 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
             color.label = "Book Wall color \(index)"
             frameSlots.append(try FrameSlot(event: event, texture: color))
         }
+        #if BOOKWORMS_DIAGNOSTICS
+            rendererStartedAt = CACurrentMediaTime()
+        #endif
         let realityRenderer = try RealityRenderer()
         realityRenderer.activeCamera = scene.camera
         realityRenderer.cameraSettings.antialiasing =

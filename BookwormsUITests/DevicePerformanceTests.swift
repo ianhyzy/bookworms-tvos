@@ -125,7 +125,13 @@ final class DevicePerformanceTests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(focusedBook).firstMatch.waitForExistence(timeout: 10))
         func returnToEntry() { returnToWallEntry(app, focusedBook: focusedBook) }
         returnToEntry()
-        let entry = app.buttons.matching(wallBooks).element(boundBy: 0).identifier
+        // The entry book is the first column's bottom spine; each spine reports its own frame.
+        let spines = app.buttons.matching(wallBooks).allElementsBoundByIndex
+            .map { (id: $0.identifier, frame: $0.frame) }
+        let leftColumn = spines.map(\.frame.midX).min() ?? 0
+        let entry = spines.filter { abs($0.frame.midX - leftColumn) < 60 }
+            .max { $0.frame.midY < $1.frame.midY }?
+            .id
         XCTAssertEqual(app.buttons.matching(focusedBook).firstMatch.identifier, entry)
         // Records the starting screen, such as a tab control left over the wall.
         let start = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
