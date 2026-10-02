@@ -847,10 +847,14 @@ final class LibraryModel {
                     cloudBacked = true
                     do {
                         let savedSourceRevision = try await saveSources()
-                        guard iCloudEnabled, revision == cloudRevision,
-                            savedSourceRevision == sourceSaveRevision, !Task.isCancelled
-                        else {
+                        guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                             return
+                        }
+                        // A source installed during the save wrote newer snapshots; sync again
+                        // so they upload and the status settles.
+                        guard savedSourceRevision == sourceSaveRevision else {
+                            cloudPending = true
+                            continue
                         }
                         styleSaveRevision &+= 1
                         let styleRevision = styleSaveRevision

@@ -226,6 +226,7 @@ struct ShelfView: View {
                 guard key.loaded, key.enabled else { return }
                 await bookWallPreparation.prepare(key.books)
             }
+            .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
                 social.prepare(coordinator.preferences)
             }

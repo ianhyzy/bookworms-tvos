@@ -8,7 +8,7 @@ CWA redirects and catalog paging stay within the configured HTTPS origin. The ap
 
 **Settings → General → iCloud storage** enables private CloudKit storage. It is off by default; users turn it on. The `LibraryArchive` record type is deployed to the production schema. The archive contains source snapshots and saved AI design records. Credentials are excluded. Covers and downloadable fonts stay in local caches. The cloud archive uses a file asset so it can exceed the local preferences budget.
 
-Each successful Hardcover fetch saves the authenticated account ID with its complete source snapshot, and the library reads only the newest snapshot for the active account. The shelf still limits displayed books, but the cloud snapshot retains the full fetched library.
+Each successful Hardcover fetch saves the authenticated account ID with its complete source snapshot, and the library reads only the newest snapshot for the active account. The shelf still limits displayed books, but the cloud snapshot retains the full fetched library. A device with no active Hardcover account, such as a newly restored Apple TV, shows the newest Hardcover snapshot in the archive until a credential is added.
 
 Cloud sync merges sources by identity and sync date, and designs by book ID and generation date. Conditional saves retry concurrent updates instead of overwriting another device's newer data. Unchanged archives are not uploaded again. A source sync queues a cloud update, and paid designs are saved to iCloud before relying on cloud storage beyond the local preferences budget.
 

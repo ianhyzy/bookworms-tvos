@@ -159,6 +159,7 @@ final class BookWallScene {
     private var layout = BookWallLayout(books: [])
     private var signature: [Book] = []
     private var preparedBodies: [Int: ModelEntity] = [:]
+    private var preparedWallID: UUID?
     private var bodies: [Int: ModelEntity] = [:]
     private var restingTransforms: [Int: Transform] = [:]
     private struct FlightFrame {
@@ -338,13 +339,14 @@ final class BookWallScene {
         hasUndrawnChange = true
         self.onSettled = onSettled
         let books = prepared.books
-        guard books != signature else {
+        guard books != signature || prepared.id != preparedWallID else {
             if isSettled { onSettled(projectedFrames()) }
             return
         }
         dropTask?.cancel()
         cancelTransition()
         signature = books
+        preparedWallID = prepared.id
         layout = prepared.layout
         preparedBodies = prepared.bodies
         labels = prepared.labels
@@ -1648,6 +1650,48 @@ final class BookWallScene {
         return material
     }
 
+    private static let casingName = "hardcover-casing"
+    private static let spineFaceName = "hardcover-spine"
+    private static let coverFaceName = "hardcover-cover"
+
+    private static func caseMaterial(_ style: BookWallLocalSpine.Style) -> PhysicallyBasedMaterial {
+        surface(color: style.background.uiColor, roughness: 0.56)
+    }
+
+    private static func spineMaterial(_ spine: TextureResource) -> PhysicallyBasedMaterial {
+        var material = surface(color: .white, roughness: 0.56)
+        material.baseColor = .init(texture: .init(spine))
+        return material
+    }
+
+    private static func coverMaterial(
+        _ cover: TextureResource?, style: BookWallLocalSpine.Style
+    ) -> any RealityKit.Material {
+        guard let cover else { return UnlitMaterial(color: style.background.uiColor) }
+        // The shaped covering reflects a soft edge highlight without tinting the artwork.
+        var paper = surface(color: .white, roughness: 0.52, specular: 0.25)
+        paper.baseColor = .init(texture: .init(cover))
+        return paper
+    }
+
+    /// Replaces a built book's cover-derived materials in place, so a cover that downloads
+    /// after preparation reaches the wall without rebuilding or moving the book. The caller
+    /// must ask the scene for a frame afterward.
+    static func applyArtwork(
+        to body: ModelEntity, style: BookWallLocalSpine.Style, spine: TextureResource,
+        cover: TextureResource
+    ) {
+        let materials: [String: any RealityKit.Material] = [
+            casingName: caseMaterial(style),
+            spineFaceName: spineMaterial(spine),
+            coverFaceName: coverMaterial(cover, style: style),
+        ]
+        for case let part as ModelEntity in body.children {
+            guard let material = materials[part.name] else { continue }
+            part.model?.materials = [material]
+        }
+    }
+
     /// Builds the hardcover and its collision shape before the wall opens.
     static func makeBook(
         slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style,
@@ -1692,7 +1736,6 @@ final class BookWallScene {
                 body.addChild(plane)
             }
         }
-        let caseMaterial = Self.surface(color: style.background.uiColor, roughness: 0.56)
         // Both cover faces flow through the same full-height spine contour. The open
         // fore edge still exposes the paper block inside the continuous casing.
         let casing = ModelEntity(
@@ -1701,8 +1744,8 @@ final class BookWallScene {
                 foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
                 spineWallDepth: (size.z - pageSize.z) / 2,
                 bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
-            materials: [caseMaterial])
-        casing.name = "hardcover-casing"
+            materials: [caseMaterial(style)])
+        casing.name = Self.casingName
         body.addChild(casing)
         let shape = ShapeResource.generateBox(size: size)
         body.collision = CollisionComponent(shapes: [shape])
@@ -1719,29 +1762,20 @@ final class BookWallScene {
         // The spine plane is opaque and shares the case's surface settings, so it shades like
         // the case around it without a visible label edge, and the GPU skips the case's spine
         // face behind it.
-        var spineMaterial = Self.surface(color: .white, roughness: 0.56)
-        spineMaterial.baseColor = .init(texture: .init(spine))
         let face = ModelEntity(
             mesh: .generatePlane(
                 width: slot.spineFaceWidth, height: slot.spineFaceHeight),
-            materials: [spineMaterial])
+            materials: [spineMaterial(spine)])
+        face.name = Self.spineFaceName
         face.position.z = slot.coverWidth / 2 + 0.009
         body.addChild(face)
-        let coverMaterial: any RealityKit.Material
-        if let cover {
-            // The shaped covering reflects a soft edge highlight without tinting the artwork.
-            var paper = Self.surface(color: .white, roughness: 0.52, specular: 0.25)
-            paper.baseColor = .init(texture: .init(cover))
-            coverMaterial = paper
-        } else {
-            coverMaterial = UnlitMaterial(color: style.background.uiColor)
-        }
         let coverFace = ModelEntity(
             mesh: BookWallHardcoverMesh.coverSurface(
                 width: slot.coverWidth, height: slot.bookHeight,
                 foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
                 bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
-            materials: [coverMaterial])
+            materials: [coverMaterial(cover, style: style)])
+        coverFace.name = Self.coverFaceName
         coverFace.position.y = slot.spineThickness / 2 + Self.coverSurfaceOffset
         // The spine faces +Z, so the cover's top edge points toward -X on the upper face.
         coverFace.orientation =

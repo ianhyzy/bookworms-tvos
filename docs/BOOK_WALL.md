@@ -1,6 +1,6 @@
 # Book Wall models, animation, and local spines
 
-Book Wall generates spine artwork on Apple TV. It does not call an AI service or download fonts. It may use the existing artwork store to fetch the selected cover before sampling that image locally. A book without a usable cover still gets a deterministic, readable spine.
+Book Wall generates spine artwork on Apple TV. It does not call an AI service or download fonts. It may use the existing artwork store to fetch the selected cover before sampling that image locally. A book without a usable cover still gets a deterministic, readable spine. A book whose cover URL produced no image is downloaded again 30 seconds after preparation, as on the shelf; if the cover arrives, the book's spine, casing, and cover artwork change in place without another fall, and its slot keeps the proportions it was laid out with.
 
 This document describes the implemented behavior and the constraints to preserve when changing it. See the [development handoff](handoffs/2026-09-29-book-wall.md) for work in progress and evidence locations, and [Book Wall checks](TESTING.md#book-wall-checks) for device verification.
 
