@@ -206,11 +206,9 @@ final class BookWallNavigationTests: XCTestCase {
     }
 
     private func audit(_ app: XCUIApplication) throws {
-        try app.performAccessibilityAudit(for: [
-            .contrast, .textClipped, .sufficientElementDescription, .trait,
-        ]) { issue in
-            // The one-pixel probes report test evidence, not user-facing content.
-            ["scenario-probe", "focus-transition-probe"].contains(issue.element?.identifier ?? "")
+        // The one-pixel probes report test evidence, not user-facing content.
+        try app.auditAccessibility {
+            ["scenario-probe", "focus-transition-probe"].contains($0.element?.identifier ?? "")
         }
     }
 

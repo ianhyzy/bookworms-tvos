@@ -205,16 +205,20 @@ enum RemoteNavigation {
         let sections = app.descendants(matching: .any)["settings-sections"]
         XCTAssertTrue(sections.waitForExistence(timeout: 5), file: file, line: line)
         guard let section else { return }
-        let button = sections.buttons[section]
-        for _ in 0..<6 where !isFocused(button) {
-            let inBar =
-                sections.descendants(matching: .any)
-                .matching(NSPredicate(format: "hasFocus == true")).count > 0
-            XCUIRemote.shared.press(inBar ? .left : .up)
+        let segments = sections.buttons
+        let focusedSegment = segments.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<6 where !focusedSegment.exists { XCUIRemote.shared.press(.up) }
+        let ordered = segments.allElementsBoundByIndex.sorted { $0.frame.minX < $1.frame.minX }
+        guard let from = ordered.firstIndex(where: \.hasFocus),
+            let to = ordered.firstIndex(where: { $0.label == section })
+        else {
+            return XCTFail("Settings section unreachable: \(section)", file: file, line: line)
         }
-        for _ in 0..<6 where !isFocused(button) { XCUIRemote.shared.press(.right) }
-        XCTAssertTrue(
-            isFocused(button), "Settings section unreachable: \(section)", file: file, line: line)
+        // Focus selects each segment it passes, which replaces the section content. Press a
+        // counted number of times instead of reading focus during that replacement, which can
+        // report the previous segment and send focus past the target.
+        for _ in 0..<abs(to - from) { XCUIRemote.shared.press(to < from ? .left : .right) }
+        waitForFocus(segments[section], file: file, line: line)
         XCUIRemote.shared.press(.select)
     }
 
@@ -290,5 +294,23 @@ enum RemoteNavigation {
             : NSPredicate(format: "identifier == %@", element.identifier)
         return XCUIApplication().descendants(matching: .any).matching(focus).containing(key).count
             > 0
+    }
+}
+
+extension XCUIApplication {
+    /// Audits contrast, text clipping, element descriptions, and traits.
+    ///
+    /// The audit skips the collapsed sidebar's back chevron, which tvOS 26.0 labels with its
+    /// symbol name, `chevron.compact.backward`. The chevron is system chrome that the app cannot
+    /// relabel. `isIgnored` excludes other elements, such as test instrumentation.
+    @MainActor
+    func auditAccessibility(
+        ignoring isIgnored: @escaping (XCUIAccessibilityAuditIssue) -> Bool = { _ in false }
+    ) throws {
+        try performAccessibilityAudit(for: [
+            .contrast, .textClipped, .sufficientElementDescription, .trait,
+        ]) { issue in
+            issue.element?.identifier == "chevron.compact.backward" || isIgnored(issue)
+        }
     }
 }
