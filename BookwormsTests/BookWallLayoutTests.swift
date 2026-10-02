@@ -117,14 +117,15 @@ final class BookWallLayoutTests: XCTestCase {
     }
 
     func testLongTitleGetsMoreSpineSpace() throws {
+        // A shared id gives both books the same seeded thickness and variety, so only the
+        // space reserved for their lettering differs.
         let short = Book(id: 1, title: "Dune", author: "Frank Herbert", pages: 300)
         let long = Book(
-            id: 2, title: "A Very Long Book Title About the World and Everything in It",
+            id: 1, title: "A Very Long Book Title About the World and Everything in It",
             author: "A Writer With a Long Name", pages: 300)
-        let slots = BookWallLayout(books: [short, long]).slots
-        XCTAssertGreaterThan(
-            try XCTUnwrap(slots.first { $0.book.id == 2 }).spineThickness,
-            try XCTUnwrap(slots.first { $0.book.id == 1 }).spineThickness)
+        let shortSlot = try XCTUnwrap(BookWallLayout(books: [short]).slots.first)
+        let longSlot = try XCTUnwrap(BookWallLayout(books: [long]).slots.first)
+        XCTAssertGreaterThan(longSlot.spineThickness, shortSlot.spineThickness)
     }
 
     @MainActor

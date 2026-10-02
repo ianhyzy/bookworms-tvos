@@ -44,7 +44,11 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertTrue(replay.exists)
         RemoteNavigation.press(.up, in: app, expecting: replay)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        // Spines stay mounted during a replay, so wait for the books to land.
+        let falling = app.staticTexts["Books are falling into place…"]
+        XCTAssertTrue(falling.waitForExistence(timeout: 2))
+        XCTAssertTrue(falling.waitForNonExistence(timeout: 15))
+        XCTAssertTrue(first.exists)
         RemoteNavigation.waitForFocus(replay)
         RemoteNavigation.press(.down, in: app, expecting: topRight)
         assertSpinesInsideScreen(app)
@@ -87,7 +91,11 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: topRight)
         RemoteNavigation.press(.up, in: app, expecting: replay)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        // Spines stay mounted during a replay, so wait for the books to land.
+        let falling = app.staticTexts["Books are falling into place…"]
+        XCTAssertTrue(falling.waitForExistence(timeout: 2))
+        XCTAssertTrue(falling.waitForNonExistence(timeout: 15))
+        XCTAssertTrue(first.exists)
         RemoteNavigation.waitForFocus(replay)
         RemoteNavigation.press(.down, in: app, expecting: topRight)
         assertSpinesInsideScreen(app)
@@ -108,7 +116,9 @@ final class BookWallNavigationTests: XCTestCase {
             XCTAssertTrue(detail.waitForExistence(timeout: 5))
             XCTAssertEqual(detail.label, title)
             XCTAssertFalse(app.buttons["book-wall-replay"].exists)
-            XCTAssertFalse(app.buttons["back-to-shelf"].exists)
+            XCTAssertEqual(
+                app.buttons.matching(identifier: "back-to-shelf").count, 1,
+                "Details show only the wall's Back button")
             capture(app, name: "Book-Wall-renderer-edge-\(id)-detail")
             XCUIRemote.shared.press(.menu)
             XCTAssertEqual(app.state, .runningForeground)
@@ -155,8 +165,14 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
         // The scenario enables Book Wall; enter it through the native sidebar, as a viewer does.
         RemoteNavigation.selectView("Book Wall", in: app)
-        XCTAssertTrue(app.buttons["book-wall-8"].waitForExistence(timeout: 20))
-        RemoteNavigation.waitForFocus(app.buttons["book-wall-8"])
+        let entry = app.buttons["book-wall-8"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 20))
+        RemoteNavigation.waitForFocus(entry)
+        let updates = RemoteNavigation.transitions(app)
+        // Spines are focusable while books fall; landing republishes their rectangles without
+        // moving focus, and Drop again appears once they rest.
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
+        XCTAssertEqual(RemoteNavigation.transitions(app), updates, "Landing moved focus")
         return app
     }
 

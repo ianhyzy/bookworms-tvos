@@ -196,7 +196,7 @@ final class BookWallScene {
     private var animatingUntil: CFTimeInterval = 0
     private var selectedID: Int?
     private var isFlyingOut = false
-    private var onSettled: (([Int: CGRect]) -> Void)?
+    private var onFocusFrames: ((_ frames: [Int: CGRect], _ settled: Bool) -> Void)?
     #if BOOKWORMS_DIAGNOSTICS
         private var motionMetrics = BookWallMotionMetrics()
     #endif
@@ -301,7 +301,7 @@ final class BookWallScene {
 
     /// Restores hit targets after the host attaches to an already settled wall.
     func refreshHostFocusFrames() {
-        if isSettled { onSettled?(projectedFrames()) }
+        publishFocusFrames()
     }
 
     func detachHost(_ host: any BookWallRenderHost) {
@@ -334,13 +334,13 @@ final class BookWallScene {
 
     func configure(
         prepared: BookWallPreparedWall, reduceMotion: Bool,
-        onSettled: @escaping ([Int: CGRect]) -> Void
+        onFocusFrames: @escaping (_ frames: [Int: CGRect], _ settled: Bool) -> Void
     ) {
         hasUndrawnChange = true
-        self.onSettled = onSettled
+        self.onFocusFrames = onFocusFrames
         let books = prepared.books
         guard books != signature || prepared.id != preparedWallID else {
-            if isSettled { onSettled(projectedFrames()) }
+            publishFocusFrames()
             return
         }
         dropTask?.cancel()
@@ -373,7 +373,7 @@ final class BookWallScene {
         selectedID = nil
         isFlyingOut = false
         guard !books.isEmpty else {
-            onSettled([:])
+            onFocusFrames([:], true)
             return
         }
         updateSceneViewport()
@@ -512,7 +512,17 @@ final class BookWallScene {
         }
         isSettled = true
         showShelfLabel(for: selectedID)
-        onSettled?(projectedFrames())
+        publishFocusFrames()
+    }
+
+    /// Sends each spine's rectangle at rest and whether the books have settled. Targets exist
+    /// from the start of a fall, so entering the tab can focus a book while it falls; the view
+    /// opens details only after settling. Never assigns focus.
+    private func publishFocusFrames() {
+        guard !layout.slots.isEmpty, renderBounds.width > 0, renderBounds.height > 0 else {
+            return
+        }
+        onFocusFrames?(projectedFrames(), isSettled)
     }
 
     /// Shows the focused book's lettering on the shelf front, or the hint without focus.
@@ -601,7 +611,7 @@ final class BookWallScene {
         let thickest = layout.slots.map(\.spineThickness).max() ?? 0
         dropHeight = max(dropHeight, frameTop + thickest)
         fitBackdrop()
-        if isSettled { onSettled?(projectedFrames()) }
+        publishFocusFrames()
     }
 
     private var focalLength: Float {
@@ -1612,14 +1622,9 @@ final class BookWallScene {
     private func addBook(_ slot: BookWallLayout.Slot, falls: Bool) {
         guard let body = preparedBodies.removeValue(forKey: slot.book.id) else { return }
         body.stopAllAnimations()
-        let seed = Float((UInt64(bitPattern: Int64(slot.book.id)) &* 1_103_515_245) % 100) / 100
-        // Spines sit flush on one front plane. Centered books of different depths would put
-        // deeper spines nearer the camera, where they hide part of the book above or below.
-        let front = (layout.slots.map(\.coverWidth).max() ?? slot.coverWidth) / 2
-        body.position = [
-            slot.x + (seed - 0.5) * 0.18, falls ? dropHeight : slot.restingY,
-            front - slot.coverWidth / 2,
-        ]
+        var position = restingPosition(for: slot)
+        if falls { position.y = dropHeight }
+        body.position = position
         // Flat covers make supported contact agree with the stacked collision geometry.
         // A locked roll would leave one corner embedded in the book below it.
         body.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
@@ -1797,16 +1802,32 @@ final class BookWallScene {
         return body
     }
 
+    /// Where `addBook` places a book once it rests: a fall can shift it slightly, and settling
+    /// records and republishes the landed pose.
+    private func restingPosition(for slot: BookWallLayout.Slot) -> SIMD3<Float> {
+        let seed = Float((UInt64(bitPattern: Int64(slot.book.id)) &* 1_103_515_245) % 100) / 100
+        // Spines sit flush on one front plane. Centered books of different depths would put
+        // deeper spines nearer the camera, where they hide part of the book above or below.
+        let front = (layout.slots.map(\.coverWidth).max() ?? slot.coverWidth) / 2
+        return [slot.x + (seed - 0.5) * 0.18, slot.restingY, front - slot.coverWidth / 2]
+    }
+
+    /// Projects each spine at rest: its landed pose once settled, otherwise its planned pose.
+    /// The root has an identity transform, so these root-relative poses are world poses.
     private func projectedFrames() -> [Int: CGRect] {
         var frames: [Int: CGRect] = [:]
         for slot in layout.slots {
-            guard let body = bodies[slot.book.id] else { continue }
+            let pose =
+                (restingTransforms[slot.book.id]
+                ?? Transform(translation: restingPosition(for: slot)))
+                .matrix
             var points: [CGPoint] = []
             for x in [-slot.spineFaceWidth / 2, slot.spineFaceWidth / 2] {
                 for y in [-slot.spineFaceHeight / 2, slot.spineFaceHeight / 2] {
-                    let corner = body.convert(
-                        position: [x, y, slot.coverWidth / 2 + 0.009], to: nil)
-                    if let point = renderHost?.project(corner), point.x.isFinite, point.y.isFinite {
+                    let corner = pose * SIMD4<Float>(x, y, slot.coverWidth / 2 + 0.009, 1)
+                    if let point = projectWithCamera([corner.x, corner.y, corner.z]),
+                        point.x.isFinite, point.y.isFinite
+                    {
                         points.append(point)
                     }
                 }

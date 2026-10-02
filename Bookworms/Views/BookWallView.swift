@@ -75,7 +75,10 @@ struct BookWallView: View {
                         PerformanceDiagnostics.isolates("wall-instant-panel-exit")
                             ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
                 }
-                if isSettled && detailBook == nil && !isReturning {
+                // Spine targets stay mounted at each book's resting position while books
+                // fall, so the sidebar's focus handoff finds the entry book. Opening details
+                // waits for the books to settle.
+                if detailBook == nil && !isReturning {
                     ZStack(alignment: .topLeading) {
                         ForEach(books) { book in
                             if let frame = frames[book.id] {
@@ -117,8 +120,8 @@ struct BookWallView: View {
                     #if DEBUG && targetEnvironment(simulator)
                         // Scenario hook: opens the entry book once so Simulator captures can
                         // show the detail pose without remote input.
-                        .task {
-                            guard
+                        .task(id: isSettled) {
+                            guard isSettled,
                                 ProcessInfo.processInfo.arguments.contains(
                                     "--book-wall-open-entry"),
                                 !Self.openedEntryForScenario,
@@ -189,11 +192,14 @@ struct BookWallView: View {
             isSettled = false
             hasSettledOnce = false
             frames = [:]
-            scene.configure(prepared: prepared, reduceMotion: reduceMotion) {
+            scene.configure(prepared: prepared, reduceMotion: reduceMotion) { newFrames, settled in
                 guard revision == configurationRevision else { return }
-                frames = $0
+                frames = newFrames
+                guard settled, !isSettled else { return }
                 isSettled = true
                 hasSettledOnce = !books.isEmpty
+                // Focus can reach a spine while its book falls; it pulls out once it rests.
+                scene.highlight(focusedBook, reduceMotion: reduceMotion)
             }
         }
         .onChange(of: focusedBook) {
@@ -273,8 +279,8 @@ struct BookWallView: View {
         guard isActive, isSettled, detailBook == nil, openingBookID == nil, !isReturning,
             scene.replayFall(reduceMotion: reduceMotion)
         else { return }
+        // The spine targets stay mounted, so a focused Drop again keeps focus.
         isSettled = false
-        frames = [:]
         openingFailed = false
         onActivity()
     }
