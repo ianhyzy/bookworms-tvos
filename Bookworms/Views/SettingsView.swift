@@ -283,7 +283,7 @@ struct SettingsView: View {
                 "Views",
                 "Choose which views appear in the menu. At least one stays on. Choose ambient views on the Ambient page."
             )
-            ForEach(BookwormsView.allCases) { view in
+            ForEach(BookwormsView.availableCases) { view in
                 let isOn = coordinator.preferences.orderedViews.contains(view)
                 Toggle(
                     view.rawValue,

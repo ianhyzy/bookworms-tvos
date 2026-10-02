@@ -13,7 +13,7 @@ Choose sources in **Settings → Sources**. The app supports one active account 
 
 Hardcover library access requires `read:me:content`, `read:library`, and `read:catalog:data`. Social views also require `read:social` and `read:users`. See [authentication](docs/HARDCOVER_AUTHENTICATION.md) for token setup.
 
-Credentials stay in Keychain. Disabling a source hides its books but retains its snapshot. iCloud is optional storage, off by default, rather than another selectable book provider; it stores source snapshots and saved designs, excluding credentials, images, and social snapshots. See [iCloud behavior](docs/SOURCES_AND_ICLOUD.md).
+Credentials stay in Keychain. Disabling a source hides its books but retains its snapshot. Complete Hardcover snapshots carry the authenticated account ID, so a replacement credential cannot combine books from different Hardcover accounts. iCloud is optional storage, off by default, rather than another selectable book provider; it stores source snapshots and saved designs, excluding credentials, images, and social snapshots. See [iCloud behavior](docs/SOURCES_AND_ICLOUD.md).
 
 ## Combining and deduplicating data
 

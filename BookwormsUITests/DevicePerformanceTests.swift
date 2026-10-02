@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Repeatable remote input. XCTest command timings are not app response measurements.
@@ -9,6 +10,19 @@ final class DevicePerformanceTests: XCTestCase {
         element.hasFocus
             || element.descendants(matching: .any)
                 .matching(NSPredicate(format: "hasFocus == true")).count > 0
+    }
+
+    /// Moves focus to Book Wall's entry book: the first column's bottom book, which is the
+    /// first hit target. Down can enter through **Drop again** and land on another column's top
+    /// book, so this moves to the bottom of the column, then Left into the sidebar and Right back.
+    private func returnToWallEntry(_ app: XCUIApplication, focusedBook: NSPredicate) {
+        for _ in 0..<12 { XCUIRemote.shared.press(.down) }
+        for _ in 0..<6 where app.buttons.matching(focusedBook).count > 0 {
+            XCUIRemote.shared.press(.left)
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCUIRemote.shared.press(.right)
+        Thread.sleep(forTimeInterval: 1)
     }
 
     func testMenuProfile() throws {
@@ -72,6 +86,223 @@ final class DevicePerformanceTests: XCTestCase {
         print("PERFORMANCE_FINISHED")
         Thread.sleep(forTimeInterval: 45)
     }
+    /// Launches directly into Book Wall, opens and closes book details three times, then moves
+    /// quickly through the stacks. Phase markers carry wall-clock times for aligning the trace.
+    func testBookWallProfile() throws {
+        guard ProcessInfo.processInfo.environment["VERIFY_DEVICE_PERFORMANCE"] == "1" else {
+            throw XCTSkip("Opt-in physical Apple TV Book Wall diagnosis.")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let environment = ProcessInfo.processInfo.environment
+        if environment["PERF_DIAGNOSTICS"] == "1" {
+            app.launchArguments = ["--performance-diagnostics"]
+            // A variant may combine isolations with "+".
+            for variant in (environment["PERF_VARIANT"] ?? "").split(separator: "+") {
+                app.launchArguments.append("--isolate=\(variant)")
+            }
+        }
+        if let antialiasing = environment["PERF_WALL_ANTIALIASING"], !antialiasing.isEmpty {
+            app.launchArguments.append("--wall-antialiasing=\(antialiasing)")
+        }
+        // Opens Book Wall without the sidebar and adds it there if it was hidden.
+        app.launchArguments.append("--start-view=bookWall")
+        app.launch()
+        let wallBooks = NSPredicate(
+            format: "identifier BEGINSWITH 'book-wall-' AND identifier != 'book-wall-replay'")
+        XCTAssertTrue(app.buttons.matching(wallBooks).firstMatch.waitForExistence(timeout: 90))
+        // Let preparation and the fall finish before measuring.
+        Thread.sleep(forTimeInterval: 10)
+        // A direct launch leaves focus on the collapsed tab control, where Menu would leave the
+        // app. Down enters the wall at its entry book, as it does for a viewer.
+        let focusedBook = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            wallBooks, NSPredicate(format: "hasFocus == true"),
+        ])
+        for _ in 0..<3 where app.buttons.matching(focusedBook).count == 0 {
+            XCUIRemote.shared.press(.down)
+            Thread.sleep(forTimeInterval: 1)
+        }
+        XCTAssertTrue(app.buttons.matching(focusedBook).firstMatch.waitForExistence(timeout: 10))
+        func returnToEntry() { returnToWallEntry(app, focusedBook: focusedBook) }
+        returnToEntry()
+        // The entry book is the first column's bottom spine; each spine reports its own frame.
+        let spines = app.buttons.matching(wallBooks).allElementsBoundByIndex
+            .map { (id: $0.identifier, frame: $0.frame) }
+        let leftColumn = spines.map(\.frame.midX).min() ?? 0
+        let entry = spines.filter { abs($0.frame.midX - leftColumn) < 60 }
+            .max { $0.frame.midY < $1.frame.midY }?
+            .id
+        XCTAssertEqual(app.buttons.matching(focusedBook).firstMatch.identifier, entry)
+        // Records the starting screen, such as a tab control left over the wall.
+        let start = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        start.name = "ready"
+        start.lifetime = .keepAlways
+        add(start)
+        print("PERFORMANCE_READY")
+        // Attach Instruments outside this test before measured input begins.
+        Thread.sleep(forTimeInterval: 20)
+        func phase(_ name: String) {
+            print("PERFORMANCE_PHASE \(name) \(Date().timeIntervalSince1970)")
+        }
+        let remote = XCUIRemote.shared
+        // Details come first: Instruments has dropped Display and GPU data later in long
+        // recordings, and the open state is the most important measurement.
+        for cycle in 0..<3 {
+            phase("select-\(cycle)")
+            remote.press(.select)
+            // Flight, wall fade, text fade, and a little idle motion.
+            Thread.sleep(forTimeInterval: 5)
+            phase("return-\(cycle)")
+            remote.press(.menu)
+            Thread.sleep(forTimeInterval: 4)
+            // Stay inside the first two columns so the next selection opens a different book.
+            remote.press(cycle.isMultiple(of: 2) ? .up : .right)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        // The details sequence stops here: a shorter recording loses less data and saves faster.
+        if environment["PERF_SEQUENCE"] != "details" {
+            // Unmeasured: passes through the sidebar to restore the starting book.
+            phase("reposition")
+            returnToEntry()
+            Thread.sleep(forTimeInterval: 2)
+            phase("navigate")
+            // Every burst returns to the first column's bottom book, so Left never reaches the
+            // sidebar, where Select and Menu would leave the wall or the app.
+            let bursts: [(XCUIRemote.Button, Int)] = [
+                (.up, 4), (.down, 4), (.right, 2), (.up, 4), (.down, 4), (.left, 2),
+                (.up, 4), (.down, 4), (.right, 2), (.up, 4), (.down, 4), (.left, 2),
+            ]
+            for (direction, count) in bursts {
+                for _ in 0..<count {
+                    remote.press(direction)
+                    Thread.sleep(forTimeInterval: 0.08)
+                }
+                Thread.sleep(forTimeInterval: 0.6)
+            }
+            Thread.sleep(forTimeInterval: 2)
+            // Play/Pause only records activity on the wall, so this control phase measures XCTest's
+            // press overhead at the navigation pace without any focus change.
+            phase("control")
+            for _ in 0..<24 {
+                remote.press(.playPause)
+                Thread.sleep(forTimeInterval: 0.08)
+            }
+            Thread.sleep(forTimeInterval: 2)
+            // One focus move every two seconds separates each move's effect on frame pacing.
+            phase("slow-navigate")
+            for direction in [XCUIRemote.Button.up, .down, .up, .down, .up, .down] {
+                remote.press(direction)
+                Thread.sleep(forTimeInterval: 2)
+            }
+        }
+        phase("end")
+        // Query accessibility only after the measured intervals. Book targets show only on the
+        // settled wall with details closed, so they confirm the last return completed.
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-wall-'"))
+                .firstMatch.waitForExistence(timeout: 5))
+        print("PERFORMANCE_FINISHED")
+        Thread.sleep(forTimeInterval: 10)
+    }
+
+    /// Captures screenshots as fast as XCTest allows while a book flies out and while it starts
+    /// back, for inspecting transition rendering on the TV. Not a timing measurement.
+    func testBookWallTransitionFrames() throws {
+        guard ProcessInfo.processInfo.environment["VERIFY_DEVICE_PERFORMANCE"] == "1" else {
+            throw XCTSkip("Opt-in physical Apple TV Book Wall capture.")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--start-view=bookWall"]
+        // Space-separated extra arguments, such as diagnostics isolations.
+        app.launchArguments += (ProcessInfo.processInfo.environment["PERF_EXTRA_ARGUMENTS"] ?? "")
+            .split(separator: " ").map(String.init)
+        app.launch()
+        let wallBooks = NSPredicate(
+            format: "identifier BEGINSWITH 'book-wall-' AND identifier != 'book-wall-replay'")
+        let focusedBook = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            wallBooks, NSPredicate(format: "hasFocus == true"),
+        ])
+        XCTAssertTrue(app.buttons.matching(wallBooks).firstMatch.waitForExistence(timeout: 90))
+        Thread.sleep(forTimeInterval: 10)
+        for _ in 0..<3 where app.buttons.matching(focusedBook).count == 0 {
+            XCUIRemote.shared.press(.down)
+            Thread.sleep(forTimeInterval: 1)
+        }
+        XCTAssertTrue(app.buttons.matching(focusedBook).firstMatch.waitForExistence(timeout: 10))
+        // An optional title prefix selects the book whose transitions to capture; every cycle
+        // then reopens it instead of moving to another book.
+        let title = ProcessInfo.processInfo.environment["PERF_BOOK_TITLE"] ?? ""
+        if !title.isEmpty {
+            let target = app.buttons
+                .matching(
+                    NSCompoundPredicate(andPredicateWithSubpredicates: [
+                        wallBooks, NSPredicate(format: "label BEGINSWITH[c] %@", title),
+                    ])
+                )
+                .firstMatch
+            XCTAssertTrue(target.exists, "No wall book titled \(title)")
+            returnToWallEntry(app, focusedBook: focusedBook)
+            let current = app.buttons.matching(focusedBook).firstMatch
+            for _ in 0..<40 where !target.hasFocus {
+                guard current.exists else {
+                    // Focus left the wall for the header; the stacks lie below it.
+                    XCUIRemote.shared.press(.down)
+                    Thread.sleep(forTimeInterval: 0.6)
+                    continue
+                }
+                let from = current.frame
+                let dx = target.frame.midX - from.midX
+                let dy = target.frame.midY - from.midY
+                // Spines in one stack differ in width, so stay vertical within a column.
+                let sameColumn = abs(dx) < max(from.width, target.frame.width) / 2
+                XCUIRemote.shared.press(
+                    sameColumn ? (dy > 0 ? .down : .up) : (dx > 0 ? .right : .left))
+                Thread.sleep(forTimeInterval: 0.6)
+            }
+            XCTAssertTrue(target.hasFocus)
+        }
+        Thread.sleep(forTimeInterval: 2)
+        // With a screen recording, screenshots would only perturb the frames being recorded.
+        let recordsVideo = ProcessInfo.processInfo.environment["PERF_CAPTURE"] == "video"
+        func burst(_ name: String, seconds: TimeInterval) {
+            if recordsVideo {
+                Thread.sleep(forTimeInterval: seconds)
+                return
+            }
+            let start = Date()
+            while Date().timeIntervalSince(start) < seconds {
+                let elapsed = Int(Date().timeIntervalSince(start) * 1_000)
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = String(format: "%@-%04d", name, elapsed)
+                shot.lifetime = .keepAlways
+                add(shot)
+            }
+        }
+        // Video covers three books in different positions; screenshots cover the first.
+        for cycle in 0..<(recordsVideo ? 3 : 1) {
+            XCUIRemote.shared.press(.select)
+            burst("open", seconds: 2.5)
+            Thread.sleep(forTimeInterval: 4)
+            XCUIRemote.shared.press(.menu)
+            burst("return", seconds: 3.5)
+            Thread.sleep(forTimeInterval: 2)
+            if title.isEmpty {
+                XCUIRemote.shared.press(cycle.isMultiple(of: 2) ? .up : .right)
+                Thread.sleep(forTimeInterval: 1.5)
+            }
+        }
+        // A replay shows the fall and the controls returning.
+        let replay = app.buttons["book-wall-replay"]
+        if recordsVideo, replay.waitForExistence(timeout: 5) {
+            XCUIRemote.shared.press(.up)
+            XCUIRemote.shared.press(.right)
+            XCUIRemote.shared.press(.right)
+            XCUIRemote.shared.press(.select)
+            Thread.sleep(forTimeInterval: 8)
+        }
+    }
+
     func testLongSessionProfile() throws {
         guard ProcessInfo.processInfo.environment["VERIFY_DEVICE_PERFORMANCE"] == "1" else {
             throw XCTSkip("Opt-in 20-minute navigation and 45-minute ambient investigation.")

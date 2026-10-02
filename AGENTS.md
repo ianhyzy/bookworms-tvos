@@ -13,6 +13,7 @@ This repository contains **Bookworms - eBook Display**, a Swift 6 and SwiftUI ap
 | App lifecycle and library state | [BookwormsApp.swift](Bookworms/BookwormsApp.swift), [LibraryModel.swift](Bookworms/Services/LibraryModel.swift) |
 | Navigation and view preparation | [ShelfView.swift](Bookworms/Views/ShelfView.swift) |
 | Focus and remote navigation | [FOCUS_NAVIGATION.md](docs/FOCUS_NAVIGATION.md), [RemoteNavigation.swift](BookwormsUITests/RemoteNavigation.swift) |
+| Book Wall 3D models, motion, and rendering | [Implementation and change constraints](docs/BOOK_WALL.md), [current development handoff](docs/handoffs/2026-09-29-book-wall.md) |
 | Year in Review | [YearInReview.swift](Bookworms/Models/YearInReview.swift), [YearInReviewView.swift](Bookworms/Views/YearInReviewView.swift) |
 | Social data and comparisons | [SocialLibraryModel.swift](Bookworms/Services/SocialLibraryModel.swift), [SocialPresentation.swift](Bookworms/Models/SocialPresentation.swift) |
 | Cover caching and appearance | [ArtworkStore.swift](Bookworms/Services/ArtworkStore.swift), [CoverView.swift](Bookworms/Views/CoverView.swift) |
@@ -49,7 +50,7 @@ Maintain [VIEWS.md](VIEWS.md) for tvOS view options and [DATASOURCES.md](DATASOU
 - Show a reader's name with `ReaderLabel`, which adds their Hardcover profile photo. Include any new reader's avatar URL in artwork preparation so photos never download while browsing.
 - Keep sidebar visibility (`ViewPreferences.enabled`) and ambient views (`ambientViews`, chosen on the Ambient page) independent. Load data and artwork for `activeViews`, which covers both. Per-view choices belong on their views, not in Settings.
 - Set app text with `appFont(size:weight:)`, not `.font(.system(size:))`, so the serif style (New York) uses medium weight for regular text. Settings always uses the system font.
-- Limit displayed collections to `BookLimit.maximum` (40) items, except Following at 20, while retaining complete metadata for sorting and intersections. Prepare artwork for enabled views before browsing; do not introduce per-cover Hardcover queries or network calls during scrolling or detail rendering.
+- Limit displayed collections to `BookLimit.maximum` (40) items, except Following at 20 and Book Wall, which shows every book finished in the current year. Retain complete metadata for sorting and intersections. Prepare artwork for enabled views before browsing; do not introduce per-cover Hardcover queries or network calls during scrolling or detail rendering.
 - Preserve refresh gates, download sharing, and cache bounds. Consult [storage and performance](docs/STORAGE_AND_PERFORMANCE.md), [sources and iCloud](docs/SOURCES_AND_ICLOUD.md), and [social views](docs/SOCIAL_VIEWS_AND_AMBIENT.md) for detailed behavior.
 
 ## Writing

@@ -4,7 +4,7 @@ Read [contributor instructions](../AGENTS.md) for repository rules and implement
 
 ## Build locally
 
-Install Xcode with the tvOS platform and simulator runtime. Install XcodeGen if you need to regenerate the checked-in project.
+Install Xcode with the tvOS platform and simulator runtime. Install XcodeGen if you need to regenerate the checked-in project. Book Wall's presentation shader compiles at build time, so install the Metal Toolchain once with `xcodebuild -downloadComponent MetalToolchain`; without it, builds fail with a missing Metal Toolchain error. Run the command again if that error returns after an Xcode update.
 
 ```sh
 xcodegen generate
@@ -57,7 +57,7 @@ python3 scripts/connect-development-build.py \
   --device DEVICE_ID
 ```
 
-The helper also accepts `--simulator SIMULATOR_ID`. Release builds use the source settings screen. Never place credentials in repository files, command arguments, logs, screenshots, or test fixtures. CWA requires an HTTPS OPDS endpoint; a private server must be reachable from the Apple TV.
+The helper also accepts `--simulator SIMULATOR_ID`. An unsigned Debug simulator build keeps the bootstrap credential in memory for that run if Keychain rejects the save; its library snapshot remains available after relaunch. Release builds use the source settings screen. Never place credentials in repository files, command arguments, logs, screenshots, or test fixtures. CWA requires an HTTPS OPDS endpoint; a private server must be reachable from the Apple TV.
 
 Read [privacy behavior](PRIVACY.md) before changing data collection, retention, or external transfers. Optional iCloud storage preserves library metadata and saved designs; credentials stay in Keychain.
 

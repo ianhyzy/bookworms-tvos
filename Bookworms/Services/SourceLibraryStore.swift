@@ -1,6 +1,6 @@
 import Foundation
 
-struct SourceLibraryStore {
+struct SourceLibraryStore: Sendable {
     let url: URL
     init(url: URL = URL.cachesDirectory.appending(path: "Bookworms/sources.json")) {
         self.url = url

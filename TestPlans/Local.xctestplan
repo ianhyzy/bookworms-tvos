@@ -36,7 +36,8 @@
         "SettingsInteractionTests",
         "SocialNavigationTests",
         "ScenarioNavigationTests",
-        "OfflinePolicyUITests"
+        "OfflinePolicyUITests",
+        "BookWallNavigationTests"
       ]
     }
   ]

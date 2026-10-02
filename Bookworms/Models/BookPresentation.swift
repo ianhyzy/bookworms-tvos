@@ -1,6 +1,6 @@
 import Foundation
 
-/// A missing key or design always uses source artwork, never a synthesized spine.
+/// Keeps the retained shelf-spine path separate from Book Wall's local designs.
 @MainActor
 enum BookPresentation {
     /// Temporarily hide generated artwork and provider configuration without removing saved designs.

@@ -1,5 +1,18 @@
 import SwiftUI
 
+/// Shares column dimensions between native details and the wall's 3D presentation.
+enum BookDetailCoverLayout {
+    static let horizontalPadding: CGFloat = 80
+    static let verticalPadding: CGFloat = 54
+    static let columnFraction: CGFloat = 0.24
+    static let wallColumnFraction: CGFloat = 0.32
+    static let wallNavigationCoverSize = CGSize(width: 300, height: 144)
+    static let coverHeightFraction: CGFloat = 0.60
+    static let backHeight: CGFloat = 64
+    static let coverGap: CGFloat = 64
+    static let detailColumnGap: CGFloat = 80
+}
+
 struct BookDetailView: View {
     @AppStorage("dateFormat") private var dateFormat = AppDateFormat.monthName
     let book: Book
@@ -7,6 +20,9 @@ struct BookDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     /// Loads community reviews on request; `nil` when Hardcover can't supply them for this book.
     var loadReviews: (@MainActor () async throws -> [BookReview])?
+    var showsCover = true
+    var showsBackButton = true
+    var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var showsReviews = false
     @State private var readingDescription: ReviewPresentation?
@@ -18,60 +34,90 @@ struct BookDetailView: View {
 
     init(
         book: Book, style: SpineStyle,
-        loadReviews: (@MainActor () async throws -> [BookReview])? = nil
+        loadReviews: (@MainActor () async throws -> [BookReview])? = nil,
+        showsCover: Bool = true,
+        showsBackButton: Bool = true,
+        onClose: (() -> Void)? = nil
     ) {
         self.book = book
         self.style = style
         self.loadReviews = loadReviews
+        self.showsCover = showsCover
+        self.showsBackButton = showsBackButton
+        self.onClose = onClose
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
 
     var body: some View {
         GeometryReader { geometry in
+            let coverColumnWidth =
+                geometry.size.width
+                * (showsCover
+                    ? BookDetailCoverLayout.columnFraction
+                    : BookDetailCoverLayout.wallColumnFraction)
             ZStack {
-                LinearGradient(
-                    colors: colorScheme == .dark
-                        ? [
-                            Color(
-                                red: style.background.red * 0.34,
-                                green: style.background.green * 0.34,
-                                blue: style.background.blue * 0.34), .black,
-                        ]
-                        : [
-                            Color(
-                                red: 0.85 + style.background.red * 0.15,
-                                green: 0.85 + style.background.green * 0.15,
-                                blue: 0.85 + style.background.blue * 0.15),
-                            Color(red: 0.97, green: 0.96, blue: 0.94),
-                        ],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-                RadialGradient(
-                    colors: [style.background.color.opacity(0.20), .clear], center: .leading,
-                    startRadius: 50, endRadius: 900
-                )
-                .ignoresSafeArea()
+                if showsCover {
+                    LinearGradient(
+                        colors: colorScheme == .dark
+                            ? [
+                                Color(
+                                    red: style.background.red * 0.34,
+                                    green: style.background.green * 0.34,
+                                    blue: style.background.blue * 0.34), .black,
+                            ]
+                            : [
+                                Color(
+                                    red: 0.85 + style.background.red * 0.15,
+                                    green: 0.85 + style.background.green * 0.15,
+                                    blue: 0.85 + style.background.blue * 0.15),
+                                Color(red: 0.97, green: 0.96, blue: 0.94),
+                            ],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                    .ignoresSafeArea()
+                    RadialGradient(
+                        colors: [style.background.color.opacity(0.20), .clear], center: .leading,
+                        startRadius: 50, endRadius: 900
+                    )
+                    .ignoresSafeArea()
+                }
                 // The left column is a full-height focus section, so Left from any control in the
                 // text column returns to Back.
-                HStack(alignment: .top, spacing: 56) {
-                    VStack(alignment: .leading, spacing: 64) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Label("Back to view", systemImage: "chevron.left")
+                HStack(
+                    alignment: .top,
+                    spacing: showsCover ? 56 : BookDetailCoverLayout.detailColumnGap
+                ) {
+                    VStack(alignment: .leading, spacing: BookDetailCoverLayout.coverGap) {
+                        if showsBackButton {
+                            Button {
+                                close()
+                            } label: {
+                                Label("Back to view", systemImage: "chevron.left")
+                            }
+                            .buttonStyle(.glass)
+                            .accessibilityIdentifier("back-to-shelf")
+                            .padding(.leading, showsCover ? 0 : 60)
+                            .frame(height: BookDetailCoverLayout.backHeight)
+                        } else {
+                            Color.clear.frame(height: BookDetailCoverLayout.backHeight)
+                                .accessibilityHidden(true)
                         }
-                        .buttonStyle(.glass)
-                        .accessibilityIdentifier("back-to-shelf")
-                        CoverView(book: book)
-                            .frame(
-                                width: geometry.size.width * 0.24,
-                                height: geometry.size.height * 0.6
-                            )
+                        Group {
+                            if showsCover {
+                                CoverView(book: book)
+                            } else {
+                                Color.clear.accessibilityHidden(true)
+                            }
+                        }
+                        .frame(
+                            width: coverColumnWidth,
+                            height: geometry.size.height
+                                * BookDetailCoverLayout.coverHeightFraction
+                        )
                         Spacer(minLength: 0)
                     }
-                    .frame(width: geometry.size.width * 0.24)
+                    .frame(width: coverColumnWidth)
                     .focusSection()
                     // Two sibling sections, not nested ones: the header starts level with Back, so
                     // Right from Back and Up from Show more both reach the histogram, and the
@@ -94,16 +140,21 @@ struct BookDetailView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
-                .padding(.horizontal, 80).padding(.vertical, 54)
+                .padding(.horizontal, BookDetailCoverLayout.horizontalPadding)
+                .padding(.vertical, BookDetailCoverLayout.verticalPadding)
             }
         }
-        .onExitCommand { dismiss() }
+        .onExitCommand { close() }
         .sheet(item: $readingDescription) { ReviewReadingView(review: $0).appTypography() }
         .sheet(isPresented: $showsReviews) {
             if let loadReviews {
                 BookReviewsView(book: book, load: loadReviews).appTypography()
             }
         }
+    }
+
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
     }
 
     /// The description truncated to the remaining height. A hidden full-height copy detects
@@ -132,12 +183,25 @@ struct BookDetailView: View {
                 }
                 .clipped()
                 .accessibilityIdentifier("book-description")
-            if fullDescriptionHeight > descriptionHeight + 1 {
-                Button("Show more") {
+            if fullDescriptionHeight > descriptionHeight + 1,
+                !PerformanceDiagnostics.isolates("wall-no-show-more")
+            {
+                let showMore = Button("Show more") {
                     readingDescription = ReviewPresentation(
                         title: book.title, text: descriptionText, spoilers: false)
                 }
-                .buttonStyle(.glass)
+                // Book Wall shows details over its live 3D scene, without the cover. Glass there
+                // samples a layer that changes every frame, which kept the open state at 40 fps
+                // on Apple TV 4K (2nd generation); the flat platter reads nothing behind it.
+                Group {
+                    if showsCover || PerformanceDiagnostics.isolates("wall-show-more-glass") {
+                        showMore.buttonStyle(.glass)
+                    } else if PerformanceDiagnostics.isolates("wall-show-more-bordered") {
+                        showMore.buttonStyle(.bordered)
+                    } else {
+                        showMore.buttonStyle(FlatButtonStyle()).focusEffectDisabled()
+                    }
+                }
                 .accessibilityIdentifier("show-full-description")
             }
         }
@@ -172,7 +236,7 @@ struct BookDetailView: View {
         if let format = book.formatLabel {
             items.append(("Format", format, book.formatSymbol))
         }
-        return HStack(alignment: .top, spacing: 44) {
+        return HStack(alignment: .top, spacing: showsCover ? 44 : 28) {
             Grid(alignment: .leading, horizontalSpacing: 36, verticalSpacing: 20) {
                 ForEach(Array(stride(from: 0, to: items.count, by: 2)), id: \.self) { index in
                     GridRow {
@@ -192,7 +256,7 @@ struct BookDetailView: View {
                     // A non-breaking space keeps each dot with the genre before it when wrapping.
                     value: genres.joined(separator: "\u{00A0}· "), symbol: "tag", lines: 5
                 )
-                .frame(width: 330, alignment: .leading)
+                .frame(width: showsCover ? 330 : 250, alignment: .leading)
             }
             Group {
                 if loadReviews != nil {
@@ -226,6 +290,31 @@ struct BookDetailView: View {
             Text(value).appFont(size: 23, weight: .medium).lineLimit(lines)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A capsule with flat fills and the tvOS focus look: a translucent platter that turns white and
+/// lifts with focus. Unlike glass, it never samples the content behind it.
+private struct FlatButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Platter(configuration: configuration)
+    }
+
+    private struct Platter: View {
+        let configuration: Configuration
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .padding(.horizontal, 30)
+                .padding(.vertical, 16)
+                .foregroundStyle(isFocused ? Color.black : Color.primary)
+                .background(isFocused ? Color.white : Color.primary.opacity(0.12), in: .capsule)
+                .scaleEffect(isFocused && !reduceMotion ? 1.06 : 1)
+                .opacity(configuration.isPressed ? 0.8 : 1)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isFocused)
+        }
     }
 }
 
