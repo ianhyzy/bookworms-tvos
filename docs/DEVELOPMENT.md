@@ -4,7 +4,7 @@ Read [contributor instructions](../AGENTS.md) for repository rules and implement
 
 ## Build locally
 
-Install Xcode with the tvOS platform and simulator runtime. Install XcodeGen if you need to regenerate the checked-in project.
+Install Xcode with the tvOS platform and simulator runtime. Install XcodeGen if you need to regenerate the checked-in project. Book Wall's presentation shader compiles at build time, so install the Metal Toolchain once with `xcodebuild -downloadComponent MetalToolchain`; without it, builds fail with a missing Metal Toolchain error.
 
 ```sh
 xcodegen generate

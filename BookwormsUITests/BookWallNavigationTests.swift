@@ -85,7 +85,14 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.moveFocus(to: topRight, in: app)
         RemoteNavigation.pressWithoutMoving(.right, in: app, from: topRight)
         RemoteNavigation.press(.up, in: app, expecting: replay)
-        RemoteNavigation.pressWithoutMoving(.up, in: app, from: replay)
+        if #available(tvOS 27, *) {
+            // On tvOS 27, Up from the header reaches the sidebar natively.
+            RemoteNavigation.press(.up, in: app, expecting: sidebar)
+            RemoteNavigation.press(.right, in: app, expecting: topRight)
+            RemoteNavigation.press(.up, in: app, expecting: replay)
+        } else {
+            RemoteNavigation.pressWithoutMoving(.up, in: app, from: replay)
+        }
         RemoteNavigation.pressWithoutMoving(.right, in: app, from: replay)
         RemoteNavigation.press(.left, in: app, expecting: sidebar)
         RemoteNavigation.press(.right, in: app, expecting: topRight)
@@ -164,10 +171,11 @@ final class BookWallNavigationTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
         // The scenario enables Book Wall; enter it through the native sidebar, as a viewer does.
-        RemoteNavigation.selectView("Book Wall", in: app)
+        // The spines exist in the tab's first render, so Select moves focus once, straight to
+        // the entry book.
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
         let entry = app.buttons["book-wall-8"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 20))
-        RemoteNavigation.waitForFocus(entry)
+        RemoteNavigation.press(.select, in: app, expecting: entry)
         let updates = RemoteNavigation.transitions(app)
         // Spines are focusable while books fall; landing republishes their rectangles without
         // moving focus, and Drop again appears once they rest.

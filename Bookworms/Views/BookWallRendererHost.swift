@@ -200,7 +200,11 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         let textureSize = scene.hostConfiguration.internalSize
         guard let queue = device.makeCommandQueue() else { throw RendererError.unavailableMetal }
         commandQueue = queue
-        let library = try device.makeLibrary(source: Self.presentationShader, options: nil)
+        // BookWallPresentation.metal compiles with the app, so opening the wall does not
+        // compile shaders on the main thread.
+        guard let library = device.makeDefaultLibrary() else {
+            throw RendererError.unavailableMetal
+        }
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.label = "Book Wall presentation"
         descriptor.vertexFunction = library.makeFunction(name: "wallPresentationVertex")
@@ -570,31 +574,6 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
     private static func log(_ message: String) {
         FileHandle.standardError.write(Data("\(message)\n".utf8))
     }
-
-    // Sampling and attachment conversion preserve sRGB on both sides of the presentation
-    // pass. Linear filtering also supports smaller internal textures without extra assets.
-    private static let presentationShader = """
-        #include <metal_stdlib>
-        using namespace metal;
-        struct WallPresentationVertex {
-            float4 position [[position]];
-            float2 uv;
-        };
-        vertex WallPresentationVertex wallPresentationVertex(uint vertexID [[vertex_id]]) {
-            const float2 positions[] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };
-            const float2 coordinates[] = { float2(0, 1), float2(2, 1), float2(0, -1) };
-            WallPresentationVertex result;
-            result.position = float4(positions[vertexID], 0, 1);
-            result.uv = coordinates[vertexID];
-            return result;
-        }
-        fragment float4 wallPresentationFragment(
-            WallPresentationVertex input [[stage_in]], texture2d<float> color [[texture(0)]]) {
-            constexpr sampler linearSampler(coord::normalized, address::clamp_to_edge,
-                filter::linear);
-            return float4(color.sample(linearSampler, input.uv).rgb, 1);
-        }
-        """
 
     private enum RendererError: LocalizedError {
         case unavailableMetal

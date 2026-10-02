@@ -61,6 +61,14 @@ struct BookWallView: View {
             let tabOrigin = CGPoint(
                 x: tabFrame.minX - viewportFrame.minX,
                 y: tabFrame.minY - viewportFrame.minY)
+            // Until the scene publishes frames for this configuration, the planned resting
+            // frames place the spines, so they exist in the tab's first render and the
+            // sidebar's focus handoff finds the entry book through `.defaultFocus`.
+            let spineFrames =
+                frames.isEmpty
+                ? BookWallScene.plannedFocusFrames(
+                    for: prepared.layout, viewport: viewportFrame.size)
+                : frames
             ZStack(alignment: .topLeading) {
                 if let detailBook, !PerformanceDiagnostics.isolates("wall-no-detail-panel") {
                     BookDetailView(
@@ -75,13 +83,13 @@ struct BookWallView: View {
                         PerformanceDiagnostics.isolates("wall-instant-panel-exit")
                             ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
                 }
-                // Spine targets stay mounted at each book's resting position while books
-                // fall, so the sidebar's focus handoff finds the entry book. Opening details
-                // waits for the books to settle.
+                // Spine targets exist from the tab's first render at each book's resting
+                // position and stay mounted while books fall. Opening details waits for the
+                // books to settle.
                 if detailBook == nil && !isReturning {
                     ZStack(alignment: .topLeading) {
                         ForEach(books) { book in
-                            if let frame = frames[book.id] {
+                            if let frame = spineFrames[book.id] {
                                 Button {
                                     openDetail(
                                         book,
@@ -96,17 +104,20 @@ struct BookWallView: View {
                                 .buttonStyle(CoverButtonStyle())
                                 .focusEffectDisabled()
                                 .focused($focusedBook, equals: book.id)
-                                .frame(width: frame.width, height: frame.height)
-                                .position(
-                                    x: frame.midX - tabOrigin.x,
-                                    y: frame.midY - tabOrigin.y
-                                )
                                 // Keep the selected button mounted and focused throughout
                                 // its flight; other books cannot start competing flights.
                                 .disabled(openingBookID != nil && openingBookID != book.id)
                                 .accessibilityLabel("\(book.title), \(book.author)")
                                 .accessibilityHint("Open book details")
                                 .accessibilityIdentifier("book-wall-\(book.id)")
+                                // Position last: modifiers after `.position` apply to a
+                                // container that fills the tab, which accessibility would
+                                // then report as every spine's frame.
+                                .frame(width: frame.width, height: frame.height)
+                                .position(
+                                    x: frame.midX - tabOrigin.x,
+                                    y: frame.midY - tabOrigin.y
+                                )
                             }
                         }
                     }
@@ -191,6 +202,7 @@ struct BookWallView: View {
             let revision = configurationRevision
             isSettled = false
             hasSettledOnce = false
+            // Empty frames fall back to the planned layout, so the spines stay mounted.
             frames = [:]
             scene.configure(prepared: prepared, reduceMotion: reduceMotion) { newFrames, settled in
                 guard revision == configurationRevision else { return }

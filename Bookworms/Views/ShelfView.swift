@@ -157,6 +157,15 @@ struct ShelfView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .background {
+            // Measured on every tab, so Book Wall can place its spine targets in its first
+            // render, before its renderer exists.
+            Color.clear
+                .ignoresSafeArea()
+                .onGeometryChange(for: CGRect.self) { geometry in
+                    geometry.frame(in: .global)
+                } action: { frame in
+                    wallViewportFrame = frame
+                }
             if sidebarItem == .view(.bookWall) {
                 ZStack {
                     WoodBackground(palette: palette)
@@ -165,11 +174,6 @@ struct ShelfView: View {
                         .allowsHitTesting(false)
                 }
                 .ignoresSafeArea()
-                .onGeometryChange(for: CGRect.self) { geometry in
-                    geometry.frame(in: .global)
-                } action: { frame in
-                    wallViewportFrame = frame
-                }
                 .task(
                     id: WallBackdropKey(
                         isDark: palette.isDark, isWood: palette.isWood,

@@ -580,69 +580,105 @@ final class BookWallScene {
         else { return }
         viewportSize = renderBounds.size
         cancelTransition()
-        let area = visibleArea
-        let focal = focalLength
-        var depth: Float = 1
-        let front = (layout.slots.map(\.coverWidth).max() ?? 0.8) / 2
-        for slot in layout.slots {
-            // Include the drop, the shelf, and focus lift without changing book proportions.
-            // Frame the settled stacks with room for the header controls above them. Books
-            // start above the frame and fall into view.
-            for y in [
-                BookWallLayout.floorY - Self.shelfThickness - 0.06,
-                slot.restingY + slot.spineThickness / 2 + 1.0,
-            ] {
-                for x in [slot.x - slot.bookHeight / 2 - 0.2, slot.x + slot.bookHeight / 2 + 0.2] {
-                    // Spines sit flush at the deepest book's front; focus pulls one further out.
-                    let point = SIMD3<Float>(x, y, front + Self.focusPullOut + 0.03)
-                    depth = max(depth, requiredCameraDepth(for: point, in: area, focal: focal))
-                }
-            }
-        }
-        let shelfHalfWidth = layout.totalWidth / 2 + 0.7
-        let shelfFront = (layout.slots.map(\.coverWidth).max() ?? 0.8) / 2 + 0.275
-        for x in [-shelfHalfWidth, shelfHalfWidth] {
-            let corner = SIMD3<Float>(x, BookWallLayout.floorY - Self.shelfThickness, shelfFront)
-            depth = max(depth, requiredCameraDepth(for: corner, in: area, focal: focal))
-        }
-        wallCameraDepth = depth + 0.15
+        wallCameraDepth = Self.wallCameraDepth(fitting: layout, in: renderBounds)
         setCameraDepth(wallCameraDepth)
-        let frameTop = Float(renderBounds.midY) * wallCameraDepth / focal
+        let frameTop = Float(renderBounds.midY) * wallCameraDepth / focalLength
         let thickest = layout.slots.map(\.spineThickness).max() ?? 0
         dropHeight = max(dropHeight, frameTop + thickest)
         fitBackdrop()
         publishFocusFrames()
     }
 
-    private var focalLength: Float {
-        Float(renderBounds.height) / (2 * tan(camera.camera.fieldOfViewInDegrees * .pi / 360))
-    }
+    private var focalLength: Float { Self.focalLength(in: renderBounds) }
 
-    private var visibleArea: CGRect {
-        renderBounds.insetBy(dx: 72, dy: 72)
-    }
+    private var visibleArea: CGRect { Self.visibleArea(in: renderBounds) }
 
     private func requiredCameraDepth(for point: SIMD3<Float>, in area: CGRect, focal: Float)
         -> Float
     {
+        Self.requiredCameraDepth(for: point, in: area, of: renderBounds, focal: focal)
+    }
+
+    /// Uses the same vertical field of view as the camera, including during a planned dolly.
+    private func project(_ point: SIMD3<Float>, cameraDepth: Float) -> CGPoint? {
+        guard cameraDepth - point.z > camera.camera.near else { return nil }
+        return Self.project(point, cameraDepth: cameraDepth, in: renderBounds)
+    }
+
+    /// The camera's focal length in points; the camera's field of view is always `fieldOfView`.
+    private static func focalLength(in bounds: CGRect) -> Float {
+        Float(bounds.height) / (2 * tan(fieldOfView * .pi / 360))
+    }
+
+    private static func visibleArea(in bounds: CGRect) -> CGRect {
+        bounds.insetBy(dx: 72, dy: 72)
+    }
+
+    private static func requiredCameraDepth(
+        for point: SIMD3<Float>, in area: CGRect, of bounds: CGRect, focal: Float
+    ) -> Float {
         let horizontalRoom = Float(
-            point.x < 0 ? renderBounds.midX - area.minX : area.maxX - renderBounds.midX)
-        let verticalRoom = Float(
-            point.y > 0 ? renderBounds.midY - area.minY : area.maxY - renderBounds.midY)
+            point.x < 0 ? bounds.midX - area.minX : area.maxX - bounds.midX)
+        let verticalRoom = Float(point.y > 0 ? bounds.midY - area.minY : area.maxY - bounds.midY)
         return point.z
             + max(
                 abs(point.x) * focal / max(1, horizontalRoom),
                 abs(point.y) * focal / max(1, verticalRoom))
     }
 
-    /// Uses the same vertical field of view as the camera, including during a planned dolly.
-    private func project(_ point: SIMD3<Float>, cameraDepth: Float) -> CGPoint? {
+    private static func project(_ point: SIMD3<Float>, cameraDepth: Float, in bounds: CGRect)
+        -> CGPoint?
+    {
         let distance = cameraDepth - point.z
-        guard distance > camera.camera.near else { return nil }
-        let scale = focalLength / distance
+        guard distance > 0 else { return nil }
+        let scale = focalLength(in: bounds) / distance
         return CGPoint(
-            x: renderBounds.midX + CGFloat(point.x * scale),
-            y: renderBounds.midY - CGFloat(point.y * scale))
+            x: bounds.midX + CGFloat(point.x * scale), y: bounds.midY - CGFloat(point.y * scale))
+    }
+
+    /// The camera depth that frames `layout`'s settled stacks, the header room above them, the
+    /// shelf, and the focus pull-out inside `bounds`, without changing book proportions. Books
+    /// start above the frame and fall into view.
+    private static func wallCameraDepth(fitting layout: BookWallLayout, in bounds: CGRect)
+        -> Float
+    {
+        let area = visibleArea(in: bounds)
+        let focal = focalLength(in: bounds)
+        var depth: Float = 1
+        let front = (layout.slots.map(\.coverWidth).max() ?? 0.8) / 2
+        for slot in layout.slots {
+            for y in [
+                BookWallLayout.floorY - shelfThickness - 0.06,
+                slot.restingY + slot.spineThickness / 2 + 1.0,
+            ] {
+                for x in [slot.x - slot.bookHeight / 2 - 0.2, slot.x + slot.bookHeight / 2 + 0.2] {
+                    // Spines sit flush at the deepest book's front; focus pulls one further out.
+                    let point = SIMD3<Float>(x, y, front + focusPullOut + 0.03)
+                    depth = max(
+                        depth, requiredCameraDepth(for: point, in: area, of: bounds, focal: focal))
+                }
+            }
+        }
+        let shelfHalfWidth = layout.totalWidth / 2 + 0.7
+        for x in [-shelfHalfWidth, shelfHalfWidth] {
+            let corner = SIMD3<Float>(x, BookWallLayout.floorY - shelfThickness, front + 0.275)
+            depth = max(
+                depth, requiredCameraDepth(for: corner, in: area, of: bounds, focal: focal))
+        }
+        return depth + 0.15
+    }
+
+    /// Spine rectangles for `layout` at rest, in full-screen points for `viewport`.
+    ///
+    /// Needs neither a renderer nor a configured scene, so `BookWallView` mounts its focus
+    /// targets in the tab's first render, before the sidebar hands focus to the tab. These are
+    /// the frames the scene publishes until the books settle. Never assigns focus.
+    static func plannedFocusFrames(for layout: BookWallLayout, viewport: CGSize) -> [Int: CGRect] {
+        let bounds = CGRect(origin: .zero, size: viewport)
+        guard !layout.slots.isEmpty, bounds.width > 0, bounds.height > 0 else { return [:] }
+        return focusFrames(
+            for: layout, resting: [:],
+            cameraDepth: wallCameraDepth(fitting: layout, in: bounds), in: bounds)
     }
 
     private func corners(of slot: BookWallLayout.Slot, at pose: Transform) -> [SIMD3<Float>] {
@@ -1622,7 +1658,7 @@ final class BookWallScene {
     private func addBook(_ slot: BookWallLayout.Slot, falls: Bool) {
         guard let body = preparedBodies.removeValue(forKey: slot.book.id) else { return }
         body.stopAllAnimations()
-        var position = restingPosition(for: slot)
+        var position = Self.restingPosition(for: slot, in: layout)
         if falls { position.y = dropHeight }
         body.position = position
         // Flat covers make supported contact agree with the stacked collision geometry.
@@ -1804,7 +1840,9 @@ final class BookWallScene {
 
     /// Where `addBook` places a book once it rests: a fall can shift it slightly, and settling
     /// records and republishes the landed pose.
-    private func restingPosition(for slot: BookWallLayout.Slot) -> SIMD3<Float> {
+    private static func restingPosition(
+        for slot: BookWallLayout.Slot, in layout: BookWallLayout
+    ) -> SIMD3<Float> {
         let seed = Float((UInt64(bitPattern: Int64(slot.book.id)) &* 1_103_515_245) % 100) / 100
         // Spines sit flush on one front plane. Centered books of different depths would put
         // deeper spines nearer the camera, where they hide part of the book above or below.
@@ -1812,33 +1850,45 @@ final class BookWallScene {
         return [slot.x + (seed - 0.5) * 0.18, slot.restingY, front - slot.coverWidth / 2]
     }
 
-    /// Projects each spine at rest: its landed pose once settled, otherwise its planned pose.
+    /// Projects each spine at rest: its landed pose from `resting`, otherwise its planned pose.
     /// The root has an identity transform, so these root-relative poses are world poses.
-    private func projectedFrames() -> [Int: CGRect] {
+    private static func focusFrames(
+        for layout: BookWallLayout, resting: [Int: Transform], cameraDepth: Float,
+        in viewport: CGRect
+    ) -> [Int: CGRect] {
         var frames: [Int: CGRect] = [:]
         for slot in layout.slots {
             let pose =
-                (restingTransforms[slot.book.id]
-                ?? Transform(translation: restingPosition(for: slot)))
+                (resting[slot.book.id]
+                ?? Transform(translation: restingPosition(for: slot, in: layout)))
                 .matrix
             var points: [CGPoint] = []
             for x in [-slot.spineFaceWidth / 2, slot.spineFaceWidth / 2] {
                 for y in [-slot.spineFaceHeight / 2, slot.spineFaceHeight / 2] {
                     let corner = pose * SIMD4<Float>(x, y, slot.coverWidth / 2 + 0.009, 1)
-                    if let point = projectWithCamera([corner.x, corner.y, corner.z]),
+                    if let point = project(
+                        [corner.x, corner.y, corner.z], cameraDepth: cameraDepth, in: viewport),
                         point.x.isFinite, point.y.isFinite
                     {
                         points.append(point)
                     }
                 }
             }
-            guard points.count == 4, let bounds = Self.bounds(of: points) else { continue }
-            let width = max(44, bounds.width)
-            let height = max(30, bounds.height)
+            guard points.count == 4, let rect = bounds(of: points) else { continue }
+            let width = max(44, rect.width)
+            let height = max(30, rect.height)
             frames[slot.book.id] = CGRect(
-                x: bounds.midX - width / 2, y: bounds.midY - height / 2,
-                width: width, height: height)
+                x: rect.midX - width / 2, y: rect.midY - height / 2, width: width, height: height)
         }
+        return frames
+    }
+
+    /// Projects each spine at rest with the wall's resting camera depth, whatever the current
+    /// dolly, so published rectangles match `plannedFocusFrames` until the books land.
+    private func projectedFrames() -> [Int: CGRect] {
+        let frames = Self.focusFrames(
+            for: layout, resting: restingTransforms, cameraDepth: wallCameraDepth,
+            in: renderBounds)
         let outside = frames.values.filter { !renderBounds.contains($0) }.count
         BookWallHostLog.write("focusFrames=\(frames.count) outsideViewport=\(outside)")
         return frames
