@@ -245,7 +245,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=["local", "unit", "major"], default="local")
     parser.add_argument("--summarize", action="store_true")
-    parser.add_argument("--detach", action="store_true", help="Start independently and return immediately; do not poll")
+    parser.add_argument("--detach", action="store_true", help="Start independently and return immediately; wait on the printed PID instead of polling")
     parser.add_argument("--notify", action="store_true", help="Post a macOS notification when the run finishes (set by --detach)")
     args = parser.parse_args(argv)
     base = ROOT / ".local/test-worker"

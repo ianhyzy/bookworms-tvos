@@ -25,8 +25,14 @@ Use these instructions only when the user has asked for a test run in the curren
    ```
 
    Use `--profile unit` only when asked for unit/service checks. Use `--profile major` when asked for the minimum/current runtime matrix. The launcher rejects other profiles and concurrent worker runs.
-4. Return the printed PID and dispatch-log path immediately, then end your turn. A detached run posts a macOS notification with its result when it finishes. The detached worker runs without an agent or model supervising it. Do not poll. The timeout is two hours.
-5. When the user or reviewing agent returns, read the dispatch log once to find `handoff.md`. Return the result, profile, and absolute paths to `handoff.md` and `handoff.json`. If it is still running, report that and stop.
+4. Note the printed PID and dispatch-log path. If your agent harness can run a background command and notify you when it exits, wait there for the worker to exit:
+
+   ```sh
+   while kill -0 <PID> 2>/dev/null; do sleep 30; done; tail -n 5 <dispatch-log>
+   ```
+
+   The wait uses no model turns; the harness resumes you once when the worker exits. Without such a harness, return the PID and dispatch-log path and end your turn. Do not check on the run with repeated tool calls or by reading its logs while it runs. The worker needs no agent or model supervision, enforces a two-hour timeout, and posts a macOS notification with its result.
+5. When the wait ends, or when the user or reviewing agent returns, read the dispatch log once to find `handoff.md`. Return the result, profile, and absolute paths to `handoff.md` and `handoff.json`. If it is still running, report that and stop.
 6. Read `handoff.md` only. `build.log`, `coverage.json`, `test-tree.json`, and result bundles are large; search them with bounded `grep` output only when the user asks for detail.
 
 Exit codes: **0** automated pass, **1** failed verification, **2** blocked verification. Missing tests, skips, source changes, missing offline-guard evidence, and incomplete cleanup cannot count as a pass. Visual review stays separate.
