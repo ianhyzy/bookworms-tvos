@@ -59,9 +59,7 @@ final class SocialNavigationTests: XCTestCase {
             XCTAssertEqual(left.frame.minY, right.frame.minY, accuracy: 30)
         }
         capture(app, name: "Following")
-        try app.performAccessibilityAudit(for: [
-            .contrast, .textClipped, .sufficientElementDescription, .trait,
-        ])
+        try app.auditAccessibility()
         RemoteNavigation.press(.right, in: app, expecting: cards[1])
         RemoteNavigation.press(.left, in: app, expecting: first)
         let review = app.buttons["activity-review-1"]

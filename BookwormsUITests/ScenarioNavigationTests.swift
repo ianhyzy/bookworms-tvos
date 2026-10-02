@@ -78,12 +78,8 @@ final class ScenarioNavigationTests: XCTestCase {
     }
 
     private func audit(_ app: XCUIApplication) throws {
-        try app.performAccessibilityAudit(for: [
-            .contrast, .textClipped, .sufficientElementDescription, .trait,
-        ]) { issue in
-            // The one-pixel diagnostic probe is test instrumentation, not product content.
-            issue.element?.identifier == "scenario-probe"
-        }
+        // The one-pixel diagnostic probe is test instrumentation, not product content.
+        try app.auditAccessibility { $0.element?.identifier == "scenario-probe" }
     }
 
     private func waitForProbe(
