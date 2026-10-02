@@ -91,7 +91,8 @@ final class HardcoverAuthenticationTests: XCTestCase {
     }
 
     func testReplacementTokenCanBeValidatedWithoutLoadingBooks() async throws {
-        try await client().validateToken("hc_pat_validate")
+        let accountID = try await client().validateToken("hc_pat_validate")
+        XCTAssertEqual(accountID, "1")
     }
 
     func testLibraryPaginationLoadsAllPagesAndRejectsPartialFailure() async throws {

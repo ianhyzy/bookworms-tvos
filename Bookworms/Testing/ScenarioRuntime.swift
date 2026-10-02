@@ -54,7 +54,13 @@
             defaults.set(false, forKey: "iCloudEnabled")
             if defaults.data(forKey: "viewPreferences") == nil {
                 var preferences = ViewPreferences()
-                preferences.enabled = [.shelf]
+                // Book Wall tests enable it here instead of through Settings, then still enter it
+                // through the native sidebar.
+                let arguments = ProcessInfo.processInfo.arguments
+                preferences.enabled =
+                    arguments.contains("--start-view=bookWall")
+                        || arguments.contains("--test-enable-book-wall")
+                    ? [.shelf, .bookWall] : [.shelf]
                 defaults.set(try! JSONEncoder().encode(preferences), forKey: "viewPreferences")
             }
             if let argument = ProcessInfo.processInfo.arguments.first(where: {
@@ -136,7 +142,7 @@
             let client = HardcoverClient(session: URLSession(configuration: configuration))
             dependencies.fetchHardcover = { [self] token in
                 sourceCalls += 1
-                return try await client.fetchBooks(token: token)
+                return try await client.fetchLibrary(token: token)
             }
             dependencies.validateHardcover = { token in try await client.validateToken(token) }
             dependencies.fetchCWA = { [self] _, _ in

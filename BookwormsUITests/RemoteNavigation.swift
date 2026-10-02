@@ -143,7 +143,8 @@ enum RemoteNavigation {
     }
 
     private static let sidebarItems = [
-        "My Shelf", "Year in Review", "Following", "Compare Shelves", "Book Club", "Ambient",
+        "My Shelf", "Year in Review", "Following", "Compare Shelves", "Book Club", "Book Wall",
+        "Ambient",
         "Settings",
     ]
 

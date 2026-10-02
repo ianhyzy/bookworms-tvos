@@ -55,7 +55,7 @@ struct SocialViews: View {
             case .following: following
             case .comparison: comparison
             case .shared: shared
-            case .shelf, .yearInReview: EmptyView()
+            case .shelf, .yearInReview, .bookWall: EmptyView()
             }
         }
         .task(id: social.following.map(\.id)) {
@@ -113,7 +113,7 @@ struct SocialViews: View {
             } else if !social.following.isEmpty {
                 isReaderPickerFocused = true
             }
-        case .shelf, .yearInReview: break
+        case .shelf, .yearInReview, .bookWall: break
         }
     }
 

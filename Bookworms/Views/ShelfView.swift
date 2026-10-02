@@ -27,14 +27,52 @@ struct ShelfView: View {
     @State private var artworkGeneration = 0
     @State private var presentationStyles: [Int: SpineStyle] = [:]
     @State private var socialReturnRevision = 0
+    @State private var bookWallScene = BookWallScene()
+    @State private var bookWallPreparation = BookWallPreparation()
+    @State private var bookWallPreparationRetry = 0
+    @State private var wallDetail = BookWallDetailState()
+    @State private var wallViewportFrame = CGRect.zero
     @Environment(\.colorScheme) private var colorScheme
     private var palette: ShelfPalette {
         ShelfPalette(isDark: colorScheme == .dark, isWood: woodBackground)
+    }
+
+    /// Renders the wall background once per palette and size for Book Wall's lit backdrop,
+    /// at one pixel per point to match the scene's 1080p render cap.
+    private func renderWallBackdrop() {
+        let size = wallViewportFrame.size
+        guard size.width > 0, size.height > 0 else { return }
+        let renderer = ImageRenderer(
+            content: WoodBackground(palette: palette).frame(width: size.width, height: size.height))
+        renderer.scale = 1
+        if let image = renderer.cgImage { bookWallScene.setBackdrop(image) }
     }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.scenePhase) private var scenePhase
     private var controlsVisible: Bool { activity.controlsVisible }
+    private var wallBooks: [Book] {
+        let year = Calendar.current.component(.year, from: .now)
+        return library.readingYears.first { $0.year == year }?.books ?? []
+    }
+    private var wallPreparationKey: BookWallPreparationKey {
+        BookWallPreparationKey(
+            loaded: library.hasLoadedLibrarySnapshot,
+            enabled: coordinator.preferences.orderedViews.contains(.bookWall),
+            books: wallBooks, retry: bookWallPreparationRetry)
+    }
+    private var waitsForBookWall: Binding<Bool> {
+        Binding(
+            get: {
+                coordinator.current == .bookWall
+                    && !bookWallPreparation.isReady(for: wallBooks)
+            },
+            set: { presented in
+                if !presented && !bookWallPreparation.isReady(for: wallBooks) {
+                    showView(.shelf)
+                }
+            })
+    }
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
     @State private var selectedBook: Book?
@@ -100,7 +138,8 @@ struct ShelfView: View {
         coordinator.current = shown
     }
 
-    var body: some View {
+    /// The tab hierarchy with its backgrounds and overlays.
+    private var tabs: some View {
         TabView(selection: sidebarSelection) {
             ForEach(coordinator.preferences.orderedViews) { view in
                 Tab(view.rawValue, systemImage: view.systemImage, value: SidebarItem.view(view)) {
@@ -117,167 +156,166 @@ struct ShelfView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .background {
+            if sidebarItem == .view(.bookWall) {
+                ZStack {
+                    WoodBackground(palette: palette)
+                    BookWallRendererView(scene: bookWallScene)
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
+                }
+                .ignoresSafeArea()
+                .onGeometryChange(for: CGRect.self) { geometry in
+                    geometry.frame(in: .global)
+                } action: { frame in
+                    wallViewportFrame = frame
+                }
+                .task(
+                    id: WallBackdropKey(
+                        isDark: palette.isDark, isWood: palette.isWood,
+                        width: wallViewportFrame.width, height: wallViewportFrame.height)
+                ) {
+                    renderWallBackdrop()
+                }
+            }
+        }
         .environment(\.artworkGeneration, artworkGeneration)
         .tvOSSidebarHeader {
             sidebarHeader
         }
-        #if BOOKWORMS_DIAGNOSTICS
-            .background { PerformanceDiagnosticObserver().allowsHitTesting(false) }
-        #endif
-        #if DEBUG && targetEnvironment(simulator)
-            .overlay(alignment: .topLeading) {
-                if let scenario = ScenarioRuntime.current { ScenarioProbe(runtime: scenario) }
+        .overlay { BookWallDetailOverlay(state: wallDetail, palette: palette) }
+    }
+
+    var body: some View {
+        // The tab hierarchy and these lifecycle modifiers are separate expressions; together
+        // they exceed the type checker's time limit.
+        tabs
+            .fullScreenCover(isPresented: waitsForBookWall) {
+                bookWallWaitingView
             }
-            .background(alignment: .topLeading) {
-                if FocusTransitionProbe.isEnabled {
-                    FocusTransitionProbe().frame(width: 1, height: 1)
-                }
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: ScenarioRuntime.commandNotification)
-            ) { notification in
-                if let scenario = ScenarioRuntime.current,
-                    let command = notification.object as? String
-                {
-                    _ = scenario.handle(
-                        scenario.commandURL(command), library: library, ambient: ambient,
-                        availableViews: availableAmbientViews, shelfState: scenarioShelfState)
-                }
-            }
-        #endif
-        .onChange(of: canHideControls, initial: true) {
-            activity.scheduleHiding(allowed: canHideControls)
-        }
-        .onDisappear { activity.scheduleHiding(allowed: false) }
-        .onChange(of: coordinator.preferences, initial: true) {
-            social.prepare(coordinator.preferences)
-        }
-        .onChange(of: scenePhase) {
-            if scenePhase == .active {
-                recordActivity()
-                library.reloadCredentialAvailability()
-                Task {
-                    await library.becameActive()
-                    await loadSocial()
-                }
-            } else {
-                ambient.stop()
-            }
-        }
-        .task(id: artworkKey) {
-            let key = artworkKey
-            let preparation = await ArtworkStore.shared.prefetch(
-                books: key.books, avatarURLs: key.avatarURLs)
-            guard !Task.isCancelled, key == artworkKey else { return }
-            for (id, ratio) in preparation.ratios { library.recordCoverRatio(ratio, for: id) }
-            let firstShelfEntry =
-                !hasEnteredShelf && !library.books.isEmpty && coordinator.current == .shelf
-            let firstPreparation = !hasPreparedArtwork
-            preparedArtwork = key
-            artworkGeneration &+= 1
-            // Later preparations keep content mounted and must not move focus.
-            if firstShelfEntry || firstPreparation {
-                DispatchQueue.main.async {
-                    // A newer library can replace the prepared books before this focus transaction runs.
-                    guard key == artworkKey, preparedArtwork == key else { return }
-                    // Selecting a main view later moves focus into it natively.
-                    guard isShowingMainView, selectedBook == nil, !ambient.isActive else { return }
-                    if coordinator.current == .shelf {
-                        guard
-                            let entry =
-                                preparedPages.first?.books.first?.id ?? library.books.first?.id
-                        else { return }
-                        hasEnteredShelf = true
-                        requestBookFocus(entry)
-                    } else {
-                        socialReturnRevision += 1
-                    }
-                }
-            }
-            // Retry covers that failed, such as after a timeout, once. Mounted covers reload from the
-            // local cache when the generation changes; browsing itself never downloads.
-            guard !preparation.failed.isEmpty,
-                (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey
-            else { return }
-            await ArtworkStore.shared.forgetFailures()
-            let retry = await ArtworkStore.shared.prefetch(
-                books: preparation.failed, avatarURLs: [])
-            guard !Task.isCancelled, key == artworkKey, !retry.ratios.isEmpty else { return }
-            for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
-            artworkGeneration &+= 1
-        }
-        .onChange(of: voiceOver) {
-            if voiceOver { ambient.stop() }
-            recordActivity()
-        }
-        .task(
-            id:
-                "\(library.hardcoverConnected):\(library.hardcoverEnabled):\(library.isSample)"
-        ) { await loadSocial() }
-        .task(id: library.connectionRevision) {
-            // Explicit reconnection retries social permissions even after a denied daily attempt.
-            if library.connectionRevision > 0 { await loadSocial(manual: true) }
-        }
-        .task(
-            id: SocialLoadKey(
-                readerID: coordinator.preferences.readerID,
-                enabled: coordinator.preferences.activeViews)
-        ) {
-            if !ambient.isActive { await loadSocial() }
-        }
-        .onChange(of: ambient.isActive) { library.setAmbientActive(ambient.isActive) }
-        .onChange(of: coordinator.current) {
-            // Disabling the current view in Settings falls back to My Shelf without leaving Settings.
-            if isShowingMainView { sidebarItem = .view(coordinator.current) }
-            if coordinator.current == .comparison || coordinator.current == .shared {
-                ensureComparisonReader()
-            }
-            recordActivity()
-            focusedBook = nil
-            bookFocusRequest = nil
-        }
-        .onPlayPauseCommand { recordActivity() }
-        .onOpenURL { url in
-            #if DEBUG && targetEnvironment(simulator)
-                if ScenarioRuntime.current?
-                    .handle(
-                        url, library: library, ambient: ambient,
-                        availableViews: availableAmbientViews, shelfState: scenarioShelfState)
-                    == true
-                {
-                    return
-                }
+            #if BOOKWORMS_DIAGNOSTICS
+                .background { PerformanceDiagnosticObserver().allowsHitTesting(false) }
             #endif
-            guard let id = BookLink.id(from: url) else { return }
-            showView(.shelf)
-            library.requestedBookID = id
-        }
-        .fullScreenCover(
-            item: $selectedBook, onDismiss: restoreSelection
-        ) { book in
-            BookDetailView(
-                book: library.book(withID: book.id) ?? book,
-                style: library.style(for: book),
-                loadReviews: reviewLoader(for: book)
-            )
-            .appTypography()
-            .id(book.id)
-        }
-        .fullScreenCover(
-            isPresented: Binding(get: { ambient.isActive }, set: { if !$0 { ambient.stop() } }),
-            onDismiss: finishAmbientDismissal
-        ) {
-            AmbientView(
-                controller: ambient, library: library, social: social,
-                preferences: coordinator.preferences
-            )
-            .appTypography()
             #if DEBUG && targetEnvironment(simulator)
                 .overlay(alignment: .topLeading) {
                     if let scenario = ScenarioRuntime.current { ScenarioProbe(runtime: scenario) }
                 }
+                .background(alignment: .topLeading) {
+                    if FocusTransitionProbe.isEnabled {
+                        FocusTransitionProbe().frame(width: 1, height: 1)
+                    }
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(for: ScenarioRuntime.commandNotification)
+                ) { notification in
+                    if let scenario = ScenarioRuntime.current,
+                        let command = notification.object as? String
+                    {
+                        _ = scenario.handle(
+                            scenario.commandURL(command), library: library, ambient: ambient,
+                            availableViews: availableAmbientViews, shelfState: scenarioShelfState)
+                    }
+                }
             #endif
-        }
+            .onChange(of: canHideControls, initial: true) {
+                activity.scheduleHiding(allowed: canHideControls)
+            }
+            .onDisappear { activity.scheduleHiding(allowed: false) }
+            .task(id: wallPreparationKey, priority: .utility) {
+                let key = wallPreparationKey
+                guard key.loaded, key.enabled else { return }
+                await bookWallPreparation.prepare(key.books)
+            }
+            .onChange(of: coordinator.preferences, initial: true) {
+                social.prepare(coordinator.preferences)
+            }
+            .onChange(of: scenePhase) {
+                if scenePhase == .active {
+                    recordActivity()
+                    library.reloadCredentialAvailability()
+                    Task {
+                        await library.becameActive()
+                        await loadSocial()
+                    }
+                } else {
+                    ambient.stop()
+                }
+            }
+            .task(id: artworkKey) { await prepareArtwork() }
+            .onChange(of: voiceOver) {
+                if voiceOver { ambient.stop() }
+                recordActivity()
+            }
+            .task(
+                id:
+                    "\(library.hardcoverConnected):\(library.hardcoverEnabled):\(library.isSample)"
+            ) { await loadSocial() }
+            .task(id: library.connectionRevision) {
+                // Explicit reconnection retries social permissions even after a denied daily attempt.
+                if library.connectionRevision > 0 { await loadSocial(manual: true) }
+            }
+            .task(
+                id: SocialLoadKey(
+                    readerID: coordinator.preferences.readerID,
+                    enabled: coordinator.preferences.activeViews)
+            ) {
+                if !ambient.isActive { await loadSocial() }
+            }
+            .onChange(of: ambient.isActive) { library.setAmbientActive(ambient.isActive) }
+            .onChange(of: coordinator.current) {
+                // Disabling the current view in Settings falls back to My Shelf without leaving Settings.
+                if isShowingMainView { sidebarItem = .view(coordinator.current) }
+                if coordinator.current == .comparison || coordinator.current == .shared {
+                    ensureComparisonReader()
+                }
+                recordActivity()
+                focusedBook = nil
+                bookFocusRequest = nil
+            }
+            .onPlayPauseCommand { recordActivity() }
+            .onOpenURL { url in
+                #if DEBUG && targetEnvironment(simulator)
+                    if ScenarioRuntime.current?
+                        .handle(
+                            url, library: library, ambient: ambient,
+                            availableViews: availableAmbientViews, shelfState: scenarioShelfState)
+                        == true
+                    {
+                        return
+                    }
+                #endif
+                guard let id = BookLink.id(from: url) else { return }
+                showView(.shelf)
+                library.requestedBookID = id
+            }
+            .fullScreenCover(
+                item: $selectedBook, onDismiss: restoreSelection
+            ) { book in
+                BookDetailView(
+                    book: library.book(withID: book.id) ?? book,
+                    style: library.style(for: book),
+                    loadReviews: reviewLoader(for: book)
+                )
+                .appTypography()
+                .id(book.id)
+            }
+            .fullScreenCover(
+                isPresented: Binding(get: { ambient.isActive }, set: { if !$0 { ambient.stop() } }),
+                onDismiss: finishAmbientDismissal
+            ) {
+                AmbientView(
+                    controller: ambient, library: library, social: social,
+                    preferences: coordinator.preferences
+                )
+                .appTypography()
+                #if DEBUG && targetEnvironment(simulator)
+                    .overlay(alignment: .topLeading) {
+                        if let scenario = ScenarioRuntime.current {
+                            ScenarioProbe(runtime: scenario)
+                        }
+                    }
+                #endif
+            }
     }
 
     private func finishAmbientDismissal() {
@@ -289,6 +327,37 @@ struct ShelfView: View {
         let libraryRevision: Int
         let books: [Book]
         let avatarURLs: [URL]
+    }
+
+    private struct BookWallPreparationKey: Equatable {
+        let loaded: Bool
+        let enabled: Bool
+        let books: [Book]
+        let retry: Int
+    }
+
+    private var bookWallWaitingView: some View {
+        ZStack {
+            WoodBackground(palette: palette)
+            VStack(spacing: 28) {
+                Text("Preparing Book Wall").appFont(size: 52)
+                if let failure = bookWallPreparation.failure {
+                    Text(failure).appFont(size: 28)
+                    Button("Retry") { bookWallPreparationRetry &+= 1 }
+                } else {
+                    ProgressView()
+                    Text(
+                        library.hasLoadedLibrarySnapshot
+                            ? "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
+                            : "Loading your library…"
+                    )
+                    .appFont(size: 28)
+                }
+                Button("Back to My Shelf") { showView(.shelf) }
+            }
+            .padding(72)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
+        }
     }
 
     /// Content waits for the first artwork preparation that includes books, then stays mounted.
@@ -400,6 +469,52 @@ struct ShelfView: View {
         }
     }
 
+    /// Prefetches covers and avatars for the active views, then moves focus into the first view
+    /// once. Kept out of `body`, whose modifier chain is near the type checker's time limit.
+    private func prepareArtwork() async {
+        let key = artworkKey
+        let preparation = await ArtworkStore.shared.prefetch(
+            books: key.books, avatarURLs: key.avatarURLs)
+        guard !Task.isCancelled, key == artworkKey else { return }
+        for (id, ratio) in preparation.ratios { library.recordCoverRatio(ratio, for: id) }
+        let firstShelfEntry =
+            !hasEnteredShelf && !library.books.isEmpty && coordinator.current == .shelf
+        let firstPreparation = !hasPreparedArtwork
+        preparedArtwork = key
+        artworkGeneration &+= 1
+        // Later preparations keep content mounted and must not move focus.
+        if firstShelfEntry || firstPreparation {
+            DispatchQueue.main.async {
+                // A newer library can replace the prepared books before this focus transaction runs.
+                guard key == artworkKey, preparedArtwork == key else { return }
+                // Selecting a main view later moves focus into it natively.
+                guard isShowingMainView, selectedBook == nil, !ambient.isActive else { return }
+                if coordinator.current == .shelf {
+                    guard
+                        let entry =
+                            preparedPages.first?.books.first?.id ?? library.books.first?.id
+                    else { return }
+                    hasEnteredShelf = true
+                    requestBookFocus(entry)
+                } else {
+                    socialReturnRevision += 1
+                }
+            }
+        }
+        // Retry covers that failed, such as after a timeout, once. Mounted covers reload from the
+        // local cache when the generation changes; browsing itself never downloads.
+        guard !preparation.failed.isEmpty,
+            (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey
+        else { return }
+        await ArtworkStore.shared.forgetFailures()
+        let retry = await ArtworkStore.shared.prefetch(
+            books: preparation.failed, avatarURLs: [])
+        guard !Task.isCancelled, key == artworkKey, !retry.ratios.isEmpty else { return }
+        for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
+        artworkGeneration &+= 1
+
+    }
+
     private func restoreSelection() {
         recordActivity()
         guard isShowingMainView else { return }
@@ -432,11 +547,31 @@ struct ShelfView: View {
             // Matches the shelf's horizontal padding and PagedRow's inner edge insets.
             let available = geometry.size.width - 160 - 2 * PagedRowLayout.edgeInset
             ZStack(alignment: .bottomTrailing) {
-                WoodBackground(palette: palette)
+                // The wall renders behind the TabView in a full-screen surface. Its tab
+                // stays transparent so sidebar chrome remains above the same 3D models.
+                if view != .bookWall { WoodBackground(palette: palette) }
                 VStack(alignment: .leading, spacing: 0) {
                     if !hasPreparedArtwork {
                         ProgressView("Loading view…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if view == .bookWall {
+                        if let prepared = bookWallPreparation.prepared,
+                            prepared.books == wallBooks
+                        {
+                            BookWallView(
+                                library: library, coordinator: coordinator, scene: bookWallScene,
+                                prepared: prepared, viewportFrame: wallViewportFrame,
+                                isActive: sidebarItem == .view(.bookWall),
+                                reviewLoader: reviewLoader(for:),
+                                onActivity: recordActivity,
+                                returnRevision: socialReturnRevision,
+                                detailState: wallDetail
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            ProgressView("Preparing Book Wall…")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
                     } else if view == .yearInReview {
                         YearInReviewView(
                             library: library, coordinator: coordinator, palette: palette,
@@ -473,13 +608,19 @@ struct ShelfView: View {
                         shelfStatus
                     }
                 }
-                .padding(.horizontal, view == .following || view == .comparison ? 48 : 80)
+                .padding(
+                    .horizontal,
+                    view == .bookWall ? 0 : (view == .following || view == .comparison ? 48 : 80)
+                )
                 .padding(.top, view.hasHeader ? 0 : ShelfScreenLayout.verticalPadding)
                 // Year in Review's covers need the height more than the caption needs the margin.
                 .padding(
                     .bottom,
-                    view == .yearInReview
-                        ? ShelfScreenLayout.verticalPadding / 2 : ShelfScreenLayout.verticalPadding
+                    view == .bookWall
+                        ? 0
+                        : view == .yearInReview
+                            ? ShelfScreenLayout.verticalPadding / 2
+                            : ShelfScreenLayout.verticalPadding
                 )
 
                 if !view.hasHeader {
@@ -746,13 +887,97 @@ struct ShelfView: View {
 extension BookwormsView {
     /// Views whose top-right header holds their options, level with the sidebar title.
     fileprivate var hasHeader: Bool {
-        self == .comparison || self == .shared || self == .yearInReview
+        self == .comparison || self == .shared || self == .yearInReview || self == .bookWall
     }
 }
 
 struct SpineButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
+/// Identifies a rendering of the wall background for the lit 3D backdrop.
+private struct WallBackdropKey: Hashable {
+    let isDark: Bool
+    let isWood: Bool
+    let width: CGFloat
+    let height: CGFloat
+}
+
+/// Shows Book Wall's Back overlay while details are open. It reads the detail state itself, so
+/// opening or closing details updates this overlay rather than `ShelfView`'s whole body.
+private struct BookWallDetailOverlay: View {
+    let state: BookWallDetailState
+    let palette: ShelfPalette
+
+    var body: some View {
+        if state.isPresented {
+            BookWallDetailNavigationCover(palette: palette) { state.closeRevision += 1 }
+                .transition(
+                    PerformanceDiagnostics.isolates("wall-instant-cover-exit")
+                        ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
+        }
+    }
+}
+
+/// Places Back above the tab control, which tvOS draws outside the selected tab's content.
+private struct BookWallDetailNavigationCover: View {
+    let palette: ShelfPalette
+    let onBack: () -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                if !PerformanceDiagnostics.isolates("wall-no-detail-corner") {
+                    // The wood sample covers the floating tab pill only while details are open.
+                    // Darken it like the detail wall image near the top of the frame.
+                    WoodBackground(palette: palette)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .colorMultiply(
+                            Color(
+                                red: Double(BookWallScene.detailWallTop.x),
+                                green: Double(BookWallScene.detailWallTop.y),
+                                blue: Double(BookWallScene.detailWallTop.z))
+                        )
+                        .mask(alignment: .topLeading) {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .white, location: 0),
+                                    .init(color: .white, location: 0.94),
+                                    .init(color: .clear, location: 1),
+                                ], startPoint: .leading, endPoint: .trailing
+                            )
+                            .frame(
+                                width: BookDetailCoverLayout.wallNavigationCoverSize.width,
+                                height: BookDetailCoverLayout.wallNavigationCoverSize.height)
+                        }
+                        .mask(alignment: .topLeading) {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .white, location: 0),
+                                    .init(color: .white, location: 0.94),
+                                    .init(color: .clear, location: 1),
+                                ], startPoint: .top, endPoint: .bottom
+                            )
+                            .frame(
+                                width: BookDetailCoverLayout.wallNavigationCoverSize.width,
+                                height: BookDetailCoverLayout.wallNavigationCoverSize.height)
+                        }
+                }
+                if !PerformanceDiagnostics.isolates("wall-no-detail-back") {
+                    Button(action: onBack) {
+                        Label("Back to view", systemImage: "chevron.left")
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("back-to-shelf")
+                    .padding(.leading, 40)
+                    .padding(.top, 50)
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .onExitCommand(perform: onBack)
     }
 }
 

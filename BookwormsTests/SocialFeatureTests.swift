@@ -189,7 +189,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.current, .shared)
         coordinator.switchView(1)
         XCTAssertEqual(coordinator.current, .yearInReview)
-        for view in [BookwormsView.yearInReview, .following, .comparison, .shared] {
+        for view in [BookwormsView.yearInReview, .bookWall, .following, .comparison, .shared] {
             coordinator.setEnabled(view, false)
         }
         XCTAssertEqual(coordinator.preferences.orderedViews, [.shared], "The last view stays")

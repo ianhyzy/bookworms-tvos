@@ -16,16 +16,20 @@ struct AIStyleStore {
     }
 
     func load() -> [Int: AIStyleRecord] {
-        let durable =
-            defaults.data(forKey: Self.key)
-            .flatMap { try? JSONDecoder().decode([Int: AIStyleRecord].self, from: $0) } ?? [:]
-        let cached =
-            (try? Data(contentsOf: cacheURL))
-            .flatMap { try? JSONDecoder().decode([Int: AIStyleRecord].self, from: $0) } ?? [:]
+        let durableData = defaults.data(forKey: Self.key)
+        let cachedData = try? Data(contentsOf: cacheURL)
+        let decodedDurable =
+            durableData.flatMap { try? JSONDecoder().decode([Int: AIStyleRecord].self, from: $0) }
+        let decodedCached =
+            cachedData.flatMap { try? JSONDecoder().decode([Int: AIStyleRecord].self, from: $0) }
+        let durable = decodedDurable ?? [:]
+        let cached = decodedCached ?? [:]
         let merged = CloudLibraryArchive(designs: durable)
             .merging(CloudLibraryArchive(designs: cached)).designs
-        // Repair the preferences copy from cached records when they fit the local budget.
-        try? save(merged)
+        // Matching copies need no repair; writing the cache on every launch blocks rendering.
+        if durableData != cachedData || (durableData != nil && decodedDurable == nil) {
+            try? save(merged)
+        }
         return merged
     }
 
@@ -40,6 +44,13 @@ struct AIStyleStore {
         let measurement = PerformanceDiagnostics.begin("DesignPersistence")
         defer { measurement.end() }
         let data = try JSONEncoder().encode(records)
+        try savePreferences(data, cloudBacked: cloudBacked)
+        try? FileManager.default.createDirectory(
+            at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: cacheURL, options: .atomic)
+    }
+
+    func savePreferences(_ data: Data, cloudBacked: Bool) throws {
         var preferences = defaults.dictionaryRepresentation()
         preferences[Self.key] = data
         let encoded = try PropertyListSerialization.data(
@@ -47,9 +58,6 @@ struct AIStyleStore {
         // Leave headroom below tvOS's 512 KB preferences warning threshold.
         guard encoded.count < 450_000 || cloudBacked else { throw SaveError.capacity }
         if encoded.count < 450_000 { defaults.set(data, forKey: Self.key) }
-        try? FileManager.default.createDirectory(
-            at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: cacheURL, options: .atomic)
     }
 
     enum SaveError: LocalizedError {

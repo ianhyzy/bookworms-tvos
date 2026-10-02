@@ -16,9 +16,15 @@ final class LibraryModel {
     /// Year in Review statistics for every year with a finished book, most recent first.
     /// Prepared when the library changes, so the view only reads them.
     private(set) var readingYears: [YearInReview] = []
+    private(set) var hasLoadedLibrarySnapshot = false
     @ObservationIgnored private let dependencies: LibraryDependencies
+    @ObservationIgnored private let persistence: LibraryPersistence
     @ObservationIgnored private var sourceRevision = 0
+    @ObservationIgnored private var sourceSaveRevision = 0
+    @ObservationIgnored private var styleSaveRevision = 0
+    @ObservationIgnored private var topShelfRevision = 0
     @ObservationIgnored private var cloudRevision = 0
+    @ObservationIgnored private var activeHardcoverAccountID: String?
     private var schedule: SourceSyncSchedule { SourceSyncSchedule(defaults: dependencies.defaults) }
     var bookCount: Int {
         didSet {
@@ -197,6 +203,10 @@ final class LibraryModel {
 
     init(dependencies: LibraryDependencies = LibraryDependencies()) {
         self.dependencies = dependencies
+        persistence = LibraryPersistence(
+            sourceStore: dependencies.sourceStore,
+            styleCacheURL: dependencies.styleStore.cacheURL,
+            writeTopShelf: dependencies.writeTopShelf)
         let defaults = dependencies.defaults
         credentials = CredentialAvailability(read: dependencies.readCredential)
         bookCount = Self.clampedBookCount(
@@ -217,6 +227,7 @@ final class LibraryModel {
             ?? ShelfPreferences()
         // Opt-in: the published privacy policy describes iCloud storage as off by default.
         iCloudEnabled = defaults.object(forKey: "iCloudEnabled") as? Bool ?? false
+        activeHardcoverAccountID = defaults.string(forKey: "activeHardcoverAccountID")
         sourceErrors = defaults.dictionary(forKey: "sourceErrors") as? [String: String] ?? [:]
     }
 
@@ -224,7 +235,9 @@ final class LibraryModel {
         sourceRevision += 1
         invalidateCloudSync()
         rebuildLibrary()
-        if hasStarted { queueCloudSync() }
+        if hasStarted {
+            queueCloudSync()
+        }
     }
 
     private func invalidateCloudSync() {
@@ -241,6 +254,7 @@ final class LibraryModel {
             ProcessInfo.processInfo.arguments.contains("--sample-library")
         {
             showSample()
+            hasLoadedLibrarySnapshot = true
             return
         }
         aiRecords = dependencies.styleStore.load()
@@ -269,7 +283,7 @@ final class LibraryModel {
                 SourceSnapshot(
                     source: .hardcover, accountID: "hardcover", books: allBooks, syncedAt: syncedAt)
             ]
-            try? dependencies.sourceStore.save(sourceSnapshots)
+            _ = try? await saveSources()
         }
         for snapshot in sourceSnapshots {
             schedule.seed(snapshot.source, date: snapshot.syncedAt)
@@ -281,6 +295,7 @@ final class LibraryModel {
             }
         }
         rebuildLibrary()
+        hasLoadedLibrarySnapshot = true
         if iCloudEnabled { queueCloudSync() } else { cloudStatus = "iCloud storage is off." }
         #if DEBUG
             if dependencies.allowLaunchOverrides,
@@ -441,37 +456,46 @@ final class LibraryModel {
 
     private func connectValidatedToken(_ token: String, revision: Int) async -> Bool {
         do {
+            let accountID = try await dependencies.validateHardcover(token)
+            guard revision == sourceRevision, !Task.isCancelled else { return false }
+            let hasSnapshot =
+                activeHardcoverAccountID == accountID
+                && sourceSnapshots.contains {
+                    $0.source == .hardcover && $0.accountID == accountID
+                }
+            let accountChanged = activeHardcoverAccountID != accountID
             // Credential rotation must remain available between scheduled library syncs.
-            if !schedule
-                .isDue(
-                    .hardcover, now: dependencies.now(),
-                    hasSnapshot: sourceSnapshots.contains { $0.source == .hardcover })
+            if hasSnapshot
+                && !schedule
+                    .isDue(
+                        .hardcover, now: dependencies.now(),
+                        hasSnapshot: hasSnapshot)
             {
-                try await dependencies.validateHardcover(token)
-                guard revision == sourceRevision, !Task.isCancelled else { return false }
-                try dependencies.saveCredential(token, "hardcover-token")
+                try saveHardcoverCredential(token)
                 hardcoverConnected = true
+                setActiveHardcoverAccountID(accountID)
                 hardcoverSessionExpired = false
                 connectionRevision += 1
                 isSample = false
                 hardcoverEnabled = true
                 sourceErrors[LibrarySource.hardcover.rawValue] = nil
                 message =
-                    "Hardcover token verified and saved. Library sync keeps its daily schedule."
+                    "Hardcover token verified. Library sync keeps its daily schedule."
                 return true
             }
             try schedule
                 .begin(
-                    .hardcover, now: dependencies.now(),
-                    hasSnapshot: sourceSnapshots.contains { $0.source == .hardcover })
+                    .hardcover, now: dependencies.now(), manual: accountChanged,
+                    hasSnapshot: hasSnapshot)
             let result = try await dependencies.fetchHardcover(token)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
-            try dependencies.saveCredential(token, "hardcover-token")
+            guard result.accountID == accountID else { throw HardcoverError.invalidToken }
+            try saveHardcoverCredential(token)
             hardcoverConnected = true
             hardcoverSessionExpired = false
             connectionRevision += 1
             hardcoverEnabled = true
-            install(result, source: .hardcover, accountID: "hardcover")
+            await install(result.books, source: .hardcover, accountID: accountID)
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
@@ -479,6 +503,20 @@ final class LibraryModel {
             sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
             return false
         }
+    }
+
+    private func saveHardcoverCredential(_ token: String) throws {
+        #if DEBUG && targetEnvironment(simulator)
+            if dependencies.allowLaunchOverrides,
+                ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"] != nil
+            {
+                // An unsigned simulator can lack Keychain access. The authorized bootstrap
+                // token remains in this process only; the source snapshot is saved separately.
+                try? dependencies.saveCredential(token, "hardcover-token")
+                return
+            }
+        #endif
+        try dependencies.saveCredential(token, "hardcover-token")
     }
 
     func refresh(manual: Bool = false) async {
@@ -504,17 +542,19 @@ final class LibraryModel {
                 || schedule
                     .isDue(
                         .hardcover, now: dependencies.now(),
-                        hasSnapshot: sourceSnapshots.contains { $0.source == .hardcover }),
+                        hasSnapshot: activeHardcoverSnapshot() != nil
+                            && activeHardcoverAccountID != nil),
             let token = dependencies.readCredential("hardcover-token")
         {
             do {
                 try schedule
                     .begin(
                         .hardcover, now: dependencies.now(), manual: manual,
-                        hasSnapshot: sourceSnapshots.contains { $0.source == .hardcover })
+                        hasSnapshot: activeHardcoverSnapshot() != nil
+                            && activeHardcoverAccountID != nil)
                 let result = try await dependencies.fetchHardcover(token)
                 guard revision == sourceRevision, !Task.isCancelled else { return }
-                install(result, source: .hardcover, accountID: "hardcover")
+                await install(result.books, source: .hardcover, accountID: result.accountID)
             } catch {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
@@ -546,7 +586,7 @@ final class LibraryModel {
                 let result = try await dependencies.fetchCWA(configuration, password)
                 // A response belongs to the configuration captured before suspension.
                 guard revision == sourceRevision, !Task.isCancelled else { return }
-                install(result, source: .cwa, accountID: configuration.identity)
+                await install(result, source: .cwa, accountID: configuration.identity)
             } catch {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 sourceErrors[LibrarySource.cwa.rawValue] = readable(error)
@@ -583,7 +623,7 @@ final class LibraryModel {
             dependencies.defaults.set(
                 try JSONEncoder().encode(configuration), forKey: "cwaConfiguration")
             cwaEnabled = true
-            install(result, source: .cwa, accountID: configuration.identity)
+            await install(result, source: .cwa, accountID: configuration.identity)
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
@@ -598,7 +638,10 @@ final class LibraryModel {
     func sourceStatus(_ source: LibrarySource, dateFormat: AppDateFormat = .monthName) -> String? {
         if let error = sourceErrors[source.rawValue] { return error }
         guard let last = schedule.lastAttempt(source) else { return "Not synced yet" }
-        let successful = sourceSnapshots.first { $0.source == source }?.syncedAt
+        let successful =
+            source == .hardcover
+            ? activeHardcoverSnapshot()?.syncedAt
+            : sourceSnapshots.first { $0.source == source }?.syncedAt
         let next = successful.map { $0.addingTimeInterval(86400) } ?? last.addingTimeInterval(300)
         return next > dependencies.now()
             ? "Next check: " + dateFormat.string(from: next) + " · "
@@ -658,13 +701,15 @@ final class LibraryModel {
 
     func style(for book: Book) -> SpineStyle { styles[book.id] ?? .fallback(for: book) }
 
-    private func install(_ result: [Book], source: LibrarySource, accountID: String) {
+    private func install(_ result: [Book], source: LibrarySource, accountID: String) async {
         sourceErrors[source.rawValue] = nil
-        if source == .hardcover { hardcoverSessionExpired = false }
+        if source == .hardcover {
+            setActiveHardcoverAccountID(accountID)
+            hardcoverSessionExpired = false
+        }
         let snapshot = SourceSnapshot(
             source: source, accountID: accountID, books: result, syncedAt: dependencies.now())
-        // One Hardcover account at a time: a sync replaces every saved Hardcover snapshot,
-        // including ones other builds keyed by user ID.
+        // A complete Hardcover sync replaces snapshots from older builds and accounts.
         sourceSnapshots.removeAll {
             $0.source == source && (source == .hardcover || $0.accountID == accountID)
         }
@@ -672,23 +717,53 @@ final class LibraryModel {
         schedule.seed(source, date: snapshot.syncedAt)
         isSample = false
         message = nil
-        do { try dependencies.sourceStore.save(sourceSnapshots) } catch {
-            message = "Books loaded, but the offline library could not be saved."
-        }
         rebuildLibrary()
         queueCloudSync()
+        let snapshots = sourceSnapshots
+        sourceSaveRevision &+= 1
+        let saveRevision = sourceSaveRevision
+        do {
+            try await persistence.saveSources(snapshots, revision: saveRevision)
+        } catch {
+            if saveRevision == sourceSaveRevision {
+                message = "Books loaded, but the offline library could not be saved."
+            }
+        }
+    }
+
+    private func saveSources() async throws -> Int {
+        sourceSaveRevision &+= 1
+        let revision = sourceSaveRevision
+        try await persistence.saveSources(sourceSnapshots, revision: revision)
+        return revision
+    }
+
+    private func setActiveHardcoverAccountID(_ id: String) {
+        guard !id.isEmpty else { return }
+        activeHardcoverAccountID = id
+        dependencies.defaults.set(id, forKey: "activeHardcoverAccountID")
+    }
+
+    private func activeHardcoverSnapshot() -> SourceSnapshot? {
+        let snapshots = sourceSnapshots.filter { $0.source == .hardcover }
+        if let activeHardcoverAccountID {
+            return snapshots.filter { $0.accountID == activeHardcoverAccountID }
+                .max { $0.syncedAt < $1.syncedAt }
+        }
+        // Preserve existing cached covers before a legacy account can be verified. A newly
+        // restored device without a credential uses its newest snapshot.
+        return snapshots.filter { !hardcoverConnected || $0.accountID == "hardcover" }
+            .max { $0.syncedAt < $1.syncedAt }
     }
 
     private func rebuildLibrary() {
         let measurement = PerformanceDiagnostics.begin("RebuildLibrary")
         defer { measurement.end() }
         guard !isSample else { return }
-        // Only the newest Hardcover snapshot counts; an older one, for example restored from
-        // iCloud, would otherwise supply stale covers because the merge keeps the first copy.
-        let hardcover = sourceSnapshots.filter { $0.source == .hardcover }
-            .max { $0.syncedAt < $1.syncedAt }
+        let hardcover = hardcoverEnabled ? activeHardcoverSnapshot() : nil
+        // Merge one active Hardcover snapshot so an older copy cannot supply stale covers.
         let enabled =
-            (hardcoverEnabled ? [hardcover].compactMap(\.self) : [])
+            [hardcover].compactMap(\.self)
             + sourceSnapshots.filter {
                 $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
             }
@@ -736,6 +811,11 @@ final class LibraryModel {
     func cloudAccountChanged() {
         cloudBacked = false
         iCloudEnabled = false
+        if !hardcoverConnected {
+            activeHardcoverAccountID = nil
+            dependencies.defaults.removeObject(forKey: "activeHardcoverAccountID")
+            rebuildLibrary()
+        }
         cloudStatus =
             "Your iCloud account changed. Turn iCloud Storage on to sync this library with the current account."
     }
@@ -766,13 +846,30 @@ final class LibraryModel {
                     aiRecords = merged.designs
                     cloudBacked = true
                     do {
-                        try dependencies.sourceStore.save(sourceSnapshots)
-                        try dependencies.styleStore.save(aiRecords, cloudBacked: true)
+                        let savedSourceRevision = try await saveSources()
+                        guard iCloudEnabled, revision == cloudRevision,
+                            savedSourceRevision == sourceSaveRevision, !Task.isCancelled
+                        else {
+                            return
+                        }
+                        styleSaveRevision &+= 1
+                        let styleRevision = styleSaveRevision
+                        if let data = try await persistence.saveStyleCache(
+                            aiRecords, revision: styleRevision)
+                        {
+                            guard iCloudEnabled, revision == cloudRevision,
+                                styleRevision == styleSaveRevision, !Task.isCancelled
+                            else { return }
+                            try dependencies.styleStore.savePreferences(data, cloudBacked: true)
+                        }
                     } catch {
                         cloudStatus =
                             "iCloud synced, but the local copy could not be saved. "
                             + UserFacingError.message(error)
                         rebuildLibrary()
+                        return
+                    }
+                    guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return
                     }
                     for snapshot in sourceSnapshots {
@@ -813,7 +910,12 @@ final class LibraryModel {
                     else { return nil }
                     return TopShelfBook(id: book.id, title: book.title, imageURL: url)
                 }
-        try? dependencies.writeTopShelf(items)
+        topShelfRevision &+= 1
+        let revision = topShelfRevision
+        let persistence = persistence
+        Task.detached(priority: .utility) {
+            await persistence.publishTopShelf(items, revision: revision)
+        }
     }
 
     private func restoreSavedStyles(_ books: [Book]) {

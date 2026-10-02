@@ -425,12 +425,20 @@ actor HardcoverClient {
         return data
     }
 
-    func validateToken(_ token: String) async throws {
+    func validateToken(_ token: String) async throws -> String {
         let account: Account = try await request(.account, variables: [:], token: token)
-        guard account.me.count == 1 else { throw HardcoverError.invalidToken }
+        guard account.me.count == 1, let user = account.me.first else {
+            throw HardcoverError.invalidToken
+        }
+        return String(user.id)
     }
 
     func fetchBooks(token: String) async throws -> [Book] {
+        try await fetchLibrary(token: token).books
+    }
+
+    /// Returns the authenticated account with its complete library so saved books keep provenance.
+    func fetchLibrary(token: String) async throws -> HardcoverLibrary {
         let account: Account = try await request(.account, variables: [:], token: token)
         guard account.me.count == 1, let user = account.me.first else {
             throw HardcoverError.invalidToken
@@ -443,7 +451,9 @@ actor HardcoverClient {
                 variables: ["user": user.id, "offset": offset, "language": Self.coverLanguage],
                 token: token)
             rows += result.userBooks
-            if result.userBooks.count < 100 { return Self.normalize(rows) }
+            if result.userBooks.count < 100 {
+                return HardcoverLibrary(accountID: String(user.id), books: Self.normalize(rows))
+            }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
             try await Task.sleep(for: .seconds(1.1))
         }
@@ -568,6 +578,11 @@ actor HardcoverClient {
         }
         return unique.values.sorted(by: Book.recentFirst)
     }
+}
+
+struct HardcoverLibrary: Sendable {
+    let accountID: String
+    let books: [Book]
 }
 
 // Decode wire fields explicitly; normalization keeps API-specific choices out of the UI.

@@ -19,11 +19,16 @@ Each view divides its focusable content into focus sections with `.focusSection(
 | View | Sections, top to bottom | Item that receives focus on entry |
 | --- | --- | --- |
 | **My Shelf** | Book row | The last focused book |
+| **Book Wall** | Header (**Drop again**) and settled book spines | The last focused current-year book, or the first. The focus engine moves directly between spine buttons, including Up and Down within a stack; focus pulls the selected book straight out. The top-right replay button appears after the first fall and remains focusable while it replays. Selection keeps its spine button mounted while the model moves to the detail cover position. Other spines and replay are disabled during that flight; details open only when it succeeds. Back returns the book to its recorded resting position and restores focus to its spine. Left from the leftmost spine reaches the sidebar. |
 | **Year in Review** | Header (year menu), cover row | The last focused book in the chosen year, or its first book. Right from the sidebar reaches the year menu, which sits level with it. |
 | **Following** | Activity row, in pages of 4; each card can have a **Read review** button below it | The last focused activity |
 | **Compare Shelves** | Header (ordering menu, reader picker), your row, the reader's row | The book in the same column as the last focused book, on the entered row's visible page |
 | **Book Club** | Header (reader picker, sort menu), cover row, review actions | The selected cover |
 | **Ambient** | Two columns: view interval and session length on the left, view toggles in sidebar order on the right; **Start ambient mode** below both | The control nearest the sidebar item |
+
+Book Wall preparation shows a modal when the current year's books are not ready. **Back to My Shelf** remains focusable while it loads; **Retry** appears if spine preparation fails. The modal closes when preparation finishes, then focus enters the settled spine collection.
+
+Book Wall's noninteractive RealityKit canvas sits behind the `TabView` and spans the screen. Focus controls stay inside the native tab. The view converts projected book rectangles from canvas coordinates to tab coordinates, so tab insets do not change the render viewport or move hit targets away from their models. The sidebar remains above the canvas. Leaving for another tab, including Settings or Ambient, cancels any detail transition; stale task completions cannot reopen it.
 
 Within a section, the focus engine picks the nearest item in the pressed direction. Up from a Compare Shelves row reaches the nearest header control, and Down from a Book Club cover reaches the nearest review action. Down where no item exists leaves focus unchanged.
 
@@ -45,6 +50,7 @@ The following entry points are the only places the app assigns focus. Each runs 
 | Following, Book Club, or Year in Review appears | The view's `onAppear` focuses the remembered item. |
 | The first artwork preparation finishes while a main view is showing | `ShelfView` requests focus on the first shelf book, or advances `socialReturnRevision`, only on the first preparation. |
 | The user returns from details or ambient mode to a main view | `ShelfView.restoreSelection` issues a `ShelfBookFocusRequest` or advances `socialReturnRevision`. `SocialViews.restoreContentFocus` and `YearInReviewView` act only when nothing in the content has focus. |
+| The user closes Book Wall details | `BookWallView.closeDetail` restores the selected spine after the return flight completes. A cancelled return does not assign focus. |
 | The user opens or closes a full review in the book reviews popup | Opening a review disables the list, and the reader pane focuses itself when it appears. Back closes the reader; the list's default focus is the card that opened it, so the focus engine returns there without a focus write. |
 
 Data changes never move focus. After the first artwork preparation, content stays mounted while later preparations finish; covers reload from the local cache when `artworkGeneration` changes. Sorting, reader changes, and background refreshes update the mounted views in place.
@@ -85,12 +91,12 @@ UI tests launch the app with `--focus-probe`. In Debug simulator builds, this in
 - `press(_:in:expecting:)` presses a direction, waits for the expected element, observes a one-second settle window, and requires exactly one focus update. A second update is a bounce.
 - `pressWithoutMoving(_:in:from:)` requires zero focus updates where no item exists in that direction.
 - `visibleButtons(_:prefix:in:)` returns fully visible items from left to right, because offscreen pages are mounted too.
-- `open(_:arguments:)` launches on My Shelf and selects a view from the sidebar, which is how users reach every other view. Use it for view-entry tests. `launch(view:arguments:)` opens a view directly with `--start-view=`; initial focus on that path can land in the header or sidebar, so do not use it to test entry focus. `selectView`, `focusSidebarItem`, and `openSettings` navigate through the sidebar.
+- `open(_:arguments:)` launches on My Shelf and selects a view from the sidebar, which is how users reach every other view. Use it for view-entry tests. `launch(view:arguments:)` opens a view directly with `--start-view=`, which also adds that view to the sidebar if it was turned off; initial focus on that path can land in the header or sidebar, so do not use it to test entry focus. `selectView`, `focusSidebarItem`, and `openSettings` navigate through the sidebar.
 - `moveFocus(to:in:)` presses toward a target from the focused element, changing columns before moving vertically. From the Settings section bar it presses Down first, because Left or Right would switch sections. Use it in two-column layouts such as Settings and the Ambient page.
 - `hasFocus(labeled:in:)` checks sidebar rows and menu items by label, because they report focus on a container rather than on the element a name query returns.
 
 The settle window is an observation period for late focus updates, not synchronization. Do not shorten it to speed up a test or lengthen it to make a failing test pass.
 
-[ShelfNavigationTests](../BookwormsUITests/ShelfNavigationTests.swift) covers My Shelf and Year in Review, and [SocialNavigationTests](../BookwormsUITests/SocialNavigationTests.swift) covers the social views. Use `openSettings`, `showShelf`, and `startAmbient` to reach sidebar destinations.
+[ShelfNavigationTests](../BookwormsUITests/ShelfNavigationTests.swift) covers My Shelf and Year in Review, [BookWallNavigationTests](../BookwormsUITests/BookWallNavigationTests.swift) covers native sidebar entry and return, counted spine/header movement, repeated edge-book detail returns, replay, and on-screen focus targets. [SocialNavigationTests](../BookwormsUITests/SocialNavigationTests.swift) covers the social views. Use `openSettings`, `showShelf`, and `startAmbient` to reach sidebar destinations.
 
 Simulator tests use discrete remote presses. Verify Siri Remote swipes, rapid input, and paging animation on the physical Apple TV.

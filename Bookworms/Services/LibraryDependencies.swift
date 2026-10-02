@@ -14,10 +14,10 @@ struct LibraryDependencies {
         try CredentialStore.save($0, account: $1)
     }
     var removeCredential: (String) -> Void = { CredentialStore.remove(account: $0) }
-    var fetchHardcover: @MainActor (String) async throws -> [Book] = {
-        try await HardcoverClient.shared.fetchBooks(token: $0)
+    var fetchHardcover: @MainActor (String) async throws -> HardcoverLibrary = {
+        try await HardcoverClient.shared.fetchLibrary(token: $0)
     }
-    var validateHardcover: @MainActor (String) async throws -> Void = {
+    var validateHardcover: @MainActor (String) async throws -> String = {
         try await HardcoverClient.shared.validateToken($0)
     }
     var exchangeHardcoverCode: @MainActor (String) async throws -> String = {
@@ -38,7 +38,9 @@ struct LibraryDependencies {
     var now: () -> Date = { Date() }
     var sleep: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     var readTopShelf: () -> [TopShelfBook] = { TopShelfSnapshot.read() }
-    var writeTopShelf: ([TopShelfBook]) throws -> Void = { try TopShelfSnapshot.write($0) }
+    var writeTopShelf: @Sendable ([TopShelfBook]) throws -> Void = {
+        try TopShelfSnapshot.write($0)
+    }
 
     init(
         defaults: UserDefaults = .standard,

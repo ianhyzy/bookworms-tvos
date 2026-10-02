@@ -57,7 +57,7 @@ python3 scripts/connect-development-build.py \
   --device DEVICE_ID
 ```
 
-The helper also accepts `--simulator SIMULATOR_ID`. Release builds use the source settings screen. Never place credentials in repository files, command arguments, logs, screenshots, or test fixtures. CWA requires an HTTPS OPDS endpoint; a private server must be reachable from the Apple TV.
+The helper also accepts `--simulator SIMULATOR_ID`. An unsigned Debug simulator build keeps the bootstrap credential in memory for that run if Keychain rejects the save; its library snapshot remains available after relaunch. Release builds use the source settings screen. Never place credentials in repository files, command arguments, logs, screenshots, or test fixtures. CWA requires an HTTPS OPDS endpoint; a private server must be reachable from the Apple TV.
 
 Read [privacy behavior](PRIVACY.md) before changing data collection, retention, or external transfers. Optional iCloud storage preserves library metadata and saved designs; credentials stay in Keychain.
 

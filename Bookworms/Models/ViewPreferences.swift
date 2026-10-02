@@ -4,6 +4,7 @@ import Observation
 enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     case shelf = "My Shelf"
     case yearInReview = "Year in Review"
+    case bookWall = "Book Wall"
     case following = "Following"
     case comparison = "Compare Shelves"
     case shared = "Book Club"
@@ -13,6 +14,7 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .shelf: "books.vertical.fill"
         case .yearInReview: "calendar"
+        case .bookWall: "books.vertical.fill"
         case .following: "person.2.fill"
         case .comparison: "rectangle.split.2x1.fill"
         case .shared: "shared.with.you"
@@ -23,7 +25,11 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     var isSocial: Bool { self == .following || self == .comparison || self == .shared }
 
     /// Whether ambient mode can show this view. Year in Review is interactive only.
-    var supportsAmbient: Bool { self != .yearInReview }
+    var supportsAmbient: Bool { self != .yearInReview && self != .bookWall }
+
+    static var availableCases: [Self] {
+        allCases.filter { $0 != .bookWall || BookWallAvailability.isSupported }
+    }
 }
 
 enum SharedReadsSort: String, Codable, CaseIterable, Identifiable {
@@ -48,7 +54,7 @@ enum BookLimit {
 }
 
 struct ViewPreferences: Codable, Equatable {
-    var enabled: [BookwormsView] = BookwormsView.allCases
+    var enabled: [BookwormsView] = BookwormsView.availableCases
     var readerID: Int?
     var comparisonOrder = ComparisonOrder.rating
     var sharedReadsSort = SharedReadsSort.agreement
@@ -63,16 +69,16 @@ struct ViewPreferences: Codable, Equatable {
     var sessionMinutes = 0
     /// Views the user has been offered in the sidebar. Preferences saved before a view existed
     /// decode as `nil` here, so `validate()` adds later views to the sidebar once.
-    var offeredViews: [BookwormsView]? = BookwormsView.allCases
+    var offeredViews: [BookwormsView]? = BookwormsView.availableCases
     /// Views in the sidebar, in display order. At least one view stays: My Shelf if none are on.
     var orderedViews: [BookwormsView] {
-        let views = BookwormsView.allCases.filter { enabled.contains($0) }
+        let views = BookwormsView.availableCases.filter { enabled.contains($0) }
         return views.isEmpty ? [.shelf] : views
     }
     /// Views ambient mode may show, in display order. It can be empty; the Ambient page then
     /// disables **Start ambient mode**.
     var ambientOrderedViews: [BookwormsView] {
-        BookwormsView.allCases.filter {
+        BookwormsView.availableCases.filter {
             guard $0.supportsAmbient else { return false }
             return $0 == .shelf
                 ? ambientExcludesShelf != true : ambientViews?.contains($0) ?? true
@@ -80,14 +86,14 @@ struct ViewPreferences: Codable, Equatable {
     }
     /// Views that need prepared data and artwork: those in the sidebar or in ambient mode.
     var activeViews: [BookwormsView] {
-        BookwormsView.allCases.filter {
+        BookwormsView.availableCases.filter {
             orderedViews.contains($0) || ambientOrderedViews.contains($0)
         }
     }
     mutating func validate() {
         let offered = offeredViews ?? [.shelf, .following, .comparison, .shared]
-        enabled += BookwormsView.allCases.filter { !offered.contains($0) }
-        offeredViews = BookwormsView.allCases
+        enabled += BookwormsView.availableCases.filter { !offered.contains($0) }
+        offeredViews = BookwormsView.availableCases
         enabled = orderedViews
         comparisonCount = min(BookLimit.maximum, max(1, comparisonCount))
         if ![5, 10, 15].contains(ambientMinutes) { ambientMinutes = 10 }
@@ -113,6 +119,7 @@ final class BookwormsCoordinator {
     /// The year Year in Review shows for this session. `nil` shows the most recent year.
     var reviewYear: Int?
     var reviewSelection: Int?
+    var wallSelection: Int?
     var comparisonRow = 0
     /// The focused book's position within its visible Compare Shelves page, shared by both rows.
     var comparisonColumn = 0
@@ -126,19 +133,21 @@ final class BookwormsCoordinator {
             .flatMap { try? JSONDecoder().decode(ViewPreferences.self, from: $0) }
             ?? ViewPreferences()
         saved.validate()
-        preferences = saved
-        current = saved.orderedViews[0]
-        if let argument = ProcessInfo.processInfo.arguments.first(where: {
-            $0.hasPrefix("--start-view=")
-        }) {
-            let requested = String(argument.dropFirst("--start-view=".count))
-            if let target = BookwormsView.allCases.first(where: {
-                $0.rawValue.caseInsensitiveCompare(requested) == .orderedSame
-                    || "\($0)".caseInsensitiveCompare(requested) == .orderedSame
-            }) {
-                current = target
+        // Captures and device tests open a view directly; it joins the sidebar if it was hidden.
+        let start = ProcessInfo.processInfo.arguments
+            .first(where: {
+                $0.hasPrefix("--start-view=")
+            })
+            .flatMap { argument in
+                let requested = String(argument.dropFirst("--start-view=".count))
+                return BookwormsView.availableCases.first(where: {
+                    $0.rawValue.caseInsensitiveCompare(requested) == .orderedSame
+                        || "\($0)".caseInsensitiveCompare(requested) == .orderedSame
+                })
             }
-        }
+        if let start, !saved.enabled.contains(start) { saved.enabled.append(start) }
+        preferences = saved
+        current = start ?? saved.orderedViews[0]
     }
     func switchView(_ direction: Int) {
         let views = preferences.orderedViews
