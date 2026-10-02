@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 @MainActor
@@ -44,10 +45,7 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertTrue(replay.exists)
         RemoteNavigation.press(.up, in: app, expecting: replay)
         XCUIRemote.shared.press(.select)
-        // Spines stay mounted during a replay, so wait for the books to land.
-        let falling = app.staticTexts["Books are falling into place…"]
-        XCTAssertTrue(falling.waitForExistence(timeout: 2))
-        XCTAssertTrue(falling.waitForNonExistence(timeout: 15))
+        waitForReplayToLand(app)
         XCTAssertTrue(first.exists)
         RemoteNavigation.waitForFocus(replay)
         RemoteNavigation.press(.down, in: app, expecting: topRight)
@@ -98,10 +96,7 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: topRight)
         RemoteNavigation.press(.up, in: app, expecting: replay)
         XCUIRemote.shared.press(.select)
-        // Spines stay mounted during a replay, so wait for the books to land.
-        let falling = app.staticTexts["Books are falling into place…"]
-        XCTAssertTrue(falling.waitForExistence(timeout: 2))
-        XCTAssertTrue(falling.waitForNonExistence(timeout: 15))
+        waitForReplayToLand(app)
         XCTAssertTrue(first.exists)
         RemoteNavigation.waitForFocus(replay)
         RemoteNavigation.press(.down, in: app, expecting: topRight)
@@ -182,6 +177,25 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
         XCTAssertEqual(RemoteNavigation.transitions(app), updates, "Landing moved focus")
         return app
+    }
+
+    /// Waits for a replay started by Drop again to finish. Spines stay mounted during a replay,
+    /// so their existence does not show that the books have landed. With Reduce Motion the wall
+    /// arranges the books at once and its status can clear before this check runs.
+    private func waitForReplayToLand(
+        _ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        let status = app.staticTexts[
+            reduceMotion ? "Arranging books…" : "Books are falling into place…"]
+        if !reduceMotion {
+            XCTAssertTrue(
+                status.waitForExistence(timeout: 2), "Drop again did not start a fall",
+                file: file, line: line)
+        }
+        XCTAssertTrue(
+            status.waitForNonExistence(timeout: 15), "The replayed books did not land",
+            file: file, line: line)
     }
 
     private func capture(_ app: XCUIApplication, name: String) {
