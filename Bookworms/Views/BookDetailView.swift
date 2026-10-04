@@ -23,8 +23,12 @@ struct BookDetailView: View {
     var showsCover = true
     var showsBackButton = true
     var onClose: (() -> Void)?
+    /// Shows My Shelf filtered to the chosen author or genre. When `nil`, they appear as text.
+    var onShowShelf: ((ShelfFilter) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var showsReviews = false
+    /// The entry point when focus moves into the metadata row: the first genre.
+    @FocusState private var focusedGenre: String?
     @State private var readingDescription: ReviewPresentation?
     @State private var descriptionHeight: CGFloat = 0
     @State private var fullDescriptionHeight: CGFloat = 0
@@ -37,7 +41,8 @@ struct BookDetailView: View {
         loadReviews: (@MainActor () async throws -> [BookReview])? = nil,
         showsCover: Bool = true,
         showsBackButton: Bool = true,
-        onClose: (() -> Void)? = nil
+        onClose: (() -> Void)? = nil,
+        onShowShelf: ((ShelfFilter) -> Void)? = nil
     ) {
         self.book = book
         self.style = style
@@ -45,6 +50,7 @@ struct BookDetailView: View {
         self.showsCover = showsCover
         self.showsBackButton = showsBackButton
         self.onClose = onClose
+        self.onShowShelf = onShowShelf
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
@@ -120,8 +126,9 @@ struct BookDetailView: View {
                     .frame(width: coverColumnWidth)
                     .focusSection()
                     // Two sibling sections, not nested ones: the header starts level with Back, so
-                    // Right from Back and Up from Show more both reach the histogram, and the
-                    // full-width description section catches Down from the histogram.
+                    // Right from Back reaches the header (the author button, or the histogram when
+                    // the author is text), and the full-width description section catches Down
+                    // from the metadata row.
                     VStack(alignment: .leading, spacing: 18) {
                         VStack(alignment: .leading, spacing: 18) {
                             VStack(alignment: .leading, spacing: 8) {
@@ -129,10 +136,19 @@ struct BookDetailView: View {
                                     .appFont(size: 56, weight: .semibold)
                                     .lineLimit(3).minimumScaleFactor(0.7)
                                     .accessibilityIdentifier("detail-title")
-                                Text(book.author).appFont(size: 30)
-                                    .foregroundStyle(.secondary)
+                                // A full-width section, so Up from the histogram reaches the
+                                // author.
+                                HStack {
+                                    author
+                                    Spacer(minLength: 0)
+                                }
+                                .focusSection()
                             }
-                            metadata
+                            // Its own section, so Down from the author lands on a genre or the
+                            // histogram instead of skipping to Show more, which aligns with it.
+                            metadata.focusSection()
+                                .defaultFocus(
+                                    $focusedGenre, genres.first, priority: .userInitiated)
                         }
                         .focusSection()
                         Divider().overlay(.primary.opacity(0.12))
@@ -251,11 +267,18 @@ struct BookDetailView: View {
             }
             .fixedSize()
             if !genres.isEmpty {
-                metadataItem(
-                    "Genres",
-                    // A non-breaking space keeps each dot with the genre before it when wrapping.
-                    value: genres.joined(separator: "\u{00A0}· "), symbol: "tag", lines: 5
-                )
+                Group {
+                    if let onShowShelf {
+                        genreButtons(onShowShelf)
+                    } else {
+                        metadataItem(
+                            "Genres",
+                            // A non-breaking space keeps each dot with the genre before it when
+                            // wrapping.
+                            value: genres.joined(separator: "\u{00A0}· "), symbol: "tag", lines: 5
+                        )
+                    }
+                }
                 .frame(width: showsCover ? 330 : 250, alignment: .leading)
             }
             Group {
@@ -278,6 +301,49 @@ struct BookDetailView: View {
         .padding(.vertical, 10)
     }
 
+    /// The author as a compact capsule button when details can filter My Shelf, otherwise text.
+    @ViewBuilder private var author: some View {
+        if let onShowShelf {
+            Button {
+                onShowShelf(.author(book.author))
+            } label: {
+                Label(book.author, systemImage: "person")
+                    .labelStyle(CompactLabelStyle())
+                    .appFont(size: 26, weight: .medium)
+            }
+            .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 6))
+            .accessibilityHint("Shows your books by this author.")
+            .accessibilityIdentifier("detail-author")
+        } else {
+            Text(book.author).appFont(size: 30).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The Genres label above one capsule button per genre.
+    private func genreButtons(_ onShowShelf: @escaping (ShelfFilter) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "tag").frame(width: 20)
+                Text("Genres")
+            }
+            .appFont(size: 18).foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+            FlowLayout(spacing: 10) {
+                ForEach(genres, id: \.self) { genre in
+                    Button {
+                        onShowShelf(.genre(genre))
+                    } label: {
+                        Text(genre).appFont(size: 21, weight: .medium)
+                    }
+                    .buttonStyle(FlatButtonStyle(horizontalPadding: 14, verticalPadding: 5))
+                    .focused($focusedGenre, equals: genre)
+                    .accessibilityHint("Shows your books in this genre.")
+                    .accessibilityIdentifier("detail-genre-\(genre)")
+                }
+            }
+        }
+    }
+
     private func metadataItem(_ title: String, value: String, symbol: String, lines: Int = 2)
         -> some View
     {
@@ -296,19 +362,26 @@ struct BookDetailView: View {
 /// A capsule with flat fills and the tvOS focus look: a translucent platter that turns white and
 /// lifts with focus. Unlike glass, it never samples the content behind it.
 private struct FlatButtonStyle: ButtonStyle {
+    var horizontalPadding: CGFloat = 30
+    var verticalPadding: CGFloat = 16
+
     func makeBody(configuration: Configuration) -> some View {
-        Platter(configuration: configuration)
+        Platter(
+            configuration: configuration, horizontalPadding: horizontalPadding,
+            verticalPadding: verticalPadding)
     }
 
     private struct Platter: View {
         let configuration: Configuration
+        let horizontalPadding: CGFloat
+        let verticalPadding: CGFloat
         @Environment(\.isFocused) private var isFocused
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
             configuration.label
-                .padding(.horizontal, 30)
-                .padding(.vertical, 16)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
                 .foregroundStyle(isFocused ? Color.black : Color.primary)
                 .background(isFocused ? Color.white : Color.primary.opacity(0.12), in: .capsule)
                 .scaleEffect(isFocused && !reduceMotion ? 1.06 : 1)
@@ -567,5 +640,63 @@ private struct BookReviewCard: View {
         }
         .buttonStyle(.card)
         .accessibilityIdentifier("book-review-\(review.id)")
+    }
+}
+
+/// An icon and title with a tight gap and a small icon, for compact capsule buttons.
+private struct CompactLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 8) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
+    }
+}
+
+/// Places views left to right and wraps to a new line when the next one doesn't fit.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = rows(width: proposal.width ?? .infinity, subviews: subviews)
+        return CGSize(
+            width: rows.map(\.width).max() ?? 0,
+            height: rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1)))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        var y = bounds.minY
+        for row in rows(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+                x += subviews[index].sizeThatFits(.unspecified).width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private func rows(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if var last = rows.last, last.width + spacing + size.width <= width {
+                last.indices.append(index)
+                last.width += spacing + size.width
+                last.height = max(last.height, size.height)
+                rows[rows.count - 1] = last
+            } else {
+                rows.append(Row(indices: [index], width: size.width, height: size.height))
+            }
+        }
+        return rows
     }
 }

@@ -126,6 +126,20 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(legacy.collection, .standard)
     }
 
+    @MainActor func testShelfFilterLimitsTheShelfUntilCleared() {
+        let library = LibraryModel()
+        library.showSample()
+        library.shelfFilter = .author("Alex Rowan")
+        XCTAssertEqual(library.books.map(\.id), [1, 8])
+        library.shelfFilter = .genre("Fantasy")
+        XCTAssertEqual(library.books.map(\.id), [1])
+        library.shelfFilter = nil
+        XCTAssertEqual(library.books.count, SampleLibrary.books.count)
+        XCTAssertTrue(
+            ShelfFilter.genre("Litrpg")
+                .matches(Book(id: 9, title: "", author: "", genres: ["litrpg"])))
+    }
+
     func testHotTakesSortByGapFromCommunityRating() {
         let books = [
             Book(id: 1, title: "Agree", author: "A", rating: 4, communityRating: 4.1),

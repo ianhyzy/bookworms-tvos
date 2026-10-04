@@ -33,10 +33,6 @@ Data: the series ID is synced; series names, positions, and unowned books need a
 
 Data: library books by author are synced; bios, photos, and other works need a new query.
 
-## Genre and author shelves
-
-Browse My Shelf filtered to one primary genre or one author, for example from the caption's genre or author. Data: synced.
-
 ## Year in Review
 
 - An all-time view and a comparison of two years.
@@ -44,10 +40,6 @@ Browse My Shelf filtered to one primary genre or one author, for example from th
 - A fullscreen "Wrapped" slideshow at the end of the year, which could also play in ambient mode.
 
 Data: synced.
-
-## Hot takes
-
-**Hot Takes** is a My Shelf sort. Still open: show the gap in the caption, such as "You ★5 · Community ★3.2". Data: synced.
 
 ## Recommended by friends
 

@@ -17,9 +17,14 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertTrue(app.otherElements["rating-distribution"].exists)
         let back = app.buttons["back-to-shelf"]
         let reviews = app.buttons["community-reviews"]
+        let author = app.buttons["detail-author"]
+        let fantasy = app.buttons["detail-genre-Fantasy"]
         RemoteNavigation.waitForFocus(back)
-        RemoteNavigation.press(.right, in: app, expecting: reviews)
+        RemoteNavigation.press(.right, in: app, expecting: author)
         RemoteNavigation.press(.left, in: app, expecting: back)
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: fantasy)
+        RemoteNavigation.press(.right, in: app, expecting: app.buttons["detail-genre-Mystery"])
         RemoteNavigation.press(.right, in: app, expecting: reviews)
         XCUIRemote.shared.press(.select)
         let longReview = app.buttons["book-review-1"]
@@ -35,7 +40,7 @@ final class ShelfNavigationTests: XCTestCase {
         let showMore = app.buttons["show-full-description"]
         XCTAssertTrue(showMore.exists)
         RemoteNavigation.press(.down, in: app, expecting: showMore)
-        RemoteNavigation.press(.up, in: app, expecting: reviews)
+        RemoteNavigation.press(.up, in: app, expecting: fantasy)
         RemoteNavigation.press(.down, in: app, expecting: showMore)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(
@@ -54,6 +59,62 @@ final class ShelfNavigationTests: XCTestCase {
         shelf.lifetime = .keepAlways
         add(shelf)
     }
+    func testDetailAuthorAndGenresFilterTheShelf() {
+        let app = RemoteNavigation.launch()
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(first)
+        XCUIRemote.shared.press(.select)
+        let back = app.buttons["back-to-shelf"]
+        let author = app.buttons["detail-author"]
+        let fantasy = app.buttons["detail-genre-Fantasy"]
+        let mystery = app.buttons["detail-genre-Mystery"]
+        let reviews = app.buttons["community-reviews"]
+        RemoteNavigation.waitForFocus(back)
+        // Every direction out of the author and genre buttons.
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: fantasy)
+        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: fantasy)
+        RemoteNavigation.press(.right, in: app, expecting: mystery)
+        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: fantasy)
+        RemoteNavigation.press(.right, in: app, expecting: mystery)
+        RemoteNavigation.press(.right, in: app, expecting: reviews)
+        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: fantasy)
+        RemoteNavigation.press(.down, in: app, expecting: app.buttons["show-full-description"])
+        RemoteNavigation.press(.up, in: app, expecting: fantasy)
+        RemoteNavigation.press(.left, in: app, expecting: back)
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+
+        // The author's books, with the opened book focused.
+        let clear = app.buttons["clear-shelf-filter"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(first)
+        XCTAssertTrue(app.buttons["book-8"].exists)
+        XCTAssertFalse(app.buttons["book-2"].exists)
+        RemoteNavigation.press(.down, in: app, expecting: clear)
+        RemoteNavigation.press(.up, in: app, expecting: first)
+        RemoteNavigation.press(.down, in: app, expecting: clear)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["book-2"].waitForExistence(timeout: 5))
+        XCTAssertFalse(clear.exists)
+
+        // A genre filter from the same book.
+        RemoteNavigation.waitForFocus(first)
+        XCUIRemote.shared.press(.select)
+        RemoteNavigation.waitForFocus(back)
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: fantasy)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(first)
+        XCTAssertFalse(app.buttons["book-8"].exists)
+    }
+
     func testShelfPagesMoveWithOneFocusUpdate() {
         let app = RemoteNavigation.launch(arguments: ["--sample-pages"])
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))

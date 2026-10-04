@@ -17,6 +17,10 @@ final class LibraryModel {
     /// Prepared when the library changes, so the view only reads them.
     private(set) var readingYears: [YearInReview] = []
     private(set) var hasLoadedLibrarySnapshot = false
+    /// Limits My Shelf to one author or genre until cleared. Not saved.
+    var shelfFilter: ShelfFilter? {
+        didSet { if shelfFilter != oldValue { updateShelf() } }
+    }
     @ObservationIgnored private let dependencies: LibraryDependencies
     @ObservationIgnored private let persistence: LibraryPersistence
     @ObservationIgnored private var sourceRevision = 0
@@ -776,16 +780,18 @@ final class LibraryModel {
     private func updateShelf() {
         let measurement = PerformanceDiagnostics.begin("UpdateShelf")
         defer { measurement.end() }
+        let source = shelfFilter.map { filter in allBooks.filter(filter.matches) } ?? allBooks
         books =
             isSample
-            ? Array(allBooks.prefix(bookCount))
-            : shelfPreferences.select(allBooks, limit: bookCount)
+            ? Array(source.prefix(bookCount))
+            : shelfPreferences.select(source, limit: bookCount)
         if !isSample {
             restoreSavedStyles(books)
             restoreVisibleFonts()
             queueAutomaticGeneration()
         }
-        publishTopShelf()
+        // Top Shelf mirrors the unfiltered shelf.
+        if shelfFilter == nil { publishTopShelf() }
     }
 
     private func writeSyncDiagnostics() {

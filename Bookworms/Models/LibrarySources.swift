@@ -91,6 +91,28 @@ enum ShelfSort: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Limits My Shelf to one author or genre, chosen from book details. It lasts until the user
+/// clears it or the app relaunches, and never changes the saved shelf preferences.
+enum ShelfFilter: Hashable, Sendable {
+    case author(String)
+    /// A display genre, as `Book.displayGenre` formats it.
+    case genre(String)
+
+    var name: String {
+        switch self {
+        case .author(let name), .genre(let name): name
+        }
+    }
+
+    func matches(_ book: Book) -> Bool {
+        switch self {
+        case .author(let name): book.author == name
+        case .genre(let name):
+            book.genres?.contains { Book.displayGenre($0) == name } ?? false
+        }
+    }
+}
+
 struct ShelfPreferences: Codable, Equatable {
     /// The most current reads that lead the default collection.
     static let readingLimit = 3

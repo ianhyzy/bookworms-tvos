@@ -24,6 +24,7 @@ Each view divides its focusable content into focus sections with `.focusSection(
 | **Following** | Activity row, in pages of 4; each card can have a **Read review** button below it | The last focused activity |
 | **Compare Shelves** | Header (ordering menu, reader picker), your row, the reader's row | The book in the same column as the last focused book, on the entered row's visible page |
 | **Book Club** | Header (reader picker, sort menu), cover row, review actions | The selected cover |
+| **Book details** | Left column (**Back to view**); header (author button, full width); metadata row (genre buttons and the rating histogram, full width); description (**Show more**) | Right from Back reaches the author. Down from the author enters the metadata row at its first genre. Up from the metadata row reaches the author; Up from **Show more** reaches the first genre. A filtered My Shelf adds its clear button in a full-width section below the caption, reached with Down from the row. |
 | **Ambient** | Two columns: view interval and session length on the left, view toggles in sidebar order on the right; **Start ambient mode** below both | The control nearest the sidebar item |
 
 Book Wall preparation shows a modal when the current year's books are not ready. **Back to My Shelf** remains focusable while it loads; **Retry** appears if spine preparation fails. The modal closes when preparation finishes; closing it does not move focus into the wall.

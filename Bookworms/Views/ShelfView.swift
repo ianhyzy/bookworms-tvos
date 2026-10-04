@@ -299,7 +299,14 @@ struct ShelfView: View {
                 BookDetailView(
                     book: library.book(withID: book.id) ?? book,
                     style: library.style(for: book),
-                    loadReviews: reviewLoader(for: book)
+                    loadReviews: reviewLoader(for: book),
+                    onShowShelf: { filter in
+                        // The book matches its own author and genres, so focus returns to it.
+                        lastFocusedID = book.id
+                        library.shelfFilter = filter
+                        showView(.shelf)
+                        selectedBook = nil
+                    }
                 )
                 .appTypography()
                 .id(book.id)
@@ -820,7 +827,9 @@ struct ShelfView: View {
         let book = library.books.first { $0.id == (focusedBook ?? lastFocusedID) }
         return Group {
             if let book {
-                BookCaption(book: book, dateFormat: dateFormat)
+                BookCaption(
+                    book: book, dateFormat: dateFormat,
+                    comparesCommunity: library.shelfPreferences.sort == .hotTakes)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Select a book to look inside").appFont(size: 33, weight: .medium)
@@ -834,12 +843,25 @@ struct ShelfView: View {
 
     private var shelfStatus: some View {
         HStack(spacing: 22) {
+            if let filter = library.shelfFilter {
+                Button {
+                    library.shelfFilter = nil
+                } label: {
+                    Label(filter.name, systemImage: "xmark")
+                }
+                .buttonStyle(.glass)
+                .appFont(size: 24, weight: .medium)
+                .accessibilityLabel("Clear filter: \(filter.name)")
+                .accessibilityIdentifier("clear-shelf-filter")
+            }
             if library.isSample {
                 Text("Sample shelf").appFont(size: 21)
                     .foregroundStyle(palette.text.opacity(0.6))
             }
             Spacer()
         }
+        // A full-width section, so Down from any cover reaches the filter's clear button.
+        .focusSection()
     }
 
     private func shelfRow(rowHeight: CGFloat) -> some View {
@@ -867,22 +889,33 @@ struct ShelfView: View {
         VStack(spacing: 26) {
             Image(systemName: "books.vertical").appFont(size: 80, weight: .ultraLight)
                 .accessibilityHidden(true)
-            Text(library.isConnected ? "Your shelf is waiting" : "Make room for your books")
-                .appFont(size: 42)
+            Text(
+                library.shelfFilter != nil
+                    ? "No books on your shelf match"
+                    : library.isConnected ? "Your shelf is waiting" : "Make room for your books"
+            )
+            .appFont(size: 42)
             Text(
                 library.isConnected
                     ? "No books match your shelf choices. Change Show in Settings → Shelf."
                     : "Connect a source in Settings to explore your books."
             )
             .appFont(size: 25).multilineTextAlignment(.center).frame(maxWidth: 850)
-            HStack(spacing: 24) {
-                Button("Choose sources") {
-                    settingsSection = .sources
-                    sidebarItem = .settings
+            if let filter = library.shelfFilter {
+                Button("Show all books") { library.shelfFilter = nil }
+                    .buttonStyle(.glassProminent)
+                    .accessibilityLabel("Clear filter: \(filter.name)")
+                    .accessibilityIdentifier("clear-shelf-filter")
+            } else {
+                HStack(spacing: 24) {
+                    Button("Choose sources") {
+                        settingsSection = .sources
+                        sidebarItem = .settings
+                    }
+                    .buttonStyle(.glassProminent)
+                    .accessibilityIdentifier("choose-sources")
+                    Button("Explore a sample shelf") { library.showSample() }.buttonStyle(.glass)
                 }
-                .buttonStyle(.glassProminent)
-                .accessibilityIdentifier("choose-sources")
-                Button("Explore a sample shelf") { library.showSample() }.buttonStyle(.glass)
             }
         }
         .foregroundStyle(palette.text)
@@ -1073,6 +1106,8 @@ struct ShelfPhoto: View {
 struct BookCaption: View {
     let book: Book
     let dateFormat: AppDateFormat
+    /// Replaces the stars with your rating beside the community's, for the Hot Takes sort.
+    var comparesCommunity = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1101,7 +1136,16 @@ struct BookCaption: View {
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             )
             .appFont(size: 29).opacity(0.82).lineLimit(1)
-            if let rating = book.rating { StarRating(rating: rating, size: 26).padding(.top, 4) }
+            if comparesCommunity, let rating = book.rating, let community = book.communityRating,
+                community > 0
+            {
+                Text(
+                    "You ★\(rating.formatted(.number.precision(.fractionLength(0...1)))) · Community ★\(community.formatted(.number.precision(.fractionLength(1))))"
+                )
+                .appFont(size: 29).opacity(0.82).padding(.top, 4)
+            } else if let rating = book.rating {
+                StarRating(rating: rating, size: 26).padding(.top, 4)
+            }
         }
     }
 }
