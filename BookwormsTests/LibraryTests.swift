@@ -334,6 +334,11 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(item.displayAction?.url, URL(string: "bookworms://book/1"))
         XCTAssertEqual(BookLink.id(from: books[0].actionURL), 1)
         XCTAssertNil(TopShelfSnapshot.content(for: []))
+        var reading = books[0]
+        reading.progress = 0.4
+        let split = try XCTUnwrap(TopShelfSnapshot.content(for: [reading, books[1]]))
+        XCTAssertEqual(split.sections.map(\.title), ["Now reading", "Recently read"])
+        XCTAssertEqual(split.sections[0].items.first?.playbackProgress, 0.4)
         for value in [
             "https://book/1", "bookworms://other/1", "bookworms://book/-1",
             "bookworms://book/1?token=x", "bookworms://book/1/2",

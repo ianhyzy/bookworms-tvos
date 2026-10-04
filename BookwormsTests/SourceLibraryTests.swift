@@ -126,6 +126,17 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(legacy.collection, .standard)
     }
 
+    func testHotTakesSortByGapFromCommunityRating() {
+        let books = [
+            Book(id: 1, title: "Agree", author: "A", rating: 4, communityRating: 4.1),
+            Book(id: 2, title: "Loved", author: "A", rating: 5, communityRating: 2.9),
+            Book(id: 3, title: "Unrated", author: "A", communityRating: 3),
+            Book(id: 4, title: "Panned", author: "A", rating: 1, communityRating: 4.2),
+        ]
+        let prefs = ShelfPreferences(collection: .all, sort: .hotTakes)
+        XCTAssertEqual(prefs.select(books, limit: 40).map(\.id), [4, 2, 1, 3])
+    }
+
     func testCurrentReadProgressUsesPagesAndClamps() {
         func read(_ pages: Int?, edition: Int? = nil) -> CurrentRead {
             CurrentRead(
@@ -141,10 +152,12 @@ final class SourceLibraryTests: XCTestCase {
     func testEveryShelfSortSupportsReverseAndDeterministicTies() {
         let first = Book(
             id: 1, title: "Alpha", author: "Alpha", pages: 100,
-            finished: "2026-01-01", rating: 2, isOwned: true, publicationYear: 2000)
+            finished: "2026-01-01", rating: 2, communityRating: 4, isOwned: true,
+            publicationYear: 2000)
         let second = Book(
             id: 2, title: "Zulu", author: "Zulu", pages: 500,
-            finished: "2026-02-01", rating: 5, isOwned: true, publicationYear: 2020)
+            finished: "2026-02-01", rating: 5, communityRating: 4.5, isOwned: true,
+            publicationYear: 2020)
         for sort in ShelfSort.allCases {
             let expected = [.dateRead, .rating, .year].contains(sort) ? [2, 1] : [1, 2]
             let forward = ShelfPreferences(collection: .all, sort: sort)

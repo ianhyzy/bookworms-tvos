@@ -34,6 +34,12 @@ struct YearInReview: Equatable, Identifiable, Sendable {
     let genres: [Tally]
     /// The author with the most finished books, when at least two share an author.
     let topAuthor: Tally?
+    /// The book with the most pages; the latest finish wins a tie.
+    let longest: Book?
+    /// The book with the fewest pages, when the year has at least two books with page counts.
+    let shortest: Book?
+    /// The highest-rated book; the latest finish wins a tie.
+    let favorite: Book?
 
     var id: Int { year }
 
@@ -61,18 +67,25 @@ struct YearInReview: Equatable, Identifiable, Sendable {
                     ? lhs.id < rhs.id : (lhs.finished ?? "") < (rhs.finished ?? "")
             }
         self.books = books
+        let favorites = books.sorted { lhs, rhs in
+            (lhs.rating ?? -1) == (rhs.rating ?? -1)
+                ? Book.recentFirst(lhs, rhs) : (lhs.rating ?? -1) > (rhs.rating ?? -1)
+        }
+        favorite = favorites.first { $0.rating.map { (0...5).contains($0) && $0 > 0 } ?? false }
         if books.count > BookLimit.maximum {
-            let favorites = books.sorted { lhs, rhs in
-                (lhs.rating ?? -1) == (rhs.rating ?? -1)
-                    ? Book.recentFirst(lhs, rhs) : (lhs.rating ?? -1) > (rhs.rating ?? -1)
-            }
             let kept = Set(favorites.prefix(BookLimit.maximum).map(\.id))
             shelf = books.filter { kept.contains($0.id) }
         } else {
             shelf = books
         }
 
-        let paged = books.compactMap(\.pages).filter { $0 > 0 }
+        // `books` is earliest first, so the last of equal page counts is the latest finish.
+        let withPages = books.filter { ($0.pages ?? 0) > 0 }
+        longest = withPages.last { $0.pages == withPages.map { $0.pages ?? 0 }.max() }
+        shortest =
+            withPages.count < 2
+            ? nil : withPages.last { $0.pages == withPages.map { $0.pages ?? 0 }.min() }
+        let paged = withPages.compactMap(\.pages)
         pages = paged.reduce(0, +)
         booksWithPages = paged.count
         let ratings = books.compactMap(\.rating).filter { (0...5).contains($0) }

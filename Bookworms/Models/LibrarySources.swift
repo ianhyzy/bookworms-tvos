@@ -86,6 +86,8 @@ enum ShelfSort: String, Codable, CaseIterable, Identifiable {
     case title = "Title"
     case author = "Author"
     case length = "Length"
+    /// Largest gap between your rating and the community's first; books missing either go last.
+    case hotTakes = "Hot Takes"
     var id: String { rawValue }
 }
 
@@ -127,6 +129,7 @@ struct ShelfPreferences: Codable, Equatable {
             case .year:
                 order = compare(lhs.publicationYear, rhs.publicationYear, descending: true)
             case .length: order = compare(lhs.pages, rhs.pages, descending: false)
+            case .hotTakes: order = compare(lhs.ratingGap, rhs.ratingGap, descending: true)
             case .title:
                 order = compare(
                     lhs.title.lowercased(), rhs.title.lowercased(), descending: false)

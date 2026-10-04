@@ -7,7 +7,6 @@ Each idea notes the data it needs. "Synced" means the Hardcover library or socia
 ## Current reads
 
 - **Progress on the Book Wall.** The wall's ribbon currently marks focus. Proposed: current reads always carry a ribbon whose length shows progress, and focus uses a different cue. Alternative: a brass spine tab shows the percentage. Data: synced.
-- **Top Shelf progress.** Top Shelf can't draw the My Shelf light sweep over its system-rendered posters. Set `playbackProgress` on current reads to use the native progress bar, and consider separate **Now Reading** and **Recently Read** sections. Data: synced.
 - **Audiobook progress.** Divide `progress_seconds` by the edition's audio length. Data: new field; confirm the edition length field in Hardcover's schema first.
 
 ## Reading goal worm
@@ -50,7 +49,7 @@ Data: synced.
 
 ## Hot takes
 
-A view of the books where your rating differs most from the community rating, sorted by difference. It mirrors the Book Club disagreement sort, but compares you with the community. Data: synced.
+**Hot Takes** is a My Shelf sort. Still open: show the gap in the caption, such as "You ★5 · Community ★3.2". Data: synced.
 
 ## Recommended by friends
 

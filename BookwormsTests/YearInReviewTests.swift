@@ -52,6 +52,25 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(review.topAuthor, .init(name: "Author", count: 4))
     }
 
+    func testRecordsPickLongestShortestAndFavorite() throws {
+        let review = try XCTUnwrap(
+            YearInReview.all(from: [
+                book(1, finished: "2025-01-01", rating: 5, pages: 640),
+                book(2, finished: "2025-02-01", rating: 3, pages: 180),
+                book(3, finished: "2025-03-01", rating: 5, pages: 640),
+                book(4, finished: "2025-04-01", pages: 0),
+            ])
+            .first)
+        XCTAssertEqual(review.longest?.id, 3, "The latest finish wins a tie")
+        XCTAssertEqual(review.shortest?.id, 2)
+        XCTAssertEqual(review.favorite?.id, 3)
+        let single = try XCTUnwrap(
+            YearInReview.all(from: [book(1, finished: "2025-01-01", pages: 300)]).first)
+        XCTAssertEqual(single.longest?.id, 1)
+        XCTAssertNil(single.shortest, "One paged book isn't also the shortest")
+        XCTAssertNil(single.favorite)
+    }
+
     func testGenresAndAuthorsRankByCountThenName() throws {
         let review = try XCTUnwrap(
             YearInReview.all(from: [

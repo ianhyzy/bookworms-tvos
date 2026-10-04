@@ -28,6 +28,12 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     /// The current read's start date, `yyyy-MM-dd`.
     var started: String?
 
+    /// How far your rating is from the community average, when both are recorded.
+    var ratingGap: Double? {
+        guard let rating, rating > 0, let communityRating, communityRating > 0 else { return nil }
+        return abs(rating - communityRating)
+    }
+
     var isHardcoverBook: Bool { sources?.contains(.hardcover) ?? (id < 1_000_000_000_000_000) }
 
     var spineTitle: String { title.components(separatedBy: ":").first ?? title }

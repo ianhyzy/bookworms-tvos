@@ -912,7 +912,9 @@ final class LibraryModel {
                         let url = book.detailCoverURL ?? book.coverURL ?? cached[book.id],
                         url.scheme == "https"
                     else { return nil }
-                    return TopShelfBook(id: book.id, title: book.title, imageURL: url)
+                    return TopShelfBook(
+                        id: book.id, title: book.title, imageURL: url,
+                        progress: book.isReading == true ? book.progress ?? 0 : nil)
                 }
         topShelfRevision &+= 1
         let revision = topShelfRevision

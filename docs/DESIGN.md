@@ -26,7 +26,7 @@ Details show the full cover in its original proportions, title, author, descript
 
 ## Home Screen
 
-The Top Shelf extension shows the first ten books of the selected shelf collection that have HTTPS artwork. Selecting a cover opens that book's details. The extension receives no API credentials.
+The Top Shelf extension shows the first ten books of the selected shelf collection that have HTTPS artwork, split into **Now reading** (with the system progress bar) and **Recently read**. Selecting a cover opens that book's details. The extension receives no API credentials.
 
 ## Visual review
 
