@@ -7,6 +7,10 @@ struct TopShelfBook: Codable, Sendable, Equatable {
     let imageURL: URL
     /// The fraction of a current read completed, from 0 to 1. `nil` for books not in progress.
     var progress: Double? = nil
+    /// A local copy of the cover with the light sweep drawn in, in the App Group container.
+    var posterURL: URL? = nil
+    /// The poster when it is a local file, otherwise the HTTPS cover.
+    var displayImageURL: URL { posterURL?.isFileURL == true ? posterURL! : imageURL }
     var actionURL: URL { URL(string: "bookworms://book/\(id)")! }
 }
 
@@ -28,7 +32,7 @@ enum TopShelfSnapshot {
     }
 
     /// Builds a **Now reading** section for books with progress and a **Recently read** section
-    /// for the rest. The system draws a native progress bar from `playbackProgress`.
+    /// for the rest. Current reads show the app's swept poster when one was rendered.
     static func content(for books: [TopShelfBook]) -> TVTopShelfSectionedContent? {
         let valid = books.filter { $0.id > 0 && $0.imageURL.scheme == "https" }.prefix(10)
         func section(_ title: String, _ books: [TopShelfBook]) -> TVTopShelfItemCollection<
@@ -36,16 +40,13 @@ enum TopShelfSnapshot {
         >? {
             guard !books.isEmpty else { return nil }
             let section = TVTopShelfItemCollection(
-                items: books.map { book in
+                items: books.map { book -> TVTopShelfSectionedItem in
                     let item = TVTopShelfSectionedItem(identifier: String(book.id))
                     item.title = book.title
                     item.imageShape = .poster
-                    item.setImageURL(book.imageURL, for: .screenScale1x)
-                    item.setImageURL(book.imageURL, for: .screenScale2x)
+                    item.setImageURL(book.displayImageURL, for: .screenScale1x)
+                    item.setImageURL(book.displayImageURL, for: .screenScale2x)
                     item.displayAction = TVTopShelfAction(url: book.actionURL)
-                    if let progress = book.progress {
-                        item.playbackProgress = min(1, max(0, progress))
-                    }
                     return item
                 })
             section.title = title

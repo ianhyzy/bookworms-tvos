@@ -40,8 +40,6 @@ Browse My Shelf filtered to one primary genre or one author, for example from th
 ## Year in Review
 
 - An all-time view and a comparison of two years.
-- Your longest and shortest books.
-- Your highest-rated book.
 - Your ratings compared with community ratings, such as "you rated this ★5, the community ★3.2."
 - A fullscreen "Wrapped" slideshow at the end of the year, which could also play in ambient mode.
 

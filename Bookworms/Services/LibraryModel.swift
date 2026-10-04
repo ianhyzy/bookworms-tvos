@@ -920,6 +920,7 @@ final class LibraryModel {
         let revision = topShelfRevision
         let persistence = persistence
         Task.detached(priority: .utility) {
+            let items = await TopShelfPoster.render(items, artwork: .shared)
             await persistence.publishTopShelf(items, revision: revision)
         }
     }

@@ -46,6 +46,7 @@
 		6D30390F371FDCDDE9527606 /* ShelfControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D67BA8EFA6DDFF09034B330 /* ShelfControls.swift */; };
 		6FB1D806D46FC1C9184E7EA9 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4321F36F65C066329FF751AB /* CredentialStore.swift */; };
 		7137D25D47C7B1FE18667136 /* CoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E96643E6AD6A9B38AC8A744 /* CoverView.swift */; };
+		7393398A5BC4CB0CE49264C5 /* TopShelfPoster.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0692971600BAF0457C2A78 /* TopShelfPoster.swift */; };
 		73C80B69680AA580C1B51509 /* SocialLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC4903ECD2C4C41FD217FAA6 /* SocialLibrary.swift */; };
 		77137A36A42BC2BDB51D5896 /* AutomaticSpineGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3911BB3B9FC6F012E81172A1 /* AutomaticSpineGeneration.swift */; };
 		7DC10487220907D33C111ECA /* ShelfNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F906B2997E16682756654DA8 /* ShelfNavigationTests.swift */; };
@@ -191,6 +192,7 @@
 		463315DD1C5CB6F4143881AC /* UserFacingError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserFacingError.swift; sourceTree = "<group>"; };
 		4664FDF12F4575226EFE2BF2 /* BookWallPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallPreparation.swift; sourceTree = "<group>"; };
 		4A3AFD124F7D3384645C649F /* SocialFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialFeatureTests.swift; sourceTree = "<group>"; };
+		4B0692971600BAF0457C2A78 /* TopShelfPoster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopShelfPoster.swift; sourceTree = "<group>"; };
 		4C32CAF5A0AD0A522E9DD714 /* Book.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Book.swift; sourceTree = "<group>"; };
 		4E7812293B68A78D288D26DE /* ServiceIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceIntegrationTests.swift; sourceTree = "<group>"; };
 		4F8CD616984999BA355D0253 /* PerformanceDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceDiagnostics.swift; sourceTree = "<group>"; };
@@ -329,6 +331,7 @@
 				06E4189770AB6C94FAED8949 /* SpineAuthorLayout.swift */,
 				F9506F46014E55734BFE9C2F /* SpineFontProfile.swift */,
 				8C4BB9A02FA73549E988BF4E /* SpineTextMetrics.swift */,
+				4B0692971600BAF0457C2A78 /* TopShelfPoster.swift */,
 				463315DD1C5CB6F4143881AC /* UserFacingError.swift */,
 			);
 			path = Services;
@@ -762,6 +765,7 @@
 				DCFD7DACE59B019353630D32 /* SpineTextMetrics.swift in Sources */,
 				085016EE97D66C5E7C53689D /* SpineTextRenderer.swift in Sources */,
 				0340625950B4EBF79BB9CE54 /* SpineView.swift in Sources */,
+				7393398A5BC4CB0CE49264C5 /* TopShelfPoster.swift in Sources */,
 				59A8123D5BE5B609BA8EFFD7 /* TopShelfSnapshot.swift in Sources */,
 				E1F523024C548532EB2F64D6 /* UserFacingError.swift in Sources */,
 				B6BC68C77530158559E842B2 /* ViewPreferences.swift in Sources */,

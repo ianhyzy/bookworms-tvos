@@ -8,7 +8,7 @@ The app and Top Shelf extension each include a `PrivacyInfo.xcprivacy` resource.
 | --- | --- | --- | --- |
 | App | User defaults | `CA92.1` | Store and read this app's settings, sync schedules, and saved designs. |
 | App | File timestamps | `C617.1` | Read modification dates of files in the app's cache for font-catalog freshness and image eviction. |
-| Top Shelf | None | None | Read a JSON snapshot in the App Group container and publish public cover URLs. |
+| Top Shelf | None | None | Read a JSON snapshot in the App Group container and publish public cover URLs. The app writes swept copies of current-read covers to the same container and removes posters no book uses. |
 
 The extension does not call `UserDefaults` or read file timestamps. Do not copy the app's declarations into it without corresponding API use. Update these manifests whenever a target starts using another required-reason API. Reason definitions come from [Apple's API category reference](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
 
