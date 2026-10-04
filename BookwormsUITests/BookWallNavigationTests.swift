@@ -3,7 +3,13 @@ import XCTest
 
 @MainActor
 final class BookWallNavigationTests: XCTestCase {
-    override func setUpWithError() throws { continueAfterFailure = false }
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        // The test runner's Reduce Motion pass sets this; a pass without the setting tests nothing.
+        if ProcessInfo.processInfo.environment["BOOKWORMS_EXPECT_REDUCE_MOTION"] == "1" {
+            XCTAssertTrue(UIAccessibility.isReduceMotionEnabled, "Simulator Reduce Motion is off")
+        }
+    }
 
     func testSpineFocusDetailsAndSettledReturn() {
         let app = openWall()

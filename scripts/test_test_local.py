@@ -395,6 +395,40 @@ class ExecutionTests(unittest.TestCase):
         with mock.patch.dict(os.environ, variables, clear=True):
             self.assertEqual(runner.offline_environment(), {"PATH": "/bin"})
 
+    def test_reduce_motion_pass_selects_its_classes_and_requires_each(self):
+        required = REQUIRED + ["BookwormsUITests/BookWallNavigationTests/testReplay",
+                               "BookwormsUITests/OfflinePolicyUITests/testGuard",
+                               "BookwormsTests/OfflinePolicyTests/testGuard"]
+        self.assertEqual(runner.reduce_motion_tests(required), required[1:])
+        with self.assertRaises(runner.VerificationError):
+            runner.reduce_motion_tests(required[:-1])
+
+    def test_local_plan_requires_a_reduce_motion_pass_on_the_last_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "results"
+            calls = []
+
+            def execute(runtime, device_type, runtime_output, plan, tests, baseline, reduce_motion, derived):
+                calls.append((runtime_output.name, reduce_motion, derived and derived.parent.name, tests))
+                return {"status": "passed", "runtime": runtime, "failures": []}
+
+            required = ["BookwormsUITests/BookWallNavigationTests/testReplay",
+                        "BookwormsUITests/OfflinePolicyUITests/testGuard",
+                        "BookwormsTests/OfflinePolicyTests/testGuard", "BookwormsTests/OtherTests/testOther"]
+            inventory = {"runtimes": [{"isAvailable": True, "version": "27.0", "identifier": "com.apple.tvOS-27-0"}],
+                         "devicetypes": [{"identifier": "Apple-TV-4K-3rd-generation"}]}
+            with mock.patch.object(runner, "source_identity", return_value={"sha256": "unchanged"}), \
+                 mock.patch.object(runner, "command_text", return_value="Xcode test"), \
+                 mock.patch.object(runner, "discover_required_tests", return_value=required), \
+                 mock.patch.object(runner, "command_json", return_value=inventory), \
+                 mock.patch.object(runner, "execute_runtime", side_effect=execute):
+                code = runner.main(["--runtime", "27.0", "--output", str(output)])
+            self.assertEqual(code, 0)
+            self.assertEqual(calls, [("tvOS-27.0", False, None, required),
+                                     ("tvOS-27.0-reduce-motion", True, "tvOS-27.0", required[:3])])
+            saved = json.loads((output / "report.json").read_text())
+            self.assertEqual(saved["requested_runtimes"], ["27.0", "27.0 with Reduce Motion"])
+
     def test_major_cannot_silently_be_narrowed_to_unit_or_one_runtime(self):
         with self.assertRaises(SystemExit):
             runner.parse_arguments(["--major", "--plan", "Unit"])

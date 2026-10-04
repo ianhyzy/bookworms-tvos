@@ -81,8 +81,8 @@ def make_handoff(report, profile, exit_code, output, problem=None):
     failures.extend(complete_errors)
     counts = collections.Counter()
     records = []
-    required = set(report.get("required_tests", []))
     for run in report["runs"]:
+        required = set(run.get("required_tests", report.get("required_tests", [])))
         tests = run.get("tests", {})
         counts.update(test.get("result", "Unknown") for test in tests.values())
         failures.extend(run.get("failures", []))

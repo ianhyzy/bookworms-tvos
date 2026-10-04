@@ -9,7 +9,7 @@ Run tests only when the owner asks. Routine verification after a change is:
 1. Lint each edited Swift file with `xcrun swift-format lint --strict`.
 2. Build and install on the Apple TV with `python3 scripts/device-build.py`, which compiles a Release build and launches it for manual testing.
 
-Update affected tests alongside behavior changes, list the tests that would add signal, and ask before running them. A Unit run takes about a minute; a Local run adds several minutes of UI tests; `--major` repeats Local on each runtime.
+Update affected tests alongside behavior changes, list the tests that would add signal, and ask before running them. A Unit run takes about a minute; a Local run adds several minutes of UI tests; `--major` repeats Local on each runtime. Local and `--major` add one shorter Reduce Motion pass.
 
 ## Local test worker
 
@@ -27,7 +27,7 @@ For infrastructure maintenance, run `python3 -m unittest discover -s scripts -p 
 python3 scripts/test-local.py
 ```
 
-The runner creates a disposable Apple TV 4K simulator using the newest installed tvOS runtime. It retains the build log, `.xcresult` bundle, coverage, exported screenshots, and Markdown/JSON reports under `.local/test-results/`, then deletes only the simulator it created. Each run uses its own derived-data directory. It does not read 1Password or configure real accounts. Xcode and the selected tvOS runtimes must already be installed.
+The runner creates a disposable Apple TV 4K simulator using the newest installed tvOS runtime. It retains the build log, `.xcresult` bundle, coverage, exported screenshots, and Markdown/JSON reports under `.local/test-results/`, then deletes only the simulator it created. Each run uses its own derived-data directory. A Local run then repeats the Book Wall navigation and offline-policy test classes on a second disposable simulator with Reduce Motion on, reusing the first build; the UI tests fail if the setting did not apply. With `--major`, this pass runs on the last runtime in the matrix and is reported as that runtime **with Reduce Motion**. It does not read 1Password or configure real accounts. Xcode and the selected tvOS runtimes must already be installed.
 
 For a faster service and model check:
 
@@ -110,7 +110,7 @@ Run these checks separately after changes to provider requests or decoding, or w
 | Multiple sources | Matching and merged ownership, source provenance, persisted freshness, cache-loss recovery, failed-attempt backoff, partial provider failure, rejected replacement, stale response rejection, visible source toggles and relaunch persistence | Real provider compatibility and combined catalogs |
 | Shelf choices | Read/owned/all filters, every sort and reverse order, unknown values last, the 40-book limit, five-book steps, visible reverse order and relaunch persistence | Very large real catalogs and missing metadata |
 | Shelf navigation | One focus update per press within and across pages, Select/Back focus restoration, Left to the sidebar and back, no movement below the shelf, covers resting on the shelf, and Year in Review covers, year menu, details return, and sidebar | Siri Remote swipes, rapid input, and paging animation on the physical TV |
-| Book Wall | Complete current-year layout, covering thickness in collision/stack spacing, column clearance for wide books, cover proportions, local-spine contrast, counted native sidebar entry (one focus update onto the entry book) and return, counted spine/header focus moves, replay, repeated detail returns, and focus targets inside the screen | Full-model visibility throughout falling and flight, collision contact without rebound, current-pose return after idle drift, cancellation during navigation, Reduce Motion, and Release frame presentation on Apple TV |
+| Book Wall | Complete current-year layout, covering thickness in collision/stack spacing, column clearance for wide books, cover proportions, local-spine contrast, counted native sidebar entry (one focus update onto the entry book) and return, counted spine/header focus moves, replay, repeated detail returns, and focus targets inside the screen, with Reduce Motion off and on | Full-model visibility throughout falling and flight, collision contact without rebound, current-pose return after idle drift, cancellation during navigation, the absence of motion with Reduce Motion, and Release frame presentation on Apple TV |
 | Details | Title, **Show more** for long descriptions, rating chart, one-press focus moves among Back, the reviews histogram, and **Show more**, sample reviews with return focus, cover-choice ranking | Real cover sharpness, extremely long titles/authors, and live Hardcover community reviews |
 | Typography and book shape | Title target and author hierarchy, ink density, subtle size bounds, author line spacing, title-height borrowing, cache keys, page packing and size variation | Downloaded calligraphy/decorative fonts, overhanging glyphs, subtitles, viewing distance |
 | Light/dark appearance | Appearance mapping, visible settings changes and relaunch persistence, deterministic screenshot exports, accessibility audits of shelf, social views, details, settings, empty and error states | Approve screenshot references; both wood textures, Reduce Motion, actual VoiceOver |
