@@ -67,10 +67,16 @@ enum SourceError: LocalizedError {
 }
 
 enum ShelfCollection: String, Codable, CaseIterable, Identifiable {
-    case read = "Read Books"
+    /// Up to `ShelfPreferences.readingLimit` current reads, then read books.
+    case standard = "Default"
     case owned = "Owned Books"
     case all = "All Books"
     var id: String { rawValue }
+
+    /// Decodes unknown values, including the retired "Read Books", as `standard`.
+    init(from decoder: any Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .standard
+    }
 }
 
 enum ShelfSort: String, Codable, CaseIterable, Identifiable {
@@ -84,43 +90,53 @@ enum ShelfSort: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ShelfPreferences: Codable, Equatable {
-    var collection = ShelfCollection.read
+    /// The most current reads that lead the default collection.
+    static let readingLimit = 3
+
+    var collection = ShelfCollection.standard
     var sort = ShelfSort.dateRead
     var reversed = false
 
+    /// Books for the shelf, in display order. The default collection leads with the most recently
+    /// started current reads, regardless of sort, and they count toward `limit`.
     func select(_ books: [Book], limit: Int) -> [Book] {
+        let reading =
+            collection == .standard
+            ? books.filter { $0.isReading == true }
+                .sorted { ($0.started ?? "", $0.id) > ($1.started ?? "", $1.id) }
+                .prefix(Self.readingLimit) : []
+        let limit = min(BookLimit.maximum, max(1, limit))
         let eligible = books.filter {
             switch collection {
-            case .read: $0.isRead == true || $0.finished != nil
+            case .standard: $0.isReading != true && ($0.isRead == true || $0.finished != nil)
             case .owned: $0.isOwned == true
             case .all: true
             }
         }
-        return Array(
-            eligible.sorted { lhs, rhs in
-                func compare<T: Comparable>(_ a: T?, _ b: T?, descending: Bool) -> Bool? {
-                    if a == b { return nil }
-                    guard let a else { return false }
-                    guard let b else { return true }
-                    return descending != reversed ? a > b : a < b
-                }
-                let order: Bool?
-                switch sort {
-                case .dateRead: order = compare(lhs.finished, rhs.finished, descending: true)
-                case .rating: order = compare(lhs.rating, rhs.rating, descending: true)
-                case .year:
-                    order = compare(lhs.publicationYear, rhs.publicationYear, descending: true)
-                case .length: order = compare(lhs.pages, rhs.pages, descending: false)
-                case .title:
-                    order = compare(
-                        lhs.title.lowercased(), rhs.title.lowercased(), descending: false)
-                case .author:
-                    order = compare(
-                        lhs.author.lowercased(), rhs.author.lowercased(), descending: false)
-                }
-                return order ?? (lhs.id < rhs.id)
+        let sorted = eligible.sorted { lhs, rhs in
+            func compare<T: Comparable>(_ a: T?, _ b: T?, descending: Bool) -> Bool? {
+                if a == b { return nil }
+                guard let a else { return false }
+                guard let b else { return true }
+                return descending != reversed ? a > b : a < b
             }
-            .prefix(min(BookLimit.maximum, max(1, limit))))
+            let order: Bool?
+            switch sort {
+            case .dateRead: order = compare(lhs.finished, rhs.finished, descending: true)
+            case .rating: order = compare(lhs.rating, rhs.rating, descending: true)
+            case .year:
+                order = compare(lhs.publicationYear, rhs.publicationYear, descending: true)
+            case .length: order = compare(lhs.pages, rhs.pages, descending: false)
+            case .title:
+                order = compare(
+                    lhs.title.lowercased(), rhs.title.lowercased(), descending: false)
+            case .author:
+                order = compare(
+                    lhs.author.lowercased(), rhs.author.lowercased(), descending: false)
+            }
+            return order ?? (lhs.id < rhs.id)
+        }
+        return Array((Array(reading) + sorted).prefix(limit))
     }
 }
 

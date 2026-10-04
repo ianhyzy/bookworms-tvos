@@ -102,6 +102,42 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(prefs.select(books, limit: 2).map(\.id), [2, 3])
     }
 
+    func testDefaultShelfLeadsWithThreeMostRecentlyStartedCurrentReads() throws {
+        let reading = (1...4)
+            .map {
+                Book(
+                    id: $0, title: "Reading \($0)", author: "Author", finished: "2025-01-01",
+                    isRead: true, isReading: true, started: "2026-09-0\($0)")
+            }
+        let read = [
+            Book(id: 10, title: "Older", author: "Author", finished: "2026-01-01"),
+            Book(id: 11, title: "Newer", author: "Author", finished: "2026-08-01"),
+            Book(id: 12, title: "Unread", author: "Author", isOwned: true),
+        ]
+        let prefs = ShelfPreferences(sort: .title)
+        XCTAssertEqual(prefs.select(read + reading, limit: 40).map(\.id), [4, 3, 2, 11, 10])
+        XCTAssertEqual(prefs.select(read + reading, limit: 2).map(\.id), [4, 3])
+        XCTAssertEqual(
+            ShelfPreferences(collection: .all, sort: .title).select(reading, limit: 40).count, 4)
+        let legacy = try JSONDecoder()
+            .decode(
+                ShelfPreferences.self,
+                from: Data(#"{"collection":"Read Books","sort":"Title","reversed":false}"#.utf8))
+        XCTAssertEqual(legacy.collection, .standard)
+    }
+
+    func testCurrentReadProgressUsesPagesAndClamps() {
+        func read(_ pages: Int?, edition: Int? = nil) -> CurrentRead {
+            CurrentRead(
+                startedAt: nil, progressPages: pages, edition: CurrentRead.Pages(pages: edition))
+        }
+        XCTAssertEqual(HardcoverClient.progress(of: read(50, edition: 200), pages: 100), 0.25)
+        XCTAssertEqual(HardcoverClient.progress(of: read(50), pages: 100), 0.5)
+        XCTAssertEqual(HardcoverClient.progress(of: read(500), pages: 100), 1)
+        XCTAssertNil(HardcoverClient.progress(of: read(nil), pages: 100))
+        XCTAssertNil(HardcoverClient.progress(of: read(10), pages: nil))
+    }
+
     func testEveryShelfSortSupportsReverseAndDeterministicTies() {
         let first = Book(
             id: 1, title: "Alpha", author: "Alpha", pages: 100,

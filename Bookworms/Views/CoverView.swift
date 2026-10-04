@@ -4,6 +4,8 @@ struct CoverView: View {
     let book: Book
     /// Draws a contact shadow where the cover's base meets a `ShelfBoard`.
     var standsOnShelf = false
+    /// Dims the unread part of a current read's cover, right of a line at `Book.progress`.
+    var showsProgress = false
     var onAspectRatio: ((Double) -> Void)? = nil
     @Environment(\.isFocused) private var isFocused
     @Environment(\.coverIsPressed) private var isPressed
@@ -36,6 +38,11 @@ struct CoverView: View {
             }
             artwork(with: currentImage, compact: geometry.size.height < 350)
                 .frame(width: width, height: height)
+                .overlay(alignment: .leading) {
+                    if showsProgress, currentImage != nil, let progress = book.progress {
+                        progressSweep(progress, width: width)
+                    }
+                }
                 .clipShape(.rect(cornerRadius: cornerRadius))
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius)
@@ -107,11 +114,32 @@ struct CoverView: View {
         onAspectRatio?(Double(decoded.width) / Double(decoded.height))
     }
 
+    /// A static light sweep: the read part keeps its color, the unread part dims, and a white
+    /// line marks the reader's place. Plain fills keep it free of blur and offscreen passes.
+    private func progressSweep(_ progress: Double, width: CGFloat) -> some View {
+        let line = max(2, width * 0.012)
+        let x = width * progress
+        return ZStack(alignment: .leading) {
+            Rectangle().fill(.black.opacity(0.5))
+                .frame(width: width - x).offset(x: x)
+            Rectangle().fill(.white.opacity(0.9))
+                .frame(width: line).offset(x: min(max(0, x - line / 2), width - line))
+        }
+        .frame(width: width, alignment: .leading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private func artwork(with currentImage: UIImage?, compact: Bool) -> some View {
         ZStack {
             if let currentImage {
                 Image(uiImage: currentImage).resizable().scaledToFit()
                     .accessibilityLabel("Cover of \(book.title)")
+                    .accessibilityValue(
+                        showsProgress
+                            ? book.progress.map { "\(Int(($0 * 100).rounded())) percent read" }
+                                ?? "" : ""
+                    )
                     .accessibilityIdentifier("detail-cover")
             } else {
                 Rectangle().fill(.gray.opacity(0.18))

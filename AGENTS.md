@@ -21,7 +21,7 @@ This repository contains **Bookworms - eBook Display**, a Swift 6 and SwiftUI ap
 | Home Screen extension | [ContentProvider.swift](BookwormsTopShelf/ContentProvider.swift), [TopShelfSnapshot.swift](Shared/TopShelfSnapshot.swift) |
 | Targets and build settings | [project.yml](project.yml) |
 
-Read [architecture](docs/ARCHITECTURE.md) for data flow, [development setup](docs/DEVELOPMENT.md) for local and device workflows, [testing](docs/TESTING.md) for verification, and [release instructions](docs/RELEASING.md) for distribution. Check [privacy](docs/PRIVACY.md) before changing external transfers or retention. Preserve [texture attribution](docs/TEXTURE_CREDITS.md) and [icon source documentation](design/icon/README.md).
+Read [architecture](docs/ARCHITECTURE.md) for data flow, [development setup](docs/DEVELOPMENT.md) for local and device workflows, [testing](docs/TESTING.md) for verification, and [release instructions](docs/RELEASING.md) for distribution. Check [privacy](docs/PRIVACY.md) before changing external transfers or retention. Record proposed features in [feature ideas](docs/IDEAS.md), not in the reference documents. Preserve [texture attribution](docs/TEXTURE_CREDITS.md) and [icon source documentation](design/icon/README.md).
 
 Run commands from the repository root:
 

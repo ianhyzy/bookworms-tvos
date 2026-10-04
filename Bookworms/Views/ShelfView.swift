@@ -1096,7 +1096,7 @@ struct BookCaption: View {
                     book.author, book.primaryGenre,
                     book.finished.map { _ in
                         book.finishedLabel(format: dateFormat)
-                    },
+                    } ?? (book.isReading == true ? "Reading" : nil),
                 ]
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             )
@@ -1437,7 +1437,7 @@ struct ShelfRow: View {
                     fontRevision: library.fontRevision)
             } else {
                 CoverView(
-                    book: book, standsOnShelf: true,
+                    book: book, standsOnShelf: true, showsProgress: true,
                     onAspectRatio: { library.recordCoverRatio($0, for: book.id) }
                 )
                 .frame(width: dimensions.width, height: dimensions.height)

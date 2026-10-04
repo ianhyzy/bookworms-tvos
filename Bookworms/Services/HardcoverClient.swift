@@ -305,6 +305,10 @@ actor HardcoverClient {
                   order_by: [{finished_at: desc}, {id: desc}], limit: 1) {
                   finished_at edition { id pages image { url width height } reading_format { format } language { code2 } }
                 }
+                current_read: user_book_reads(where: {finished_at: {_is_null: true}},
+                  order_by: [{id: desc}], limit: 1) {
+                  started_at progress_pages edition { pages }
+                }
               }
             }
             """
@@ -536,6 +540,19 @@ actor HardcoverClient {
         return (best.url, alternate)
     }
 
+    /// Hardcover's `status_id` for **Currently Reading**.
+    static let currentlyReadingStatus = 2
+
+    /// The fraction of pages read in an unfinished read, from 0 to 1. Prefers the page count of
+    /// the read's edition, then the library edition, then the book. Returns `nil` when the read logs no pages, such as an audiobook
+    /// tracked in seconds.
+    static func progress(of read: CurrentRead?, pages fallback: Int?) -> Double? {
+        guard let read, let done = read.progressPages,
+            let total = read.edition?.pages ?? fallback, total > 0
+        else { return nil }
+        return min(1, max(0, Double(done) / Double(total)))
+    }
+
     static func normalize(_ rows: [UserBook]) -> [Book] {
         var unique: [Int: Book] = [:]
         for row in rows {
@@ -572,7 +589,13 @@ actor HardcoverClient {
                     .filter { (0.5...5).contains($0.rating) && $0.count >= 0 },
                 detailCoverURL: covers.preferred, sources: [.hardcover],
                 isRead: row.statusID == 3 || read?.finishedAt != nil || row.lastReadDate != nil,
-                publicationYear: source.releaseYear)
+                publicationYear: source.releaseYear,
+                isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
+                progress: row.statusID == Self.currentlyReadingStatus
+                    ? Self.progress(of: row.currentRead, pages: row.edition?.pages ?? source.pages)
+                    : nil,
+                started: row.statusID == Self.currentlyReadingStatus
+                    ? row.currentRead?.startedAt : nil)
             if let previous = unique[book.id], !Book.recentFirst(book, previous) { continue }
             unique[book.id] = book
         }
@@ -594,6 +617,8 @@ struct UserBook: Decodable, Sendable {
     let book: SourceBook
     let edition: Edition?
     let userBookReads: [ReadEvent]?
+    var currentReads: [CurrentRead]? = nil
+    var currentRead: CurrentRead? { currentReads?.first }
     enum CodingKeys: String, CodingKey {
         case id
         case statusID = "status_id"
@@ -602,6 +627,7 @@ struct UserBook: Decodable, Sendable {
         case book
         case edition
         case userBookReads = "user_book_reads"
+        case currentReads = "current_read"
     }
 
 }
@@ -684,6 +710,18 @@ struct ReadEvent: Decodable, Sendable {
         case edition
     }
 
+}
+/// An unfinished read, which carries reading progress.
+struct CurrentRead: Decodable, Sendable {
+    let startedAt: String?
+    let progressPages: Int?
+    let edition: Pages?
+    struct Pages: Decodable, Sendable { let pages: Int? }
+    enum CodingKeys: String, CodingKey {
+        case startedAt = "started_at"
+        case progressPages = "progress_pages"
+        case edition
+    }
 }
 struct SeriesMembership: Decodable, Sendable {
     let featured: Bool?

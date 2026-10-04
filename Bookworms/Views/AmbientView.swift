@@ -186,7 +186,7 @@ struct AmbientView: View {
                                     book: book, style: style, dimensions: dimensions,
                                     isFocused: false, fontRevision: library.fontRevision)
                             } else {
-                                CoverView(book: book, standsOnShelf: true)
+                                CoverView(book: book, standsOnShelf: true, showsProgress: true)
                                     .frame(width: dimensions.width, height: dimensions.height)
                             }
                         }

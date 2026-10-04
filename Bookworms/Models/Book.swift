@@ -21,6 +21,12 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var isOwned: Bool?
     var isRead: Bool?
     var publicationYear: Int?
+    /// Whether the book is on the reader's Hardcover **Currently Reading** shelf.
+    var isReading: Bool?
+    /// The fraction of the current read completed, from 0 to 1, when Hardcover has page progress.
+    var progress: Double?
+    /// The current read's start date, `yyyy-MM-dd`.
+    var started: String?
 
     var isHardcoverBook: Bool { sources?.contains(.hardcover) ?? (id < 1_000_000_000_000_000) }
 
