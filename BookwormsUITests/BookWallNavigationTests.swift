@@ -44,8 +44,7 @@ final class BookWallNavigationTests: XCTestCase {
         let replay = app.buttons["book-wall-replay"]
         XCTAssertTrue(replay.exists)
         RemoteNavigation.press(.up, in: app, expecting: replay)
-        XCUIRemote.shared.press(.select)
-        waitForReplayToLand(app)
+        replayAndWaitToLand(app)
         XCTAssertTrue(first.exists)
         RemoteNavigation.waitForFocus(replay)
         RemoteNavigation.press(.down, in: app, expecting: topRight)
@@ -95,8 +94,7 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.press(.left, in: app, expecting: sidebar)
         RemoteNavigation.press(.right, in: app, expecting: topRight)
         RemoteNavigation.press(.up, in: app, expecting: replay)
-        XCUIRemote.shared.press(.select)
-        waitForReplayToLand(app)
+        replayAndWaitToLand(app)
         XCTAssertTrue(first.exists)
         RemoteNavigation.waitForFocus(replay)
         RemoteNavigation.press(.down, in: app, expecting: topRight)
@@ -179,23 +177,21 @@ final class BookWallNavigationTests: XCTestCase {
         return app
     }
 
-    /// Waits for a replay started by Drop again to finish. Spines stay mounted during a replay,
-    /// so their existence does not show that the books have landed. With Reduce Motion the wall
-    /// arranges the books at once and its status can clear before this check runs.
-    private func waitForReplayToLand(
+    /// Presses Select on the focused Drop again button and waits for the replayed books to
+    /// land. Spines stay mounted during a replay, and with Reduce Motion the status text can
+    /// clear before a check runs, so the wall's fall count is the only lasting evidence.
+    private func replayAndWaitToLand(
         _ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
     ) {
-        let reduceMotion = UIAccessibility.isReduceMotionEnabled
-        let status = app.staticTexts[
-            reduceMotion ? "Arranging books…" : "Books are falling into place…"]
-        if !reduceMotion {
-            XCTAssertTrue(
-                status.waitForExistence(timeout: 2), "Drop again did not start a fall",
-                file: file, line: line)
-        }
-        XCTAssertTrue(
-            status.waitForNonExistence(timeout: 15), "The replayed books did not land",
-            file: file, line: line)
+        let probe = app.staticTexts["book-wall-fall-probe"]
+        let landed = Int(probe.label) ?? 0
+        XCUIRemote.shared.press(.select)
+        let replayed = NSPredicate(format: "label == %@", String(landed + 1))
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: replayed, object: probe)],
+                timeout: 15),
+            .completed, "Drop again did not replay the fall", file: file, line: line)
     }
 
     private func capture(_ app: XCUIApplication, name: String) {
@@ -208,7 +204,8 @@ final class BookWallNavigationTests: XCTestCase {
     private func audit(_ app: XCUIApplication) throws {
         // The one-pixel probes report test evidence, not user-facing content.
         try app.auditAccessibility {
-            ["scenario-probe", "focus-transition-probe"].contains($0.element?.identifier ?? "")
+            ["scenario-probe", "focus-transition-probe", "book-wall-fall-probe"]
+                .contains($0.element?.identifier ?? "")
         }
     }
 
