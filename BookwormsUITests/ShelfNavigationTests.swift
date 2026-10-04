@@ -73,7 +73,8 @@ final class ShelfNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(back)
         // Every direction out of the author and genre buttons.
         RemoteNavigation.press(.right, in: app, expecting: author)
-        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.pressWithoutMoving(.up, in: app, from: author)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: author)
         RemoteNavigation.press(.down, in: app, expecting: fantasy)
         RemoteNavigation.press(.up, in: app, expecting: author)
         RemoteNavigation.press(.down, in: app, expecting: fantasy)
