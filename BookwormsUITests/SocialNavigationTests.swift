@@ -243,13 +243,16 @@ final class SocialNavigationTests: XCTestCase {
         let following = app.descendants(matching: .any)["ambient-view-following"].firstMatch
         let comparison = app.descendants(matching: .any)["ambient-view-comparison"].firstMatch
         let shared = app.descendants(matching: .any)["ambient-view-shared"].firstMatch
+        let picks = app.descendants(matching: .any)["ambient-view-friendsPicks"].firstMatch
         let start = app.buttons["start-ambient"]
         XCTAssertTrue(following.waitForExistence(timeout: 5))
         XCTAssertLessThan(following.frame.minY, comparison.frame.minY)
         XCTAssertLessThan(comparison.frame.minY, shared.frame.minY)
+        XCTAssertLessThan(shared.frame.minY, picks.frame.minY)
         RemoteNavigation.moveFocus(to: following, in: app)
         RemoteNavigation.press(.down, in: app, expecting: comparison)
         RemoteNavigation.press(.down, in: app, expecting: shared)
+        RemoteNavigation.press(.down, in: app, expecting: picks)
         RemoteNavigation.press(.down, in: app, expecting: start)
         capture(app, name: "Ambient page")
     }
@@ -307,7 +310,7 @@ final class SocialNavigationTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: second)
         RemoteNavigation.press(.right, in: app, expecting: third)
         RemoteNavigation.pressWithoutMoving(.right, in: app, from: third)
-        RemoteNavigation.pressWithoutMoving(.up, in: app, from: third)
+        // Up is left to the system: tvOS 27 moves it to the sidebar title.
         RemoteNavigation.pressWithoutMoving(.down, in: app, from: third)
         RemoteNavigation.press(.left, in: app, expecting: second)
         RemoteNavigation.press(.left, in: app, expecting: first)
