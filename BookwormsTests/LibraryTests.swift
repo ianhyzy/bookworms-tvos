@@ -18,6 +18,16 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(invalid.finishedLabel(format: .iso), "Date not recorded")
     }
 
+    func testLengthLabelUsesMinutesOnlyForAudiobooksWithARecordedLength() {
+        var book = Book(id: 1, title: "Book", author: "Author", pages: 304, format: "Listened")
+        XCTAssertEqual(book.lengthLabel, "304 pages")
+        book.audioSeconds = 44_550
+        XCTAssertEqual(book.lengthLabel, "743 minutes")
+        book.format = "Ebook"
+        XCTAssertEqual(book.lengthLabel, "304 pages")
+        XCTAssertNil(Book(id: 2, title: "Book", author: "Author").lengthLabel)
+    }
+
     func testGenreTagsKeepEnglishAndDropForeignLanguages() {
         for tag in ["Science Fiction", "LGBTQ", "Aliens", "Manga", "Dystopian", "Culture"] {
             XCTAssertTrue(HardcoverClient.isEnglishTag(tag), tag)

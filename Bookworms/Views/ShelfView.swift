@@ -76,6 +76,8 @@ struct ShelfView: View {
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
     @State private var selectedBook: Book?
+    /// The book whose details applied the shelf filter, and the view those details opened over.
+    @State private var filterOrigin: (book: Book, view: BookwormsView)?
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
         case ambient
@@ -303,6 +305,7 @@ struct ShelfView: View {
                     onShowShelf: { filter in
                         // The book matches its own author and genres, so focus returns to it.
                         lastFocusedID = book.id
+                        filterOrigin = (book, coordinator.current)
                         library.shelfFilter = filter
                         showView(.shelf)
                         selectedBook = nil
@@ -556,6 +559,28 @@ struct ShelfView: View {
 
     }
 
+    /// Reopens the details that filtered My Shelf, over the view they opened from, and clears the
+    /// filter. `nil` without such a filter, so Back keeps opening the sidebar.
+    // ponytail: one level of history; keep a stack if chained filters should unwind in order.
+    private var returnToFilterOrigin: (() -> Void)? {
+        guard let origin = filterOrigin, library.shelfFilter != nil else { return nil }
+        return {
+            filterOrigin = nil
+            library.shelfFilter = nil
+            lastFocusedID = origin.book.id
+            showView(origin.view)
+            // Book Wall reopens its own details for a book it holds; other views use the cover.
+            if coordinator.current == .bookWall,
+                wallBooks.contains(where: { $0.id == origin.book.id })
+            {
+                coordinator.wallSelection = origin.book.id
+                wallDetail.requestedBookID = origin.book.id
+            } else {
+                selectedBook = origin.book
+            }
+        }
+    }
+
     private func restoreSelection() {
         recordActivity()
         guard isShowingMainView else { return }
@@ -604,6 +629,17 @@ struct ShelfView: View {
                                 prepared: prepared, viewportFrame: wallViewportFrame,
                                 isActive: sidebarItem == .view(.bookWall),
                                 reviewLoader: reviewLoader(for:),
+                                onShowShelf: { book, filter in
+                                    lastFocusedID = book.id
+                                    filterOrigin = (book, .bookWall)
+                                    library.shelfFilter = filter
+                                    showView(.shelf)
+                                },
+                                series: { library.series(for: library.book(withID: $0.id) ?? $0) },
+                                libraryBook: { library.book(withID: $0) },
+                                // ponytail: a series book opens in the cover details, even one
+                                // on the wall; fly to it instead if that should stay 3D.
+                                onOpenBook: { selectedBook = $0 },
                                 onActivity: recordActivity,
                                 returnRevision: socialReturnRevision,
                                 detailState: wallDetail
@@ -671,6 +707,9 @@ struct ShelfView: View {
                 }
             }
             .ignoresSafeArea(edges: view.hasHeader ? .top : [])
+            // The one place main content handles Back: a shelf that details filtered returns to
+            // those details. Everywhere else the handler is `nil` and Back opens the sidebar.
+            .onExitCommand(perform: view == .shelf ? returnToFilterOrigin : nil)
             .task(
                 id: ShelfPreparationKey(
                     revision: library.presentationRevision, fontRevision: library.fontRevision,
@@ -980,10 +1019,12 @@ private struct BookWallDetailOverlay: View {
 
     var body: some View {
         if state.isPresented {
-            BookWallDetailNavigationCover(palette: palette) { state.closeRevision += 1 }
-                .transition(
-                    PerformanceDiagnostics.isolates("wall-instant-cover-exit")
-                        ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
+            BookWallDetailNavigationCover(palette: palette, detailFrame: state.frame) {
+                state.closeRevision += 1
+            }
+            .transition(
+                PerformanceDiagnostics.isolates("wall-instant-cover-exit")
+                    ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
         }
     }
 }
@@ -991,7 +1032,9 @@ private struct BookWallDetailOverlay: View {
 /// Places Back above the tab control, which tvOS draws outside the selected tab's content.
 private struct BookWallDetailNavigationCover: View {
     let palette: ShelfPalette
+    let detailFrame: CGRect
     let onBack: () -> Void
+    @FocusState private var backFocused: Bool
 
     var body: some View {
         GeometryReader { geometry in
@@ -1033,13 +1076,27 @@ private struct BookWallDetailNavigationCover: View {
                         }
                 }
                 if !PerformanceDiagnostics.isolates("wall-no-detail-back") {
-                    Button(action: onBack) {
-                        Label("Back to view", systemImage: "chevron.left")
+                    // Back sits where cover details place it, in a full-height section over the
+                    // book's column, so Left from any detail control reaches it. Like cover
+                    // details, opening focuses Back first.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button(action: onBack) {
+                            Label("Back to view", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.glass)
+                        .focused($backFocused)
+                        .onAppear { backFocused = true }
+                        .accessibilityIdentifier("back-to-shelf")
+                        .frame(height: BookDetailCoverLayout.backHeight)
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.glass)
-                    .accessibilityIdentifier("back-to-shelf")
-                    .padding(.leading, 40)
-                    .padding(.top, 50)
+                    .frame(
+                        width: detailFrame.width * BookDetailCoverLayout.columnFraction,
+                        alignment: .leading
+                    )
+                    .focusSection()
+                    .padding(.leading, detailFrame.minX + BookDetailCoverLayout.horizontalPadding)
+                    .padding(.top, detailFrame.minY + BookDetailCoverLayout.verticalPadding)
                 }
             }
         }

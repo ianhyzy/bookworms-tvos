@@ -30,6 +30,8 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var progress: Double?
     /// The current read's start date, `yyyy-MM-dd`.
     var started: String?
+    /// The listening time of the reader's audiobook edition, when Hardcover records it.
+    var audioSeconds: Int? = nil
 
     /// How far your rating is from the community average, when both are recorded.
     var ratingGap: Double? {
@@ -86,6 +88,16 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         case "both": "Physical & audiobook"
         default: format
         }
+    }
+
+    /// The length for display: listening time in whole minutes for an audiobook when Hardcover
+    /// records it, otherwise the page count.
+    var lengthLabel: String? {
+        if formatLabel == "Audiobook", let audioSeconds, audioSeconds > 0 {
+            return "\((audioSeconds + 30) / 60) minutes"
+        }
+        if let pages, pages > 0 { return "\(pages) pages" }
+        return nil
     }
 
     /// The format and finish date joined with a bullet, such as "Audiobook • Sep 17, 2026".

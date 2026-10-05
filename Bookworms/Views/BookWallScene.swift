@@ -856,17 +856,19 @@ final class BookWallScene {
         for slot: BookWallLayout.Slot, detailFrame: CGRect,
         cameraDepth: Float, reduceMotion: Bool
     ) -> Transform? {
+        // Below Back, where cover details place the cover.
         let top = max(
             BookDetailCoverLayout.wallNavigationCoverSize.height + 12,
-            detailFrame.minY + BookDetailCoverLayout.verticalPadding)
+            detailFrame.minY + BookDetailCoverLayout.verticalPadding
+                + BookDetailCoverLayout.backHeight + BookDetailCoverLayout.coverGap)
         let bottom = min(
             visibleArea.maxY, detailFrame.maxY - BookDetailCoverLayout.verticalPadding)
         // Fit symmetrically around the screen's center rather than centering below
-        // the Back button. The full sway remains below the navigation cover.
+        // the Back button. The full sway remains below Back.
         let halfHeight = min(renderBounds.midY - top, bottom - renderBounds.midY)
         guard halfHeight > 0 else { return nil }
         let left = detailFrame.minX + BookDetailCoverLayout.horizontalPadding
-        let width = detailFrame.width * BookDetailCoverLayout.wallColumnFraction
+        let width = detailFrame.width * BookDetailCoverLayout.columnFraction
         let area = CGRect(
             x: left + width * Self.detailShadowRoom, y: renderBounds.midY - halfHeight,
             width: width,

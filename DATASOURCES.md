@@ -8,7 +8,7 @@ Choose sources in **Settings → Sources**. The app supports one active account 
 
 | Source | Connection and default | Available data |
 | --- | --- | --- |
-| **Hardcover** | Personal access token. Enabled by default; requires connection. | Library books, authors, descriptions, covers, completion dates, reading status, page progress and start date of current reads, personal ratings, publication years, page counts, formats, series, genres, and community ratings when available. Social access adds followed-reader profiles, avatars, activity, ratings, and reviews. |
+| **Hardcover** | Personal access token. Enabled by default; requires connection. | Library books, authors, descriptions, covers, completion dates, reading status, page progress and start date of current reads, personal ratings, publication years, page counts, audiobook listening times, formats, series, genres, and community ratings when available. Social access adds followed-reader profiles, avatars, activity, ratings, and reviews. |
 | **Calibre Web Automated (CWA)** | HTTPS server and local username/password with OPDS access. Disabled by default, and hidden in Settings while `BookPresentation.offersCWA` is false; the client, saved configuration, and sync remain. | Owned ebooks, authors, descriptions, categories, publication dates, and authenticated cover URLs. No personal ratings or completion dates; catalog modification times are not reading dates. |
 
 Hardcover library access requires `read:me:content`, `read:library`, and `read:catalog:data`. Social views also require `read:social` and `read:users`. See [authentication](docs/HARDCOVER_AUTHENTICATION.md) for token setup.

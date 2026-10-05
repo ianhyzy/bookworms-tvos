@@ -10,7 +10,7 @@ When a focused view handles a move command and also sets focus, the focus engine
 
 ## Navigation structure
 
-The app uses a `TabView` with `.sidebarAdaptable`. Pressing Left from the leftmost content item or pressing Back opens the sidebar natively. The app never moves focus to the sidebar itself.
+The app uses a `TabView` with `.sidebarAdaptable`. Pressing Left from the leftmost content item or pressing Back opens the sidebar natively. The app never moves focus to the sidebar itself. One state handles Back itself: on a My Shelf that book details filtered by author or genre, Back clears the filter and reopens those details over the view they opened from.
 
 The sidebar is one list: the enabled main views, then **Ambient**, then **Settings**. Every item is a `Tab`, so the list works on tvOS 26. A private `SidebarItem` selection in [ShelfView.swift](../Bookworms/Views/ShelfView.swift) maps main views to `coordinator.current`; **Ambient** and **Settings** leave it on the last main view. **Settings** shows `SettingsView` in place, and Back returns to the sidebar. A row of section tabs in a header focus section, level with the sidebar title, chooses the section; focusing a tab shows its section. They are buttons rather than a segmented control, which keeps Left at its leading edge, so Left from the first tab opens the sidebar. Each section lays out its controls in two columns. **Ambient** shows a page whose **Start ambient mode** button starts playback, so moving focus through the sidebar never starts it. On tvOS 27 and later, `tvOSSidebarHeader` also shows the Hardcover profile above the list; tvOS 26 omits it because `tabViewSidebarHeader` requires tvOS 27.
 
@@ -24,7 +24,7 @@ Each view divides its focusable content into focus sections with `.focusSection(
 | **Following** | Activity row, in pages of 4; each card can have a **Read review** button below it | The last focused activity |
 | **Compare Shelves** | Header (ordering menu, reader picker), your row, the reader's row | The book in the same column as the last focused book, on the entered row's visible page |
 | **Book Club** | Header (reader picker, sort menu), cover row, review actions | The selected cover |
-| **Book details** | Left column (**Back to view**); header (author and series buttons, full width); metadata row (genre buttons and the rating histogram, full width); description (**Show more**) | Right from Back reaches the author. Down from the author enters the metadata row at its first genre. Right from the author reaches the series button. Up from the metadata row reaches the nearer of the two; Up from **Show more** reaches the first genre. A filtered My Shelf adds its clear button in a full-width section below the caption, reached with Down from the row. |
+| **Book details** | Left column (**Back to view**); header (author and series buttons, full width, above an unfocusable facts line); metadata row (the unfocusable finish date, genre buttons, then the rating histogram, full width); description (**Show more**) | Right from Back reaches the author. Down from the author enters the metadata row at its first genre. Right from the author reaches the series button. Up from the metadata row reaches the nearer of the two; Up from **Show more** reaches the first genre. A filtered My Shelf adds its clear button in a full-width section below the caption, reached with Down from the row. Book Wall details use the same sections; their Back sits in an overlay above the tab control, in a full-height section over the book's column. |
 | **Friends' Picks** | Cover row | The last focused pick, or the first |
 | **Ambient** | Two columns: view interval and session length on the left, view toggles in sidebar order on the right; **Start ambient mode** below both | The control nearest the sidebar item |
 
@@ -52,6 +52,7 @@ The following entry points are the only places the app assigns focus. Each runs 
 | Following, Book Club, or Year in Review appears | The view's `onAppear` focuses the remembered item. |
 | The first artwork preparation finishes while a main view is showing | `ShelfView` requests focus on the first shelf book, or advances `socialReturnRevision`, only on the first preparation. |
 | The user returns from details or ambient mode to a main view | `ShelfView.restoreSelection` issues a `ShelfBookFocusRequest` or advances `socialReturnRevision`. `SocialViews.restoreContentFocus` and `YearInReviewView` act only when nothing in the content has focus. |
+| The user opens Book Wall details | The Back overlay focuses Back when it appears, as cover details focus Back first. |
 | The user closes Book Wall details | `BookWallView.closeDetail` restores the selected spine after the return flight completes. A cancelled return does not assign focus. |
 | The user opens or closes a full review in the book reviews popup | Opening a review disables the list, and the reader pane focuses itself when it appears. Back closes the reader; the list's default focus is the card that opened it, so the focus engine returns there without a focus write. |
 
@@ -81,7 +82,7 @@ Data changes never move focus. After the first artwork preparation, content stay
 | Replacing mounted content with a loading view after the first load | Focus is destroyed and restored elsewhere. | Keep content mounted and update it in place. |
 | Changing `.id(_:)` on a container that can hold focus | SwiftUI recreates its children and focus is lost. | Keep identity stable and change content. |
 | A sidebar item that performs an action when selected | Selection can follow focus in the sidebar, so the action can run while the user is only moving past it. | Make the item a destination page with a button, as **Ambient** does. |
-| `.onExitCommand` in main content | It blocks Back from opening the sidebar. | Let Back use its native behavior. |
+| `.onExitCommand` in main content | It blocks Back from opening the sidebar. | Let Back use its native behavior. The filtered My Shelf passes a handler only while a filter from details is active, and `nil` otherwise. |
 | Tests that check only the final focused element | A bounce ends on a plausible item and passes. | Use `RemoteNavigation.press(_:in:expecting:)`. |
 
 ## Testing navigation

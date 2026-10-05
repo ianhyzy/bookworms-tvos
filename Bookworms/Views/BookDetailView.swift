@@ -5,12 +5,16 @@ enum BookDetailCoverLayout {
     static let horizontalPadding: CGFloat = 80
     static let verticalPadding: CGFloat = 54
     static let columnFraction: CGFloat = 0.24
-    static let wallColumnFraction: CGFloat = 0.32
     static let wallNavigationCoverSize = CGSize(width: 300, height: 144)
     static let coverHeightFraction: CGFloat = 0.60
     static let backHeight: CGFloat = 64
     static let coverGap: CGFloat = 64
-    static let detailColumnGap: CGFloat = 80
+}
+
+extension ShapeStyle where Self == Color {
+    /// Labels and captions in book details: a step below the description's 0.86 opacity, and at
+    /// least 4.5:1 against the backgrounds behind detail text in both appearances.
+    static var detailCaption: Color { .primary.opacity(0.72) }
 }
 
 struct BookDetailView: View {
@@ -32,6 +36,9 @@ struct BookDetailView: View {
     /// Opens details for another book in your library, chosen from the series pop-up.
     var onOpenBook: ((Book) -> Void)?
     @State private var showsSeries = false
+    /// The series book chosen in the pop-up, opened after the pop-up finishes closing so that one
+    /// presentation never starts while another is still dismissing.
+    @State private var chosenSeriesBook: Book?
     @Environment(\.dismiss) private var dismiss
     @State private var showsReviews = false
     /// The entry point when focus moves into the metadata row: the first genre.
@@ -70,11 +77,7 @@ struct BookDetailView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let coverColumnWidth =
-                geometry.size.width
-                * (showsCover
-                    ? BookDetailCoverLayout.columnFraction
-                    : BookDetailCoverLayout.wallColumnFraction)
+            let coverColumnWidth = geometry.size.width * BookDetailCoverLayout.columnFraction
             ZStack {
                 if showsCover {
                     LinearGradient(
@@ -103,10 +106,7 @@ struct BookDetailView: View {
                 }
                 // The left column is a full-height focus section, so Left from any control in the
                 // text column returns to Back.
-                HStack(
-                    alignment: .top,
-                    spacing: showsCover ? 56 : BookDetailCoverLayout.detailColumnGap
-                ) {
+                HStack(alignment: .top, spacing: 56) {
                     VStack(alignment: .leading, spacing: BookDetailCoverLayout.coverGap) {
                         if showsBackButton {
                             Button {
@@ -116,7 +116,6 @@ struct BookDetailView: View {
                             }
                             .buttonStyle(.glass)
                             .accessibilityIdentifier("back-to-shelf")
-                            .padding(.leading, showsCover ? 0 : 60)
                             .frame(height: BookDetailCoverLayout.backHeight)
                         } else {
                             Color.clear.frame(height: BookDetailCoverLayout.backHeight)
@@ -142,7 +141,7 @@ struct BookDetailView: View {
                     // Right from Back reaches the header (the author button, or the histogram when
                     // the author is text), and the full-width description section catches Down
                     // from the metadata row.
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 22) {
                         VStack(alignment: .leading, spacing: 18) {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(book.title)
@@ -160,6 +159,7 @@ struct BookDetailView: View {
                                     Spacer(minLength: 0)
                                 }
                                 .focusSection()
+                                factsLine
                             }
                             // Its own section, so Down from the author lands on a genre or the
                             // histogram instead of skipping to Show more, which aligns with it.
@@ -168,7 +168,6 @@ struct BookDetailView: View {
                                     $focusedGenre, genres.first, priority: .userInitiated)
                         }
                         .focusSection()
-                        Divider().overlay(.primary.opacity(0.12))
                         description.focusSection()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -184,6 +183,11 @@ struct BookDetailView: View {
                 BookReviewsView(book: book, load: loadReviews).appTypography()
             }
         }
+    }
+
+    private func openChosenSeriesBook() {
+        if let chosen = chosenSeriesBook { onOpenBook?(chosen) }
+        chosenSeriesBook = nil
     }
 
     private func close() {
@@ -250,41 +254,41 @@ struct BookDetailView: View {
         return description
     }
 
-    /// Reading facts in three columns, then genres, then the community histogram, which takes the
-    /// remaining width and opens reviews when Hardcover can supply them.
-    private var metadata: some View {
-        var items = [
-            ("Finished", book.finishedLabel(format: dateFormat), "checkmark.circle")
+    /// The labeled facts under the author: reading format, publication year, and length, such as
+    /// "1098 pages" or "742 minutes" for an audiobook. Missing facts are left out.
+    private var facts: [(symbol: String, label: String, value: String)] {
+        [
+            book.formatLabel.map { (book.formatSymbol, "Format", $0) },
+            book.publicationYear.map { ("calendar", "Published", String($0)) },
+            book.lengthLabel.map { ("text.book.closed", "Length", $0) },
         ]
-        if let rating = book.rating {
-            items.append(
-                (
-                    "Your rating",
-                    "\(rating.formatted(.number.precision(.fractionLength(0...2)))) / 5", "star"
-                ))
-        }
-        if let pages = book.pages, pages > 0 {
-            items.append(("Length", "\(pages) pages", "text.book.closed"))
-        }
-        if let year = book.publicationYear {
-            items.append(("Published", String(year), "calendar"))
-        }
-        if let format = book.formatLabel {
-            items.append(("Format", format, book.formatSymbol))
-        }
-        return HStack(alignment: .top, spacing: showsCover ? 44 : 28) {
-            Grid(alignment: .leading, horizontalSpacing: 36, verticalSpacing: 20) {
-                // Three per row keeps the facts to two rows beside the genres and histogram.
-                ForEach(Array(stride(from: 0, to: items.count, by: 3)), id: \.self) { index in
-                    GridRow {
-                        ForEach(index..<min(index + 3, items.count), id: \.self) { item in
-                            metadataItem(
-                                items[item].0, value: items[item].1, symbol: items[item].2)
-                        }
-                    }
-                }
+        .compactMap(\.self)
+    }
+
+    /// The facts in one row, which wraps when it is too long for the column.
+    private var factsLine: some View {
+        FlowLayout(spacing: 26) {
+            ForEach(facts, id: \.label) { fact in
+                Label("\(fact.label): \(fact.value)", systemImage: fact.symbol)
+                    .labelStyle(CompactLabelStyle())
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("detail-fact-\(fact.label)")
             }
-            .fixedSize()
+        }
+        .appFont(size: 26).foregroundStyle(.detailCaption).lineLimit(1)
+    }
+
+    /// The finish date when one is recorded, then genres, then the rating histogram, which opens
+    /// reviews when Hardcover can supply them.
+    private var metadata: some View {
+        HStack(alignment: .top, spacing: 44) {
+            if book.finished != nil {
+                metadataItem(
+                    "Finished", value: book.finishedLabel(format: dateFormat),
+                    symbol: "checkmark.circle"
+                )
+                .fixedSize()
+            }
             if !genres.isEmpty {
                 Group {
                     if let onShowShelf {
@@ -294,11 +298,13 @@ struct BookDetailView: View {
                             "Genres",
                             // A non-breaking space keeps each dot with the genre before it when
                             // wrapping.
-                            value: genres.joined(separator: "\u{00A0}· "), symbol: "tag", lines: 5
+                            value: genres.joined(separator: "\u{00A0}· "), symbol: "tag", lines: 3
                         )
                     }
                 }
-                .frame(width: showsCover ? 330 : 250, alignment: .leading)
+                // Genres size first and wrap only when the chart would drop below its minimum
+                // width; the chart takes what they leave.
+                .layoutPriority(1)
             }
             Group {
                 if loadReviews != nil {
@@ -315,9 +321,8 @@ struct BookDetailView: View {
                     RatingsView(book: book)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The author as a compact capsule button when details can filter My Shelf, otherwise text.
@@ -328,13 +333,13 @@ struct BookDetailView: View {
             } label: {
                 Label(book.author, systemImage: "person")
                     .labelStyle(CompactLabelStyle())
-                    .appFont(size: 26, weight: .medium)
+                    .appFont(size: 29, weight: .medium)
             }
             .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 6))
             .accessibilityHint("Shows your books by this author.")
             .accessibilityIdentifier("detail-author")
         } else {
-            Text(book.author).appFont(size: 30).foregroundStyle(.secondary)
+            Text(book.author).appFont(size: 34).foregroundStyle(.primary.opacity(0.9))
         }
     }
 
@@ -354,15 +359,16 @@ struct BookDetailView: View {
                 .appFont(size: 26, weight: .medium)
                 .lineLimit(1)
             }
-            .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 6))
+            // Matches the height of the author capsule, whose text is larger.
+            .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 8))
             .accessibilityHint("Shows every book in the series.")
             .accessibilityIdentifier("detail-series")
-            .fullScreenCover(isPresented: $showsSeries) {
+            .fullScreenCover(isPresented: $showsSeries, onDismiss: openChosenSeriesBook) {
                 SeriesPopup(
                     series: series, currentID: book.id, libraryBook: libraryBook,
                     onOpen: { chosen in
+                        if chosen.id != book.id { chosenSeriesBook = chosen }
                         showsSeries = false
-                        if chosen.id != book.id { onOpenBook?(chosen) }
                     }
                 )
                 .appTypography()
@@ -380,7 +386,7 @@ struct BookDetailView: View {
                 Image(systemName: "tag").frame(width: 20)
                 Text("Genres")
             }
-            .appFont(size: 18).foregroundStyle(.secondary)
+            .appFont(size: 18).foregroundStyle(.detailCaption)
             .accessibilityHidden(true)
             FlowLayout(spacing: 10) {
                 ForEach(genres, id: \.self) { genre in
@@ -406,7 +412,7 @@ struct BookDetailView: View {
                 Image(systemName: symbol).frame(width: 20)
                 Text(title)
             }
-            .appFont(size: 18).foregroundStyle(.secondary)
+            .appFont(size: 18).foregroundStyle(.detailCaption)
             Text(value).appFont(size: 23, weight: .medium).lineLimit(lines)
         }
         .accessibilityElement(children: .combine)

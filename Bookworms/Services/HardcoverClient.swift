@@ -300,10 +300,10 @@ actor HardcoverClient {
                     image { url width height }
                   }
                 }
-                edition { id pages image { url width height } reading_format { format } language { code2 } }
+                edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
                 user_book_reads(where: {finished_at: {_is_null: false}},
                   order_by: [{finished_at: desc}, {id: desc}], limit: 1) {
-                  finished_at edition { id pages image { url width height } reading_format { format } language { code2 } }
+                  finished_at edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
                 }
                 current_read: user_book_reads(where: {finished_at: {_is_null: true}},
                   order_by: [{id: desc}], limit: 1) {
@@ -641,7 +641,8 @@ actor HardcoverClient {
                     ? Self.progress(of: row.currentRead, pages: row.edition?.pages ?? source.pages)
                     : nil,
                 started: row.statusID == Self.currentlyReadingStatus
-                    ? row.currentRead?.startedAt : nil)
+                    ? row.currentRead?.startedAt : nil,
+                audioSeconds: edition?.audioSeconds)
             if let previous = unique[book.id], !Book.recentFirst(book, previous) { continue }
             unique[book.id] = book
         }
@@ -757,12 +758,14 @@ struct BookTag: Decodable, Sendable {
 struct Edition: Decodable, Sendable {
     let id: Int
     let pages: Int?
+    var audioSeconds: Int? = nil
     let image: CoverImage?
     let readingFormat: ReadingFormat?
     var language: Language? = nil
     enum CodingKeys: String, CodingKey {
         case id
         case pages
+        case audioSeconds = "audio_seconds"
         case image
         case readingFormat = "reading_format"
         case language

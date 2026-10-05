@@ -10,6 +10,12 @@ struct BookWallView: View {
     let viewportFrame: CGRect
     let isActive: Bool
     let reviewLoader: (Book) -> (@MainActor () async throws -> [BookReview])?
+    /// Shows My Shelf filtered to the author or genre chosen in the given book's details.
+    let onShowShelf: (Book, ShelfFilter) -> Void
+    let series: (Book) -> SeriesInfo?
+    let libraryBook: (Int) -> Book?
+    /// Opens details for another library book, chosen from the series pop-up.
+    let onOpenBook: (Book) -> Void
     let onActivity: () -> Void
     let returnRevision: Int
     let detailState: BookWallDetailState
@@ -61,6 +67,12 @@ struct BookWallView: View {
             let tabOrigin = CGPoint(
                 x: tabFrame.minX - viewportFrame.minX,
                 y: tabFrame.minY - viewportFrame.minY)
+            // Details occupy the rectangle cover details do. The tab extends above the viewport,
+            // under the top safe area that cover details respect, so restore that inset.
+            let topInset = max(0, -tabOrigin.y)
+            let detailFrame = CGRect(
+                x: tabOrigin.x, y: tabOrigin.y + topInset,
+                width: geometry.size.width, height: geometry.size.height - topInset)
             // Until the scene publishes frames for this configuration, the planned resting
             // frames place the spines, so they exist in the tab's first render and the
             // sidebar's focus handoff finds the entry book through `.defaultFocus`.
@@ -75,8 +87,13 @@ struct BookWallView: View {
                         book: detailBook, style: library.style(for: detailBook),
                         loadReviews: reviewLoader(detailBook), showsCover: false,
                         showsBackButton: false,
-                        onClose: closeDetail
+                        onClose: closeDetail,
+                        onShowShelf: { onShowShelf(detailBook, $0) },
+                        series: series(detailBook),
+                        libraryBook: libraryBook,
+                        onOpenBook: onOpenBook
                     )
+                    .padding(.top, topInset)
                     .appTypography()
                     .id(detailBook.id)
                     .transition(
@@ -93,7 +110,7 @@ struct BookWallView: View {
                                 Button {
                                     openDetail(
                                         book,
-                                        detailFrame: CGRect(origin: tabOrigin, size: geometry.size))
+                                        detailFrame: detailFrame)
                                 } label: {
                                     // Fully transparent, so the compositor has no layer to
                                     // blend over the 3D wall; focus does not need visible
@@ -128,6 +145,15 @@ struct BookWallView: View {
                     // detail fade, an animated removal kept all of them updating on the main
                     // thread for the whole animation, which delayed the wall's frames.
                     .transition(.identity)
+                    // Back from a shelf that these details filtered reopens them here, once the
+                    // books have settled.
+                    .task(id: isSettled ? detailState.requestedBookID : nil) {
+                        guard isSettled, let id = detailState.requestedBookID else { return }
+                        detailState.requestedBookID = nil
+                        guard let book = books.first(where: { $0.id == id }) else { return }
+                        openDetail(
+                            book, detailFrame: detailFrame)
+                    }
                     #if DEBUG && targetEnvironment(simulator)
                         // Scenario hook: opens the entry book once so Simulator captures can
                         // show the detail pose without remote input.
@@ -141,7 +167,7 @@ struct BookWallView: View {
                             try? await Task.sleep(for: .seconds(2))
                             Self.openedEntryForScenario = true
                             openDetail(
-                                book, detailFrame: CGRect(origin: tabOrigin, size: geometry.size))
+                                book, detailFrame: detailFrame)
                         }
                     #endif
                 }
@@ -280,6 +306,8 @@ struct BookWallView: View {
             }
             scene.showOnlyDetailBook(true, reduceMotion: reduceMotion)
             // The wall has already faded in the scene; the text fades in after the book lands.
+            detailState.frame = detailFrame.offsetBy(
+                dx: viewportFrame.minX, dy: viewportFrame.minY)
             withAnimation(detailFade) {
                 detailBook = book
                 detailState.isPresented = true
@@ -342,4 +370,8 @@ final class BookWallDetailState {
     var isPresented = false
     /// Increments when the overlay's Back closes details.
     var closeRevision = 0
+    /// A wall book whose details open once the wall settles.
+    var requestedBookID: Int?
+    /// The open details' frame in global coordinates, which positions the Back overlay.
+    var frame = CGRect.zero
 }

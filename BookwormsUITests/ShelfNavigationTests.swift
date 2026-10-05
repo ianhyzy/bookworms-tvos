@@ -78,9 +78,8 @@ final class ShelfNavigationTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: series)
         RemoteNavigation.pressWithoutMoving(.right, in: app, from: series)
         RemoteNavigation.press(.left, in: app, expecting: author)
-        // Up from the metadata row reaches the series button, which sits above the genres.
-        RemoteNavigation.press(.down, in: app, expecting: fantasy)
-        RemoteNavigation.press(.up, in: app, expecting: series)
+        // Up from the metadata row reaches the series button, which sits above the second genre
+        // and the histogram.
         RemoteNavigation.press(.down, in: app, expecting: fantasy)
         RemoteNavigation.press(.right, in: app, expecting: mystery)
         RemoteNavigation.press(.up, in: app, expecting: series)
@@ -119,6 +118,15 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertTrue(clear.waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(first)
         XCTAssertFalse(app.buttons["book-8"].exists)
+
+        // Back reopens the details and clears the filter; Back again returns to the whole shelf.
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(back)
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(first)
+        XCTAssertTrue(app.buttons["book-8"].waitForExistence(timeout: 5))
+        XCTAssertFalse(clear.exists)
     }
 
     func testSeriesPopupListsTheSeriesAndOpensLibraryBooks() {
@@ -128,7 +136,9 @@ final class ShelfNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(first)
         XCUIRemote.shared.press(.select)
         RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"])
-        XCTAssertTrue(app.staticTexts["2023"].exists, "Details list the publication year")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["detail-fact-Published"].label.contains("2023"),
+            "Details list the publication year")
         let series = app.buttons["detail-series"]
         XCTAssertTrue(series.label.contains("The Island Cycle"))
         RemoteNavigation.press(.right, in: app, expecting: app.buttons["detail-author"])
