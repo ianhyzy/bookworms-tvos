@@ -71,6 +71,21 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertNil(single.favorite)
     }
 
+    func testOnThisDayFindsEarlierYearsMostRecentFirst() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let today = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 10, day: 4)))
+        let books = [
+            book(1, finished: "2021-10-04"), book(2, finished: "2025-10-04T22:00:00Z"),
+            book(3, finished: "2026-10-04"), book(4, finished: "2025-10-05"),
+            book(5, finished: nil),
+        ]
+        XCTAssertEqual(
+            Book.finishedOnThisDay(books, date: today, calendar: calendar).map(\.id), [2, 1],
+            "Today's own finishes and other days are left out")
+    }
+
     func testGenresAndAuthorsRankByCountThenName() throws {
         let review = try XCTUnwrap(
             YearInReview.all(from: [

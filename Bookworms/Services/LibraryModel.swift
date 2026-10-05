@@ -11,8 +11,14 @@ final class LibraryModel {
         didSet {
             let years = YearInReview.all(from: allBooks)
             if years != readingYears { readingYears = years }
+            refreshOnThisDay()
         }
     }
+    /// Books finished on today's date in earlier years, for ambient mode. Prepared when the
+    /// library changes and when the app becomes active, so a new day is picked up.
+    private(set) var onThisDay: [Book] = []
+    /// The year `onThisDay` was chosen in, for "N years ago" labels.
+    private(set) var onThisDayYear = Calendar.current.component(.year, from: .now)
     /// Year in Review statistics for every year with a finished book, most recent first.
     /// Prepared when the library changes, so the view only reads them.
     private(set) var readingYears: [YearInReview] = []
@@ -653,7 +659,27 @@ final class LibraryModel {
             : nil
     }
 
+    func refreshOnThisDay() {
+        var date = Date.now
+        #if DEBUG && targetEnvironment(simulator)
+            if let argument = ProcessInfo.processInfo.arguments.first(where: {
+                $0.hasPrefix("--on-this-day-date=")
+            }),
+                let override = ISO8601DateFormatter()
+                    .date(
+                        from: argument.dropFirst("--on-this-day-date=".count) + "T12:00:00Z")
+            {
+                date = override
+            }
+        #endif
+        let books = Book.finishedOnThisDay(allBooks, date: date, calendar: .current)
+        let year = Calendar.current.component(.year, from: date)
+        if year != onThisDayYear { onThisDayYear = year }
+        if books != onThisDay { onThisDay = books }
+    }
+
     func becameActive() async {
+        refreshOnThisDay()
         guard hasStarted, !isSample else { return }
         await refresh()
     }

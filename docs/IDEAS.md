@@ -51,7 +51,6 @@ Rank readers by books and pages read this year. Include only people you follow, 
 
 ## Other ideas
 
-- **On this day:** books you finished on today's date in past years, for ambient mode.
 - **Taste match:** a rating-overlap score for each followed reader, used to sort the reader picker.
 - **Want to read shelf** with a **Pick for me** button.
 - **Ambient overlays,** such as a clock or date.

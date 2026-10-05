@@ -121,6 +121,20 @@ struct YearInReview: Equatable, Identifiable, Sendable {
 }
 
 extension Book {
+    /// Books finished on `date`'s month and day in earlier years, most recent year first.
+    static func finishedOnThisDay(_ books: [Book], date: Date, calendar: Calendar) -> [Book] {
+        let today = calendar.dateComponents([.year, .month, .day], from: date)
+        let suffix = String(format: "-%02d-%02d", today.month ?? 0, today.day ?? 0)
+        return
+            books.filter { book in
+                guard let finished = book.finished?.prefix(10), finished.hasSuffix(suffix),
+                    let year = Int(finished.prefix(4)), year < (today.year ?? 0)
+                else { return false }
+                return true
+            }
+            .sorted(by: recentFirst)
+    }
+
     /// The year and month (1–12) of the recorded finish date, or `nil` when it is missing or
     /// malformed.
     var finishedYearMonth: (year: Int, month: Int)? {

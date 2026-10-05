@@ -400,6 +400,10 @@ struct ShelfView: View {
         if enabled.contains(.shared) {
             books += social.presentation.shared.prefix(BookLimit.maximum).map { $0.mine.book }
         }
+        // Ambient My Shelf leads with them; at most a handful on any date.
+        if coordinator.preferences.ambientOrderedViews.contains(.shelf) {
+            books += library.onThisDay.prefix(BookLimit.maximum)
+        }
         // Only the chosen year; choosing another year prepares its covers, as choosing a reader
         // does for Compare Shelves.
         if enabled.contains(.yearInReview),

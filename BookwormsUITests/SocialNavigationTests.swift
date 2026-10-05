@@ -282,4 +282,16 @@ final class SocialNavigationTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["detail-title"].exists)
         XCTAssertFalse(app.buttons["stop-ambient"].exists)
     }
+
+    func testAmbientShelfLeadsWithOnThisDay() {
+        // The first sample book was finished on September 9, 2026.
+        let app = RemoteNavigation.launch(arguments: ["--on-this-day-date=2027-09-09"])
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        RemoteNavigation.startAmbient(app)
+        let card = app.descendants(matching: .any)["on-this-day"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.label.contains("One year ago today"))
+        XCTAssertTrue(card.label.contains("The Orchard at Night"))
+        capture(app, name: "Ambient on this day")
+    }
 }
