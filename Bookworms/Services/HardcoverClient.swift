@@ -293,7 +293,7 @@ actor HardcoverClient {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
                 id last_read_date rating status_id
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
-                  book_series { featured series { id } }
+                  book_series { featured position series { id } }
                   editions(where: {image_id: {_is_null: false},
                       _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
                     order_by: {users_count: desc}, limit: 5) {
@@ -308,6 +308,17 @@ actor HardcoverClient {
                 current_read: user_book_reads(where: {finished_at: {_is_null: true}},
                   order_by: [{id: desc}], limit: 1) {
                   started_at progress_pages edition { pages }
+                }
+              }
+            }
+            """
+        case series = """
+            query ShelfSeries($ids: [Int!]!) {
+              series(where: {id: {_in: $ids}}) {
+                id name
+                book_series(where: {position: {_is_null: false}},
+                  order_by: [{position: asc}, {book: {users_count: desc}}]) {
+                  position book { id title release_year image { url width height } }
                 }
               }
             }
@@ -456,12 +467,47 @@ actor HardcoverClient {
                 token: token)
             rows += result.userBooks
             if result.userBooks.count < 100 {
-                return HardcoverLibrary(accountID: String(user.id), books: Self.normalize(rows))
+                let books = Self.normalize(rows)
+                // Series are an enhancement: a failure keeps the library sync complete.
+                let series = try? await fetchSeries(Set(books.compactMap(\.seriesID)), token: token)
+                return HardcoverLibrary(
+                    accountID: String(user.id), books: books, series: series ?? [])
             }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
             try await Task.sleep(for: .seconds(1.1))
         }
         throw HardcoverError.incomplete
+    }
+
+    /// Fetches series names and main books in batches of 50, paced like library pages.
+    private func fetchSeries(_ ids: Set<Int>, token: String) async throws -> [SeriesInfo] {
+        var result: [SeriesInfo] = []
+        let sorted = ids.sorted()
+        for start in stride(from: 0, to: sorted.count, by: 50) {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .seconds(1.1))
+            let batch = Array(sorted[start..<min(start + 50, sorted.count)])
+            let response: SeriesResponse = try await request(
+                .series, variables: ["ids": batch], token: token)
+            result += response.series.map(Self.normalize)
+        }
+        return result
+    }
+
+    /// Keeps one book per whole-number position: the most-read, which the query lists first.
+    static func normalize(_ series: SeriesResponse.Series) -> SeriesInfo {
+        var seen = Set<Double>()
+        let books = series.bookSeries.compactMap { entry -> SeriesInfo.SeriesBook? in
+            guard let position = entry.position, position >= 0,
+                position == position.rounded(), let book = entry.book,
+                seen.insert(position).inserted
+            else { return nil }
+            return SeriesInfo.SeriesBook(
+                id: book.id, title: book.title ?? "Untitled", position: position,
+                releaseYear: book.releaseYear,
+                coverURL: book.image?.url.flatMap { $0.scheme == "https" ? $0 : nil })
+        }
+        return SeriesInfo(id: series.id, name: series.name, books: books)
     }
 
     /// The sharpest portrait cover: portrait shapes beat other shapes, then height wins.
@@ -568,6 +614,8 @@ actor HardcoverClient {
                 edition: edition?.image, book: source.image,
                 otherEditions: (source.editions ?? []).compactMap(\.image),
                 editionIsInLanguage: edition?.isInLanguage(Self.coverLanguage) ?? true)
+            let membership = source.bookSeries?
+                .sorted { ($0.featured ?? false) && !($1.featured ?? false) }.first
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,
@@ -575,10 +623,8 @@ actor HardcoverClient {
                 pages: edition?.pages ?? source.pages,
                 finished: read?.finishedAt ?? row.lastReadDate, rating: row.rating,
                 format: edition?.readingFormat?.format,
-                seriesID: source.bookSeries?
-                    .sorted { ($0.featured ?? false) && !($1.featured ?? false) }.first?
-                    .series?
-                    .id,
+                seriesID: membership?.series?.id,
+                seriesPosition: membership?.position,
                 genres: source.cachedTags?["Genre"]?
                     .filter {
                         ($0.spoilerRatio ?? 0) < 0.2 && !["Fiction", "Nonfiction"].contains($0.tag)
@@ -606,6 +652,34 @@ actor HardcoverClient {
 struct HardcoverLibrary: Sendable {
     let accountID: String
     let books: [Book]
+    var series: [SeriesInfo] = []
+}
+
+struct SeriesResponse: Decodable, Sendable {
+    let series: [Series]
+    struct Series: Decodable, Sendable {
+        let id: Int
+        let name: String
+        let bookSeries: [Entry]
+        enum CodingKeys: String, CodingKey {
+            case id, name
+            case bookSeries = "book_series"
+        }
+    }
+    struct Entry: Decodable, Sendable {
+        let position: Double?
+        let book: Member?
+    }
+    struct Member: Decodable, Sendable {
+        let id: Int
+        let title: String?
+        let releaseYear: Int?
+        let image: CoverImage?
+        enum CodingKeys: String, CodingKey {
+            case id, title, image
+            case releaseYear = "release_year"
+        }
+    }
 }
 
 // Decode wire fields explicitly; normalization keeps API-specific choices out of the UI.
@@ -725,6 +799,7 @@ struct CurrentRead: Decodable, Sendable {
 }
 struct SeriesMembership: Decodable, Sendable {
     let featured: Bool?
+    let position: Double?
     let series: SeriesIdentity?
     struct SeriesIdentity: Decodable, Sendable { let id: Int }
 }

@@ -72,18 +72,23 @@ final class ShelfNavigationTests: XCTestCase {
         let reviews = app.buttons["community-reviews"]
         RemoteNavigation.waitForFocus(back)
         // Every direction out of the author and genre buttons.
+        let series = app.buttons["detail-series"]
         RemoteNavigation.press(.right, in: app, expecting: author)
         RemoteNavigation.pressWithoutMoving(.up, in: app, from: author)
-        RemoteNavigation.pressWithoutMoving(.right, in: app, from: author)
+        RemoteNavigation.press(.right, in: app, expecting: series)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: series)
+        RemoteNavigation.press(.left, in: app, expecting: author)
+        // Up from the metadata row reaches the series button, which sits above the genres.
         RemoteNavigation.press(.down, in: app, expecting: fantasy)
-        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.up, in: app, expecting: series)
         RemoteNavigation.press(.down, in: app, expecting: fantasy)
         RemoteNavigation.press(.right, in: app, expecting: mystery)
-        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.up, in: app, expecting: series)
         RemoteNavigation.press(.down, in: app, expecting: fantasy)
         RemoteNavigation.press(.right, in: app, expecting: mystery)
         RemoteNavigation.press(.right, in: app, expecting: reviews)
-        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.up, in: app, expecting: series)
+        RemoteNavigation.press(.left, in: app, expecting: author)
         RemoteNavigation.press(.down, in: app, expecting: fantasy)
         RemoteNavigation.press(.down, in: app, expecting: app.buttons["show-full-description"])
         RemoteNavigation.press(.up, in: app, expecting: fantasy)
@@ -114,6 +119,43 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertTrue(clear.waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(first)
         XCTAssertFalse(app.buttons["book-8"].exists)
+    }
+
+    func testSeriesPopupListsTheSeriesAndOpensLibraryBooks() {
+        let app = RemoteNavigation.launch()
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(first)
+        XCUIRemote.shared.press(.select)
+        RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"])
+        XCTAssertTrue(app.staticTexts["2023"].exists, "Details list the publication year")
+        let series = app.buttons["detail-series"]
+        XCTAssertTrue(series.label.contains("The Island Cycle"))
+        RemoteNavigation.press(.right, in: app, expecting: app.buttons["detail-author"])
+        RemoteNavigation.press(.right, in: app, expecting: series)
+        XCUIRemote.shared.press(.select)
+        let current = app.buttons["series-book-1"]
+        let second = app.buttons["series-book-8"]
+        let unowned = app.buttons["series-book-9"]
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(current)
+        RemoteNavigation.press(.right, in: app, expecting: second)
+        RemoteNavigation.press(.right, in: app, expecting: unowned)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: unowned)
+        let popup = XCTAttachment(screenshot: app.screenshot())
+        popup.name = "Series pop-up"
+        popup.lifetime = .keepAlways
+        add(popup)
+        // A book outside the library stays put; one in it opens its details.
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(RemoteNavigation.isFocused(unowned))
+        RemoteNavigation.press(.left, in: app, expecting: second)
+        XCUIRemote.shared.press(.select)
+        let title = app.staticTexts["detail-title"]
+        XCTAssertTrue(
+            title.waitForExistence(timeout: 5)
+                && NSPredicate(format: "label == %@", "Winter in the Orchard").evaluate(with: title)
+        )
     }
 
     func testShelfPagesMoveWithOneFocusUpdate() {

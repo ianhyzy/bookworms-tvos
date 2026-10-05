@@ -19,12 +19,7 @@ A 3D split-flap display, like a Vestaboard, spells out the titles of your most r
 
 ## Series
 
-Integrate series across the app so you can check the other books in a series:
-
-- Book details lists the series with each book's position, marking the books you've read and your current read.
-- A series shelf groups your series and shows progress, such as "3 of 7 read", and the next unread book.
-
-Data: the series ID is synced; series names, positions, and unowned books need a new query, prepared during sync rather than when details open.
+Book details show the series and its books. Still open: a series shelf that groups your series with progress, such as "3 of 7 read", and the next unread book.
 
 ## Authors
 

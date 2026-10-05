@@ -306,6 +306,12 @@ struct ShelfView: View {
                         library.shelfFilter = filter
                         showView(.shelf)
                         selectedBook = nil
+                    },
+                    series: library.series(for: library.book(withID: book.id) ?? book),
+                    libraryBook: { library.book(withID: $0) },
+                    onOpenBook: { chosen in
+                        lastFocusedID = chosen.id
+                        selectedBook = chosen
                     }
                 )
                 .appTypography()

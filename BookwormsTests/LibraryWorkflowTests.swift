@@ -56,6 +56,29 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(saved.first { $0.source == .cwa }?.books.map(\.id), [2])
     }
 
+    func testSyncedSeriesPersistAndMatchTheirBooks() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86401)])
+        var book = fixture.book(3)
+        book.seriesID = 7
+        let series = SeriesInfo(
+            id: 7, name: "Fictional Saga",
+            books: [
+                .init(id: 3, title: "One", position: 1, releaseYear: 2024, coverURL: nil),
+                .init(id: 4, title: "Two", position: 2, releaseYear: nil, coverURL: nil),
+            ])
+        var dependencies = fixture.dependencies()
+        dependencies.fetchHardcover = { _ in
+            HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: [book], series: [series])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertEqual(model.series(for: book)?.books.map(\.id), [3, 4])
+        let saved = dependencies.sourceStore.load()
+        XCTAssertEqual(saved.first { $0.source == .hardcover }?.series, [series])
+    }
+
     func testRejectedHardcoverReplacementRetainsCredentialAndSnapshot() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

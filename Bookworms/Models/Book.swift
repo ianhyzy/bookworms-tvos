@@ -11,6 +11,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var rating: Double?
     var format: String?
     var seriesID: Int?
+    /// The book's position in `seriesID`, such as 3 for the third book. Companion works can have
+    /// fractional positions.
+    var seriesPosition: Double? = nil
     var genres: [String]?
     var communityRating: Double?
     var ratingsCount: Int?
@@ -118,6 +121,27 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// A series and its main books in reading order, fetched during sync so details open offline.
+struct SeriesInfo: Codable, Hashable, Sendable, Identifiable {
+    let id: Int
+    let name: String
+    /// The series' main books, one per whole-number position, earliest first.
+    let books: [SeriesBook]
+
+    struct SeriesBook: Codable, Hashable, Sendable, Identifiable {
+        let id: Int
+        let title: String
+        let position: Double
+        let releaseYear: Int?
+        let coverURL: URL?
+    }
+
+    /// "#3", or "#2.5" for a companion work.
+    static func positionLabel(_ position: Double) -> String {
+        "#" + position.formatted(.number.precision(.fractionLength(0...1)))
+    }
+}
+
 struct LibrarySnapshot: Codable, Sendable {
     let books: [Book]
     let syncedAt: Date
@@ -156,11 +180,12 @@ enum SampleLibrary {
                 repeating:
                     "A botanist returns to an island where the trees bloom only after sunset. As the seasons change, a forgotten family archive reveals a different history of the island and the people who call it home. ",
                 count: 8), pages: 384, finished: "2026-09-09", rating: 4.5, format: "Ebook",
-            seriesID: 1, genres: ["Fantasy", "Mystery"], communityRating: 4.24, ratingsCount: 100,
+            seriesID: 1, seriesPosition: 1, genres: ["Fantasy", "Mystery"], communityRating: 4.24,
+            ratingsCount: 100,
             ratingDistribution: [
                 RatingBucket(rating: 3, count: 10), RatingBucket(rating: 4, count: 56),
                 RatingBucket(rating: 5, count: 34),
-            ]),
+            ], publicationYear: 2023),
         Book(
             id: 2, title: "A Field Guide to Elsewhere", author: "Morgan Vale",
             description:
@@ -189,11 +214,24 @@ enum SampleLibrary {
         Book(
             id: 8, title: "Winter in the Orchard", author: "Alex Rowan",
             description: "The island's story continues.", pages: 410, finished: "2026-08-18",
-            format: "Audiobook", seriesID: 1),
+            format: "Audiobook", seriesID: 1, seriesPosition: 2,
+            publicationYear: 2025),
     ]
 }
 
 extension SampleLibrary {
+    /// The sample books 1 and 8, plus a third book the sample reader doesn't own.
+    static let series = SeriesInfo(
+        id: 1, name: "The Island Cycle",
+        books: [
+            .init(
+                id: 1, title: "The Orchard at Night", position: 1, releaseYear: 2023, coverURL: nil),
+            .init(
+                id: 8, title: "Winter in the Orchard", position: 2, releaseYear: 2025, coverURL: nil
+            ),
+            .init(id: 9, title: "The Last Harvest", position: 3, releaseYear: 2027, coverURL: nil),
+        ])
+
     /// Fictional books only the sample reader has read.
     static let friendPicks: [Book] = [
         Book(

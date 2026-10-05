@@ -14,6 +14,13 @@ final class LibraryModel {
             refreshOnThisDay()
         }
     }
+    /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
+    private(set) var seriesByID: [Int: SeriesInfo] = [:]
+
+    func series(for book: Book) -> SeriesInfo? {
+        book.seriesID.flatMap { seriesByID[$0] }
+    }
+
     /// Books finished on today's date in earlier years, for ambient mode. Prepared when the
     /// library changes and when the app becomes active, so a new day is picked up.
     private(set) var onThisDay: [Book] = []
@@ -514,7 +521,8 @@ final class LibraryModel {
             hardcoverSessionExpired = false
             connectionRevision += 1
             hardcoverEnabled = true
-            await install(result.books, source: .hardcover, accountID: accountID)
+            await install(
+                result.books, source: .hardcover, accountID: accountID, series: result.series)
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
@@ -573,7 +581,9 @@ final class LibraryModel {
                             && activeHardcoverAccountID != nil)
                 let result = try await dependencies.fetchHardcover(token)
                 guard revision == sourceRevision, !Task.isCancelled else { return }
-                await install(result.books, source: .hardcover, accountID: result.accountID)
+                await install(
+                    result.books, source: .hardcover, accountID: result.accountID,
+                    series: result.series)
             } catch {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
@@ -697,6 +707,7 @@ final class LibraryModel {
         guard !isLoading else { return }
         cancelShelfWork()
         allBooks = SampleLibrary.books
+        seriesByID = [SampleLibrary.series.id: SampleLibrary.series]
         #if DEBUG
             if dependencies.allowLaunchOverrides,
                 ProcessInfo.processInfo.arguments.contains("--sample-pages")
@@ -740,14 +751,17 @@ final class LibraryModel {
 
     func style(for book: Book) -> SpineStyle { styles[book.id] ?? .fallback(for: book) }
 
-    private func install(_ result: [Book], source: LibrarySource, accountID: String) async {
+    private func install(
+        _ result: [Book], source: LibrarySource, accountID: String, series: [SeriesInfo]? = nil
+    ) async {
         sourceErrors[source.rawValue] = nil
         if source == .hardcover {
             setActiveHardcoverAccountID(accountID)
             hardcoverSessionExpired = false
         }
         let snapshot = SourceSnapshot(
-            source: source, accountID: accountID, books: result, syncedAt: dependencies.now())
+            source: source, accountID: accountID, books: result, syncedAt: dependencies.now(),
+            series: series)
         // A complete Hardcover sync replaces snapshots from older builds and accounts.
         sourceSnapshots.removeAll {
             $0.source == source && (source == .hardcover || $0.accountID == accountID)
@@ -807,6 +821,8 @@ final class LibraryModel {
                 $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
             }
         allBooks = LibraryMerge.books(from: enabled)
+        seriesByID = Dictionary(
+            (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         syncedAt = enabled.map(\.syncedAt).max()
         styles = aiRecords.mapValues(\.style)
         updateShelf()

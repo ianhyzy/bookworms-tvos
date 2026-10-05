@@ -140,6 +140,31 @@ final class SourceLibraryTests: XCTestCase {
                 .matches(Book(id: 9, title: "", author: "", genres: ["litrpg"])))
     }
 
+    func testSeriesKeepsOneMainBookPerPositionInOrder() throws {
+        let json = #"""
+            {"series": [{"id": 7, "name": "Ana and Din Mysteries", "book_series": [
+              {"position": 1, "book": {"id": 11, "title": "The Tainted Cup", "release_year": 2024,
+                "image": {"url": "https://assets.example/1.jpg"}}},
+              {"position": 1, "book": {"id": 99, "title": "The Tainted Cup (Large Print)"}},
+              {"position": 1.5, "book": {"id": 15, "title": "A Novella"}},
+              {"position": 2, "book": {"id": 12, "title": "A Drop of Corruption",
+                "image": {"url": "http://insecure.example/2.jpg"}}},
+              {"position": 3, "book": null}
+            ]}]}
+            """#
+        let response = try JSONDecoder().decode(SeriesResponse.self, from: Data(json.utf8))
+        let series = HardcoverClient.normalize(try XCTUnwrap(response.series.first))
+        XCTAssertEqual(series.name, "Ana and Din Mysteries")
+        XCTAssertEqual(
+            series.books.map(\.id), [11, 12],
+            "The most-read book wins each position; companions and empty rows are left out")
+        XCTAssertEqual(series.books[0].releaseYear, 2024)
+        XCTAssertNotNil(series.books[0].coverURL)
+        XCTAssertNil(series.books[1].coverURL, "Only HTTPS covers are kept")
+        XCTAssertEqual(SeriesInfo.positionLabel(3), "#3")
+        XCTAssertEqual(SeriesInfo.positionLabel(2.5), "#2.5")
+    }
+
     func testHotTakesSortByGapFromCommunityRating() {
         let books = [
             Book(id: 1, title: "Agree", author: "A", rating: 4, communityRating: 4.1),

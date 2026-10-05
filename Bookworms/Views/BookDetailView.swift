@@ -25,6 +25,13 @@ struct BookDetailView: View {
     var onClose: (() -> Void)?
     /// Shows My Shelf filtered to the chosen author or genre. When `nil`, they appear as text.
     var onShowShelf: ((ShelfFilter) -> Void)?
+    /// The book's series, shown as a button beside the author that opens the series pop-up.
+    var series: SeriesInfo?
+    /// Your library's copy of a series book, or `nil` when you don't have it.
+    var libraryBook: (Int) -> Book? = { _ in nil }
+    /// Opens details for another book in your library, chosen from the series pop-up.
+    var onOpenBook: ((Book) -> Void)?
+    @State private var showsSeries = false
     @Environment(\.dismiss) private var dismiss
     @State private var showsReviews = false
     /// The entry point when focus moves into the metadata row: the first genre.
@@ -42,7 +49,10 @@ struct BookDetailView: View {
         showsCover: Bool = true,
         showsBackButton: Bool = true,
         onClose: (() -> Void)? = nil,
-        onShowShelf: ((ShelfFilter) -> Void)? = nil
+        onShowShelf: ((ShelfFilter) -> Void)? = nil,
+        series: SeriesInfo? = nil,
+        libraryBook: @escaping (Int) -> Book? = { _ in nil },
+        onOpenBook: ((Book) -> Void)? = nil
     ) {
         self.book = book
         self.style = style
@@ -51,6 +61,9 @@ struct BookDetailView: View {
         self.showsBackButton = showsBackButton
         self.onClose = onClose
         self.onShowShelf = onShowShelf
+        self.series = series
+        self.libraryBook = libraryBook
+        self.onOpenBook = onOpenBook
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
@@ -137,9 +150,13 @@ struct BookDetailView: View {
                                     .lineLimit(3).minimumScaleFactor(0.7)
                                     .accessibilityIdentifier("detail-title")
                                 // A full-width section, so Up from the histogram reaches the
-                                // author.
+                                // author. The series button sits beside the author and wraps
+                                // below it when the row is too narrow.
                                 HStack {
-                                    author
+                                    FlowLayout(spacing: 16) {
+                                        author
+                                        seriesButton
+                                    }
                                     Spacer(minLength: 0)
                                 }
                                 .focusSection()
@@ -249,6 +266,9 @@ struct BookDetailView: View {
         if let pages = book.pages, pages > 0 {
             items.append(("Length", "\(pages) pages", "text.book.closed"))
         }
+        if let year = book.publicationYear {
+            items.append(("Published", String(year), "calendar"))
+        }
         if let format = book.formatLabel {
             items.append(("Format", format, book.formatSymbol))
         }
@@ -316,6 +336,38 @@ struct BookDetailView: View {
             .accessibilityIdentifier("detail-author")
         } else {
             Text(book.author).appFont(size: 30).foregroundStyle(.secondary)
+        }
+    }
+
+    /// "#3 · Ana and Din Mysteries" beside the author; opens every main book in the series.
+    @ViewBuilder private var seriesButton: some View {
+        if let series, series.books.count > 1 {
+            let position = book.seriesPosition ?? series.books.first { $0.id == book.id }?.position
+            Button {
+                showsSeries = true
+            } label: {
+                Label(
+                    [position.map(SeriesInfo.positionLabel), series.name].compactMap(\.self)
+                        .joined(separator: " · "),
+                    systemImage: "books.vertical"
+                )
+                .labelStyle(CompactLabelStyle())
+                .appFont(size: 26, weight: .medium)
+                .lineLimit(1)
+            }
+            .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 6))
+            .accessibilityHint("Shows every book in the series.")
+            .accessibilityIdentifier("detail-series")
+            .sheet(isPresented: $showsSeries) {
+                SeriesPopup(
+                    series: series, currentID: book.id, libraryBook: libraryBook,
+                    onOpen: { chosen in
+                        showsSeries = false
+                        if chosen.id != book.id { onOpenBook?(chosen) }
+                    }
+                )
+                .appTypography()
+            }
         }
     }
 
@@ -698,5 +750,87 @@ private struct FlowLayout: Layout {
             }
         }
         return rows
+    }
+}
+
+/// Every main book in a series, in order, with its position and publication year. Books you
+/// haven't read, or that aren't out yet, are faded. Selecting a book in your library opens it.
+///
+/// Covers for books outside your library load when the pop-up opens; Hardcover supplied their
+/// URLs during sync.
+private struct SeriesPopup: View {
+    let series: SeriesInfo
+    let currentID: Int
+    let libraryBook: (Int) -> Book?
+    let onOpen: (Book) -> Void
+    @FocusState private var focused: Int?
+
+    private static let coverHeight: CGFloat = 330
+    private static let columnWidth: CGFloat = 230
+
+    private var readCount: Int {
+        series.books.filter { isRead(libraryBook($0.id)) }.count
+    }
+
+    private func isRead(_ book: Book?) -> Bool {
+        guard let book else { return false }
+        return book.isReading != true && (book.finished != nil || book.isRead == true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 30) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(series.name).appFont(size: 44, weight: .semibold)
+                Text("\(readCount) of \(series.books.count) read")
+                    .appFont(size: 26).foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal) {
+                // Every book stays mounted so focus can reach books scrolled out of view.
+                HStack(alignment: .top, spacing: 36) {
+                    ForEach(series.books.prefix(BookLimit.maximum)) { entry in
+                        item(entry)
+                    }
+                }
+                .padding(.vertical, 30).padding(.horizontal, 20)
+            }
+            .scrollClipDisabled()
+            .defaultFocus($focused, currentID, priority: .userInitiated)
+        }
+        .padding(60)
+    }
+
+    private func item(_ entry: SeriesInfo.SeriesBook) -> some View {
+        let owned = libraryBook(entry.id)
+        let book =
+            owned
+            ?? Book(id: entry.id, title: entry.title, author: "", coverURL: entry.coverURL)
+        let unreleased =
+            (entry.releaseYear ?? 0) > Calendar.current.component(.year, from: .now)
+        let faded = !isRead(owned) && entry.id != currentID
+        return Button {
+            if let owned { onOpen(owned) }
+        } label: {
+            VStack(spacing: 14) {
+                CoverView(book: book)
+                    .frame(width: Self.columnWidth, height: Self.coverHeight)
+                    .opacity(faded ? 0.4 : 1)
+                Text(
+                    [SeriesInfo.positionLabel(entry.position), entry.releaseYear.map(String.init)]
+                        .compactMap(\.self).joined(separator: " · ")
+                )
+                .appFont(size: 24, weight: .medium)
+                Text(entry.id == currentID ? "This book" : unreleased ? "Not out yet" : entry.title)
+                    .appFont(size: 21).foregroundStyle(.secondary).lineLimit(1)
+                    .frame(width: Self.columnWidth)
+            }
+        }
+        .buttonStyle(CoverButtonStyle())
+        .focusEffectDisabled()
+        .focused($focused, equals: entry.id)
+        .accessibilityLabel(
+            "\(SeriesInfo.positionLabel(entry.position)), \(entry.title)"
+                + (owned == nil ? ", not in your library" : "")
+        )
+        .accessibilityIdentifier("series-book-\(entry.id)")
     }
 }

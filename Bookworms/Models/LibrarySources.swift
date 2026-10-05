@@ -12,6 +12,9 @@ struct SourceSnapshot: Codable, Sendable {
     var accountID: String
     var books: [Book]
     var syncedAt: Date
+    /// Series that the books belong to; Hardcover only. `nil` in snapshots saved before series
+    /// were fetched.
+    var series: [SeriesInfo]? = nil
 }
 
 struct CWAConfiguration: Codable, Equatable, Sendable {
