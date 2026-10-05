@@ -21,11 +21,11 @@ Credentials stay in Keychain. Disabling a source hides its books but retains its
 - **Current reads:** A book is a current read when its Hardcover status is **Currently Reading**. Progress comes from the latest unfinished read. It uses Hardcover's percentage, which Hardcover records whether you log a percentage, pages, or listening time. Without one, it divides logged pages by the page count of that read's edition, then the library edition, then the book; then logged seconds by the audio length of that read's edition, then the library edition. Progress is capped at 100%. A read with no logged progress has none.
 - **CWA catalog:** Derive stable IDs from the server address and catalog identifier in a separate ID range. Keep the first entry for each ID.
 - **Combined shelf:** Match the full title and author string after normalizing case, accents, and whitespace. Use IDs instead when the title is empty or the author is unknown. Hardcover takes precedence; CWA adds ownership and missing metadata. Different normalized titles or author strings remain separate. Matching does not infer edition differences.
-- **Following:** Deduplicate activity IDs, then retain the newest event per book across all followed readers. Break timestamp ties by descending activity ID. Events without books remain separate. Apply the display limit after deduplication.
+- **Feed:** Deduplicate activity IDs, then retain the newest event per book across all followed readers. Break timestamp ties by descending activity ID. Events without books remain separate. Apply the display limit after deduplication.
 - **Reader libraries:** Deduplicate profiles by reader ID and books by Hardcover book ID. For duplicate reader-library rows, the later row in ascending record-ID order wins. Fetch books with a rating or completion date. **Top rated · All time** requires a rating; **Recently read** requires a completion date. Ties use title, then book ID.
 - **Year in Review:** Group the combined library by the year and month of each book's finish date; skip books without a valid date. Statistics use every book in the year. Genres count the first three genres of each book. The cover shelf keeps every book when the year has at most 40; otherwise it keeps the 40 highest rated (unrated last, ties by most recent finish), in reading order. The app recomputes all years when the library changes.
 - **Series:** The library query records each book's featured series and position. Each sync then fetches those series' names and main books in batches of 50, keeping the most-read book at each whole-number position and only HTTPS covers. A failed series request leaves the library sync complete and keeps the previously synced series. Their covers go to the browsing artwork tier in the background after library covers are prepared; see [storage and performance](docs/STORAGE_AND_PERFORMANCE.md).
-- **Friends' Picks:** Combine ratings of 4–5 from synced followed-reader libraries and feed activity, one rating per reader and book. Leave out books in your Hardcover library that you finished or marked read. Friends' Picks downloads the feed even when Following is off; when Following is off, a failed feed request doesn't stop the library downloads. Rank by the number of readers, then average rating, then title and ID. Each day, download the libraries of up to 10 followed readers, most feed activity first, then following order; each library uses the same daily gate as Compare Shelves.
+- **Friends' Picks:** Combine ratings of 4–5 from synced followed-reader libraries and feed activity, one rating per reader and book. Leave out books in your Hardcover library that you finished or marked read. Friends' Picks downloads the feed even when the Feed view is off; when the Feed view is off, a failed feed request doesn't stop the library downloads. Rank by the number of readers, then average rating, then title and ID. Each day, download the libraries of up to 10 followed readers, most feed activity first, then following order; each library uses the same daily gate as Compare Shelves.
 - **Book Club:** Intersect complete fetched reader libraries by Hardcover book ID before limiting results. Both ratings must be in the range 0–5. Sort by their sum, highest first, then title and ID. Keep each reader's review separate. CWA data does not supply social ratings.
 
 ## Display limits
@@ -35,7 +35,7 @@ Counts apply to each collection, not to the total cached library. Available data
 | Collection | Default | Maximum and controls |
 | --- | --- | --- |
 | My Shelf | 40 books | 40; count controls step by five. |
-| Following | Up to 20 activities | 20; fixed. Four cards fit in the viewport. |
+| Feed | Up to 20 activities | 20; fixed. Four cards fit in the viewport. |
 | Compare Shelves | 40 books per reader | 40 per reader; count controls step by five. |
 | Book Club | 40 books | 40; shares the comparison count. |
 | Friends' Picks | 40 books from up to 10 readers' libraries | 40 books and 10 readers; fixed. |
@@ -51,7 +51,7 @@ These are implementation bounds, not user settings or provider quotas.
 | --- | --- | --- |
 | Hardcover library | 100 rows per page | 100 pages / 10,000 rows. |
 | Followed readers and each social reader library | 100 rows per page | 1,000 pages / 100,000 rows per dataset. |
-| Following activity | Latest 100 events per group of up to 200 followed readers | One request per group; merge groups before deduplicating and selecting 20. Repeated books can leave fewer than 20 results. |
+| Feed activity | Latest 100 events per group of up to 200 followed readers | One request per group; merge groups before deduplicating and selecting 20. Repeated books can leave fewer than 20 results. |
 | CWA catalog | Server-defined OPDS page size | 500 pages and 50,000 entries before deduplication; reject paging loops. |
 
 Hardcover pagination requires a short final page to confirm completion. Reaching its page bound with only full pages fails the sync. Incomplete or failed syncs preserve the previous complete snapshot.

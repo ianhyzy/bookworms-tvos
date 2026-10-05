@@ -9,14 +9,17 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     case comparison = "Compare Shelves"
     case shared = "Book Club"
     case friendsPicks = "Friends' Picks"
+    /// The saved identifier; `title` is the displayed name.
     var id: String { rawValue }
+
+    var title: String { self == .following ? "Feed" : rawValue }
 
     var systemImage: String {
         switch self {
         case .shelf: "books.vertical.fill"
         case .yearInReview: "calendar"
         case .bookWall: "books.vertical.fill"
-        case .following: "person.2.fill"
+        case .following: "scroll.fill"
         case .comparison: "rectangle.split.2x1.fill"
         case .shared: "shared.with.you"
         case .friendsPicks: "hand.thumbsup.fill"

@@ -25,7 +25,7 @@ extension View {
     }
 }
 
-/// Following, Compare Shelves, and Book Club content.
+/// Feed, Compare Shelves, and Book Club content.
 ///
 /// The focus engine owns directional movement. Header controls, cover rows, and review actions are
 /// focus sections, so movement between them is native. Focus is assigned only when content appears

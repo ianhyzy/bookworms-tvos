@@ -50,7 +50,7 @@ Maintain [VIEWS.md](VIEWS.md) for tvOS view options and [DATASOURCES.md](DATASOU
 - Show a reader's name with `ReaderLabel`, which adds their Hardcover profile photo. Include any new reader's avatar URL in artwork preparation so photos never download while browsing.
 - Keep sidebar visibility (`ViewPreferences.enabled`) and ambient views (`ambientViews`, chosen on the Ambient page) independent. Load data and artwork for `activeViews`, which covers both. Per-view choices belong on their views, not in Settings.
 - Set user-visible app text with `appFont(size:weight:)`, not `.font(.system(size:))`, so the serif style (New York) uses medium weight for regular text. Settings always uses the system font. Hidden test probes and other text users never see are exempt.
-- Limit displayed collections to `BookLimit.maximum` (40) items, except Following at 20 and Book Wall, which shows every book finished in the current year. Retain complete metadata for sorting and intersections. Prepare artwork for enabled views before browsing; do not introduce per-cover Hardcover queries or network calls during scrolling or detail rendering.
+- Limit displayed collections to `BookLimit.maximum` (40) items, except Feed at 20 and Book Wall, which shows every book finished in the current year. Retain complete metadata for sorting and intersections. Prepare artwork for enabled views before browsing; do not introduce per-cover Hardcover queries or network calls during scrolling or detail rendering.
 - Preserve refresh gates, download sharing, and cache bounds. Consult [storage and performance](docs/STORAGE_AND_PERFORMANCE.md), [sources and iCloud](docs/SOURCES_AND_ICLOUD.md), and [social views](docs/SOCIAL_VIEWS_AND_AMBIENT.md) for detailed behavior.
 
 ## Writing

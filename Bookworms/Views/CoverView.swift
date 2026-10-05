@@ -49,12 +49,21 @@ struct CoverView: View {
                     if progressStyle == .horizontal, currentImage != nil,
                         let progress = book.progress
                     {
-                        ProgressView(value: progress)
-                            .progressViewStyle(.linear)
-                            .padding(.horizontal, width * 0.08)
-                            .padding(.bottom, width * 0.08)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
+                        // A static gradient darkens the cover's base so the bar reads on
+                        // light covers.
+                        ZStack(alignment: .bottom) {
+                            LinearGradient(
+                                colors: [.black.opacity(0), .black.opacity(0.6)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                            .frame(height: height * 0.16)
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .padding(.horizontal, width * 0.06)
+                                .padding(.bottom, width * 0.04)
+                        }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                     }
                 }
                 .clipShape(.rect(cornerRadius: cornerRadius))

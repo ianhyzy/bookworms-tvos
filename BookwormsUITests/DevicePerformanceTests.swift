@@ -4,7 +4,7 @@ import XCTest
 /// Repeatable remote input. XCTest command timings are not app response measurements.
 @MainActor
 final class DevicePerformanceTests: XCTestCase {
-    private let viewTitles = ["My Shelf", "Following", "Compare Shelves", "Book Club"]
+    private let viewTitles = ["My Shelf", "Feed", "Compare Shelves", "Book Club"]
 
     private func focused(_ element: XCUIElement) -> Bool {
         element.hasFocus

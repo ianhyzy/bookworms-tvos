@@ -34,7 +34,7 @@ Use the actual generated `.xctestrun` filename for the installed SDK. For an ord
 | `longevity` | Runs the sustained sequence described below. |
 | `bookWall` | Launches directly into Book Wall with `--start-view=bookWall`, opens and closes details three times, returns to the starting book, then moves through the stacks in short bursts. Adds the Display and GPU instruments. Use `scripts/profile-book-wall.py`, which builds, records, summarizes per phase, and restores the local build. |
 
-`--view` accepts 0 through 3 for My Shelf, Following, Compare Shelves, and Book Club, and opens that view from the sidebar before measurement. Keep all views enabled for these sequences.
+`--view` accepts 0 through 3 for My Shelf, Feed, Compare Shelves, and Book Club, and opens that view from the sidebar before measurement. Keep all views enabled for these sequences.
 
 For Book Wall, both drivers accept `--wall-antialiasing off|on` (default `on`, matching the
 app). The baseline renders at 1920 × 1080;

@@ -181,7 +181,7 @@ final class SocialLibraryModel {
                         try install(current, request: request)
                     } catch {
                         // Friends' Picks can rank from libraries alone, so a feed failure only
-                        // stops the sync when Following shows the feed.
+                        // stops the sync when the Feed view shows it.
                         if socialViews.contains(.following) || Task.isCancelled { throw error }
                     }
                 }

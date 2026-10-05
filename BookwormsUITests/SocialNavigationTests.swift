@@ -24,7 +24,7 @@ final class SocialNavigationTests: XCTestCase {
         let app = RemoteNavigation.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
         let destinations = [
-            ("Year in Review", "year-book-"), ("Following", "activity-"),
+            ("Year in Review", "year-book-"), ("Feed", "activity-"),
             ("Compare Shelves", "book-"), ("Book Club", "shared-"), ("My Shelf", "book-"),
         ]
         for (title, prefix) in destinations {
@@ -58,7 +58,7 @@ final class SocialNavigationTests: XCTestCase {
         for (left, right) in zip(cards.dropFirst(), cards.dropFirst(2)) {
             XCTAssertEqual(left.frame.minY, right.frame.minY, accuracy: 30)
         }
-        capture(app, name: "Following")
+        capture(app, name: "Feed")
         try app.auditAccessibility()
         RemoteNavigation.press(.right, in: app, expecting: cards[1])
         RemoteNavigation.press(.left, in: app, expecting: first)
