@@ -58,6 +58,9 @@ final class SettingsInteractionTests: XCTestCase {
 
     func testChooseSourcesOpensSourcesAndExplainsTokenEntry() {
         let app = XCUIApplication()
+        // The empty scenario has no books and answers the link-code request locally.
+        app.launchEnvironment["BOOKWORMS_SCENARIO_CONTROL"] = UUID().uuidString
+        app.launchArguments = ["--test-scenario=empty", "--test-appearance=dark"]
         app.launch()
         let choose = app.buttons["choose-sources"]
         XCTAssertTrue(choose.waitForExistence(timeout: 15))
@@ -68,20 +71,33 @@ final class SettingsInteractionTests: XCTestCase {
         }
         XCTAssertTrue(choose.hasFocus)
         XCUIRemote.shared.press(.select)
+        // The scenario's login works, so Sources offers Disconnect instead of a sheet.
+        let disconnect = app.buttons["Disconnect Hardcover"]
+        XCTAssertTrue(disconnect.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["book-limit"].exists)
+        moveDown(to: disconnect)
+        XCUIRemote.shared.press(.select)
         let connect = app.buttons["Connect Hardcover"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["book-limit"].exists)
-        moveDown(to: connect)
+        RemoteNavigation.waitForFocus(connect)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(app.textFields["hardcover-token"].waitForExistence(timeout: 5))
+        // The fixture issues a link code; the card shows it beside the QR code.
+        XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["hardcover-device-code"].label, "TEST-1234")
         XCTAssertTrue(app.images["hardcover-token-qr"].exists)
+        XCTAssertTrue(
+            app.staticTexts["hardcover-instructions"].label.contains("hardcover.app/link"))
+        XCTAssertFalse(app.buttons["Back to Sources"].exists)
+        XCTAssertFalse(app.textFields["hardcover-token"].exists)
+        let manual = app.buttons["hardcover-manual-entry"]
+        RemoteNavigation.waitForFocus(manual)
+        XCTAssertTrue(app.buttons["New code"].exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Hardcover sign-in"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        XCTAssertTrue(app.staticTexts["hardcover-step-1"].exists)
-        XCTAssertTrue(app.staticTexts["hardcover-step-2"].exists)
-        XCTAssertTrue(app.staticTexts["hardcover-step-3"].exists)
-        XCTAssertTrue(app.staticTexts["hardcover-paste-help"].label.contains("paste"))
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.textFields["hardcover-token"].waitForExistence(timeout: 5))
     }
 
     func testCountButtonsStepByFiveAndPersistAcrossLaunches() {

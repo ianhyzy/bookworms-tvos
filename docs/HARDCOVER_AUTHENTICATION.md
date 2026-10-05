@@ -21,12 +21,14 @@ Authentication tests cover device authorization initiation, device token polling
 
 ## Sign in on Apple TV
 
-On the empty start screen, **Choose sources** opens **Settings → Sources**. Select **Connect Hardcover**.
+On the empty start screen, **Choose sources** opens **Settings → Sources**. Select **Connect Hardcover** to open the sign-in card.
 
-1. On your phone or computer, open a web browser and go to **hardcover.app/link** (or scan the small on-screen QR code).
-2. Enter the 8-character code shown on your Apple TV screen and select **Authorize**.
+1. Scan the QR code with your phone, or open **hardcover.app/link** in a browser.
+2. Enter the 8-character code shown beside it and select **Authorize**.
 3. Your Apple TV connects automatically as soon as you approve.
 
-The Hardcover sheet requests a code as soon as it opens when no login is saved or when the last sync reported the saved login as invalid or expired. The saved login stays in Keychain until a new link replaces it or you disconnect.
+The card requests a code as soon as it opens. **New code** replaces an expired code, and **Enter a code instead** shows a text field for an authorization code typed with the remote. Back closes the card.
+
+While a login works, **Settings → Sources** shows **Disconnect Hardcover** instead of opening the card. When a sync reports the saved login as invalid or expired, the button becomes **Reconnect Hardcover** and **Sync now** is unavailable until you sign in again, unless another source can sync. The saved login stays in Keychain until a new link replaces it or you disconnect.
 
 The bundled QR image points to `https://hardcover.app/link` and is generated offline with Apple Core Image and verified by decoding it with Vision. To regenerate it on macOS, run `swift scripts/generate-hardcover-qr.swift Bookworms/Assets.xcassets/HardcoverTokenQR.imageset/hardcover-token.png`.

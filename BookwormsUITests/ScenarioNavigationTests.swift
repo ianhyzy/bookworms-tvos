@@ -53,7 +53,8 @@ final class ScenarioNavigationTests: XCTestCase {
         let network = try XCTUnwrap(evidence["network"] as? [String: Any])
         XCTAssertEqual(
             network["unexpected"] as? Int, 0,
-            "A scenario attempted an unconfigured network request.")
+            "A scenario attempted an unconfigured network request: \(network["unexpectedURLs"] ?? "")"
+        )
         XCTAssertEqual(
             evidence["sample"] as? Bool, false, "Scenarios must exercise normal startup.")
         XCTAssertEqual(evidence["generating"] as? Bool, false)
