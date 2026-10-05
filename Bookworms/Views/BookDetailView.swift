@@ -755,14 +755,22 @@ private struct FlowLayout: Layout {
 /// Every main book in a series, in order, with its position and publication year. Books you
 /// haven't read, or that aren't out yet, are faded. Selecting a book in your library opens it.
 ///
-/// Covers for books outside your library load when the pop-up opens; Hardcover supplied their
-/// URLs during sync.
+/// Opening the pop-up downloads covers for books outside your library, nearest the current book
+/// first; Hardcover supplied their URLs during sync. Chevrons mark books scrolled out of view.
 private struct SeriesPopup: View {
     let series: SeriesInfo
     let currentID: Int
     let libraryBook: (Int) -> Book?
     let onOpen: (Book) -> Void
     @FocusState private var focused: Int?
+    /// Advances as covers arrive, so `CoverView` reloads from the local cache.
+    @State private var artworkGeneration = 0
+    @State private var hiddenEdges = HiddenEdges()
+
+    private struct HiddenEdges: Equatable {
+        var leading = false
+        var trailing = false
+    }
 
     private static let coverHeight: CGFloat = 330
     private static let columnWidth: CGFloat = 230
@@ -786,7 +794,7 @@ private struct SeriesPopup: View {
             ScrollView(.horizontal) {
                 // Every book stays mounted so focus can reach books scrolled out of view.
                 HStack(alignment: .top, spacing: 36) {
-                    ForEach(series.books.prefix(BookLimit.maximum)) { entry in
+                    ForEach(series.books) { entry in
                         item(entry)
                     }
                 }
@@ -794,8 +802,52 @@ private struct SeriesPopup: View {
             }
             .scrollClipDisabled()
             .defaultFocus($focused, currentID, priority: .userInitiated)
+            .environment(\.artworkGeneration, artworkGeneration)
+            .onScrollGeometryChange(for: HiddenEdges.self) { geometry in
+                HiddenEdges(
+                    leading: geometry.contentOffset.x > 1,
+                    trailing: geometry.contentOffset.x + geometry.containerSize.width
+                        < geometry.contentSize.width - 1)
+            } action: { _, edges in
+                hiddenEdges = edges
+            }
+            .overlay(alignment: .leading) {
+                if hiddenEdges.leading { chevron("chevron.left").offset(x: -44) }
+            }
+            .overlay(alignment: .trailing) {
+                if hiddenEdges.trailing { chevron("chevron.right").offset(x: 44) }
+            }
         }
         .padding(60)
+        .task { await prepareCovers() }
+    }
+
+    private func chevron(_ name: String) -> some View {
+        Image(systemName: name)
+            .appFont(size: 30, weight: .light)
+            .foregroundStyle(.secondary)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    /// Downloads missing covers in small batches, nearest the current book first, and reloads
+    /// the covers after each batch. Cancelled when the pop-up closes.
+    private func prepareCovers() async {
+        let current = series.books.firstIndex { $0.id == currentID } ?? 0
+        let missing = series.books.enumerated()
+            .filter { libraryBook($0.element.id) == nil && $0.element.coverURL != nil }
+            .sorted { abs($0.offset - current) < abs($1.offset - current) }
+            .map {
+                Book(
+                    id: $0.element.id, title: $0.element.title, author: "",
+                    coverURL: $0.element.coverURL)
+            }
+        for start in stride(from: 0, to: missing.count, by: 6) {
+            guard !Task.isCancelled else { return }
+            _ = await ArtworkStore.shared.prefetch(
+                books: Array(missing[start..<min(start + 6, missing.count)]), avatarURLs: [])
+            artworkGeneration += 1
+        }
     }
 
     private func item(_ entry: SeriesInfo.SeriesBook) -> some View {
