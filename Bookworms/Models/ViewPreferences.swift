@@ -34,6 +34,10 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     static var availableCases: [Self] {
         allCases.filter { $0 != .bookWall || BookWallAvailability.isSupported }
     }
+
+    /// Views shown in the sidebar until the user changes them. Book Wall is opt-in through
+    /// **Settings → Views**.
+    static var defaultCases: [Self] { availableCases.filter { $0 != .bookWall } }
 }
 
 enum SharedReadsSort: String, Codable, CaseIterable, Identifiable {
@@ -58,7 +62,7 @@ enum BookLimit {
 }
 
 struct ViewPreferences: Codable, Equatable {
-    var enabled: [BookwormsView] = BookwormsView.availableCases
+    var enabled: [BookwormsView] = BookwormsView.defaultCases
     var readerID: Int?
     var comparisonOrder = ComparisonOrder.rating
     var sharedReadsSort = SharedReadsSort.agreement
@@ -72,7 +76,7 @@ struct ViewPreferences: Codable, Equatable {
     var ambientMinutes = 10
     var sessionMinutes = 0
     /// Views the user has been offered in the sidebar. Preferences saved before a view existed
-    /// decode as `nil` here, so `validate()` adds later views to the sidebar once.
+    /// decode as `nil` here, so `validate()` adds later default views to the sidebar once.
     var offeredViews: [BookwormsView]? = BookwormsView.availableCases
     /// Views in the sidebar, in display order. At least one view stays: My Shelf if none are on.
     var orderedViews: [BookwormsView] {
@@ -96,7 +100,7 @@ struct ViewPreferences: Codable, Equatable {
     }
     mutating func validate() {
         let offered = offeredViews ?? [.shelf, .following, .comparison, .shared]
-        enabled += BookwormsView.availableCases.filter { !offered.contains($0) }
+        enabled += BookwormsView.defaultCases.filter { !offered.contains($0) }
         offeredViews = BookwormsView.availableCases
         enabled = orderedViews
         comparisonCount = min(BookLimit.maximum, max(1, comparisonCount))

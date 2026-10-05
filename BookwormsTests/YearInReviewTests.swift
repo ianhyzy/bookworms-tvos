@@ -139,23 +139,15 @@ final class YearInReviewTests: XCTestCase {
         var saved = try JSONDecoder().decode(ViewPreferences.self, from: old)
         XCTAssertNil(saved.offeredViews)
         saved.validate()
-        // Book Wall, added later, joins too where the hardware supports it.
-        XCTAssertEqual(
-            saved.orderedViews,
-            BookwormsView.availableCases.filter {
-                [.shelf, .yearInReview, .bookWall, .following, .friendsPicks].contains($0)
-            })
+        // Book Wall, added later, stays off until the user turns it on.
+        XCTAssertEqual(saved.orderedViews, [.shelf, .yearInReview, .following, .friendsPicks])
         // Turning it off afterward persists.
         saved.enabled.removeAll { $0 == .yearInReview }
         var reloaded = try JSONDecoder()
             .decode(
                 ViewPreferences.self, from: JSONEncoder().encode(saved))
         reloaded.validate()
-        XCTAssertEqual(
-            reloaded.orderedViews,
-            BookwormsView.availableCases.filter {
-                [.shelf, .bookWall, .following, .friendsPicks].contains($0)
-            })
+        XCTAssertEqual(reloaded.orderedViews, [.shelf, .following, .friendsPicks])
         XCTAssertFalse(reloaded.ambientOrderedViews.contains(.yearInReview))
     }
 }
