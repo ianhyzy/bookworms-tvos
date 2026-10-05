@@ -537,15 +537,22 @@ struct ShelfView: View {
         }
         // Retry covers that failed, such as after a timeout, once. Mounted covers reload from the
         // local cache when the generation changes; browsing itself never downloads.
-        guard !preparation.failed.isEmpty,
-            (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey
-        else { return }
-        await ArtworkStore.shared.forgetFailures()
-        let retry = await ArtworkStore.shared.prefetch(
-            books: preparation.failed, avatarURLs: [])
-        guard !Task.isCancelled, key == artworkKey, !retry.ratios.isEmpty else { return }
-        for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
-        artworkGeneration &+= 1
+        if !preparation.failed.isEmpty {
+            guard (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey else {
+                return
+            }
+            await ArtworkStore.shared.forgetFailures()
+            let retry = await ArtworkStore.shared.prefetch(
+                books: preparation.failed, avatarURLs: [])
+            guard !Task.isCancelled, key == artworkKey else { return }
+            if !retry.ratios.isEmpty {
+                for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
+                artworkGeneration &+= 1
+            }
+        }
+        // Browsing covers last, so they never delay the library's; a newer preparation cancels
+        // this one and resumes after the covers already saved.
+        _ = await ArtworkStore.shared.prefetchBrowsing(library.browsingCoverURLs)
 
     }
 

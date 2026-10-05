@@ -357,7 +357,7 @@ struct BookDetailView: View {
             .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 6))
             .accessibilityHint("Shows every book in the series.")
             .accessibilityIdentifier("detail-series")
-            .sheet(isPresented: $showsSeries) {
+            .fullScreenCover(isPresented: $showsSeries) {
                 SeriesPopup(
                     series: series, currentID: book.id, libraryBook: libraryBook,
                     onOpen: { chosen in
@@ -366,6 +366,9 @@ struct BookDetailView: View {
                     }
                 )
                 .appTypography()
+                .onExitCommand { showsSeries = false }
+                // Details stay visible, dimmed, around the card.
+                .presentationBackground(.black.opacity(0.55))
             }
         }
     }
@@ -752,28 +755,41 @@ private struct FlowLayout: Layout {
     }
 }
 
-/// Every main book in a series, in order, with its position and publication year. Books you
-/// haven't read, or that aren't out yet, are faded. Selecting a book in your library opens it.
+/// Every main book in a series, in order, on pages of two rows with the series name above them.
+/// Each book shows its position, publication year, and full title. Books you haven't read, or
+/// that aren't out yet, are faded. Selecting a book in your library opens it.
 ///
-/// Opening the pop-up downloads covers for books outside your library, nearest the current book
-/// first; Hardcover supplied their URLs during sync. Chevrons mark books scrolled out of view.
+/// Covers come from the library artwork tier or the browsing tier, which prepares them after
+/// sync; opening the pop-up fetches any that are still missing, nearest the current book first.
+/// Pages scroll with focus, and chevrons mark further pages.
 private struct SeriesPopup: View {
     let series: SeriesInfo
     let currentID: Int
     let libraryBook: (Int) -> Book?
     let onOpen: (Book) -> Void
     @FocusState private var focused: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Advances as covers arrive, so `CoverView` reloads from the local cache.
     @State private var artworkGeneration = 0
-    @State private var hiddenEdges = HiddenEdges()
+    @State private var position = ScrollPosition(idType: Int.self)
+    @State private var visiblePage = 0
 
-    private struct HiddenEdges: Equatable {
-        var leading = false
-        var trailing = false
+    private static let columns = 7
+    private static let coverSize = CGSize(width: 160, height: 240)
+    private static let columnWidth: CGFloat = 180
+    private static let columnSpacing: CGFloat = 36
+    private static let rowSpacing: CGFloat = 34
+    /// Room inside each page for focus lift, which the scroll view would otherwise clip.
+    private static let inset: CGFloat = 24
+    private static var pageWidth: CGFloat {
+        CGFloat(columns) * columnWidth + CGFloat(columns - 1) * columnSpacing + 2 * inset
     }
 
-    private static let coverHeight: CGFloat = 330
-    private static let columnWidth: CGFloat = 230
+    private var pages: [[SeriesInfo.SeriesBook]] { series.books.chunked(into: Self.columns * 2) }
+
+    private func page(of id: Int?) -> Int {
+        (series.books.firstIndex { $0.id == id } ?? 0) / (Self.columns * 2)
+    }
 
     private var readCount: Int {
         series.books.filter { isRead(libraryBook($0.id)) }.count
@@ -785,41 +801,64 @@ private struct SeriesPopup: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 30) {
+        VStack(alignment: .leading, spacing: 26) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(series.name).appFont(size: 44, weight: .semibold)
                 Text("\(readCount) of \(series.books.count) read")
                     .appFont(size: 26).foregroundStyle(.secondary)
             }
+            .padding(.horizontal, Self.inset)
             ScrollView(.horizontal) {
-                // Every book stays mounted so focus can reach books scrolled out of view.
-                HStack(alignment: .top, spacing: 36) {
-                    ForEach(series.books) { entry in
-                        item(entry)
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { index, books in
+                        pageView(books).id(index)
                     }
                 }
-                .padding(.vertical, 30).padding(.horizontal, 20)
+                .scrollTargetLayout()
             }
-            .scrollClipDisabled()
+            .frame(width: Self.pageWidth)
+            .scrollPosition($position)
+            .scrollTargetBehavior(.paging)
+            .scrollIndicators(.hidden)
             .defaultFocus($focused, currentID, priority: .userInitiated)
             .environment(\.artworkGeneration, artworkGeneration)
-            .onScrollGeometryChange(for: HiddenEdges.self) { geometry in
-                HiddenEdges(
-                    leading: geometry.contentOffset.x > 1,
-                    trailing: geometry.contentOffset.x + geometry.containerSize.width
-                        < geometry.contentSize.width - 1)
-            } action: { _, edges in
-                hiddenEdges = edges
+            .onScrollGeometryChange(for: Int.self) {
+                Int(($0.contentOffset.x / Self.pageWidth).rounded())
+            } action: { _, page in
+                visiblePage = page
             }
+            // Scrolls to the focused book's page; focus itself stays with the focus engine.
+            .onChange(of: focused) {
+                guard let focused else { return }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.3)) {
+                    position.scrollTo(id: page(of: focused))
+                }
+            }
+            .onAppear { position.scrollTo(id: page(of: currentID)) }
             .overlay(alignment: .leading) {
-                if hiddenEdges.leading { chevron("chevron.left").offset(x: -44) }
+                if visiblePage > 0 { chevron("chevron.left").offset(x: -40) }
             }
             .overlay(alignment: .trailing) {
-                if hiddenEdges.trailing { chevron("chevron.right").offset(x: 44) }
+                if visiblePage < pages.count - 1 { chevron("chevron.right").offset(x: 40) }
             }
         }
-        .padding(60)
+        .padding(.vertical, 50).padding(.horizontal, 60)
+        .background(.regularMaterial, in: .rect(cornerRadius: 44))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await prepareCovers() }
+    }
+
+    private func pageView(_ books: [SeriesInfo.SeriesBook]) -> some View {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            ForEach(Array(books.chunked(into: Self.columns).enumerated()), id: \.offset) {
+                _, row in
+                HStack(alignment: .top, spacing: Self.columnSpacing) {
+                    ForEach(row) { item($0) }
+                }
+            }
+        }
+        .padding(Self.inset)
+        .frame(width: Self.pageWidth, alignment: .topLeading)
     }
 
     private func chevron(_ name: String) -> some View {
@@ -830,23 +869,20 @@ private struct SeriesPopup: View {
             .accessibilityHidden(true)
     }
 
-    /// Downloads missing covers in small batches, nearest the current book first, and reloads
-    /// the covers after each batch. Cancelled when the pop-up closes.
+    /// Fetches covers the browsing tier doesn't have yet, nearest the current book first, and
+    /// reloads the covers after each batch. Cancelled when the pop-up closes.
     private func prepareCovers() async {
         let current = series.books.firstIndex { $0.id == currentID } ?? 0
         let missing = series.books.enumerated()
-            .filter { libraryBook($0.element.id) == nil && $0.element.coverURL != nil }
             .sorted { abs($0.offset - current) < abs($1.offset - current) }
-            .map {
-                Book(
-                    id: $0.element.id, title: $0.element.title, author: "",
-                    coverURL: $0.element.coverURL)
+            .compactMap { offset, entry in
+                libraryBook(entry.id).map { $0.detailCoverURL ?? $0.coverURL } ?? entry.coverURL
             }
         for start in stride(from: 0, to: missing.count, by: 6) {
             guard !Task.isCancelled else { return }
-            _ = await ArtworkStore.shared.prefetch(
-                books: Array(missing[start..<min(start + 6, missing.count)]), avatarURLs: [])
-            artworkGeneration += 1
+            let fetched = await ArtworkStore.shared.prefetchBrowsing(
+                Array(missing[start..<min(start + 6, missing.count)]))
+            if fetched > 0 { artworkGeneration += 1 }
         }
     }
 
@@ -861,19 +897,25 @@ private struct SeriesPopup: View {
         return Button {
             if let owned { onOpen(owned) }
         } label: {
-            VStack(spacing: 14) {
+            VStack(spacing: 8) {
                 CoverView(book: book)
-                    .frame(width: Self.columnWidth, height: Self.coverHeight)
+                    .frame(width: Self.coverSize.width, height: Self.coverSize.height)
                     .opacity(faded ? 0.4 : 1)
                 Text(
                     [SeriesInfo.positionLabel(entry.position), entry.releaseYear.map(String.init)]
                         .compactMap(\.self).joined(separator: " · ")
                 )
-                .appFont(size: 24, weight: .medium)
-                Text(entry.id == currentID ? "This book" : unreleased ? "Not out yet" : entry.title)
-                    .appFont(size: 21).foregroundStyle(.secondary).lineLimit(1)
-                    .frame(width: Self.columnWidth)
+                .appFont(size: 22, weight: .medium)
+                // Titles wrap rather than truncate; long ones shrink slightly to fit two lines.
+                Text(
+                    entry.id == currentID
+                        ? "This book" : unreleased ? "\(entry.title) (not out yet)" : entry.title
+                )
+                .appFont(size: 19).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.7)
+                .frame(height: 48, alignment: .top)
             }
+            .frame(width: Self.columnWidth)
         }
         .buttonStyle(CoverButtonStyle())
         .focusEffectDisabled()

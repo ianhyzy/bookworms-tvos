@@ -125,6 +125,61 @@ actor ArtworkStore {
         return maximumPixelSize >= 2400 ? original : try resized(original, size: maximumPixelSize)
     }
 
+    /// Covers downloaded for browsing beyond the library, such as series books you don't own.
+    /// They are stored smaller, budgeted separately, and removed before any library cover.
+    private var browsingRoot: URL { root.appending(path: "browse", directoryHint: .isDirectory) }
+
+    private func browsingFile(for url: URL) -> URL {
+        browsingRoot.appending(path: file(for: url, suffix: "@browse900").lastPathComponent)
+    }
+
+    /// Downloads browsing covers that neither tier has yet and returns how many it saved.
+    ///
+    /// Skips the work when the device has little free space, and stops at the browsing budget.
+    /// Library preparation should finish first; this never replaces library covers.
+    func prefetchBrowsing(_ urls: [URL]) async -> Int {
+        guard Self.hasRoomForBrowsing() else { return 0 }
+        try? FileManager.default.createDirectory(
+            at: browsingRoot, withIntermediateDirectories: true)
+        var saved = 0
+        for url in urls where url.scheme == "https" {
+            guard !Task.isCancelled else { break }
+            let target = browsingFile(for: url)
+            if FileManager.default.fileExists(atPath: target.path())
+                || FileManager.default.fileExists(
+                    atPath: file(for: url, suffix: "@source2400").path())
+                || Date().timeIntervalSince(failedDownloads[url] ?? .distantPast) < 300
+            {
+                continue
+            }
+            do {
+                let data = try resized(try await fetchOriginal(url), size: 900)
+                try data.write(to: target, options: .atomic)
+                saved += 1
+            } catch {
+                failedDownloads[url] = Date()
+            }
+        }
+        if saved > 0 { prune() }
+        return saved
+    }
+
+    /// Whether the volume has room to spare for reconstructible browsing covers.
+    private static func hasRoomForBrowsing() -> Bool {
+        let available = try? URL.cachesDirectory
+            .resourceValues(
+                forKeys: [.volumeAvailableCapacityKey]
+            )
+            .volumeAvailableCapacity
+        return (available ?? .max) > browsingFreeSpaceFloor
+    }
+
+    /// Library covers and browsing covers each have a disk budget. Below this much free space,
+    /// browsing covers are removed and no more are downloaded.
+    static let libraryBudget = 180_000_000
+    static let browsingBudget = 80_000_000
+    static let browsingFreeSpaceFloor = 1_000_000_000
+
     private func file(for url: URL, suffix: String) -> URL {
         let key = SHA256.hash(data: Data((url.absoluteString + suffix).utf8))
             .map { String(format: "%02x", $0) }.joined()
@@ -144,6 +199,11 @@ actor ArtworkStore {
                 if cachedFile != canonical { try? cached.write(to: canonical, options: .atomic) }
                 return cached
             }
+        }
+        if let browsing = try? Data(contentsOf: browsingFile(for: url)),
+            CGImageSourceCreateWithData(browsing as CFData, nil) != nil
+        {
+            return browsing
         }
         guard allowsNetwork else { throw URLError(.resourceUnavailable) }
         if let task = pendingDownloads[url] { return try await task.value }
@@ -344,21 +404,35 @@ actor ArtworkStore {
         failedDownloads.removeAll()
     }
 
+    /// Removes the oldest covers over each tier's budget. Browsing covers go first: all of them
+    /// when free space runs low, so the system is less likely to purge library data.
     private func prune() {
-        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        if !Self.hasRoomForBrowsing() {
+            try? FileManager.default.removeItem(at: browsingRoot)
+        }
+        Self.trim(browsingRoot, to: Self.browsingBudget)
+        Self.trim(root, to: Self.libraryBudget)
+    }
+
+    /// Deletes the least recently written files in `directory` until it fits `budget`.
+    static func trim(_ directory: URL, to budget: Int) {
+        let keys: Set<URLResourceKey> = [
+            .fileSizeKey, .contentModificationDateKey, .isDirectoryKey,
+        ]
         let files =
             (try? FileManager.default.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: Array(keys))) ?? []
+                at: directory, includingPropertiesForKeys: Array(keys))) ?? []
         let entries =
             files.compactMap { url -> (url: URL, size: Int, modified: Date)? in
                 guard url.pathExtension != "json",
-                    let values = try? url.resourceValues(forKeys: keys)
+                    let values = try? url.resourceValues(forKeys: keys),
+                    values.isDirectory != true
                 else { return nil }
                 return (url, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
             }
             .sorted { $0.modified < $1.modified }
         var size = entries.reduce(0) { $0 + $1.size }
-        for entry in entries where size > 180_000_000 {
+        for entry in entries where size > budget {
             try? FileManager.default.removeItem(at: entry.url)
             size -= entry.size
         }

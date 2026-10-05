@@ -17,6 +17,11 @@ final class LibraryModel {
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
     private(set) var seriesByID: [Int: SeriesInfo] = [:]
 
+    /// Covers of every series book, for the browsing artwork tier, which skips covers the library
+    /// tier already has. Owned books use their library cover. Series of books on My Shelf come
+    /// first. Prepared with the library.
+    private(set) var browsingCoverURLs: [URL] = []
+
     func series(for book: Book) -> SeriesInfo? {
         book.seriesID.flatMap { seriesByID[$0] }
     }
@@ -823,6 +828,7 @@ final class LibraryModel {
         allBooks = LibraryMerge.books(from: enabled)
         seriesByID = Dictionary(
             (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        updateBrowsingCovers()
         syncedAt = enabled.map(\.syncedAt).max()
         styles = aiRecords.mapValues(\.style)
         updateShelf()
@@ -843,6 +849,21 @@ final class LibraryModel {
         }
         // Top Shelf mirrors the unfiltered shelf.
         if shelfFilter == nil { publishTopShelf() }
+        updateBrowsingCovers()
+    }
+
+    private func updateBrowsingCovers() {
+        let owned = Dictionary(
+            allBooks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let shelfSeries = books.compactMap(\.seriesID)
+        let order = shelfSeries + seriesByID.keys.sorted().filter { !shelfSeries.contains($0) }
+        var seen = Set<URL>()
+        let urls = order.compactMap { seriesByID[$0] }.flatMap(\.books)
+            .compactMap { entry in
+                owned[entry.id].map { $0.detailCoverURL ?? $0.coverURL } ?? entry.coverURL
+            }
+            .filter { seen.insert($0).inserted }
+        if urls != browsingCoverURLs { browsingCoverURLs = urls }
     }
 
     private func writeSyncDiagnostics() {

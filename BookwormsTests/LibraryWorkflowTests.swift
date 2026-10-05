@@ -62,11 +62,16 @@ final class LibraryWorkflowTests: XCTestCase {
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86401)])
         var book = fixture.book(3)
         book.seriesID = 7
+        book.coverURL = URL(string: "https://covers.example/library-3.jpg")
         let series = SeriesInfo(
             id: 7, name: "Fictional Saga",
             books: [
-                .init(id: 3, title: "One", position: 1, releaseYear: 2024, coverURL: nil),
-                .init(id: 4, title: "Two", position: 2, releaseYear: nil, coverURL: nil),
+                .init(
+                    id: 3, title: "One", position: 1, releaseYear: 2024,
+                    coverURL: URL(string: "https://covers.example/series-3.jpg")),
+                .init(
+                    id: 4, title: "Two", position: 2, releaseYear: nil,
+                    coverURL: URL(string: "https://covers.example/series-4.jpg")),
             ])
         var dependencies = fixture.dependencies()
         dependencies.fetchHardcover = { _ in
@@ -75,6 +80,9 @@ final class LibraryWorkflowTests: XCTestCase {
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         XCTAssertEqual(model.series(for: book)?.books.map(\.id), [3, 4])
+        XCTAssertEqual(
+            model.browsingCoverURLs.map(\.lastPathComponent), ["library-3.jpg", "series-4.jpg"],
+            "Owned series books use their library cover")
         let saved = dependencies.sourceStore.load()
         XCTAssertEqual(saved.first { $0.source == .hardcover }?.series, [series])
     }
