@@ -27,6 +27,11 @@ struct BookWallView: View {
     @State private var transitionRevision = 0
     @State private var configurationRevision = 0
     @State private var openingFailed = false
+    #if DEBUG && targetEnvironment(simulator)
+        /// Counts completed falls so UI tests can confirm that Drop again ran a replay. With
+        /// Reduce Motion, the status text can clear before a test reads it.
+        @State private var completedFalls = 0
+    #endif
 
     private var books: [Book] { prepared.books }
     private var entryID: Int? {
@@ -190,6 +195,13 @@ struct BookWallView: View {
                     )
                     .allowsHitTesting(false)
                 }
+                #if DEBUG && targetEnvironment(simulator)
+                    Text(String(completedFalls))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-fall-probe")
+                #endif
             }
         }
         .task(id: ConfigurationKey(books: books, isActive: isActive)) {
@@ -210,6 +222,9 @@ struct BookWallView: View {
                 guard settled, !isSettled else { return }
                 isSettled = true
                 hasSettledOnce = !books.isEmpty
+                #if DEBUG && targetEnvironment(simulator)
+                    completedFalls += 1
+                #endif
                 // Focus can reach a spine while its book falls; it pulls out once it rests.
                 scene.highlight(focusedBook, reduceMotion: reduceMotion)
             }

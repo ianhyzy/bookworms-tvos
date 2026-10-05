@@ -24,6 +24,15 @@ REMAINING_CHECKS = [
     "Home Screen publishing, signed-update credentials, and production CloudKit restoration.",
 ]
 
+# The Local plan's Reduce Motion pass reruns these classes. The offline-policy classes keep the
+# pass's offline-enforcement evidence.
+REDUCE_MOTION_TESTS = (
+    "BookwormsUITests/BookWallNavigationTests",
+    "BookwormsUITests/OfflinePolicyUITests",
+    "BookwormsTests/OfflinePolicyTests",
+)
+REDUCE_MOTION_SUFFIX = " with Reduce Motion"
+
 
 class VerificationError(RuntimeError):
     """Required evidence could not be obtained or validated."""
@@ -305,6 +314,26 @@ def inspect_results(result, output, required, exit_code, baseline=None):
     return evidence
 
 
+def reduce_motion_tests(required):
+    """Selects the Reduce Motion pass's tests from the Local plan's required tests."""
+    selected = [test for test in required if test.startswith(tuple(c + "/" for c in REDUCE_MOTION_TESTS))]
+    for test_class in REDUCE_MOTION_TESTS:
+        if not any(test.startswith(test_class + "/") for test in selected):
+            raise VerificationError(f"Reduce Motion pass class {test_class} is not in the Local plan")
+    return selected
+
+
+def enable_reduce_motion(device):
+    """Turns on Reduce Motion in a booted disposable simulator, then reboots it to apply."""
+    domain = ["xcrun", "simctl", "spawn", device, "defaults"]
+    run(domain + ["write", "com.apple.Accessibility", "ReduceMotionEnabled", "-bool", "true"])
+    if command_text(domain + ["read", "com.apple.Accessibility", "ReduceMotionEnabled"]) != "1":
+        raise VerificationError("Could not verify simulator Reduce Motion")
+    run(["xcrun", "simctl", "shutdown", device], capture_output=True, text=True)
+    run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
+    run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
+
+
 def version_tuple(value):
     return tuple(int(part) for part in value.split("."))
 
@@ -335,9 +364,16 @@ def mute_simulator_audio():
     return {"domain": domain, "key": key, "enabled": False}
 
 
-def execute_runtime(runtime, device_type, output, plan, required, baseline=None):
+def execute_runtime(runtime, device_type, output, plan, required, baseline=None, reduce_motion=False,
+                    derived_data=None):
+    """Runs `required` tests on a new simulator, then deletes it.
+
+    With `reduce_motion`, the simulator turns Reduce Motion on and runs only `required`; the UI
+    tests fail if the setting did not apply. `derived_data` reuses an earlier pass's build.
+    """
     output.mkdir()
-    record = {"runtime": runtime, "plan": plan, "status": "failed", "output": str(output), "failures": []}
+    record = {"runtime": runtime, "plan": plan, "status": "failed", "output": str(output), "failures": [],
+              "reduce_motion": reduce_motion, "required_tests": required}
     device = None
     try:
         record["audio_output"] = mute_simulator_audio()
@@ -350,17 +386,23 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None)
         save_json(output / "owned-simulator.json", {"id": device})
         run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
         run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
+        environment = offline_environment()
+        if reduce_motion:
+            enable_reduce_motion(device)
+            environment["TEST_RUNNER_BOOKWORMS_EXPECT_REDUCE_MOTION"] = "1"
         result = output / (plan + ".xcresult")
         command = ["xcodebuild", "-project", "Bookworms.xcodeproj", "-scheme", "Bookworms",
                    "-destination", "platform=tvOS Simulator,id=" + device,
-                   "-derivedDataPath", str(output / "DerivedData"), "-testPlan", plan,
+                   "-derivedDataPath", str(derived_data or output / "DerivedData"), "-testPlan", plan,
                    "-parallel-testing-enabled", "NO", "-jobs", "2", "-collect-test-diagnostics", "never",
                    "OTHER_SWIFT_FLAGS=$(inherited) -D BOOKWORMS_OFFLINE_TESTS",
                    "-resultBundlePath", str(result), "CODE_SIGNING_ALLOWED=NO", "test"]
+        if reduce_motion:
+            command[-1:-1] = ["-only-testing:" + test_class for test_class in REDUCE_MOTION_TESTS]
         record["command"] = command
         print(f"Running {plan} on tvOS {runtime['version']}; log: {output / 'build.log'}", flush=True)
         with (output / "build.log").open("w") as log:
-            completed = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=offline_environment())
+            completed = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=environment)
         record["xcodebuild_exit_code"] = completed.returncode
         record.update(inspect_results(result, output, required, completed.returncode, baseline))
         record["status"] = "failed" if record["failures"] else "passed"
@@ -452,7 +494,10 @@ def write_report(output, report):
         coverage = record.get("coverage", {}).get("line_coverage")
         percentage = f"{coverage:.1%}" if isinstance(coverage, (int, float)) else "unavailable"
         build = record.get("runtime", {}).get("buildversion", "unavailable")
-        lines.append(f"| {runtime} | {build} | {record['status']} | {passed} / {len(report.get('required_tests', []))} | {percentage} |")
+        if record.get("reduce_motion"):
+            runtime += REDUCE_MOTION_SUFFIX
+        required = record.get("required_tests", report.get("required_tests", []))
+        lines.append(f"| {runtime} | {build} | {record['status']} | {passed} / {len(required)} | {percentage} |")
         if record.get("output"):
             artifacts.append(f"- [{runtime} artifacts](<{record['output']}>)")
         visual = record.get("visual_review", {})
@@ -512,18 +557,28 @@ def main(argv=None):
                 raise VerificationError("Runtime matrix must contain unique required runtimes")
             report["runtime_matrix"] = matrix
         device_type = next((d for d in inventory["devicetypes"] if "Apple-TV-4K-3rd-generation" in d["identifier"]), None)
-        selected_runtimes = select_runtimes(inventory, requested)
-        report["requested_runtimes"] = [version for version, _ in selected_runtimes]
+        passes = [(version, runtime, False) for version, runtime in select_runtimes(inventory, requested)]
+        if args.plan == "Local":
+            # One Reduce Motion pass on the last requested runtime covers motion-dependent paths.
+            version, runtime, _ = passes[-1]
+            passes.append((version + REDUCE_MOTION_SUFFIX, runtime, True))
+        report["requested_runtimes"] = [version for version, _, _ in passes]
         write_report(output, report)
-        for requested_runtime, runtime in selected_runtimes:
+        for requested_runtime, runtime, reduce_motion in passes:
             if not runtime or not device_type:
                 reason = f"Required tvOS runtime {requested_runtime} or Apple TV 4K simulator device type is not installed. Install it in Xcode Settings → Components."
                 report["runs"].append({"requested_runtime": requested_runtime, "status": "blocked", "failures": [reason]})
                 write_report(output, report)
                 continue
             runtime_output = output / ("tvOS-" + runtime["version"])
+            derived_data = None
+            if reduce_motion:
+                derived_data = runtime_output / "DerivedData"
+                runtime_output = output / ("tvOS-" + runtime["version"] + "-reduce-motion")
             baseline = args.baseline_dir.resolve() / runtime_output.name if args.baseline_dir else None
-            record = execute_runtime(runtime, device_type, runtime_output, args.plan, required, baseline)
+            tests = reduce_motion_tests(required) if reduce_motion else required
+            record = execute_runtime(runtime, device_type, runtime_output, args.plan, tests, baseline,
+                                     reduce_motion, derived_data)
             record["requested_runtime"] = requested_runtime
             report["runs"].append(record)
             write_report(output, report)
