@@ -47,11 +47,15 @@ final class SocialFeatureTests: XCTestCase {
         let picksRoot = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: picksRoot) }
         let picksClient = SocialFixtureClient()
+        await picksClient.failFeed()
         let picks = SocialLibraryModel(
             client: picksClient, defaults: picksDefaults, cacheRoot: picksRoot)
         await picks.load(token: "hc_pat_fixture", readerID: 2, enabledViews: [.friendsPicks])
         counts = await picksClient.counts
         XCTAssertEqual(counts["feed"], 1, "Friends' Picks ranks feed ratings")
+        XCTAssertEqual(
+            [counts["reader1"], counts["reader2"], counts["reader3"]], [1, 1, 1],
+            "A feed failure doesn't stop Friends' Picks from syncing libraries")
     }
 
     func testPurgedSocialSnapshotRecoversInsideDailyWindow() async throws {
@@ -434,7 +438,9 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         readerTwoGate?.resume()
         readerTwoGate = nil
     }
+    private var feedFails = false
     func fail(with failure: Failure) { self.failure = failure }
+    func failFeed() { feedFails = true }
     func unfollow() { unfollowed = true }
     func owner(token: String) async throws -> ReaderProfile {
         counts["owner", default: 0] += 1
@@ -452,6 +458,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
     }
     func feed(users: [Int], token: String) async throws -> [FeedActivity] {
         counts["feed", default: 0] += 1
+        if feedFails { throw URLError(.timedOut) }
         return []
     }
     func library(user: Int, token: String) async throws -> [ReaderBook] {

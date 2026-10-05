@@ -174,10 +174,16 @@ final class SocialLibraryModel {
                         owner: current.owner.id, dataset: "feed", manual: manual,
                         lastSuccess: current.dates["feed"])
                 {
-                    current.activities = try await client.feed(
-                        users: current.following.map(\.id), token: token)
-                    current.dates["feed"] = now()
-                    try install(current, request: request)
+                    do {
+                        current.activities = try await client.feed(
+                            users: current.following.map(\.id), token: token)
+                        current.dates["feed"] = now()
+                        try install(current, request: request)
+                    } catch {
+                        // Friends' Picks can rank from libraries alone, so a feed failure only
+                        // stops the sync when Following shows the feed.
+                        if socialViews.contains(.following) || Task.isCancelled { throw error }
+                    }
                 }
                 if needsComparison || needsPicks,
                     begin(

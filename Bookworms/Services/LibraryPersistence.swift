@@ -8,6 +8,7 @@ actor LibraryPersistence {
     private var sourceRevision = 0
     private var styleRevision = 0
     private var topShelfRevision = 0
+    private var newestTopShelfRequest = 0
 
     init(
         sourceStore: SourceLibraryStore, styleCacheURL: URL,
@@ -35,9 +36,18 @@ actor LibraryPersistence {
         return data
     }
 
+    /// Records a Top Shelf render before it writes any poster.
+    func beginTopShelf(revision: Int) {
+        newestTopShelfRequest = max(newestTopShelfRequest, revision)
+    }
+
+    /// Publishes `books` unless a newer snapshot was published. Renders run concurrently, so
+    /// only the newest requested render removes unused posters: an older one could otherwise
+    /// delete posters that a newer render already wrote.
     func publishTopShelf(_ books: [TopShelfBook], revision: Int) {
         guard revision >= topShelfRevision else { return }
         topShelfRevision = revision
         try? writeTopShelf(books)
+        if revision == newestTopShelfRequest { TopShelfPoster.removeUnused(keeping: books) }
     }
 }

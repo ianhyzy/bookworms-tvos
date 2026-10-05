@@ -992,7 +992,8 @@ final class LibraryModel {
             uniquingKeysWith: { first, _ in first })
         // Top Shelf mirrors the unfiltered shelf.
         let shelf =
-            shelfFilter == nil || isSample ? books : shelfPreferences.select(allBooks, limit: 10)
+            shelfFilter == nil || isSample
+            ? books : shelfPreferences.select(allBooks, limit: bookCount)
         let items: [TopShelfBook] =
             isSample
             ? []
@@ -1009,11 +1010,8 @@ final class LibraryModel {
         topShelfRevision &+= 1
         let revision = topShelfRevision
         let persistence = persistence
-        // Renders run in order: each removes unused posters, which a concurrent older render
-        // could otherwise do after a newer snapshot referencing them was published.
-        let previous = topShelfTask
         topShelfTask = Task.detached(priority: .utility) {
-            await previous?.value
+            await persistence.beginTopShelf(revision: revision)
             let items = await TopShelfPoster.render(items, artwork: .shared)
             await persistence.publishTopShelf(items, revision: revision)
         }

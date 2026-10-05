@@ -15,8 +15,7 @@ enum TopShelfPoster {
                 path: "top-shelf-posters", directoryHint: .isDirectory)
     }
 
-    /// Returns `books` with `posterURL` set for each current read whose poster was written, and
-    /// removes posters that no book uses.
+    /// Returns `books` with `posterURL` set for each current read whose poster was written.
     static func render(_ books: [TopShelfBook], artwork: ArtworkStore) async -> [TopShelfBook] {
         guard let directory else { return books }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -36,12 +35,17 @@ enum TopShelfPoster {
             }
             result[index].posterURL = file
         }
-        let kept = Set(result.compactMap { $0.posterURL?.lastPathComponent })
+        return result
+    }
+
+    /// Removes posters that none of `books` uses.
+    static func removeUnused(keeping books: [TopShelfBook]) {
+        guard let directory else { return }
+        let kept = Set(books.compactMap { $0.posterURL?.lastPathComponent })
         for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path())) ?? []
         where !kept.contains(name) {
             try? FileManager.default.removeItem(at: directory.appending(path: name))
         }
-        return result
     }
 
     /// Returns a JPEG of the cover with the unread part dimmed and a white line at `progress`,

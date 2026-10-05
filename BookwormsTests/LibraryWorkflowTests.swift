@@ -110,6 +110,7 @@ final class LibraryWorkflowTests: XCTestCase {
             return book
         }
         try fixture.save([fixture.snapshot(.hardcover, books: [covered(1)], age: 86401)])
+        fixture.defaults.set(2, forKey: "bookCount")
         var dependencies = fixture.dependencies()
         var library = [covered(1, author: "Filtered author"), covered(2)]
         dependencies.fetchHardcover = { _ in
@@ -129,8 +130,8 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.waitForTopShelf()
         XCTAssertEqual(model.books.map(\.id), [1], "The filter still limits My Shelf")
         XCTAssertEqual(
-            published.withLock { $0.last }, [1, 2, 3],
-            "A sync during a filter publishes the unfiltered shelf")
+            published.withLock { $0.last?.count }, 2,
+            "A sync during a filter publishes the unfiltered shelf within Books shown")
     }
 
     func testRejectedHardcoverReplacementRetainsCredentialAndSnapshot() async throws {
