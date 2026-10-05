@@ -135,9 +135,9 @@ Use a reduced set when the full recorder crashes or loses providers, then compar
 
 ## Renderer pipeline and lighting diagnostics
 
-The opt-in renderer emits `BookWallRendererPipeline` windows in diagnostic builds when launched with `--performance-diagnostics`. Each window reports submitted/completed frames, skipped and idle ticks, occupied slots, callback duration, and the actual view/layer scale. The same bounded message is an Instruments point-of-interest event. A slot lifetime includes CPU submission, GPU work, and callback dispatch; it is not GPU execution time or a displayed-frame interval. Use the Display instrument for acceptance.
+The renderer emits `BookWallRendererPipeline` windows in diagnostic builds when launched with `--performance-diagnostics`. Each window reports submitted/completed frames, skipped and idle ticks, occupied slots, callback duration, and the actual view/layer scale. The same bounded message is an Instruments point-of-interest event. A slot lifetime includes CPU submission, GPU work, and callback dispatch; it is not GPU execution time or a displayed-frame interval. Use the Display instrument for acceptance.
 
-After confirming slot overlap, compare `--variant wall-no-ibl` and `--variant wall-unlit-shelf` against a matched renderer baseline. These variants apply only to the renderer. The first gives root descendants zero environment-lighting weight and skips the studio environment; the second replaces the shelf's PBR material with a constant unlit tint while retaining geometry and physics. They deliberately change appearance to isolate cost. An unlit tint is not a fitted shelf bake; validate any replacement against resting, opening, and return lighting before adopting it.
+After confirming slot overlap, compare `--variant wall-no-ibl` and `--variant wall-unlit-shelf` against a matched renderer baseline. The first gives root descendants zero environment-lighting weight and skips the studio environment; the second replaces the shelf's PBR material with a constant unlit tint while retaining geometry and physics. They deliberately change appearance to isolate cost. An unlit tint is not a fitted shelf bake; validate any replacement against resting, opening, and return lighting before adopting it.
 
 ## Finish the investigation
 
