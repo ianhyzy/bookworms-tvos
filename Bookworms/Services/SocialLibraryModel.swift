@@ -9,9 +9,11 @@ final class SocialLibraryModel {
             if snapshot?.activities != oldValue?.activities {
                 activities = FeedActivity.latestPerBook(snapshot?.activities ?? [])
             }
-            // Sync dates and feed updates do not change comparison ordering or intersections.
+            // Sync dates do not change comparison ordering, intersections, or picks; feed ratings
+            // feed Friends' Picks.
             if snapshot?.mine != oldValue?.mine || snapshot?.readerBooks != oldValue?.readerBooks
                 || snapshot?.following != oldValue?.following
+                || snapshot?.activities != oldValue?.activities
             {
                 rebuildPresentation()
             }
@@ -117,6 +119,7 @@ final class SocialLibraryModel {
         requestedReader = readerID
         requestedViews = socialViews
         let needsComparison = socialViews.contains(.comparison) || socialViews.contains(.shared)
+        let needsPicks = socialViews.contains(.friendsPicks)
         if identity != fingerprint {
             snapshot = nil
             identity = fingerprint
@@ -176,7 +179,7 @@ final class SocialLibraryModel {
                     current.dates["feed"] = now()
                     try install(current, request: request)
                 }
-                if needsComparison,
+                if needsComparison || needsPicks,
                     begin(
                         owner: current.owner.id, dataset: "mine", manual: manual,
                         lastSuccess: current.dates["mine"])
@@ -195,6 +198,18 @@ final class SocialLibraryModel {
                         user: readerID, token: token)
                     current.dates["reader.\(readerID)"] = now()
                     try install(current, request: request)
+                }
+                // Each library refreshes on its own daily gate, shared with Compare Shelves.
+                if needsPicks {
+                    for id in FriendPick.readersToSync(current, limit: Self.pickReaderLimit)
+                    where begin(
+                        owner: current.owner.id, dataset: "reader.\(id)", manual: manual,
+                        lastSuccess: current.dates["reader.\(id)"])
+                    {
+                        current.readerBooks[id] = try await client.library(user: id, token: token)
+                        current.dates["reader.\(id)"] = now()
+                        try install(current, request: request)
+                    }
                 }
                 try install(current, request: request)
                 status =
@@ -252,6 +267,9 @@ final class SocialLibraryModel {
             .write(to: cacheRoot.appending(path: "\(value.owner.id).json"), options: .atomic)
     }
 
+    /// The most followed readers whose libraries Friends' Picks downloads.
+    static let pickReaderLimit = 10
+
     func leaveSample() {
         if isSample {
             isSample = false
@@ -283,12 +301,19 @@ final class SocialLibraryModel {
                     hasSpoilers: book.id == 2,
                     finished: book.finished)
             }
-        let theirs = mine.map {
-            ReaderBook(
-                book: $0.book, rating: 4.5,
-                review: $0.review == nil ? nil : "I enjoyed the characters and the setting.",
-                hasSpoilers: false, finished: $0.finished)
-        }
+        // Two books only the reader has read, rated below the shared ones so Compare Shelves
+        // keeps its order, give Friends' Picks content.
+        let theirs =
+            mine.map {
+                ReaderBook(
+                    book: $0.book, rating: 4.5,
+                    review: $0.review == nil ? nil : "I enjoyed the characters and the setting.",
+                    hasSpoilers: false, finished: $0.finished)
+            }
+            + SampleLibrary.friendPicks.map {
+                ReaderBook(
+                    book: $0, rating: 4, review: nil, hasSpoilers: false, finished: $0.finished)
+            }
         snapshot = SocialSnapshot(
             owner: me, following: [other],
             activities: mine.map {

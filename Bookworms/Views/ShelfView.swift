@@ -400,6 +400,11 @@ struct ShelfView: View {
         if enabled.contains(.shared) {
             books += social.presentation.shared.prefix(BookLimit.maximum).map { $0.mine.book }
         }
+        if enabled.contains(.friendsPicks) {
+            let picks = social.presentation.picks.prefix(BookLimit.maximum)
+            books += picks.map(\.book)
+            avatars += picks.flatMap { $0.fans.prefix(3).compactMap(\.avatarURL) }
+        }
         // Ambient My Shelf leads with them; at most a handful on any date.
         if coordinator.preferences.ambientOrderedViews.contains(.shelf) {
             books += library.onThisDay.prefix(BookLimit.maximum)

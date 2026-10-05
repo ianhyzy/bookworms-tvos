@@ -27,6 +27,7 @@ struct AmbientView: View {
                 !social.presentation.mine.isEmpty || !social.presentation.theirs.isEmpty
             case .shared:
                 !social.presentation.shared.isEmpty
+            case .friendsPicks: !social.presentation.picks.isEmpty
             case .yearInReview, .bookWall: false
             }
         }
@@ -156,6 +157,10 @@ struct AmbientView: View {
                     }
                 }
             }
+        case .friendsPicks:
+            ambientShelf(
+                books: social.presentation.picks.map(\.book), size: size, coversOnly: true,
+                photo: photos[0])
         case .yearInReview, .bookWall:
             EmptyView()
         }

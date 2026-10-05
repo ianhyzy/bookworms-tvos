@@ -294,4 +294,29 @@ final class SocialNavigationTests: XCTestCase {
         XCTAssertTrue(card.label.contains("The Orchard at Night"))
         capture(app, name: "Ambient on this day")
     }
+
+    func testFriendsPicksRowMovesDirectlyAndLeftReachesSidebar() {
+        let app = RemoteNavigation.open("Friends' Picks")
+        // The reader rated all three sample picks 4, so they sort by title.
+        let first = app.buttons["book-102"]
+        let second = app.buttons["book-101"]
+        let third = app.buttons["book-4"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        RemoteNavigation.waitForFocus(first)
+        XCTAssertTrue(app.otherElements["friends-picks"].exists)
+        RemoteNavigation.press(.right, in: app, expecting: second)
+        RemoteNavigation.press(.right, in: app, expecting: third)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: third)
+        RemoteNavigation.pressWithoutMoving(.up, in: app, from: third)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: third)
+        RemoteNavigation.press(.left, in: app, expecting: second)
+        RemoteNavigation.press(.left, in: app, expecting: first)
+        XCUIRemote.shared.press(.left)
+        let leftContent = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasFocus == false"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [leftContent], timeout: 3), .completed)
+        XCTAssertNil(RemoteNavigation.focused(app, prefix: "book-"))
+        RemoteNavigation.press(.right, in: app, expecting: first)
+        capture(app, name: "Friends' Picks")
+    }
 }

@@ -8,6 +8,7 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     case following = "Following"
     case comparison = "Compare Shelves"
     case shared = "Book Club"
+    case friendsPicks = "Friends' Picks"
     var id: String { rawValue }
 
     var systemImage: String {
@@ -18,11 +19,14 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
         case .following: "person.2.fill"
         case .comparison: "rectangle.split.2x1.fill"
         case .shared: "shared.with.you"
+        case .friendsPicks: "hand.thumbsup.fill"
         }
     }
 
     /// Whether the view needs Hardcover social data.
-    var isSocial: Bool { self == .following || self == .comparison || self == .shared }
+    var isSocial: Bool {
+        self == .following || self == .comparison || self == .shared || self == .friendsPicks
+    }
 
     /// Whether ambient mode can show this view. Year in Review is interactive only.
     var supportsAmbient: Bool { self != .yearInReview && self != .bookWall }
@@ -125,6 +129,7 @@ final class BookwormsCoordinator {
     var comparisonColumn = 0
     let upper = ComparisonRowState()
     let lower = ComparisonRowState()
+    let picks = ComparisonRowState()
     @ObservationIgnored private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

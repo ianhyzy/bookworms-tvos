@@ -41,10 +41,6 @@ Data: library books by author are synced; bios, photos, and other works need a n
 
 Data: synced.
 
-## Recommended by friends
-
-Books that followed readers rated highly and you haven't read, ranked by how many of them liked each one. Data: synced in reader libraries.
-
 ## Reader leaderboard
 
 Rank readers by books and pages read this year. Include only people you follow, or only mutuals. Data: followed readers' libraries are synced; mutuals need a new query for followers.

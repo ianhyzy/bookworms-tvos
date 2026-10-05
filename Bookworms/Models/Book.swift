@@ -193,6 +193,18 @@ enum SampleLibrary {
     ]
 }
 
+extension SampleLibrary {
+    /// Fictional books only the sample reader has read.
+    static let friendPicks: [Book] = [
+        Book(
+            id: 101, title: "The Cartographer's Daughter", author: "Rae Linden", pages: 352,
+            finished: "2026-07-14", communityRating: 4.1),
+        Book(
+            id: 102, title: "Salt and Lanterns", author: "Imogen Hale", pages: 288,
+            finished: "2026-06-02", communityRating: 3.9),
+    ]
+}
+
 struct RatingBucket: Codable, Hashable, Identifiable, Sendable {
     let rating: Double
     let count: Int

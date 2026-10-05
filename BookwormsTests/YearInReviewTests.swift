@@ -143,7 +143,7 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(
             saved.orderedViews,
             BookwormsView.availableCases.filter {
-                [.shelf, .yearInReview, .bookWall, .following].contains($0)
+                [.shelf, .yearInReview, .bookWall, .following, .friendsPicks].contains($0)
             })
         // Turning it off afterward persists.
         saved.enabled.removeAll { $0 == .yearInReview }
@@ -153,7 +153,9 @@ final class YearInReviewTests: XCTestCase {
         reloaded.validate()
         XCTAssertEqual(
             reloaded.orderedViews,
-            BookwormsView.availableCases.filter { [.shelf, .bookWall, .following].contains($0) })
+            BookwormsView.availableCases.filter {
+                [.shelf, .bookWall, .following, .friendsPicks].contains($0)
+            })
         XCTAssertFalse(reloaded.ambientOrderedViews.contains(.yearInReview))
     }
 }
