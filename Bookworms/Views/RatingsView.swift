@@ -3,8 +3,6 @@ import SwiftUI
 
 struct RatingsView: View {
     let book: Book
-    /// Shows a **Reviews** cue when the chart is the label of a button that opens reviews.
-    var opensReviews = false
 
     private var buckets: [RatingBucket] {
         let counts = Dictionary(
@@ -48,19 +46,10 @@ struct RatingsView: View {
                     .appFont(size: 23, weight: .medium)
                     .accessibilityElement(children: .combine)
                 }
-                HStack(spacing: 16) {
-                    if book.communityRating != nil {
-                        Text("\((book.ratingsCount ?? 0).formatted()) ratings").fixedSize()
-                    }
-                    if opensReviews {
-                        // Fixed so the cue keeps its full width beside the chart.
-                        HStack(spacing: 7) {
-                            Text("Reviews").fixedSize()
-                            Image(systemName: "chevron.right")
-                        }
-                    }
+                if book.communityRating != nil {
+                    Text("\((book.ratingsCount ?? 0).formatted()) ratings")
+                        .appFont(size: 18).foregroundStyle(.detailCaption).padding(.top, 4)
                 }
-                .appFont(size: 18).foregroundStyle(.detailCaption).padding(.top, 4)
             }
             .lineLimit(1).fixedSize()
             if let distribution = book.ratingDistribution, !distribution.isEmpty {

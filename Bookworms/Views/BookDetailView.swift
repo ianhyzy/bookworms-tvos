@@ -311,9 +311,11 @@ struct BookDetailView: View {
                     Button {
                         showsReviews = true
                     } label: {
-                        RatingsView(book: book, opensReviews: true)
+                        RatingsView(book: book)
                     }
                     .buttonStyle(FocusHighlightButtonStyle())
+                    // Keeps the focus highlight clear of the facts line and description.
+                    .padding(.vertical, 12)
                     .focusEffectDisabled()
                     .accessibilityHint("Shows community reviews.")
                     .accessibilityIdentifier("community-reviews")
