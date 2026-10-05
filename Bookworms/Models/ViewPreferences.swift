@@ -5,14 +5,11 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     case shelf = "My Shelf"
     case yearInReview = "Year in Review"
     case bookWall = "Book Wall"
-    case following = "Following"
+    case following = "Feed"
     case comparison = "Compare Shelves"
     case shared = "Book Club"
     case friendsPicks = "Friends' Picks"
-    /// The saved identifier; `title` is the displayed name.
     var id: String { rawValue }
-
-    var title: String { self == .following ? "Feed" : rawValue }
 
     var systemImage: String {
         switch self {

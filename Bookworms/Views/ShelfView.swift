@@ -144,7 +144,7 @@ struct ShelfView: View {
     private var tabs: some View {
         TabView(selection: sidebarSelection) {
             ForEach(coordinator.preferences.orderedViews) { view in
-                Tab(view.title, systemImage: view.systemImage, value: SidebarItem.view(view)) {
+                Tab(view.rawValue, systemImage: view.systemImage, value: SidebarItem.view(view)) {
                     tabContent(for: view)
                 }
             }
@@ -840,7 +840,7 @@ struct ShelfView: View {
                     // One full-width row per view, in sidebar order, so names never truncate.
                     ForEach(ambientChoices) { view in
                         Toggle(
-                            view.title,
+                            view.rawValue,
                             isOn: Binding(
                                 get: { coordinator.preferences.ambientOrderedViews.contains(view) },
                                 set: { coordinator.setInAmbient(view, $0) }

@@ -169,6 +169,43 @@ final class SettingsInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["Sans-serif"].hasFocus)
     }
 
+    func testProgressBarsMenuReachesNeighborsAndBackOpensSidebarAfterAChoice() {
+        let app = RemoteNavigation.launch(arguments: ["--settings-tab=Shelf"])
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        RemoteNavigation.openSettings(app)
+        let picker = app.descendants(matching: .any)["shelf-progress"].firstMatch
+        let sort = app.descendants(matching: .any)["shelf-sort"].firstMatch
+        moveDown(to: picker)
+        XCTAssertEqual(picker.value as? String, "Vertical")
+        RemoteNavigation.press(.up, in: app, expecting: sort)
+        RemoteNavigation.press(.down, in: app, expecting: picker)
+        // The right column's controls sit higher, so Right has no target; Up then Right does.
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: picker)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: picker)
+
+        // Whether the menu opens on the first choice or the current one, two presses up reach
+        // Don't show, the first.
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["Horizontal"].firstMatch.waitForExistence(timeout: 5))
+        XCUIRemote.shared.press(.up)
+        XCUIRemote.shared.press(.up)
+        XCUIRemote.shared.press(.select)
+        let chosen = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Don't show"), object: picker)
+        XCTAssertEqual(XCTWaiter.wait(for: [chosen], timeout: 5), .completed)
+        RemoteNavigation.waitForFocus(picker)
+        XCUIRemote.shared.press(.menu)
+        let sidebar = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in RemoteNavigation.hasFocus(labeled: "Settings", in: app)
+            },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [sidebar], timeout: 5), .completed,
+            "Back after a menu choice opens the sidebar")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testLeftFromFirstSettingsTabOpensSidebar() {
         let app = RemoteNavigation.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))

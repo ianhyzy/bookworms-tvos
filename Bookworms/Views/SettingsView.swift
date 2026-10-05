@@ -307,7 +307,7 @@ struct SettingsView: View {
             ForEach(BookwormsView.availableCases) { view in
                 let isOn = coordinator.preferences.orderedViews.contains(view)
                 Toggle(
-                    view.title,
+                    view.rawValue,
                     isOn: Binding(get: { isOn }, set: { coordinator.setEnabled(view, $0) })
                 )
                 .font(.system(size: 26))

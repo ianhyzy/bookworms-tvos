@@ -134,7 +134,7 @@ final class YearInReviewTests: XCTestCase {
 
     func testPreferencesSavedBeforeYearInReviewAddItOnce() throws {
         let old = Data(
-            #"{"enabled":["My Shelf","Following"],"comparisonOrder":"Top rated · All time","sharedReadsSort":"Rating agreement","comparisonCount":20,"ambientMinutes":10,"sessionMinutes":0}"#
+            #"{"enabled":["My Shelf","Feed"],"comparisonOrder":"Top rated · All time","sharedReadsSort":"Rating agreement","comparisonCount":20,"ambientMinutes":10,"sessionMinutes":0}"#
                 .utf8)
         var saved = try JSONDecoder().decode(ViewPreferences.self, from: old)
         XCTAssertNil(saved.offeredViews)
