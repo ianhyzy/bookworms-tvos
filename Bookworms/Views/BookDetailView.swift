@@ -250,7 +250,7 @@ struct BookDetailView: View {
         return description
     }
 
-    /// Reading facts in two columns, then genres, then the community histogram, which takes the
+    /// Reading facts in three columns, then genres, then the community histogram, which takes the
     /// remaining width and opens reviews when Hardcover can supply them.
     private var metadata: some View {
         var items = [
@@ -274,13 +274,12 @@ struct BookDetailView: View {
         }
         return HStack(alignment: .top, spacing: showsCover ? 44 : 28) {
             Grid(alignment: .leading, horizontalSpacing: 36, verticalSpacing: 20) {
-                ForEach(Array(stride(from: 0, to: items.count, by: 2)), id: \.self) { index in
+                // Three per row keeps the facts to two rows beside the genres and histogram.
+                ForEach(Array(stride(from: 0, to: items.count, by: 3)), id: \.self) { index in
                     GridRow {
-                        metadataItem(items[index].0, value: items[index].1, symbol: items[index].2)
-                        if index + 1 < items.count {
+                        ForEach(index..<min(index + 3, items.count), id: \.self) { item in
                             metadataItem(
-                                items[index + 1].0, value: items[index + 1].1,
-                                symbol: items[index + 1].2)
+                                items[item].0, value: items[item].1, symbol: items[item].2)
                         }
                     }
                 }
