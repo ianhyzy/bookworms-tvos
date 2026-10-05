@@ -1,4 +1,5 @@
 import XCTest
+import os
 
 @testable import Bookworms
 
@@ -74,8 +75,11 @@ final class LibraryWorkflowTests: XCTestCase {
                     coverURL: URL(string: "https://covers.example/series-4.jpg")),
             ])
         var dependencies = fixture.dependencies()
+        var seriesFetchFails = false
         dependencies.fetchHardcover = { _ in
-            HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: [book], series: [series])
+            HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [book],
+                series: seriesFetchFails ? nil : [series])
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -83,8 +87,50 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(
             model.browsingCoverURLs.map(\.lastPathComponent), ["library-3.jpg", "series-4.jpg"],
             "Owned series books use their library cover")
-        let saved = dependencies.sourceStore.load()
+        var saved = dependencies.sourceStore.load()
         XCTAssertEqual(saved.first { $0.source == .hardcover }?.series, [series])
+
+        seriesFetchFails = true
+        fixture.time += 10
+        await model.refresh(manual: true)
+        XCTAssertEqual(
+            model.series(for: book)?.books.map(\.id), [3, 4],
+            "A failed series fetch keeps the cached series")
+        saved = dependencies.sourceStore.load()
+        XCTAssertEqual(saved.first { $0.source == .hardcover }?.series, [series])
+    }
+
+    func testFilteredShelfStillPublishesTheUnfilteredTopShelf() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        func covered(_ id: Int, author: String = "Fictional author") -> Book {
+            var book = fixture.book(id)
+            book.author = author
+            book.coverURL = URL(string: "https://covers.example/\(id).jpg")
+            return book
+        }
+        try fixture.save([fixture.snapshot(.hardcover, books: [covered(1)], age: 86401)])
+        var dependencies = fixture.dependencies()
+        var library = [covered(1, author: "Filtered author"), covered(2)]
+        dependencies.fetchHardcover = { _ in
+            HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: library)
+        }
+        let published = OSAllocatedUnfairLock<[Set<Int>]>(initialState: [])
+        dependencies.writeTopShelf = { books in
+            published.withLock { $0.append(Set(books.map(\.id))) }
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.shelfFilter = .author("Filtered author")
+        XCTAssertEqual(model.books.map(\.id), [1])
+        library.append(covered(3))
+        fixture.time += 10
+        await model.refresh(manual: true)
+        await model.waitForTopShelf()
+        XCTAssertEqual(model.books.map(\.id), [1], "The filter still limits My Shelf")
+        XCTAssertEqual(
+            published.withLock { $0.last }, [1, 2, 3],
+            "A sync during a filter publishes the unfiltered shelf")
     }
 
     func testRejectedHardcoverReplacementRetainsCredentialAndSnapshot() async throws {

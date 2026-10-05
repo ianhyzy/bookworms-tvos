@@ -470,8 +470,7 @@ actor HardcoverClient {
                 let books = Self.normalize(rows)
                 // Series are an enhancement: a failure keeps the library sync complete.
                 let series = try? await fetchSeries(Set(books.compactMap(\.seriesID)), token: token)
-                return HardcoverLibrary(
-                    accountID: String(user.id), books: books, series: series ?? [])
+                return HardcoverLibrary(accountID: String(user.id), books: books, series: series)
             }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
             try await Task.sleep(for: .seconds(1.1))
@@ -588,6 +587,8 @@ actor HardcoverClient {
 
     /// Hardcover's `status_id` for **Currently Reading**.
     static let currentlyReadingStatus = 2
+    /// Hardcover's `status_id` for **Read**.
+    static let readStatus = 3
 
     /// The fraction of pages read in an unfinished read, from 0 to 1. Prefers the page count of
     /// the read's edition, then the library edition, then the book. Returns `nil` when the read logs no pages, such as an audiobook
@@ -634,7 +635,8 @@ actor HardcoverClient {
                 ratingDistribution: source.ratingsDistribution?
                     .filter { (0.5...5).contains($0.rating) && $0.count >= 0 },
                 detailCoverURL: covers.preferred, sources: [.hardcover],
-                isRead: row.statusID == 3 || read?.finishedAt != nil || row.lastReadDate != nil,
+                isRead: row.statusID == Self.readStatus || read?.finishedAt != nil
+                    || row.lastReadDate != nil,
                 publicationYear: source.releaseYear,
                 isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
                 progress: row.statusID == Self.currentlyReadingStatus
@@ -653,7 +655,8 @@ actor HardcoverClient {
 struct HardcoverLibrary: Sendable {
     let accountID: String
     let books: [Book]
-    var series: [SeriesInfo] = []
+    /// `nil` when series couldn't be fetched, so the previous snapshot's series stay.
+    var series: [SeriesInfo]? = nil
 }
 
 struct SeriesResponse: Decodable, Sendable {

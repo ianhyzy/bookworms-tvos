@@ -42,6 +42,16 @@ final class SocialFeatureTests: XCTestCase {
         counts = await client.counts
         XCTAssertEqual(counts["feed"], 1)
         XCTAssertEqual(counts["reader1"], 1)
+
+        let picksDefaults = try XCTUnwrap(UserDefaults(suiteName: "Scope.\(UUID())"))
+        let picksRoot = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: picksRoot) }
+        let picksClient = SocialFixtureClient()
+        let picks = SocialLibraryModel(
+            client: picksClient, defaults: picksDefaults, cacheRoot: picksRoot)
+        await picks.load(token: "hc_pat_fixture", readerID: 2, enabledViews: [.friendsPicks])
+        counts = await picksClient.counts
+        XCTAssertEqual(counts["feed"], 1, "Friends' Picks ranks feed ratings")
     }
 
     func testPurgedSocialSnapshotRecoversInsideDailyWindow() async throws {
@@ -468,6 +478,10 @@ private actor SocialFixtureClient: SocialLibraryFetching {
                 book: Book(id: id, title: "Book \(id)", author: "A"), rating: rating, review: nil,
                 hasSpoilers: false, finished: finished)
         }
+        var readBook = Book(id: 16, title: "Book 16", author: "A")
+        readBook.isRead = true
+        let markedRead = ReaderBook(
+            book: readBook, rating: 5, review: nil, hasSpoilers: false, finished: nil)
         let snapshot = SocialSnapshot(
             owner: reader(1), following: [reader(2), reader(3), reader(4)],
             activities: [
@@ -475,16 +489,19 @@ private actor SocialFixtureClient: SocialLibraryFetching {
                     id: 1, reader: reader(4), createdAt: nil, summary: "", book: item(12, nil).book,
                     likes: 0, rating: 4.5, review: nil, hasSpoilers: false)
             ],
-            mine: [item(10, 5), item(13, nil, finished: nil)],
+            mine: [item(10, 5), item(13, nil, finished: nil), markedRead],
             readerBooks: [
-                2: [item(10, 5), item(11, 4), item(12, 5), item(13, 4), item(14, 3.5)],
+                2: [
+                    item(10, 5), item(11, 4), item(12, 5), item(13, 4), item(14, 3.5), item(16, 5),
+                ],
                 3: [item(11, 5), item(12, 4)],
                 9: [item(15, 5)],
             ])
         let picks = FriendPick.ranked(snapshot, limit: 40)
         XCTAssertEqual(
             picks.map(\.id), [12, 11, 13],
-            "Read books, low ratings, and unfollowed readers are left out; Want to Read stays")
+            "Read books, including those marked Read without a date, low ratings, and unfollowed "
+                + "readers are left out; Want to Read stays")
         XCTAssertEqual(picks[0].fans.map(\.id), [2, 4, 3], "Feed ratings count as fans")
         XCTAssertEqual(picks[1].averageRating, 4.5)
         XCTAssertEqual(

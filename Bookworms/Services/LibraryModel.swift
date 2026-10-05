@@ -45,6 +45,7 @@ final class LibraryModel {
     @ObservationIgnored private var sourceSaveRevision = 0
     @ObservationIgnored private var styleSaveRevision = 0
     @ObservationIgnored private var topShelfRevision = 0
+    @ObservationIgnored private var topShelfTask: Task<Void, Never>?
     @ObservationIgnored private var cloudRevision = 0
     @ObservationIgnored private var activeHardcoverAccountID: String?
     private var schedule: SourceSyncSchedule { SourceSyncSchedule(defaults: dependencies.defaults) }
@@ -764,9 +765,13 @@ final class LibraryModel {
             setActiveHardcoverAccountID(accountID)
             hardcoverSessionExpired = false
         }
+        let previousSeries = sourceSnapshots.last {
+            $0.source == source && $0.accountID == accountID
+        }?
+        .series
         let snapshot = SourceSnapshot(
             source: source, accountID: accountID, books: result, syncedAt: dependencies.now(),
-            series: series)
+            series: series ?? previousSeries)
         // A complete Hardcover sync replaces snapshots from older builds and accounts.
         sourceSnapshots.removeAll {
             $0.source == source && (source == .hardcover || $0.accountID == accountID)
@@ -847,8 +852,7 @@ final class LibraryModel {
             restoreVisibleFonts()
             queueAutomaticGeneration()
         }
-        // Top Shelf mirrors the unfiltered shelf.
-        if shelfFilter == nil { publishTopShelf() }
+        publishTopShelf()
         updateBrowsingCovers()
     }
 
@@ -977,14 +981,22 @@ final class LibraryModel {
         await cloudTask?.value
     }
 
+    /// Waits for queued Top Shelf renders and publications.
+    func waitForTopShelf() async {
+        await topShelfTask?.value
+    }
+
     private func publishTopShelf() {
         let cached = Dictionary(
             dependencies.readTopShelf().map { ($0.id, $0.imageURL) },
             uniquingKeysWith: { first, _ in first })
+        // Top Shelf mirrors the unfiltered shelf.
+        let shelf =
+            shelfFilter == nil || isSample ? books : shelfPreferences.select(allBooks, limit: 10)
         let items: [TopShelfBook] =
             isSample
             ? []
-            : books.prefix(10)
+            : shelf.prefix(10)
                 .compactMap { book in
                     guard book.isHardcoverBook,
                         let url = book.detailCoverURL ?? book.coverURL ?? cached[book.id],
@@ -997,7 +1009,11 @@ final class LibraryModel {
         topShelfRevision &+= 1
         let revision = topShelfRevision
         let persistence = persistence
-        Task.detached(priority: .utility) {
+        // Renders run in order: each removes unused posters, which a concurrent older render
+        // could otherwise do after a newer snapshot referencing them was published.
+        let previous = topShelfTask
+        topShelfTask = Task.detached(priority: .utility) {
+            await previous?.value
             let items = await TopShelfPoster.render(items, artwork: .shared)
             await persistence.publishTopShelf(items, revision: revision)
         }

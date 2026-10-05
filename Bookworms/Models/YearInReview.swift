@@ -81,11 +81,11 @@ struct YearInReview: Equatable, Identifiable, Sendable {
 
         // `books` is earliest first, so the last of equal page counts is the latest finish.
         let withPages = books.filter { ($0.pages ?? 0) > 0 }
-        longest = withPages.last { $0.pages == withPages.map { $0.pages ?? 0 }.max() }
-        shortest =
-            withPages.count < 2
-            ? nil : withPages.last { $0.pages == withPages.map { $0.pages ?? 0 }.min() }
         let paged = withPages.compactMap(\.pages)
+        let maximumPages = paged.max()
+        let minimumPages = paged.min()
+        longest = withPages.last { $0.pages == maximumPages }
+        shortest = withPages.count < 2 ? nil : withPages.last { $0.pages == minimumPages }
         pages = paged.reduce(0, +)
         booksWithPages = paged.count
         let ratings = books.compactMap(\.rating).filter { (0...5).contains($0) }

@@ -28,6 +28,8 @@ final class SocialClientTests: XCTestCase {
         XCTAssertEqual(books.count, 101)
         XCTAssertEqual(books.last?.rating, 4.5)
         XCTAssertNil(books.last?.book.rating)
+        XCTAssertEqual(books.last?.book.isRead, true, "Status Read marks a book read")
+        XCTAssertNil(books.first?.book.isRead)
     }
 
     func testFollowedReadersAndOwnerDecodeWithoutOptionalProfileData() async throws {
@@ -103,6 +105,7 @@ private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
                         .map { index in
                             [
                                 "id": index, "rating": 4.5, "review_has_spoilers": false,
+                                "status_id": index == 100 ? 3 : 1,
                                 "book": ["id": index, "title": "Book \(index)"],
                             ] as [String: Any]
                         }

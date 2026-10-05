@@ -169,7 +169,7 @@ final class SocialLibraryModel {
                     current.dates["following"] = now()
                     try install(current, request: request)
                 }
-                if socialViews.contains(.following),
+                if socialViews.contains(.following) || needsPicks,
                     begin(
                         owner: current.owner.id, dataset: "feed", manual: manual,
                         lastSuccess: current.dates["feed"])
