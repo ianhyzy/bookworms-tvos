@@ -88,6 +88,15 @@ final class LibraryModel {
     /// Reads the active Hardcover credential only at an explicit synchronization boundary.
     func hardcoverTokenForSync() -> String? {
         guard hardcoverEnabled, hardcoverConnected, !isSample else { return nil }
+        #if DEBUG && targetEnvironment(simulator)
+            // Matches `saveHardcoverCredential`: an unsigned simulator may keep the authorized
+            // bootstrap token only in this process, so social sync uses it too.
+            if dependencies.allowLaunchOverrides,
+                let token = ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"]
+            {
+                return dependencies.readCredential("hardcover-token") ?? token
+            }
+        #endif
         return dependencies.readCredential("hardcover-token")
     }
 

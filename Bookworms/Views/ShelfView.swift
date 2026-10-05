@@ -437,6 +437,13 @@ struct ShelfView: View {
     }
 
     private func loadSocial(manual: Bool = false) async {
+        #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--cached-social-preview") {
+                social.useCachedSnapshotForPreview()
+                ensureComparisonReader()
+                return
+            }
+        #endif
         if library.isSample {
             social.useSample(books: library.books)
             ensureComparisonReader()

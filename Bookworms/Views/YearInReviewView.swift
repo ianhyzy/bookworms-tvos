@@ -177,8 +177,9 @@ struct YearInReviewView: View {
                     ForEach(0..<12, id: \.self) { month in
                         let count = review.monthlyCounts[month]
                         VStack(spacing: 8) {
+                            // Two-digit counts are wider than a bar beside the records panel.
                             Text(verbatim: count > 0 ? String(count) : " ")
-                                .appFont(size: 22, weight: .medium)
+                                .appFont(size: 22, weight: .medium).fixedSize()
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(
                                     count > 0

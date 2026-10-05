@@ -270,6 +270,31 @@ final class SocialLibraryModel {
     /// The most followed readers whose libraries Friends' Picks downloads.
     static let pickReaderLimit = 10
 
+    #if DEBUG && targetEnvironment(simulator)
+        /// Shows the newest cached social snapshot without a credential or network requests, for
+        /// previewing downloaded data in the simulator. Like the sample, it blocks later loads.
+        func useCachedSnapshotForPreview() {
+            let files =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: cacheRoot, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            let newest = files.filter { $0.pathExtension == "json" }
+                .max {
+                    let lhs = try? $0.resourceValues(forKeys: [.contentModificationDateKey])
+                    let rhs = try? $1.resourceValues(forKeys: [.contentModificationDateKey])
+                    return (lhs?.contentModificationDate ?? .distantPast)
+                        < (rhs?.contentModificationDate ?? .distantPast)
+                }
+            guard let newest, let data = try? Data(contentsOf: newest),
+                let cached = try? JSONDecoder().decode(SocialSnapshot.self, from: data)
+            else { return }
+            activeTask?.cancel()
+            isSample = true
+            snapshot = cached
+            status = "Cached social data for simulator preview."
+            revision += 1
+        }
+    #endif
+
     func leaveSample() {
         if isSample {
             isSample = false
