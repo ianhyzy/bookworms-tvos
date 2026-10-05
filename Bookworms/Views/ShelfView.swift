@@ -561,7 +561,7 @@ struct ShelfView: View {
 
     /// Reopens the details that filtered My Shelf, over the view they opened from, and clears the
     /// filter. `nil` without such a filter, so Back keeps opening the sidebar.
-    // ponytail: one level of history; keep a stack if chained filters should unwind in order.
+    // ponytail: one level of history; after chained filters, Back reopens the latest origin.
     private var returnToFilterOrigin: (() -> Void)? {
         guard let origin = filterOrigin, library.shelfFilter != nil else { return nil }
         return {
@@ -637,8 +637,7 @@ struct ShelfView: View {
                                 },
                                 series: { library.series(for: library.book(withID: $0.id) ?? $0) },
                                 libraryBook: { library.book(withID: $0) },
-                                // ponytail: a series book opens in the cover details, even one
-                                // on the wall; fly to it instead if that should stay 3D.
+                                // A series book opens in the cover details, even one on the wall.
                                 onOpenBook: { selectedBook = $0 },
                                 onActivity: recordActivity,
                                 returnRevision: socialReturnRevision,

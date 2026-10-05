@@ -180,9 +180,16 @@ final class SocialLibraryModel {
                         current.dates["feed"] = now()
                         try install(current, request: request)
                     } catch {
-                        // Friends' Picks can rank from libraries alone, so a feed failure only
-                        // stops the sync when the Feed view shows it.
-                        if socialViews.contains(.following) || Task.isCancelled { throw error }
+                        // Friends' Picks can rank from libraries alone, so a transient feed
+                        // failure only stops the sync when the Feed view shows it. Credential and
+                        // permission failures always reach the handler below.
+                        switch error {
+                        case HardcoverError.insufficientScope, HardcoverError.forbidden,
+                            HardcoverError.invalidToken:
+                            throw error
+                        default:
+                            if socialViews.contains(.following) || Task.isCancelled { throw error }
+                        }
                     }
                 }
                 if needsComparison || needsPicks,
