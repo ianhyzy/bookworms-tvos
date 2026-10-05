@@ -274,6 +274,15 @@ struct SettingsView: View {
                 Toggle("Reverse order", isOn: $library.shelfPreferences.reversed)
                     .font(.system(size: 26))
             }
+            settingLabel("Progress bars", "How current reads show progress, including Top Shelf.")
+            Picker("Progress bars", selection: $library.shelfPreferences.progressStyle) {
+                ForEach(ProgressStyle.allCases) {
+                    Text($0.rawValue).font(.system(size: 26)).tag($0)
+                }
+            }
+            .pickerStyle(.menu).accessibilityIdentifier("shelf-progress")
+            .accessibilityValue(library.shelfPreferences.progressStyle.rawValue)
+            .font(.system(size: 26))
         } trailing: {
             countCard(
                 "Books shown", "Books from enabled sources on My Shelf.",

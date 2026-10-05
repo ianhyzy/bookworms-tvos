@@ -134,6 +134,15 @@ final class SourceLibraryTests: XCTestCase {
                 ShelfPreferences.self,
                 from: Data(#"{"collection":"Read Books","sort":"Title","reversed":false}"#.utf8))
         XCTAssertEqual(legacy.collection, .standard)
+        XCTAssertEqual(legacy.progressStyle, .vertical, "Older choices gain the vertical sweep")
+        let unknown = try JSONDecoder()
+            .decode(ShelfPreferences.self, from: Data(#"{"progressStyle":"Diagonal"}"#.utf8))
+        XCTAssertEqual(unknown, ShelfPreferences())
+        var hidden = ShelfPreferences()
+        hidden.progressStyle = .hidden
+        XCTAssertEqual(
+            try JSONDecoder().decode(ShelfPreferences.self, from: JSONEncoder().encode(hidden)),
+            hidden)
     }
 
     @MainActor func testShelfFilterLimitsTheShelfUntilCleared() {

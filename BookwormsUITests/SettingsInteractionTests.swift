@@ -187,6 +187,7 @@ final class SettingsInteractionTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: tabs.buttons["Shelf"])
         XCTAssertTrue(
             app.descendants(matching: .any)["shelf-collection"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["shelf-progress"].exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Settings tabs"
         screenshot.lifetime = .keepAlways

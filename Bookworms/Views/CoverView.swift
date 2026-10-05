@@ -4,8 +4,8 @@ struct CoverView: View {
     let book: Book
     /// Draws a contact shadow where the cover's base meets a `ShelfBoard`.
     var standsOnShelf = false
-    /// Dims the unread part of a current read's cover, right of a line at `Book.progress`.
-    var showsProgress = false
+    /// How a current read shows `Book.progress` on the cover.
+    var progressStyle = ProgressStyle.hidden
     var onAspectRatio: ((Double) -> Void)? = nil
     @Environment(\.isFocused) private var isFocused
     @Environment(\.coverIsPressed) private var isPressed
@@ -39,8 +39,22 @@ struct CoverView: View {
             artwork(with: currentImage, compact: geometry.size.height < 350)
                 .frame(width: width, height: height)
                 .overlay(alignment: .leading) {
-                    if showsProgress, currentImage != nil, let progress = book.progress {
+                    if progressStyle == .vertical, currentImage != nil,
+                        let progress = book.progress
+                    {
                         progressSweep(progress, width: width)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if progressStyle == .horizontal, currentImage != nil,
+                        let progress = book.progress
+                    {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .padding(.horizontal, width * 0.08)
+                            .padding(.bottom, width * 0.08)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
                 .clipShape(.rect(cornerRadius: cornerRadius))
@@ -114,16 +128,20 @@ struct CoverView: View {
         onAspectRatio?(Double(decoded.width) / Double(decoded.height))
     }
 
-    /// A static light sweep: the read part keeps its color, the unread part dims, and a white
-    /// line marks the reader's place. Plain fills keep it free of blur and offscreen passes.
+    /// A static light sweep: the read part keeps its color, the unread part dims, and light
+    /// bleeds left from the reader's place. A gradient fill keeps it free of blur and offscreen
+    /// passes. `TopShelfPoster.sweep` draws the same proportions.
     private func progressSweep(_ progress: Double, width: CGFloat) -> some View {
-        let line = max(2, width * 0.012)
         let x = width * progress
+        let bleed = min(x, width * TopShelfPoster.bleedFraction)
         return ZStack(alignment: .leading) {
-            Rectangle().fill(.black.opacity(0.5))
+            Rectangle().fill(.black.opacity(TopShelfPoster.dimOpacity))
                 .frame(width: width - x).offset(x: x)
-            Rectangle().fill(.white.opacity(0.9))
-                .frame(width: line).offset(x: min(max(0, x - line / 2), width - line))
+            LinearGradient(
+                colors: [.white.opacity(0), .white.opacity(TopShelfPoster.bleedOpacity)],
+                startPoint: .leading, endPoint: .trailing
+            )
+            .frame(width: bleed).offset(x: x - bleed)
         }
         .frame(width: width, alignment: .leading)
         .allowsHitTesting(false)
@@ -136,7 +154,7 @@ struct CoverView: View {
                 Image(uiImage: currentImage).resizable().scaledToFit()
                     .accessibilityLabel("Cover of \(book.title)")
                     .accessibilityValue(
-                        showsProgress
+                        progressStyle != .hidden
                             ? book.progress.map { "\(Int(($0 * 100).rounded())) percent read" }
                                 ?? "" : ""
                     )

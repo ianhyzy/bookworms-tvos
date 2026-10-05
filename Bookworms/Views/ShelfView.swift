@@ -1210,14 +1210,19 @@ struct BookCaption: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(book.formatLabel ?? "")
                 }
-                Text(book.title).appFont(size: 33, weight: .medium).lineLimit(1)
+                HStack(spacing: 10) {
+                    Text(book.title).lineLimit(1)
+                    // Fixed so a long title truncates before the status does.
+                    if book.isReading == true {
+                        Text("(Currently Reading)").fixedSize()
+                    }
+                }
+                .appFont(size: 33, weight: .medium)
             }
             Text(
                 [
                     book.author, book.primaryGenre,
-                    book.finished.map { _ in
-                        book.finishedLabel(format: dateFormat)
-                    } ?? (book.isReading == true ? "Reading" : nil),
+                    book.finished.map { _ in book.finishedLabel(format: dateFormat) },
                 ]
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             )
@@ -1567,7 +1572,8 @@ struct ShelfRow: View {
                     fontRevision: library.fontRevision)
             } else {
                 CoverView(
-                    book: book, standsOnShelf: true, showsProgress: true,
+                    book: book, standsOnShelf: true,
+                    progressStyle: library.shelfPreferences.progressStyle,
                     onAspectRatio: { library.recordCoverRatio($0, for: book.id) }
                 )
                 .frame(width: dimensions.width, height: dimensions.height)

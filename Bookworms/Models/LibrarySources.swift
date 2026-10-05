@@ -116,13 +116,46 @@ enum ShelfFilter: Hashable, Sendable {
     }
 }
 
+/// How current reads show progress on My Shelf, its ambient shelf, and Top Shelf.
+enum ProgressStyle: String, Codable, CaseIterable, Identifiable {
+    case hidden = "Don't show"
+    /// The system's linear progress bar along the cover's base; Top Shelf's native bar.
+    case horizontal = "Horizontal"
+    /// A light sweep: the unread part dims right of a soft line at the reader's place.
+    case vertical = "Vertical"
+    var id: String { rawValue }
+}
+
 struct ShelfPreferences: Codable, Equatable {
     /// The most current reads that lead the default collection.
     static let readingLimit = 3
 
-    var collection = ShelfCollection.all
-    var sort = ShelfSort.dateRead
-    var reversed = false
+    var collection: ShelfCollection
+    var sort: ShelfSort
+    var reversed: Bool
+    var progressStyle: ProgressStyle
+
+    init(
+        collection: ShelfCollection = .all, sort: ShelfSort = .dateRead, reversed: Bool = false,
+        progressStyle: ProgressStyle = .vertical
+    ) {
+        self.collection = collection
+        self.sort = sort
+        self.reversed = reversed
+        self.progressStyle = progressStyle
+    }
+
+    /// Fills choices missing from older saved preferences with their defaults.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            collection: try container.decodeIfPresent(ShelfCollection.self, forKey: .collection)
+                ?? .all,
+            sort: try container.decodeIfPresent(ShelfSort.self, forKey: .sort) ?? .dateRead,
+            reversed: try container.decodeIfPresent(Bool.self, forKey: .reversed) ?? false,
+            progressStyle: (try? container.decodeIfPresent(
+                ProgressStyle.self, forKey: .progressStyle)) ?? .vertical)
+    }
 
     /// Books for the shelf, in display order. **Default** and **All Books** lead with the most
     /// recently started current reads, regardless of sort, and they count toward `limit`.

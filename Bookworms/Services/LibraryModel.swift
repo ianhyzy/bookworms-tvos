@@ -990,6 +990,7 @@ final class LibraryModel {
         let cached = Dictionary(
             dependencies.readTopShelf().map { ($0.id, $0.imageURL) },
             uniquingKeysWith: { first, _ in first })
+        let style = shelfPreferences.progressStyle
         // Top Shelf mirrors the unfiltered shelf.
         let shelf =
             shelfFilter == nil || isSample
@@ -1005,14 +1006,17 @@ final class LibraryModel {
                     else { return nil }
                     return TopShelfBook(
                         id: book.id, title: book.title, imageURL: url,
-                        progress: book.isReading == true ? book.progress ?? 0 : nil)
+                        progress: book.isReading == true ? book.progress ?? 0 : nil,
+                        showsNativeProgress: style == .horizontal ? true : nil)
                 }
         topShelfRevision &+= 1
         let revision = topShelfRevision
         let persistence = persistence
         topShelfTask = Task.detached(priority: .utility) {
             await persistence.beginTopShelf(revision: revision)
-            let items = await TopShelfPoster.render(items, artwork: .shared)
+            let items =
+                style == .vertical
+                ? await TopShelfPoster.render(items, artwork: .shared) : items
             await persistence.publishTopShelf(items, revision: revision)
         }
     }
