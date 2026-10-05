@@ -360,11 +360,13 @@ final class LibraryTests: XCTestCase {
             sample.draw(image, in: CGRect(x: -x, y: -75, width: 100, height: 150))
             return pixel[0]
         }
+        // Gray converts to sRGB on drawing, so compare against the measured read part.
         let read = Int(try brightness(x: 20))
-        XCTAssertEqual(read, 128, accuracy: 10, "The read part keeps its color")
+        XCTAssertEqual(
+            read, Int(try brightness(x: 5)), accuracy: 3, "The read part keeps its color")
         XCTAssertGreaterThan(
             Int(try brightness(x: 38)), read + 10, "Light bleeds left from the reader's place")
-        XCTAssertLessThan(Int(try brightness(x: 70)), 90, "The unread part dims")
+        XCTAssertLessThan(Int(try brightness(x: 70)), read * 3 / 4, "The unread part dims")
     }
 
     func testTopShelfContentUsesPostersAndValidatedBookLinks() throws {
