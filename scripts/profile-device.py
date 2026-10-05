@@ -31,6 +31,8 @@ def capture_configuration(scenario, capture_set, template):
     if scenario == 'bookWall':
         # RealityKit's frame instruments record only on visionOS.
         instruments.extend(['Display', 'GPU'])
+    if scenario == 'description':
+        instruments.append('Display')
     return template, instruments
 
 
@@ -49,7 +51,7 @@ def main():
     parser.add_argument('--capture-set', choices=['full', 'display', 'cpu'], default='full',
                         help='Book Wall instruments: full (default), Display + Points of Interest, '
                              'or Time Profiler + Points of Interest')
-    parser.add_argument('--scenario', choices=['sidebar', 'settings', 'books', 'longevity', 'bookWall'], default='sidebar')
+    parser.add_argument('--scenario', choices=['sidebar', 'settings', 'books', 'longevity', 'bookWall', 'description'], default='sidebar')
     parser.add_argument('--repetitions', type=int, choices=[1,3], default=3)
     parser.add_argument('--view', type=int, choices=range(4), default=0)
     parser.add_argument('--template', default='Time Profiler',
@@ -123,6 +125,9 @@ def main():
     }
     if args.scenario == 'longevity':
         manifest['presses'] = '20 minutes of Settings cycles; 40 presses; 45 minutes ambient; 40 presses'
+    if args.scenario == 'description':
+        manifest['presses'] = ('open details for the first My Shelf book; 3 cycles of Select on Show more '
+                               'and Menu, 3 s apart; phases in test.log as PERFORMANCE_PHASE')
     if args.scenario == 'bookWall':
         variants = set((args.variant or '').split('+'))
         manifest['wall_antialiasing'] = args.wall_antialiasing

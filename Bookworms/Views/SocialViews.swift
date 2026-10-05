@@ -864,8 +864,20 @@ struct ReviewReadingView: View {
                 Button("Reveal spoilers") { revealed = true }.buttonStyle(.glassProminent)
             } else {
                 ScrollView {
-                    Text(review.text).appFont(size: 28)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Each line renders on the GPU: as one CPU-drawn text block, a long review
+                    // or description redrew on the main thread every frame while the sheet
+                    // closed, dropping about 15 frames on Apple TV 4K (2nd generation). Separate
+                    // lines keep each texture well under the size limit.
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(
+                            Array(review.text.components(separatedBy: "\n").enumerated()),
+                            id: \.offset
+                        ) {
+                            Text($0.element.isEmpty ? " " : $0.element).appFont(size: 28)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .drawingGroup()
+                        }
+                    }
                 }
                 .scrollPosition($scrollPosition)
                 .scrollIndicators(.hidden)
