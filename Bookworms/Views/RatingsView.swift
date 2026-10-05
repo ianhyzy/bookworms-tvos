@@ -50,11 +50,12 @@ struct RatingsView: View {
                 }
                 HStack(spacing: 16) {
                     if book.communityRating != nil {
-                        Text("\((book.ratingsCount ?? 0).formatted()) ratings")
+                        Text("\((book.ratingsCount ?? 0).formatted()) ratings").fixedSize()
                     }
                     if opensReviews {
+                        // Fixed so the cue keeps its full width beside the chart.
                         HStack(spacing: 7) {
-                            Text("Reviews")
+                            Text("Reviews").fixedSize()
                             Image(systemName: "chevron.right")
                         }
                     }
