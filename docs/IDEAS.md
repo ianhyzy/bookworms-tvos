@@ -7,7 +7,6 @@ Each idea notes the data it needs. "Synced" means the Hardcover library or socia
 ## Current reads
 
 - **Progress on the Book Wall.** The wall's ribbon currently marks focus. Proposed: current reads always carry a ribbon whose length shows progress, and focus uses a different cue. Alternative: a brass spine tab shows the percentage. Data: synced.
-- **Audiobook progress.** Divide `progress_seconds` by the edition's audio length. Data: new field; confirm the edition length field in Hardcover's schema first.
 
 ## Reading goal worm
 

@@ -307,7 +307,7 @@ actor HardcoverClient {
                 }
                 current_read: user_book_reads(where: {finished_at: {_is_null: true}},
                   order_by: [{id: desc}], limit: 1) {
-                  started_at progress_pages edition { pages }
+                  started_at progress progress_pages progress_seconds edition { pages audio_seconds }
                 }
               }
             }
@@ -590,14 +590,29 @@ actor HardcoverClient {
     /// Hardcover's `status_id` for **Read**.
     static let readStatus = 3
 
-    /// The fraction of pages read in an unfinished read, from 0 to 1. Prefers the page count of
-    /// the read's edition, then the library edition, then the book. Returns `nil` when the read logs no pages, such as an audiobook
-    /// tracked in seconds.
-    static func progress(of read: CurrentRead?, pages fallback: Int?) -> Double? {
-        guard let read, let done = read.progressPages,
-            let total = read.edition?.pages ?? fallback, total > 0
-        else { return nil }
-        return min(1, max(0, Double(done) / Double(total)))
+    /// The fraction of an unfinished read completed, from 0 to 1, or `nil` when the read logs no
+    /// progress.
+    ///
+    /// Prefers Hardcover's percentage, which it records whether progress was logged as a
+    /// percentage, pages, or listening time. Otherwise divides pages, then seconds, by the total
+    /// from the read's edition, falling back to `pages` or `audioSeconds` from the library edition.
+    static func progress(of read: CurrentRead?, pages: Int?, audioSeconds: Int?) -> Double? {
+        guard let read else { return nil }
+        let fraction: Double
+        if let percent = read.progress {
+            fraction = percent / 100
+        } else if let done = read.progressPages, let total = read.edition?.pages ?? pages,
+            total > 0
+        {
+            fraction = Double(done) / Double(total)
+        } else if let done = read.progressSeconds,
+            let total = read.edition?.audioSeconds ?? audioSeconds, total > 0
+        {
+            fraction = Double(done) / Double(total)
+        } else {
+            return nil
+        }
+        return fraction.isFinite ? min(1, max(0, fraction)) : nil
     }
 
     static func normalize(_ rows: [UserBook]) -> [Book] {
@@ -640,7 +655,9 @@ actor HardcoverClient {
                 publicationYear: source.releaseYear,
                 isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
                 progress: row.statusID == Self.currentlyReadingStatus
-                    ? Self.progress(of: row.currentRead, pages: row.edition?.pages ?? source.pages)
+                    ? Self.progress(
+                        of: row.currentRead, pages: row.edition?.pages ?? source.pages,
+                        audioSeconds: row.edition?.audioSeconds)
                     : nil,
                 started: row.statusID == Self.currentlyReadingStatus
                     ? row.currentRead?.startedAt : nil,
@@ -794,12 +811,24 @@ struct ReadEvent: Decodable, Sendable {
 /// An unfinished read, which carries reading progress.
 struct CurrentRead: Decodable, Sendable {
     let startedAt: String?
-    let progressPages: Int?
-    let edition: Pages?
-    struct Pages: Decodable, Sendable { let pages: Int? }
+    /// Percent complete, from 0 to 100.
+    var progress: Double? = nil
+    var progressPages: Int? = nil
+    var progressSeconds: Int? = nil
+    var edition: Length? = nil
+    struct Length: Decodable, Sendable {
+        var pages: Int? = nil
+        var audioSeconds: Int? = nil
+        enum CodingKeys: String, CodingKey {
+            case pages
+            case audioSeconds = "audio_seconds"
+        }
+    }
     enum CodingKeys: String, CodingKey {
         case startedAt = "started_at"
+        case progress
         case progressPages = "progress_pages"
+        case progressSeconds = "progress_seconds"
         case edition
     }
 }

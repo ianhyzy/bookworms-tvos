@@ -26,7 +26,7 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var publicationYear: Int?
     /// Whether the book is on the reader's Hardcover **Currently Reading** shelf.
     var isReading: Bool?
-    /// The fraction of the current read completed, from 0 to 1, when Hardcover has page progress.
+    /// The fraction of the current read completed, from 0 to 1, when Hardcover has progress.
     var progress: Double?
     /// The current read's start date, `yyyy-MM-dd`.
     var started: String?

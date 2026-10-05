@@ -90,7 +90,9 @@ final class SourceLibraryTests: XCTestCase {
             Book(id: 2, title: "A", author: "Author", rating: 5, isOwned: true),
             Book(id: 3, title: "B", author: "Author", isOwned: true),
         ]
-        XCTAssertEqual(ShelfPreferences().select(books, limit: 20).map(\.id), [1])
+        XCTAssertEqual(ShelfPreferences().collection, .all, "My Shelf shows All Books by default")
+        XCTAssertEqual(
+            ShelfPreferences(collection: .standard).select(books, limit: 20).map(\.id), [1])
         var prefs = ShelfPreferences(collection: .owned, sort: .rating)
         XCTAssertEqual(prefs.select(books, limit: 20).map(\.id), [2, 3])
         prefs.reversed = true
@@ -102,7 +104,7 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(prefs.select(books, limit: 2).map(\.id), [2, 3])
     }
 
-    func testDefaultShelfLeadsWithThreeMostRecentlyStartedCurrentReads() throws {
+    func testDefaultAndAllBooksLeadWithThreeMostRecentlyStartedCurrentReads() throws {
         let reading = (1...4)
             .map {
                 Book(
@@ -114,11 +116,19 @@ final class SourceLibraryTests: XCTestCase {
             Book(id: 11, title: "Newer", author: "Author", finished: "2026-08-01"),
             Book(id: 12, title: "Unread", author: "Author", isOwned: true),
         ]
-        let prefs = ShelfPreferences(sort: .title)
+        let prefs = ShelfPreferences(collection: .standard, sort: .title)
         XCTAssertEqual(prefs.select(read + reading, limit: 40).map(\.id), [4, 3, 2, 11, 10])
         XCTAssertEqual(prefs.select(read + reading, limit: 2).map(\.id), [4, 3])
+        let all = ShelfPreferences(collection: .all, sort: .title)
         XCTAssertEqual(
-            ShelfPreferences(collection: .all, sort: .title).select(reading, limit: 40).count, 4)
+            all.select(read + reading, limit: 40).map(\.id), [4, 3, 2, 11, 10, 1, 12],
+            "All Books pins current reads once, then sorts the rest, including other current reads")
+        XCTAssertEqual(all.select(reading, limit: 40).count, 4)
+        var owned = reading[0]
+        owned.isOwned = true
+        XCTAssertEqual(
+            ShelfPreferences(collection: .owned, sort: .title).select([owned] + read, limit: 40)
+                .map(\.id), [1, 12], "Owned Books doesn't pin current reads")
         let legacy = try JSONDecoder()
             .decode(
                 ShelfPreferences.self,
@@ -176,16 +186,43 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(prefs.select(books, limit: 40).map(\.id), [4, 2, 1, 3])
     }
 
-    func testCurrentReadProgressUsesPagesAndClamps() {
+    func testCurrentReadProgressPrefersPercentThenPagesThenSecondsAndClamps() throws {
         func read(_ pages: Int?, edition: Int? = nil) -> CurrentRead {
             CurrentRead(
-                startedAt: nil, progressPages: pages, edition: CurrentRead.Pages(pages: edition))
+                startedAt: nil, progressPages: pages, edition: CurrentRead.Length(pages: edition))
         }
-        XCTAssertEqual(HardcoverClient.progress(of: read(50, edition: 200), pages: 100), 0.25)
-        XCTAssertEqual(HardcoverClient.progress(of: read(50), pages: 100), 0.5)
-        XCTAssertEqual(HardcoverClient.progress(of: read(500), pages: 100), 1)
-        XCTAssertNil(HardcoverClient.progress(of: read(nil), pages: 100))
-        XCTAssertNil(HardcoverClient.progress(of: read(10), pages: nil))
+        func progress(_ read: CurrentRead, pages: Int? = 100, audio: Int? = nil) -> Double? {
+            HardcoverClient.progress(of: read, pages: pages, audioSeconds: audio)
+        }
+        XCTAssertEqual(progress(read(50, edition: 200)), 0.25)
+        XCTAssertEqual(progress(read(50)), 0.5)
+        XCTAssertEqual(progress(read(500)), 1)
+        XCTAssertNil(progress(read(nil)))
+        XCTAssertNil(progress(read(10), pages: nil))
+        XCTAssertNil(HardcoverClient.progress(of: nil, pages: 100, audioSeconds: 100))
+
+        let percent = CurrentRead(startedAt: nil, progress: 84.5, progressPages: 10)
+        XCTAssertEqual(
+            progress(percent)!, 0.845, accuracy: 0.0001,
+            "Hardcover's percentage wins, as for an audiobook tracked by percent")
+        let listened = CurrentRead(
+            startedAt: nil, progressSeconds: 1800, edition: CurrentRead.Length(audioSeconds: 3600))
+        XCTAssertEqual(progress(listened, pages: nil), 0.5)
+        XCTAssertEqual(
+            progress(CurrentRead(startedAt: nil, progressSeconds: 900), pages: nil, audio: 3600),
+            0.25, "Listening time falls back to the library edition's length")
+        XCTAssertEqual(progress(CurrentRead(startedAt: nil, progress: 120)), 1)
+        XCTAssertNil(progress(CurrentRead(startedAt: nil, progress: .nan)))
+
+        let decoded = try JSONDecoder()
+            .decode(
+                CurrentRead.self,
+                from: Data(
+                    #"{"started_at":"2026-09-22","progress":84.5,"progress_pages":null,"progress_seconds":72505,"edition":{"pages":null,"audio_seconds":85800}}"#
+                        .utf8))
+        XCTAssertEqual(decoded.progressSeconds, 72505)
+        XCTAssertEqual(decoded.edition?.audioSeconds, 85800)
+        XCTAssertEqual(progress(decoded, pages: nil)!, 0.845, accuracy: 0.0001)
     }
 
     func testEveryShelfSortSupportsReverseAndDeterministicTies() {

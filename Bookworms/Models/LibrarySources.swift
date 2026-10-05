@@ -120,24 +120,27 @@ struct ShelfPreferences: Codable, Equatable {
     /// The most current reads that lead the default collection.
     static let readingLimit = 3
 
-    var collection = ShelfCollection.standard
+    var collection = ShelfCollection.all
     var sort = ShelfSort.dateRead
     var reversed = false
 
-    /// Books for the shelf, in display order. The default collection leads with the most recently
-    /// started current reads, regardless of sort, and they count toward `limit`.
+    /// Books for the shelf, in display order. **Default** and **All Books** lead with the most
+    /// recently started current reads, regardless of sort, and they count toward `limit`.
     func select(_ books: [Book], limit: Int) -> [Book] {
         let reading =
-            collection == .standard
-            ? books.filter { $0.isReading == true }
+            collection == .owned
+            ? []
+            : books.filter { $0.isReading == true }
                 .sorted { ($0.started ?? "", $0.id) > ($1.started ?? "", $1.id) }
-                .prefix(Self.readingLimit) : []
+                .prefix(Self.readingLimit)
+        let pinned = Set(reading.map(\.id))
         let limit = min(BookLimit.maximum, max(1, limit))
         let eligible = books.filter {
+            guard !pinned.contains($0.id) else { return false }
             switch collection {
-            case .standard: $0.isReading != true && ($0.isRead == true || $0.finished != nil)
-            case .owned: $0.isOwned == true
-            case .all: true
+            case .standard: return $0.isReading != true && ($0.isRead == true || $0.finished != nil)
+            case .owned: return $0.isOwned == true
+            case .all: return true
             }
         }
         let sorted = eligible.sorted { lhs, rhs in
