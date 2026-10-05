@@ -177,7 +177,15 @@ struct BookDetailView: View {
             }
         }
         .onExitCommand { close() }
-        .sheet(item: $readingDescription) { ReviewReadingView(review: $0).appTypography() }
+        .fullScreenCover(item: $readingDescription) {
+            // Full screen over an opaque backdrop, as the TV app shows long descriptions. A
+            // sheet's presentation animation dropped 5-9 frames on Apple TV 4K (2nd generation);
+            // this drops 0-1.
+            ReviewReadingView(review: $0).appTypography()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .presentationBackground(
+                    colorScheme == .dark ? Color(white: 0.05) : Color(white: 0.95))
+        }
         .sheet(isPresented: $showsReviews) {
             if let loadReviews {
                 BookReviewsView(book: book, load: loadReviews).appTypography()
