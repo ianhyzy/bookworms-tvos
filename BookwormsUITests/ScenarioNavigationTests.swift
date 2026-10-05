@@ -262,6 +262,14 @@ final class ScenarioNavigationTests: XCTestCase {
                         "The Hardcover login is invalid or expired. Reconnect in Settings."
                 }
                 XCTAssertTrue(app.staticTexts[error].waitForExistence(timeout: 5))
+                // A rejected login must be reconnected before syncing again, and its error
+                // appears once.
+                XCTAssertEqual(app.buttons["sync-now"].isEnabled, scenario != "error")
+                if scenario == "error" {
+                    XCTAssertEqual(
+                        app.staticTexts.matching(NSPredicate(format: "label == %@", error)).count, 1
+                    )
+                }
                 capture(app, "scenario-\(scenario)-sources-error")
                 try audit(app)
                 RemoteNavigation.showShelf(app)

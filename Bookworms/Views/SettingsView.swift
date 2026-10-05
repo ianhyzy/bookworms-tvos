@@ -31,6 +31,7 @@ struct SettingsView: View {
         }
     }
     @Binding var section: Section
+    @FocusState private var focusedSection: Section?
     /// Leaves Settings for My Shelf, for example after choosing the sample shelf.
     let onShowShelf: () -> Void
 
@@ -144,20 +145,29 @@ struct SettingsView: View {
         }
     }
 
-    /// The native segmented control for sections, in the header row level with the sidebar title.
+    /// Section tabs in the header row, level with the sidebar title. Focusing a tab shows its
+    /// section, like a segmented control. They are separate buttons because tvOS's segmented
+    /// control keeps Left at its leading edge; buttons let the focus engine open the sidebar.
     private var sectionBar: some View {
         HStack {
             Spacer()
-            Picker("Settings", selection: $section) {
-                ForEach(Section.visibleSections) {
-                    Text($0.rawValue).tag($0)
+            HStack(spacing: 0) {
+                ForEach(Section.visibleSections) { item in
+                    Button(item.rawValue) { section = item }
+                        .buttonStyle(SectionTabStyle(isSelected: item == section))
+                        .focused($focusedSection, equals: item)
+                        .accessibilityAddTraits(item == section ? .isSelected : [])
                 }
             }
-            .pickerStyle(.segmented)
+            .padding(6)
             .frame(width: 1150)
+            .background(.regularMaterial, in: .capsule)
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings-sections")
         }
         .focusSection()
+        .defaultFocus($focusedSection, section, priority: .userInitiated)
+        .onChange(of: focusedSection) { if let focusedSection { section = focusedSection } }
     }
 
     private func settingLabel(_ title: String, _ description: String) -> some View {
@@ -304,6 +314,13 @@ struct SettingsView: View {
         }
     }
 
+    /// Whether Sync now can reach a source: false while the only usable login is a rejected
+    /// Hardcover login, which needs reconnecting first.
+    private var canSync: Bool {
+        let cwaReady = BookPresentation.offersCWA && library.cwaEnabled && library.hasCWAPassword
+        return cwaReady || (library.hardcoverConnected && !library.hardcoverSessionExpired)
+    }
+
     private var sourcesSettings: some View {
         VStack(alignment: .leading, spacing: 25) {
             note(
@@ -353,10 +370,11 @@ struct SettingsView: View {
             }
             .font(.system(size: 26))
             .performanceGlassButton()
-            .disabled(social.isLoading)
+            .disabled(social.isLoading || !canSync)
             .accessibilityIdentifier("sync-now")
             .syncProgress(library.isLoading || social.isLoading)
-            if let message = library.message {
+            // The Hardcover status above already explains a rejected login.
+            if let message = library.message, !library.hardcoverSessionExpired {
                 note(message)
             }
         }
@@ -726,6 +744,38 @@ extension View {
             if isSyncing {
                 ProgressView().accessibilityLabel("Syncing")
             }
+        }
+    }
+}
+
+/// A section tab: white with dark text while focused, a soft fill while selected.
+private struct SectionTabStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Tab(configuration: configuration, isSelected: isSelected)
+    }
+
+    private struct Tab: View {
+        let configuration: Configuration
+        let isSelected: Bool
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 29, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .foregroundStyle(isFocused ? Color.black : Color.primary)
+                .background(
+                    isFocused
+                        ? AnyShapeStyle(Color.white)
+                        : AnyShapeStyle(Color.primary.opacity(isSelected ? 0.16 : 0)),
+                    in: .capsule
+                )
+                .scaleEffect(isFocused && !reduceMotion ? 1.04 : 1)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isFocused)
         }
     }
 }

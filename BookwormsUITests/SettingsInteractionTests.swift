@@ -153,4 +153,28 @@ final class SettingsInteractionTests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["Sans-serif"].hasFocus)
     }
+
+    func testLeftFromFirstSettingsTabOpensSidebar() {
+        let app = RemoteNavigation.launch()
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        RemoteNavigation.selectView("Settings", in: app)
+        let tabs = app.descendants(matching: .any)["settings-sections"]
+        let views = tabs.buttons["Views"]
+        XCTAssertTrue(views.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(views)
+        XCUIRemote.shared.press(.left)
+        let leftTabs = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasFocus == false"), object: views)
+        XCTAssertEqual(XCTWaiter.wait(for: [leftTabs], timeout: 3), .completed)
+        XCTAssertFalse(
+            tabs.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists)
+        RemoteNavigation.press(.right, in: app, expecting: views)
+        RemoteNavigation.press(.right, in: app, expecting: tabs.buttons["Shelf"])
+        XCTAssertTrue(
+            app.descendants(matching: .any)["shelf-collection"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Settings tabs"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
 }
