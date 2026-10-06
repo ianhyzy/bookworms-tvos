@@ -16,7 +16,7 @@ The extension does not call `UserDefaults` or read file timestamps. Do not copy 
 
 | Destination | Data sent | Purpose |
 | --- | --- | --- |
-| Hardcover | PAT in the authorization header; fixed read queries, book IDs, and selected reader IDs | Fetch account, library, edition, followed-reader, activity, rating, and review data. |
+| Hardcover | PAT in the authorization header; fixed read queries, book IDs, and selected reader IDs | Fetch account, library, edition, followed-reader, block-list, activity, rating, and review data. |
 | Configured CWA server | Local username/password through HTTPS Basic authentication; catalog and cover requests | Fetch owned books and protected covers. Hidden in Settings while `BookPresentation.offersCWA` is false. |
 | AI providers | No requests while generation is disabled | Retained implementation only; saved keys and designs remain stored. |
 | Google Fonts and font hosting | No requests while generated spines are disabled | Retained implementation for spine fonts only. |

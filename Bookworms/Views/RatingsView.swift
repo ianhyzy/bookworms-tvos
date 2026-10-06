@@ -33,7 +33,7 @@ struct RatingsView: View {
         HStack(alignment: .top, spacing: 24) {
             VStack(alignment: .leading, spacing: 4) {
                 if ratings.isEmpty {
-                    Text("Unavailable").appFont(size: 23, weight: .medium)
+                    Text("No ratings yet").appFont(size: 23, weight: .medium)
                 } else {
                     Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                         ForEach(ratings, id: \.label) { rating in

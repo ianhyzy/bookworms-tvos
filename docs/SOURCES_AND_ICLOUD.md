@@ -14,7 +14,7 @@ Cloud sync merges sources by identity and sync date, and designs by book ID and 
 
 Small design collections retain a durable local preferences copy. Larger collections can exceed that budget after a successful cloud save, with a local disk copy for fast access. If iCloud is unavailable, existing local data stays usable. Account changes stop cloud syncing until the user enables storage for the new account. Turning the setting off does not delete cloud records.
 
-The current implementation transfers one archive asset when the archive changes. The entire asset is transferred when any archived data changes. CloudKit development and production environments are separate: deploy the schema before TestFlight or App Store distribution.
+The current implementation transfers one archive asset when the archive changes. The entire asset is transferred when any archived data changes. CloudKit development and production environments are separate: deploy the schema to production before App Store distribution.
 
 ## Verification
 

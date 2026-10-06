@@ -67,7 +67,7 @@ Follow [the release workflow](RELEASING.md) for version changes, candidate archi
 
 ## Local install branding
 
-`python3 scripts/device-build.py --device DEVICE_ID --team TEAM_ID` builds and installs with a LOCAL badge and the name **Bookworms Local**. It preserves the release bundle identifier and existing library data, so it replaces the installed TestFlight copy rather than installing alongside it. Release archives use the normal icon and name. Regenerate the local assets with `python3 scripts/generate-app-icon.py --local` using Node.js and `sharp`.
+`python3 scripts/device-build.py --device DEVICE_ID --team TEAM_ID` builds and installs with a LOCAL badge and the name **Bookworms Local**. It preserves the release bundle identifier and existing library data, so it replaces the installed App Store copy rather than installing alongside it. Release archives use the normal icon and name. Regenerate the local assets with `python3 scripts/generate-app-icon.py --local` using Node.js and `sharp`.
 
 ## Date display
 
