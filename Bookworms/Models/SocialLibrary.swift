@@ -118,7 +118,8 @@ struct FeedActivity: Codable, Identifiable, Hashable, Sendable {
     let rating: Double?
     let review: String?
     let hasSpoilers: Bool
-    /// Keep the newest network update for each book before applying the display limit.
+    /// Keep the newest network update for each book before applying the display limit. Events
+    /// without a book, such as reading goals and prompt answers, have nothing to show on a card.
     static func latestPerBook(_ activities: [FeedActivity], limit: Int = 20) -> [FeedActivity] {
         guard limit > 0 else { return [] }
         let dated: [(activity: FeedActivity, date: Date)] = activities.map {
@@ -133,7 +134,7 @@ struct FeedActivity: Codable, Identifiable, Hashable, Sendable {
         var result: [FeedActivity] = []
         for (activity, _) in ordered {
             guard events.insert(activity.id).inserted else { continue }
-            if let book = activity.book, !books.insert(book.id).inserted { continue }
+            guard let book = activity.book, books.insert(book.id).inserted else { continue }
             result.append(activity)
             if result.count >= limit { break }
         }

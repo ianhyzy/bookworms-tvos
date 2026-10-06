@@ -13,7 +13,7 @@ See Apple's [app record instructions](https://developer.apple.com/help/app-store
 
 `project.yml` is the only version source. Set `MARKETING_VERSION` to a three-component release version, such as `1.0.0`, and `CURRENT_PROJECT_VERSION` to a positive sequential integer from 1 through 9999. Both Info.plists reference these settings; Xcode expands them during the build.
 
-The initial local candidate is 1.0.0 (1). Before an upload, check App Store Connect for existing builds and choose an unused build greater than previous uploads. Do not assume a reset to 1 is safe if this bundle has already been uploaded. Increment once for each new upload candidate. Routine source edits do not require a bump. Change the marketing version intentionally for a new release.
+Before an upload, check App Store Connect for existing builds and choose an unused build greater than previous uploads. Earlier TestFlight uploads count. Increment once for each new upload candidate. Routine source edits do not require a bump. Change the marketing version intentionally for a new release.
 
 After changing `project.yml`, run `xcodegen generate`. Verify that both generated Info.plists still contain `$(MARKETING_VERSION)` and `$(CURRENT_PROJECT_VERSION)` rather than hardcoded numbers. Keep the generated Xcode project consistent with the specification.
 
@@ -35,7 +35,7 @@ python3 scripts/release.py validate .local/releases/CANDIDATE
 python3 scripts/release.py upload .local/releases/CANDIDATE
 ```
 
-`validate` uses Xcode's validation export method to perform Apple distribution checks. `upload` requires successful validation, a clean working tree, and the same source contents used to prepare the candidate. Committing those unchanged contents is allowed. It disables automatic build-number changes and requests production CloudKit signing. An interrupted upload is marked `upload-requested`; check App Store Connect before retrying to avoid duplicate submissions. Successful upload still requires Apple processing before TestFlight availability.
+`validate` uses Xcode's validation export method to perform Apple distribution checks. `upload` requires successful validation, a clean working tree, and the same source contents used to prepare the candidate. Committing those unchanged contents is allowed. It disables automatic build-number changes and requests production CloudKit signing. An interrupted upload is marked `upload-requested`; check App Store Connect before retrying to avoid duplicate submissions. Apple must finish processing an uploaded build before you can select it for an App Store version.
 
 The signed-in Xcode account provides authentication on this Mac. For unattended execution, set `ASC_KEY_PATH`, `ASC_KEY_ID`, and `ASC_ISSUER_ID` together. Keep the private `.p8` key outside the repository, preferably supplied through a secret manager. Never put it in a command argument as literal key content, commit it, or include it in release artifacts. API-key authentication and upload must be verified with the intended account before enabling unattended CI. See [Apple's command-line distribution guidance](https://developer.apple.com/videos/play/wwdc2021/10204/).
 
@@ -47,22 +47,51 @@ Both targets must provide `CFBundleDisplayName` and require `arm64` in their Inf
 
 The verifier checks display names, the arm64 requirement, the CloudKit push entitlement against its profile, both executable images for LLVM coverage, both packaged versions, signatures, entitlements, privacy manifests, and extension packaging. Development signing is reported, not treated as App Store approval. Preserve the complete candidate directory. Local verification does not replace Apple distribution validation.
 
-## Distribution boundary
+## App Store submission
 
-Local preparation ends before upload. When distribution is authorized, open the archive in Xcode Organizer, validate and distribute through App Store Connect. Verify production entitlements after distribution signing. Keep the manually selected build number consistent; if Xcode changes it, record and verify the final uploaded number.
+Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. The production schema contains `LibraryArchive` with its `archive` asset.
 
-The production CloudKit schema contains `LibraryArchive` with its `archive` asset. Deploy any new record type or field to production before a TestFlight build uses it. Complete beta metadata and export compliance in App Store Connect. Start with internal testing; external testing requires Apple's beta review. Verify launch, navigation, source credentials, refresh/cache behavior, Top Shelf, offline recovery, and production iCloud on the exact distributed candidate.
+After an authorized upload:
+
+1. Wait for Apple to finish processing the build.
+2. In App Store Connect, open the tvOS version whose number matches `MARKETING_VERSION`, or create it. Under **Build**, select the uploaded build. If Xcode changed the build number, record and verify the final number.
+3. Complete the listing, **App Privacy**, **Age Rating**, **App Review Information**, and **Pricing and Availability** from [App Store information](#app-store-information).
+4. Under **App Store Version Release**, choose **Manually release this version** so an approved build goes live only when you release it.
+5. Select **Add for Review**, then **Submit to App Review**.
+
+To check the exact candidate with production signing and production CloudKit before submission, export it from Xcode Organizer with **Release Testing** and install it on the registered Apple TV. Verify launch, navigation, source credentials, refresh and cache behavior, Top Shelf, offline recovery, and production iCloud.
 
 Compilation and local signature verification do not establish distribution or physical-device readiness.
 
-## Store and TestFlight information
+## App Store information
 
 | Field | Value |
 | --- | --- |
+| Name | Bookworms - eBook Display |
 | Privacy policy URL | https://ian.gay/bookworms-privacy-policy/ |
 | Support and marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
 | Contact | bookworms@ian.gay |
-| App Store Connect version | 1.0.0, matching `MARKETING_VERSION` |
+| Version | Same as `MARKETING_VERSION` in `project.yml` |
+| Price | Free, with no in-app purchases. Bookworms is free and open source. |
+| Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; create the output folder with `mkdir -p .local/app-store-screenshots`, then resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
+| App Privacy | **Data Not Collected**; see [privacy implementation](PRIVACY.md) |
+| Age rating | The app shows Hardcover reviews, which are user-generated content. Answer the questionnaire accordingly. |
+| Content rights | The app shows third-party content: Hardcover metadata, covers, profile photos, and reviews. |
+| App Review sign-in | A demo Hardcover account with finished books, a current read, and followed readers. Enter its credentials only in App Store Connect. |
+
+Use these App Review notes, adjusted to the build:
+
+```text
+Bookworms shows a Hardcover (hardcover.app) reading library on Apple TV. It only reads the account; it never changes it.
+
+Without an account: on the start screen, select "Explore a sample shelf".
+
+With the demo account: open Settings > Sources > Connect Hardcover. Scan the QR code, or open hardcover.app/link on a phone or computer, sign in with the demo account, enter the code shown on the TV, and select Authorize. The TV connects automatically.
+
+Social views show only readers the account follows. Book details can also show public Hardcover reviews of that book. Hardcover moderates all reviews; users report and block readers in the Hardcover app and website. Bookworms reads the account's block list and never shows readers the account blocked.
+
+Book Wall is off by default. Turn it on in Settings > Views. It requires Apple TV 4K (2nd generation) or later.
+```
 
 Keep the published privacy policy consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update it before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
 

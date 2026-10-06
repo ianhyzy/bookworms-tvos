@@ -11,10 +11,17 @@ enum SocialQuery: String {
         }
         """
     case feed = """
-        query SocialFeed($users: [Int!]!) {
+        query SocialFeed($users: [Int!]!, $language: String!) {
           activities(where: {user_id: {_in: $users}}, order_by: [{created_at: desc}, {id: desc}], limit: 100) {
             id created_at event data likes_count user { id username name image { url } }
-            book { id title description pages cached_contributors image { url width height } }
+            book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution
+              image { url width height }
+              editions(where: {image_id: {_is_null: false},
+                  _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
+                order_by: {users_count: desc}, limit: 5) {
+                image { url width height }
+              }
+            }
           }
         }
         """
@@ -23,7 +30,8 @@ enum SocialQuery: String {
           user_books(where: {user_id: {_eq: $user}, _or: [{rating: {_is_null: false}}, {last_read_date: {_is_null: false}}]},
             order_by: {id: asc}, limit: 100, offset: $offset) {
             id rating review review_has_spoilers last_read_date likes_count status_id
-            book { id title description pages cached_contributors image { url width height }
+            book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution
+              image { url width height }
               editions(where: {image_id: {_is_null: false},
                   _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
                 order_by: {users_count: desc}, limit: 5) {
@@ -35,10 +43,17 @@ enum SocialQuery: String {
         }
         """
     case bookReviews = """
-        query BookReviews($book: Int!) {
-          user_books(where: {book_id: {_eq: $book}, has_review: {_eq: true}},
+        query BookReviews($book: Int!, $blocked: [Int!]!) {
+          user_books(where: {book_id: {_eq: $book}, has_review: {_eq: true}, user_id: {_nin: $blocked}},
             order_by: [{likes_count: desc}, {reviewed_at: desc_nulls_last}], limit: 50) {
-            id rating review review_has_spoilers likes_count user { id username name image { url } }
+            id rating review review_has_spoilers likes_count user_id user { id username name image { url } }
+          }
+        }
+        """
+    case blocked = """
+        query SocialBlocked($user: Int!, $offset: Int!) {
+          user_blocks(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
+            blocked_user_id
           }
         }
         """
@@ -50,6 +65,7 @@ struct SocialVariables: Encodable, Sendable {
     var users: [Int]? = nil
     var book: Int? = nil
     var language: String? = nil
+    var blocked: [Int]? = nil
 }
 
 protocol SocialLibraryFetching: Sendable {
@@ -79,6 +95,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
         return profile.model
     }
 
+    /// Returns the readers `owner` follows, leaving out readers they blocked on Hardcover.
     func following(owner: Int, token: String) async throws -> [ReaderProfile] {
         struct Row: Decodable {
             let followedUser: Profile
@@ -88,12 +105,13 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             let followedUsers: [Row]
             enum CodingKeys: String, CodingKey { case followedUsers = "followed_users" }
         }
+        let blocked = try await blockedReaders(owner: owner, token: token)
         var profiles: [Int: ReaderProfile] = [:]
         for offset in stride(from: 0, to: 100_000, by: 100) {
             try Task.checkCancellation()
             let result: Result = try await fetch(
                 .following, variables: SocialVariables(user: owner, offset: offset), token: token)
-            for row in result.followedUsers {
+            for row in result.followedUsers where !blocked.contains(row.followedUser.id) {
                 profiles[row.followedUser.id] = row.followedUser.model
             }
             if result.followedUsers.count < 100 {
@@ -101,6 +119,29 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                     $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
                 }
             }
+        }
+        throw HardcoverError.incomplete
+    }
+
+    /// Returns the IDs of readers `owner` blocked on Hardcover. Every view of other readers'
+    /// content must leave them out. Callers propagate a failure instead of showing unfiltered
+    /// content.
+    func blockedReaders(owner: Int, token: String) async throws -> Set<Int> {
+        struct Row: Decodable {
+            let blockedUserID: Int?
+            enum CodingKeys: String, CodingKey { case blockedUserID = "blocked_user_id" }
+        }
+        struct Result: Decodable {
+            let userBlocks: [Row]
+            enum CodingKeys: String, CodingKey { case userBlocks = "user_blocks" }
+        }
+        var ids: Set<Int> = []
+        for offset in stride(from: 0, to: 100_000, by: 100) {
+            try Task.checkCancellation()
+            let result: Result = try await fetch(
+                .blocked, variables: SocialVariables(user: owner, offset: offset), token: token)
+            ids.formUnion(result.userBlocks.compactMap(\.blockedUserID))
+            if result.userBlocks.count < 100 { return ids }
         }
         throw HardcoverError.incomplete
     }
@@ -114,7 +155,8 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             let result: Result = try await fetch(
                 .feed,
                 variables: SocialVariables(
-                    users: Array(users[start..<min(start + 200, users.count)])), token: token)
+                    users: Array(users[start..<min(start + 200, users.count)]),
+                    language: HardcoverClient.coverLanguage), token: token)
             for activity in result.activities { activities[activity.id] = activity.model }
         }
         return FeedActivity.latestPerBook(Array(activities.values))
@@ -166,7 +208,8 @@ actor HardcoverSocialClient: SocialLibraryFetching {
     }
 
     /// Fetches up to 50 written reviews of a book, most liked first as on Hardcover, dropping reviews that are empty
-    /// after sanitization. Callers invoke this only on an explicit request, never while browsing.
+    /// after sanitization and reviews by readers the account blocked on Hardcover. Callers invoke this only on an
+    /// explicit request, never while browsing.
     func reviews(book: Int, token: String) async throws -> [BookReview] {
         // Hardcover can return null or partial reviewer profiles, for example for private
         // accounts. Show those reviews anonymously and skip only rows that can't be read at all.
@@ -176,11 +219,13 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             let review: String?
             let reviewHasSpoilers: Bool
             let likesCount: Int
+            let userID: Int?
             let user: Profile?
             enum CodingKeys: String, CodingKey {
                 case id, rating, review, user
                 case reviewHasSpoilers = "review_has_spoilers"
                 case likesCount = "likes_count"
+                case userID = "user_id"
             }
             init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -191,6 +236,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                     (try? container.decodeIfPresent(Bool.self, forKey: .reviewHasSpoilers)) ?? false
                 likesCount = max(
                     0, (try? container.decodeIfPresent(Int.self, forKey: .likesCount)) ?? 0)
+                userID = try? container.decodeIfPresent(Int.self, forKey: .userID)
                 user = try? container.decodeIfPresent(Profile.self, forKey: .user)
             }
         }
@@ -202,11 +248,16 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             let userBooks: [OptionalRow]
             enum CodingKeys: String, CodingKey { case userBooks = "user_books" }
         }
+        let blocked = try await blockedReaders(owner: owner(token: token).id, token: token)
+        // Excluding blocked readers in the query keeps them from taking any of the 50 places.
         let result: Result = try await fetch(
-            .bookReviews, variables: SocialVariables(book: book), token: token)
+            .bookReviews, variables: SocialVariables(book: book, blocked: blocked.sorted()),
+            token: token)
         let anonymous = ReaderProfile(
             id: 0, username: "reader", name: "Hardcover reader", avatarURL: nil)
         return result.userBooks.compactMap(\.row)
+            // `user_id` identifies the reviewer even when Hardcover withholds the profile.
+            .filter { row in (row.userID ?? row.user?.id).map { !blocked.contains($0) } ?? true }
             .compactMap { row in
                 ReviewText.clean(row.review)
                     .map {
@@ -218,7 +269,8 @@ actor HardcoverSocialClient: SocialLibraryFetching {
     }
 
     /// Maps a Hardcover book, choosing its cover as the library does from the reader's edition, the
-    /// book's default image, and any other editions the query returned.
+    /// book's default image, and any other editions the query returned. Catalog details come with
+    /// the daily social sync so details never fetch them while open.
     static func book(_ source: SourceBook, edition: Edition? = nil) -> Book {
         let covers = HardcoverClient.coverURLs(
             edition: edition?.image, book: source.image,
@@ -231,8 +283,10 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             id: source.id, title: source.title ?? "Untitled",
             author: authors.isEmpty ? "Unknown author" : authors,
             description: source.description, coverURL: covers.alternate, pages: source.pages,
-            format: edition?.readingFormat?.format, detailCoverURL: covers.preferred,
-            sources: [.hardcover])
+            format: edition?.readingFormat?.format, genres: source.genres,
+            communityRating: source.rating, ratingsCount: source.ratingsCount,
+            ratingDistribution: source.validRatingDistribution, detailCoverURL: covers.preferred,
+            sources: [.hardcover], publicationYear: source.releaseYear)
     }
 
     private struct Profile: Decodable {

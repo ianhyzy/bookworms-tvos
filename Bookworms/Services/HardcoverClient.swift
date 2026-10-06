@@ -641,14 +641,9 @@ actor HardcoverClient {
                 format: edition?.readingFormat?.format,
                 seriesID: membership?.series?.id,
                 seriesPosition: membership?.position,
-                genres: source.cachedTags?["Genre"]?
-                    .filter {
-                        ($0.spoilerRatio ?? 0) < 0.2 && !["Fiction", "Nonfiction"].contains($0.tag)
-                    }
-                    .sorted { ($0.count ?? 0) > ($1.count ?? 0) }.map(\.tag),
+                genres: source.genres,
                 communityRating: source.rating, ratingsCount: source.ratingsCount,
-                ratingDistribution: source.ratingsDistribution?
-                    .filter { (0.5...5).contains($0.rating) && $0.count >= 0 },
+                ratingDistribution: source.validRatingDistribution,
                 detailCoverURL: covers.preferred, sources: [.hardcover],
                 isRead: row.statusID == Self.readStatus || read?.finishedAt != nil
                     || row.lastReadDate != nil,
@@ -770,6 +765,21 @@ struct CoverImage: Codable, Sendable {
     var width: Int? = nil
     var height: Int? = nil
 }
+extension SourceBook {
+    /// Genre tags, most tagged first, without spoiler-heavy tags or the broad Fiction and
+    /// Nonfiction tags.
+    var genres: [String]? {
+        cachedTags?["Genre"]?
+            .filter { ($0.spoilerRatio ?? 0) < 0.2 && !["Fiction", "Nonfiction"].contains($0.tag) }
+            .sorted { ($0.count ?? 0) > ($1.count ?? 0) }.map(\.tag)
+    }
+
+    /// Rating buckets from half a star to five stars with nonnegative counts.
+    var validRatingDistribution: [RatingBucket]? {
+        ratingsDistribution?.filter { (0.5...5).contains($0.rating) && $0.count >= 0 }
+    }
+}
+
 struct BookTag: Decodable, Sendable {
     let tag: String
     let count: Int?
