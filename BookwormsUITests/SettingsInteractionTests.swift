@@ -58,6 +58,9 @@ final class SettingsInteractionTests: XCTestCase {
 
     func testChooseSourcesOpensSourcesAndExplainsTokenEntry() {
         let app = XCUIApplication()
+        // The empty scenario has no books and answers the link-code request locally.
+        app.launchEnvironment["BOOKWORMS_SCENARIO_CONTROL"] = UUID().uuidString
+        app.launchArguments = ["--test-scenario=empty", "--test-appearance=dark"]
         app.launch()
         let choose = app.buttons["choose-sources"]
         XCTAssertTrue(choose.waitForExistence(timeout: 15))
@@ -68,20 +71,32 @@ final class SettingsInteractionTests: XCTestCase {
         }
         XCTAssertTrue(choose.hasFocus)
         XCUIRemote.shared.press(.select)
+        // The scenario's login works, so Sources offers Disconnect instead of a sheet.
+        let disconnect = app.buttons["Disconnect Hardcover"]
+        XCTAssertTrue(disconnect.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["book-limit"].exists)
+        moveDown(to: disconnect)
+        XCUIRemote.shared.press(.select)
         let connect = app.buttons["Connect Hardcover"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["book-limit"].exists)
-        moveDown(to: connect)
+        RemoteNavigation.waitForFocus(connect)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(app.textFields["hardcover-token"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.images["hardcover-token-qr"].exists)
+        // The card shows its instructions and QR code whether or not the offline test guard
+        // lets the simulated link-code request through.
+        XCTAssertTrue(app.staticTexts["hardcover-instructions"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["hardcover-token-qr"].firstMatch.exists)
+        XCTAssertTrue(
+            app.staticTexts["hardcover-instructions"].label.contains("hardcover.app/link"))
+        XCTAssertFalse(app.buttons["Back to Sources"].exists)
+        XCTAssertFalse(app.textFields["hardcover-token"].exists)
+        let manual = app.buttons["hardcover-manual-entry"]
+        RemoteNavigation.moveFocus(to: manual, in: app)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Hardcover sign-in"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        XCTAssertTrue(app.staticTexts["hardcover-step-1"].exists)
-        XCTAssertTrue(app.staticTexts["hardcover-step-2"].exists)
-        XCTAssertTrue(app.staticTexts["hardcover-step-3"].exists)
-        XCTAssertTrue(app.staticTexts["hardcover-paste-help"].label.contains("paste"))
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.textFields["hardcover-token"].waitForExistence(timeout: 5))
     }
 
     func testCountButtonsStepByFiveAndPersistAcrossLaunches() {
@@ -152,5 +167,67 @@ final class SettingsInteractionTests: XCTestCase {
         XCUIRemote.shared.press(.right)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["Sans-serif"].hasFocus)
+    }
+
+    func testProgressBarsMenuReachesNeighborsAndBackOpensSidebarAfterAChoice() {
+        let app = RemoteNavigation.launch(arguments: ["--settings-tab=Shelf"])
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        RemoteNavigation.openSettings(app)
+        let picker = app.descendants(matching: .any)["shelf-progress"].firstMatch
+        let sort = app.descendants(matching: .any)["shelf-sort"].firstMatch
+        moveDown(to: picker)
+        XCTAssertEqual(picker.value as? String, "Vertical")
+        RemoteNavigation.press(.up, in: app, expecting: sort)
+        RemoteNavigation.press(.down, in: app, expecting: picker)
+        // The right column's controls sit higher, so Right has no target; Up then Right does.
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: picker)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: picker)
+
+        // Whether the menu opens on the first choice or the current one, two presses up reach
+        // Don't show, the first.
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["Horizontal"].firstMatch.waitForExistence(timeout: 5))
+        XCUIRemote.shared.press(.up)
+        XCUIRemote.shared.press(.up)
+        XCUIRemote.shared.press(.select)
+        let chosen = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Don't show"), object: picker)
+        XCTAssertEqual(XCTWaiter.wait(for: [chosen], timeout: 5), .completed)
+        RemoteNavigation.waitForFocus(picker)
+        XCUIRemote.shared.press(.menu)
+        let sidebar = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in RemoteNavigation.hasFocus(labeled: "Settings", in: app)
+            },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [sidebar], timeout: 5), .completed,
+            "Back after a menu choice opens the sidebar")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    func testLeftFromFirstSettingsTabOpensSidebar() {
+        let app = RemoteNavigation.launch()
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        RemoteNavigation.selectView("Settings", in: app)
+        let tabs = app.descendants(matching: .any)["settings-sections"]
+        let views = tabs.buttons["Views"]
+        XCTAssertTrue(views.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(views)
+        XCUIRemote.shared.press(.left)
+        let leftTabs = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasFocus == false"), object: views)
+        XCTAssertEqual(XCTWaiter.wait(for: [leftTabs], timeout: 3), .completed)
+        XCTAssertFalse(
+            tabs.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists)
+        RemoteNavigation.press(.right, in: app, expecting: views)
+        RemoteNavigation.press(.right, in: app, expecting: tabs.buttons["Shelf"])
+        XCTAssertTrue(
+            app.descendants(matching: .any)["shelf-collection"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["shelf-progress"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Settings tabs"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 }

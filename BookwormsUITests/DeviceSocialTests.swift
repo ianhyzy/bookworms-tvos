@@ -66,7 +66,7 @@ final class DeviceSocialTests: XCTestCase {
         let complete = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "enabled == true"), object: sync)
         XCTAssertEqual(XCTWaiter.wait(for: [complete], timeout: 120), .completed)
-        RemoteNavigation.selectView("Following", in: app)
+        RemoteNavigation.selectView("Feed", in: app)
         capture(app, "Live Following")
         RemoteNavigation.selectView("Compare Shelves", in: app)
         XCTAssertTrue(app.staticTexts["Adam"].waitForExistence(timeout: 60))

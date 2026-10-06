@@ -4,7 +4,7 @@ import XCTest
 /// Repeatable remote input. XCTest command timings are not app response measurements.
 @MainActor
 final class DevicePerformanceTests: XCTestCase {
-    private let viewTitles = ["My Shelf", "Following", "Compare Shelves", "Book Club"]
+    private let viewTitles = ["My Shelf", "Feed", "Compare Shelves", "Book Club"]
 
     private func focused(_ element: XCUIElement) -> Bool {
         element.hasFocus
@@ -59,11 +59,37 @@ final class DevicePerformanceTests: XCTestCase {
             for _ in 0..<6 { XCUIRemote.shared.press(.up) }
             for _ in 0..<6 { XCUIRemote.shared.press(.left) }
         }
+        let description = scenario == "description"
+        if description {
+            // My Shelf opens with focus on its first book; open its details.
+            XCTAssertTrue(
+                app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-'"))
+                    .allElementsBoundByIndex.contains { focused($0) },
+                "The description scenario starts from a focused My Shelf book.")
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 10))
+            XCTAssertTrue(
+                app.buttons["show-full-description"].waitForExistence(timeout: 5),
+                "The first book's description must overflow to show Show more.")
+            RemoteNavigation.moveFocus(to: app.buttons["show-full-description"], in: app)
+        }
         print("PERFORMANCE_READY")
         // Attach Instruments outside this test before measured input begins.
         Thread.sleep(forTimeInterval: 20)
         let repetitions = environment["PERF_REPETITIONS"] == "1" ? 1 : 3
-        for repetition in 0..<repetitions {
+        if description {
+            // Opens and closes the full description; phases carry wall-clock times.
+            for cycle in 0..<repetitions {
+                print("PERFORMANCE_PHASE open-\(cycle) \(Date().timeIntervalSince1970)")
+                XCUIRemote.shared.press(.select)
+                Thread.sleep(forTimeInterval: 3)
+                print("PERFORMANCE_PHASE close-\(cycle) \(Date().timeIntervalSince1970)")
+                XCUIRemote.shared.press(.menu)
+                Thread.sleep(forTimeInterval: 3)
+            }
+            print("PERFORMANCE_PHASE end \(Date().timeIntervalSince1970)")
+        }
+        for repetition in 0..<(description ? 0 : repetitions) {
             print("PERFORMANCE_RUN_\(repetition)")
             for index in 0..<40 {
                 let forward = (index / (settings ? 5 : 4)).isMultiple(of: 2)

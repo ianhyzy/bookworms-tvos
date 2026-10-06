@@ -12,6 +12,9 @@ struct SourceSnapshot: Codable, Sendable {
     var accountID: String
     var books: [Book]
     var syncedAt: Date
+    /// Series that the books belong to; Hardcover only. `nil` in snapshots saved before series
+    /// were fetched.
+    var series: [SeriesInfo]? = nil
 }
 
 struct CWAConfiguration: Codable, Equatable, Sendable {
@@ -67,10 +70,16 @@ enum SourceError: LocalizedError {
 }
 
 enum ShelfCollection: String, Codable, CaseIterable, Identifiable {
-    case read = "Read Books"
+    /// Up to `ShelfPreferences.readingLimit` current reads, then read books.
+    case standard = "Default"
     case owned = "Owned Books"
     case all = "All Books"
     var id: String { rawValue }
+
+    /// Decodes unknown values, including the retired "Read Books", as `standard`.
+    init(from decoder: any Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .standard
+    }
 }
 
 enum ShelfSort: String, Codable, CaseIterable, Identifiable {
@@ -80,47 +89,118 @@ enum ShelfSort: String, Codable, CaseIterable, Identifiable {
     case title = "Title"
     case author = "Author"
     case length = "Length"
+    /// Largest gap between your rating and the community's first; books missing either go last.
+    case hotTakes = "Hot Takes"
+    var id: String { rawValue }
+}
+
+/// Limits My Shelf to one author or genre, chosen from book details. It lasts until the user
+/// clears it or the app relaunches, and never changes the saved shelf preferences.
+enum ShelfFilter: Hashable, Sendable {
+    case author(String)
+    /// A display genre, as `Book.displayGenre` formats it.
+    case genre(String)
+
+    var name: String {
+        switch self {
+        case .author(let name), .genre(let name): name
+        }
+    }
+
+    func matches(_ book: Book) -> Bool {
+        switch self {
+        case .author(let name): book.author == name
+        case .genre(let name):
+            book.genres?.contains { Book.displayGenre($0) == name } ?? false
+        }
+    }
+}
+
+/// How current reads show progress on My Shelf, its ambient shelf, and Top Shelf.
+enum ProgressStyle: String, Codable, CaseIterable, Identifiable {
+    case hidden = "Don't show"
+    /// The system's linear progress bar along the cover's base; Top Shelf's native bar.
+    case horizontal = "Horizontal"
+    /// A light sweep: the unread part dims right of a soft line at the reader's place.
+    case vertical = "Vertical"
     var id: String { rawValue }
 }
 
 struct ShelfPreferences: Codable, Equatable {
-    var collection = ShelfCollection.read
-    var sort = ShelfSort.dateRead
-    var reversed = false
+    /// The most current reads that lead the default collection.
+    static let readingLimit = 3
 
+    var collection: ShelfCollection
+    var sort: ShelfSort
+    var reversed: Bool
+    var progressStyle: ProgressStyle
+
+    init(
+        collection: ShelfCollection = .all, sort: ShelfSort = .dateRead, reversed: Bool = false,
+        progressStyle: ProgressStyle = .vertical
+    ) {
+        self.collection = collection
+        self.sort = sort
+        self.reversed = reversed
+        self.progressStyle = progressStyle
+    }
+
+    /// Fills choices missing from older saved preferences with their defaults.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            collection: try container.decodeIfPresent(ShelfCollection.self, forKey: .collection)
+                ?? .all,
+            sort: try container.decodeIfPresent(ShelfSort.self, forKey: .sort) ?? .dateRead,
+            reversed: try container.decodeIfPresent(Bool.self, forKey: .reversed) ?? false,
+            progressStyle: (try? container.decodeIfPresent(
+                ProgressStyle.self, forKey: .progressStyle)) ?? .vertical)
+    }
+
+    /// Books for the shelf, in display order. **Default** and **All Books** lead with the most
+    /// recently started current reads, regardless of sort, and they count toward `limit`.
     func select(_ books: [Book], limit: Int) -> [Book] {
+        let reading =
+            collection == .owned
+            ? []
+            : books.filter { $0.isReading == true }
+                .sorted { ($0.started ?? "", $0.id) > ($1.started ?? "", $1.id) }
+                .prefix(Self.readingLimit)
+        let pinned = Set(reading.map(\.id))
+        let limit = min(BookLimit.maximum, max(1, limit))
         let eligible = books.filter {
+            guard !pinned.contains($0.id) else { return false }
             switch collection {
-            case .read: $0.isRead == true || $0.finished != nil
-            case .owned: $0.isOwned == true
-            case .all: true
+            case .standard: return $0.isReading != true && ($0.isRead == true || $0.finished != nil)
+            case .owned: return $0.isOwned == true
+            case .all: return true
             }
         }
-        return Array(
-            eligible.sorted { lhs, rhs in
-                func compare<T: Comparable>(_ a: T?, _ b: T?, descending: Bool) -> Bool? {
-                    if a == b { return nil }
-                    guard let a else { return false }
-                    guard let b else { return true }
-                    return descending != reversed ? a > b : a < b
-                }
-                let order: Bool?
-                switch sort {
-                case .dateRead: order = compare(lhs.finished, rhs.finished, descending: true)
-                case .rating: order = compare(lhs.rating, rhs.rating, descending: true)
-                case .year:
-                    order = compare(lhs.publicationYear, rhs.publicationYear, descending: true)
-                case .length: order = compare(lhs.pages, rhs.pages, descending: false)
-                case .title:
-                    order = compare(
-                        lhs.title.lowercased(), rhs.title.lowercased(), descending: false)
-                case .author:
-                    order = compare(
-                        lhs.author.lowercased(), rhs.author.lowercased(), descending: false)
-                }
-                return order ?? (lhs.id < rhs.id)
+        let sorted = eligible.sorted { lhs, rhs in
+            func compare<T: Comparable>(_ a: T?, _ b: T?, descending: Bool) -> Bool? {
+                if a == b { return nil }
+                guard let a else { return false }
+                guard let b else { return true }
+                return descending != reversed ? a > b : a < b
             }
-            .prefix(min(BookLimit.maximum, max(1, limit))))
+            let order: Bool?
+            switch sort {
+            case .dateRead: order = compare(lhs.finished, rhs.finished, descending: true)
+            case .rating: order = compare(lhs.rating, rhs.rating, descending: true)
+            case .year:
+                order = compare(lhs.publicationYear, rhs.publicationYear, descending: true)
+            case .length: order = compare(lhs.pages, rhs.pages, descending: false)
+            case .hotTakes: order = compare(lhs.ratingGap, rhs.ratingGap, descending: true)
+            case .title:
+                order = compare(
+                    lhs.title.lowercased(), rhs.title.lowercased(), descending: false)
+            case .author:
+                order = compare(
+                    lhs.author.lowercased(), rhs.author.lowercased(), descending: false)
+            }
+            return order ?? (lhs.id < rhs.id)
+        }
+        return Array((Array(reading) + sorted).prefix(limit))
     }
 }
 

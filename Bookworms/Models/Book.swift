@@ -11,6 +11,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var rating: Double?
     var format: String?
     var seriesID: Int?
+    /// The book's position in `seriesID`, such as 3 for the third book. Companion works can have
+    /// fractional positions.
+    var seriesPosition: Double? = nil
     var genres: [String]?
     var communityRating: Double?
     var ratingsCount: Int?
@@ -21,6 +24,20 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var isOwned: Bool?
     var isRead: Bool?
     var publicationYear: Int?
+    /// Whether the book is on the reader's Hardcover **Currently Reading** shelf.
+    var isReading: Bool?
+    /// The fraction of the current read completed, from 0 to 1, when Hardcover has progress.
+    var progress: Double?
+    /// The current read's start date, `yyyy-MM-dd`.
+    var started: String?
+    /// The listening time of the reader's audiobook edition, when Hardcover records it.
+    var audioSeconds: Int? = nil
+
+    /// How far your rating is from the community average, when both are recorded.
+    var ratingGap: Double? {
+        guard let rating, rating > 0, let communityRating, communityRating > 0 else { return nil }
+        return abs(rating - communityRating)
+    }
 
     var isHardcoverBook: Bool { sources?.contains(.hardcover) ?? (id < 1_000_000_000_000_000) }
 
@@ -73,6 +90,16 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         }
     }
 
+    /// The length for display: listening time in whole minutes for an audiobook when Hardcover
+    /// records it, otherwise the page count.
+    var lengthLabel: String? {
+        if formatLabel == "Audiobook", let audioSeconds, audioSeconds > 0 {
+            return "\((audioSeconds + 30) / 60) minutes"
+        }
+        if let pages, pages > 0 { return "\(pages) pages" }
+        return nil
+    }
+
     /// The format and finish date joined with a bullet, such as "Audiobook • Sep 17, 2026".
     /// Missing parts are left out.
     func readingSummary(dateFormat: AppDateFormat) -> String {
@@ -103,6 +130,27 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     static func recentFirst(_ lhs: Book, _ rhs: Book) -> Bool {
         if lhs.finished == rhs.finished { return lhs.id > rhs.id }
         return (lhs.finished ?? "") > (rhs.finished ?? "")
+    }
+}
+
+/// A series and its main books in reading order, fetched during sync so details open offline.
+struct SeriesInfo: Codable, Hashable, Sendable, Identifiable {
+    let id: Int
+    let name: String
+    /// The series' main books, one per whole-number position, earliest first.
+    let books: [SeriesBook]
+
+    struct SeriesBook: Codable, Hashable, Sendable, Identifiable {
+        let id: Int
+        let title: String
+        let position: Double
+        let releaseYear: Int?
+        let coverURL: URL?
+    }
+
+    /// "#3", or "#2.5" for a companion work.
+    static func positionLabel(_ position: Double) -> String {
+        "#" + position.formatted(.number.precision(.fractionLength(0...1)))
     }
 }
 
@@ -144,11 +192,12 @@ enum SampleLibrary {
                 repeating:
                     "A botanist returns to an island where the trees bloom only after sunset. As the seasons change, a forgotten family archive reveals a different history of the island and the people who call it home. ",
                 count: 8), pages: 384, finished: "2026-09-09", rating: 4.5, format: "Ebook",
-            seriesID: 1, genres: ["Fantasy", "Mystery"], communityRating: 4.24, ratingsCount: 100,
+            seriesID: 1, seriesPosition: 1, genres: ["Fantasy", "Mystery"], communityRating: 4.24,
+            ratingsCount: 100,
             ratingDistribution: [
                 RatingBucket(rating: 3, count: 10), RatingBucket(rating: 4, count: 56),
                 RatingBucket(rating: 5, count: 34),
-            ]),
+            ], publicationYear: 2023),
         Book(
             id: 2, title: "A Field Guide to Elsewhere", author: "Morgan Vale",
             description:
@@ -177,7 +226,32 @@ enum SampleLibrary {
         Book(
             id: 8, title: "Winter in the Orchard", author: "Alex Rowan",
             description: "The island's story continues.", pages: 410, finished: "2026-08-18",
-            format: "Audiobook", seriesID: 1),
+            format: "Audiobook", seriesID: 1, seriesPosition: 2,
+            publicationYear: 2025),
+    ]
+}
+
+extension SampleLibrary {
+    /// The sample books 1 and 8, plus a third book the sample reader doesn't own.
+    static let series = SeriesInfo(
+        id: 1, name: "The Island Cycle",
+        books: [
+            .init(
+                id: 1, title: "The Orchard at Night", position: 1, releaseYear: 2023, coverURL: nil),
+            .init(
+                id: 8, title: "Winter in the Orchard", position: 2, releaseYear: 2025, coverURL: nil
+            ),
+            .init(id: 9, title: "The Last Harvest", position: 3, releaseYear: 2027, coverURL: nil),
+        ])
+
+    /// Fictional books only the sample reader has read.
+    static let friendPicks: [Book] = [
+        Book(
+            id: 101, title: "The Cartographer's Daughter", author: "Rae Linden", pages: 352,
+            finished: "2026-07-14", communityRating: 4.1),
+        Book(
+            id: 102, title: "Salt and Lanterns", author: "Imogen Hale", pages: 288,
+            finished: "2026-06-02", communityRating: 3.9),
     ]
 }
 

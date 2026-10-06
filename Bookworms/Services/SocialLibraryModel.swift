@@ -9,9 +9,11 @@ final class SocialLibraryModel {
             if snapshot?.activities != oldValue?.activities {
                 activities = FeedActivity.latestPerBook(snapshot?.activities ?? [])
             }
-            // Sync dates and feed updates do not change comparison ordering or intersections.
+            // Sync dates do not change comparison ordering, intersections, or picks; feed ratings
+            // feed Friends' Picks.
             if snapshot?.mine != oldValue?.mine || snapshot?.readerBooks != oldValue?.readerBooks
                 || snapshot?.following != oldValue?.following
+                || snapshot?.activities != oldValue?.activities
             {
                 rebuildPresentation()
             }
@@ -117,6 +119,7 @@ final class SocialLibraryModel {
         requestedReader = readerID
         requestedViews = socialViews
         let needsComparison = socialViews.contains(.comparison) || socialViews.contains(.shared)
+        let needsPicks = socialViews.contains(.friendsPicks)
         if identity != fingerprint {
             snapshot = nil
             identity = fingerprint
@@ -166,17 +169,30 @@ final class SocialLibraryModel {
                     current.dates["following"] = now()
                     try install(current, request: request)
                 }
-                if socialViews.contains(.following),
+                if socialViews.contains(.following) || needsPicks,
                     begin(
                         owner: current.owner.id, dataset: "feed", manual: manual,
                         lastSuccess: current.dates["feed"])
                 {
-                    current.activities = try await client.feed(
-                        users: current.following.map(\.id), token: token)
-                    current.dates["feed"] = now()
-                    try install(current, request: request)
+                    do {
+                        current.activities = try await client.feed(
+                            users: current.following.map(\.id), token: token)
+                        current.dates["feed"] = now()
+                        try install(current, request: request)
+                    } catch {
+                        // Friends' Picks can rank from libraries alone, so a transient feed
+                        // failure only stops the sync when the Feed view shows it. Credential and
+                        // permission failures always reach the handler below.
+                        switch error {
+                        case HardcoverError.insufficientScope, HardcoverError.forbidden,
+                            HardcoverError.invalidToken:
+                            throw error
+                        default:
+                            if socialViews.contains(.following) || Task.isCancelled { throw error }
+                        }
+                    }
                 }
-                if needsComparison,
+                if needsComparison || needsPicks,
                     begin(
                         owner: current.owner.id, dataset: "mine", manual: manual,
                         lastSuccess: current.dates["mine"])
@@ -195,6 +211,18 @@ final class SocialLibraryModel {
                         user: readerID, token: token)
                     current.dates["reader.\(readerID)"] = now()
                     try install(current, request: request)
+                }
+                // Each library refreshes on its own daily gate, shared with Compare Shelves.
+                if needsPicks {
+                    for id in FriendPick.readersToSync(current, limit: Self.pickReaderLimit)
+                    where begin(
+                        owner: current.owner.id, dataset: "reader.\(id)", manual: manual,
+                        lastSuccess: current.dates["reader.\(id)"])
+                    {
+                        current.readerBooks[id] = try await client.library(user: id, token: token)
+                        current.dates["reader.\(id)"] = now()
+                        try install(current, request: request)
+                    }
                 }
                 try install(current, request: request)
                 status =
@@ -252,6 +280,34 @@ final class SocialLibraryModel {
             .write(to: cacheRoot.appending(path: "\(value.owner.id).json"), options: .atomic)
     }
 
+    /// The most followed readers whose libraries Friends' Picks downloads.
+    static let pickReaderLimit = 10
+
+    #if DEBUG && targetEnvironment(simulator)
+        /// Shows the newest cached social snapshot without a credential or network requests, for
+        /// previewing downloaded data in the simulator. Like the sample, it blocks later loads.
+        func useCachedSnapshotForPreview() {
+            let files =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: cacheRoot, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            let newest = files.filter { $0.pathExtension == "json" }
+                .max {
+                    let lhs = try? $0.resourceValues(forKeys: [.contentModificationDateKey])
+                    let rhs = try? $1.resourceValues(forKeys: [.contentModificationDateKey])
+                    return (lhs?.contentModificationDate ?? .distantPast)
+                        < (rhs?.contentModificationDate ?? .distantPast)
+                }
+            guard let newest, let data = try? Data(contentsOf: newest),
+                let cached = try? JSONDecoder().decode(SocialSnapshot.self, from: data)
+            else { return }
+            activeTask?.cancel()
+            isSample = true
+            snapshot = cached
+            status = "Cached social data for simulator preview."
+            revision += 1
+        }
+    #endif
+
     func leaveSample() {
         if isSample {
             isSample = false
@@ -283,12 +339,19 @@ final class SocialLibraryModel {
                     hasSpoilers: book.id == 2,
                     finished: book.finished)
             }
-        let theirs = mine.map {
-            ReaderBook(
-                book: $0.book, rating: 4.5,
-                review: $0.review == nil ? nil : "I enjoyed the characters and the setting.",
-                hasSpoilers: false, finished: $0.finished)
-        }
+        // Two books only the reader has read, rated below the shared ones so Compare Shelves
+        // keeps its order, give Friends' Picks content.
+        let theirs =
+            mine.map {
+                ReaderBook(
+                    book: $0.book, rating: 4.5,
+                    review: $0.review == nil ? nil : "I enjoyed the characters and the setting.",
+                    hasSpoilers: false, finished: $0.finished)
+            }
+            + SampleLibrary.friendPicks.map {
+                ReaderBook(
+                    book: $0, rating: 4, review: nil, hasSpoilers: false, finished: $0.finished)
+            }
         snapshot = SocialSnapshot(
             owner: me, following: [other],
             activities: mine.map {

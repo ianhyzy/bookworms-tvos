@@ -32,9 +32,10 @@ Use the actual generated `.xctestrun` filename for the installed SDK. For an ord
 | `books` | Moves between books in the selected view with Left and Right. Use it as the content-navigation control. |
 | `settings` | Opens Settings from the sidebar and moves across its section picker. Native segmented selection changes the visible section during this sequence; it is not a focus-only traversal. |
 | `longevity` | Runs the sustained sequence described below. |
+| `description` | Opens details for the first My Shelf book, then opens and closes **Show more** three times, 3 seconds apart. Adds the Display instrument and marks each open and close as a `PERFORMANCE_PHASE` in `test.log`. Requires `--view 0` and a first book whose description shows **Show more**. |
 | `bookWall` | Launches directly into Book Wall with `--start-view=bookWall`, opens and closes details three times, returns to the starting book, then moves through the stacks in short bursts. Adds the Display and GPU instruments. Use `scripts/profile-book-wall.py`, which builds, records, summarizes per phase, and restores the local build. |
 
-`--view` accepts 0 through 3 for My Shelf, Following, Compare Shelves, and Book Club, and opens that view from the sidebar before measurement. Keep all views enabled for these sequences.
+`--view` accepts 0 through 3 for My Shelf, Feed, Compare Shelves, and Book Club, and opens that view from the sidebar before measurement. Keep all views enabled for these sequences.
 
 For Book Wall, both drivers accept `--wall-antialiasing off|on` (default `on`, matching the
 app). The baseline renders at 1920 × 1080;
@@ -135,9 +136,9 @@ Use a reduced set when the full recorder crashes or loses providers, then compar
 
 ## Renderer pipeline and lighting diagnostics
 
-The opt-in renderer emits `BookWallRendererPipeline` windows in diagnostic builds when launched with `--performance-diagnostics`. Each window reports submitted/completed frames, skipped and idle ticks, occupied slots, callback duration, and the actual view/layer scale. The same bounded message is an Instruments point-of-interest event. A slot lifetime includes CPU submission, GPU work, and callback dispatch; it is not GPU execution time or a displayed-frame interval. Use the Display instrument for acceptance.
+The renderer emits `BookWallRendererPipeline` windows in diagnostic builds when launched with `--performance-diagnostics`. Each window reports submitted/completed frames, skipped and idle ticks, occupied slots, callback duration, and the actual view/layer scale. The same bounded message is an Instruments point-of-interest event. A slot lifetime includes CPU submission, GPU work, and callback dispatch; it is not GPU execution time or a displayed-frame interval. Use the Display instrument for acceptance.
 
-After confirming slot overlap, compare `--variant wall-no-ibl` and `--variant wall-unlit-shelf` against a matched renderer baseline. These variants apply only to the renderer. The first gives root descendants zero environment-lighting weight and skips the studio environment; the second replaces the shelf's PBR material with a constant unlit tint while retaining geometry and physics. They deliberately change appearance to isolate cost. An unlit tint is not a fitted shelf bake; validate any replacement against resting, opening, and return lighting before adopting it.
+After confirming slot overlap, compare `--variant wall-no-ibl` and `--variant wall-unlit-shelf` against a matched renderer baseline. The first gives root descendants zero environment-lighting weight and skips the studio environment; the second replaces the shelf's PBR material with a constant unlit tint while retaining geometry and physics. They deliberately change appearance to isolate cost. An unlit tint is not a fitted shelf bake; validate any replacement against resting, opening, and return lighting before adopting it.
 
 ## Finish the investigation
 

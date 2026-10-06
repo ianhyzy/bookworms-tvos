@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// One year of reading: headline totals, books per month, top genres and formats, and a shelf of
-/// the year's covers. The header's year menu changes the year in place.
+/// One year of reading: headline totals, books per month, top genres and formats, records, and a
+/// shelf of the year's covers. The header's year menu changes the year in place.
 ///
 /// Statistics come from `LibraryModel.readingYears`, prepared when the library changes. The
 /// header and the cover row are focus sections. Focus is assigned only when the row appears and
@@ -36,7 +36,8 @@ struct YearInReviewView: View {
                     // lets its background spill into the tiles and shelf.
                     HStack(alignment: .top, spacing: 24) {
                         monthlyChart(review)
-                        highlights(review).frame(width: 620)
+                        highlights(review).frame(width: review.longest == nil ? 620 : 540)
+                        if review.longest != nil { records(review).frame(width: 540) }
                     }
                     .frame(height: 300)
                     // The shelf takes whatever height the fixed rows and caption leave.
@@ -176,8 +177,9 @@ struct YearInReviewView: View {
                     ForEach(0..<12, id: \.self) { month in
                         let count = review.monthlyCounts[month]
                         VStack(spacing: 8) {
+                            // Two-digit counts are wider than a bar beside the records panel.
                             Text(verbatim: count > 0 ? String(count) : " ")
-                                .appFont(size: 22, weight: .medium)
+                                .appFont(size: 22, weight: .medium).fixedSize()
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(
                                     count > 0
@@ -187,7 +189,7 @@ struct YearInReviewView: View {
                                 .frame(
                                     height: count > 0
                                         ? max(8, barSpace * CGFloat(count) / CGFloat(most)) : 4)
-                            Text(Self.shortMonthNames[month]).appFont(size: 22)
+                            Text(Self.monthInitials[month]).appFont(size: 22)
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -241,6 +243,40 @@ struct YearInReviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.regularMaterial, in: .rect(cornerRadius: 28))
         .accessibilityElement(children: .combine)
+    }
+
+    /// The year's longest, shortest, and highest-rated books, in the highlights panel's style.
+    private func records(_ review: YearInReview) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let book = review.longest, let pages = book.pages {
+                record("Longest", book, detail: "\(pages.formatted()) pages")
+            }
+            if let book = review.shortest, let pages = book.pages {
+                record("Shortest", book, detail: "\(pages.formatted()) pages").padding(.top, 10)
+            }
+            if let book = review.favorite, let rating = book.rating {
+                record(
+                    "Highest rated", book,
+                    detail: "★ " + rating.formatted(.number.precision(.fractionLength(0...1)))
+                )
+                .padding(.top, 10)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.regularMaterial, in: .rect(cornerRadius: 28))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func record(_ title: String, _ book: Book, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).appFont(size: 24).foregroundStyle(.secondary)
+            HStack(spacing: 0) {
+                Text(book.spineTitle).lineLimit(1)
+                Text(" · \(detail)").fixedSize()
+            }
+            .appFont(size: 28, weight: .medium)
+        }
     }
 
     // MARK: - Covers
@@ -337,7 +373,8 @@ struct YearInReviewView: View {
         return calendar
     }()
     private static let monthNames = calendar.standaloneMonthSymbols
-    private static let shortMonthNames = calendar.shortStandaloneMonthSymbols
+    /// Single-letter labels keep twelve bars legible beside the highlights and records panels.
+    private static let monthInitials = calendar.veryShortStandaloneMonthSymbols
 
     /// `ShelfBoard`'s default surface depth plus edge height.
     private static let boardHeight: CGFloat = 26

@@ -293,17 +293,32 @@ actor HardcoverClient {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
                 id last_read_date rating status_id
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
-                  book_series { featured series { id } }
+                  book_series { featured position series { id } }
                   editions(where: {image_id: {_is_null: false},
                       _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
                     order_by: {users_count: desc}, limit: 5) {
                     image { url width height }
                   }
                 }
-                edition { id pages image { url width height } reading_format { format } language { code2 } }
+                edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
                 user_book_reads(where: {finished_at: {_is_null: false}},
                   order_by: [{finished_at: desc}, {id: desc}], limit: 1) {
-                  finished_at edition { id pages image { url width height } reading_format { format } language { code2 } }
+                  finished_at edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
+                }
+                current_read: user_book_reads(where: {finished_at: {_is_null: true}},
+                  order_by: [{id: desc}], limit: 1) {
+                  started_at progress progress_pages progress_seconds edition { pages audio_seconds }
+                }
+              }
+            }
+            """
+        case series = """
+            query ShelfSeries($ids: [Int!]!) {
+              series(where: {id: {_in: $ids}}) {
+                id name
+                book_series(where: {position: {_is_null: false}},
+                  order_by: [{position: asc}, {book: {users_count: desc}}]) {
+                  position book { id title release_year image { url width height } }
                 }
               }
             }
@@ -452,12 +467,46 @@ actor HardcoverClient {
                 token: token)
             rows += result.userBooks
             if result.userBooks.count < 100 {
-                return HardcoverLibrary(accountID: String(user.id), books: Self.normalize(rows))
+                let books = Self.normalize(rows)
+                // Series are an enhancement: a failure keeps the library sync complete.
+                let series = try? await fetchSeries(Set(books.compactMap(\.seriesID)), token: token)
+                return HardcoverLibrary(accountID: String(user.id), books: books, series: series)
             }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
             try await Task.sleep(for: .seconds(1.1))
         }
         throw HardcoverError.incomplete
+    }
+
+    /// Fetches series names and main books in batches of 50, paced like library pages.
+    private func fetchSeries(_ ids: Set<Int>, token: String) async throws -> [SeriesInfo] {
+        var result: [SeriesInfo] = []
+        let sorted = ids.sorted()
+        for start in stride(from: 0, to: sorted.count, by: 50) {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .seconds(1.1))
+            let batch = Array(sorted[start..<min(start + 50, sorted.count)])
+            let response: SeriesResponse = try await request(
+                .series, variables: ["ids": batch], token: token)
+            result += response.series.map(Self.normalize)
+        }
+        return result
+    }
+
+    /// Keeps one book per whole-number position: the most-read, which the query lists first.
+    static func normalize(_ series: SeriesResponse.Series) -> SeriesInfo {
+        var seen = Set<Double>()
+        let books = series.bookSeries.compactMap { entry -> SeriesInfo.SeriesBook? in
+            guard let position = entry.position, position >= 0,
+                position == position.rounded(), let book = entry.book,
+                seen.insert(position).inserted
+            else { return nil }
+            return SeriesInfo.SeriesBook(
+                id: book.id, title: book.title ?? "Untitled", position: position,
+                releaseYear: book.releaseYear,
+                coverURL: book.image?.url.flatMap { $0.scheme == "https" ? $0 : nil })
+        }
+        return SeriesInfo(id: series.id, name: series.name, books: books)
     }
 
     /// The sharpest portrait cover: portrait shapes beat other shapes, then height wins.
@@ -536,6 +585,36 @@ actor HardcoverClient {
         return (best.url, alternate)
     }
 
+    /// Hardcover's `status_id` for **Currently Reading**.
+    static let currentlyReadingStatus = 2
+    /// Hardcover's `status_id` for **Read**.
+    static let readStatus = 3
+
+    /// The fraction of an unfinished read completed, from 0 to 1, or `nil` when the read logs no
+    /// progress.
+    ///
+    /// Prefers Hardcover's percentage, which it records whether progress was logged as a
+    /// percentage, pages, or listening time. Otherwise divides pages, then seconds, by the total
+    /// from the read's edition, falling back to `pages` or `audioSeconds` from the library edition.
+    static func progress(of read: CurrentRead?, pages: Int?, audioSeconds: Int?) -> Double? {
+        guard let read else { return nil }
+        let fraction: Double
+        if let percent = read.progress {
+            fraction = percent / 100
+        } else if let done = read.progressPages, let total = read.edition?.pages ?? pages,
+            total > 0
+        {
+            fraction = Double(done) / Double(total)
+        } else if let done = read.progressSeconds,
+            let total = read.edition?.audioSeconds ?? audioSeconds, total > 0
+        {
+            fraction = Double(done) / Double(total)
+        } else {
+            return nil
+        }
+        return fraction.isFinite ? min(1, max(0, fraction)) : nil
+    }
+
     static func normalize(_ rows: [UserBook]) -> [Book] {
         var unique: [Int: Book] = [:]
         for row in rows {
@@ -551,6 +630,8 @@ actor HardcoverClient {
                 edition: edition?.image, book: source.image,
                 otherEditions: (source.editions ?? []).compactMap(\.image),
                 editionIsInLanguage: edition?.isInLanguage(Self.coverLanguage) ?? true)
+            let membership = source.bookSeries?
+                .sorted { ($0.featured ?? false) && !($1.featured ?? false) }.first
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,
@@ -558,10 +639,8 @@ actor HardcoverClient {
                 pages: edition?.pages ?? source.pages,
                 finished: read?.finishedAt ?? row.lastReadDate, rating: row.rating,
                 format: edition?.readingFormat?.format,
-                seriesID: source.bookSeries?
-                    .sorted { ($0.featured ?? false) && !($1.featured ?? false) }.first?
-                    .series?
-                    .id,
+                seriesID: membership?.series?.id,
+                seriesPosition: membership?.position,
                 genres: source.cachedTags?["Genre"]?
                     .filter {
                         ($0.spoilerRatio ?? 0) < 0.2 && !["Fiction", "Nonfiction"].contains($0.tag)
@@ -571,8 +650,18 @@ actor HardcoverClient {
                 ratingDistribution: source.ratingsDistribution?
                     .filter { (0.5...5).contains($0.rating) && $0.count >= 0 },
                 detailCoverURL: covers.preferred, sources: [.hardcover],
-                isRead: row.statusID == 3 || read?.finishedAt != nil || row.lastReadDate != nil,
-                publicationYear: source.releaseYear)
+                isRead: row.statusID == Self.readStatus || read?.finishedAt != nil
+                    || row.lastReadDate != nil,
+                publicationYear: source.releaseYear,
+                isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
+                progress: row.statusID == Self.currentlyReadingStatus
+                    ? Self.progress(
+                        of: row.currentRead, pages: row.edition?.pages ?? source.pages,
+                        audioSeconds: row.edition?.audioSeconds)
+                    : nil,
+                started: row.statusID == Self.currentlyReadingStatus
+                    ? row.currentRead?.startedAt : nil,
+                audioSeconds: edition?.audioSeconds)
             if let previous = unique[book.id], !Book.recentFirst(book, previous) { continue }
             unique[book.id] = book
         }
@@ -583,6 +672,35 @@ actor HardcoverClient {
 struct HardcoverLibrary: Sendable {
     let accountID: String
     let books: [Book]
+    /// `nil` when series couldn't be fetched, so the previous snapshot's series stay.
+    var series: [SeriesInfo]? = nil
+}
+
+struct SeriesResponse: Decodable, Sendable {
+    let series: [Series]
+    struct Series: Decodable, Sendable {
+        let id: Int
+        let name: String
+        let bookSeries: [Entry]
+        enum CodingKeys: String, CodingKey {
+            case id, name
+            case bookSeries = "book_series"
+        }
+    }
+    struct Entry: Decodable, Sendable {
+        let position: Double?
+        let book: Member?
+    }
+    struct Member: Decodable, Sendable {
+        let id: Int
+        let title: String?
+        let releaseYear: Int?
+        let image: CoverImage?
+        enum CodingKeys: String, CodingKey {
+            case id, title, image
+            case releaseYear = "release_year"
+        }
+    }
 }
 
 // Decode wire fields explicitly; normalization keeps API-specific choices out of the UI.
@@ -594,6 +712,8 @@ struct UserBook: Decodable, Sendable {
     let book: SourceBook
     let edition: Edition?
     let userBookReads: [ReadEvent]?
+    var currentReads: [CurrentRead]? = nil
+    var currentRead: CurrentRead? { currentReads?.first }
     enum CodingKeys: String, CodingKey {
         case id
         case statusID = "status_id"
@@ -602,6 +722,7 @@ struct UserBook: Decodable, Sendable {
         case book
         case edition
         case userBookReads = "user_book_reads"
+        case currentReads = "current_read"
     }
 
 }
@@ -657,12 +778,14 @@ struct BookTag: Decodable, Sendable {
 struct Edition: Decodable, Sendable {
     let id: Int
     let pages: Int?
+    var audioSeconds: Int? = nil
     let image: CoverImage?
     let readingFormat: ReadingFormat?
     var language: Language? = nil
     enum CodingKeys: String, CodingKey {
         case id
         case pages
+        case audioSeconds = "audio_seconds"
         case image
         case readingFormat = "reading_format"
         case language
@@ -685,8 +808,33 @@ struct ReadEvent: Decodable, Sendable {
     }
 
 }
+/// An unfinished read, which carries reading progress.
+struct CurrentRead: Decodable, Sendable {
+    let startedAt: String?
+    /// Percent complete, from 0 to 100.
+    var progress: Double? = nil
+    var progressPages: Int? = nil
+    var progressSeconds: Int? = nil
+    var edition: Length? = nil
+    struct Length: Decodable, Sendable {
+        var pages: Int? = nil
+        var audioSeconds: Int? = nil
+        enum CodingKeys: String, CodingKey {
+            case pages
+            case audioSeconds = "audio_seconds"
+        }
+    }
+    enum CodingKeys: String, CodingKey {
+        case startedAt = "started_at"
+        case progress
+        case progressPages = "progress_pages"
+        case progressSeconds = "progress_seconds"
+        case edition
+    }
+}
 struct SeriesMembership: Decodable, Sendable {
     let featured: Bool?
+    let position: Double?
     let series: SeriesIdentity?
     struct SeriesIdentity: Decodable, Sendable { let id: Int }
 }

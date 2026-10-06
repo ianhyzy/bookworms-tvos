@@ -76,6 +76,8 @@ struct ShelfView: View {
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
     @State private var selectedBook: Book?
+    /// The book whose details applied the shelf filter, and the view those details opened over.
+    @State private var filterOrigin: (book: Book, view: BookwormsView)?
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
         case ambient
@@ -299,7 +301,21 @@ struct ShelfView: View {
                 BookDetailView(
                     book: library.book(withID: book.id) ?? book,
                     style: library.style(for: book),
-                    loadReviews: reviewLoader(for: book)
+                    loadReviews: reviewLoader(for: book),
+                    onShowShelf: { filter in
+                        // The book matches its own author and genres, so focus returns to it.
+                        lastFocusedID = book.id
+                        filterOrigin = (book, coordinator.current)
+                        library.shelfFilter = filter
+                        showView(.shelf)
+                        selectedBook = nil
+                    },
+                    series: library.series(for: library.book(withID: book.id) ?? book),
+                    libraryBook: { library.book(withID: $0) },
+                    onOpenBook: { chosen in
+                        lastFocusedID = chosen.id
+                        selectedBook = chosen
+                    }
                 )
                 .appTypography()
                 .id(book.id)
@@ -393,6 +409,15 @@ struct ShelfView: View {
         if enabled.contains(.shared) {
             books += social.presentation.shared.prefix(BookLimit.maximum).map { $0.mine.book }
         }
+        if enabled.contains(.friendsPicks) {
+            let picks = social.presentation.picks.prefix(BookLimit.maximum)
+            books += picks.map(\.book)
+            avatars += picks.flatMap { $0.fans.prefix(3).compactMap(\.avatarURL) }
+        }
+        // Ambient My Shelf leads with them; at most a handful on any date.
+        if coordinator.preferences.ambientOrderedViews.contains(.shelf) {
+            books += library.onThisDay.prefix(BookLimit.maximum)
+        }
         // Only the chosen year; choosing another year prepares its covers, as choosing a reader
         // does for Compare Shelves.
         if enabled.contains(.yearInReview),
@@ -421,6 +446,13 @@ struct ShelfView: View {
     }
 
     private func loadSocial(manual: Bool = false) async {
+        #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--cached-social-preview") {
+                social.useCachedSnapshotForPreview()
+                ensureComparisonReader()
+                return
+            }
+        #endif
         if library.isSample {
             social.useSample(books: library.books)
             ensureComparisonReader()
@@ -506,18 +538,47 @@ struct ShelfView: View {
                 }
             }
         }
+        // Browsing covers follow the library's and don't wait for the retry below; a newer
+        // preparation cancels this one and resumes after the covers already saved.
+        _ = await ArtworkStore.shared.prefetchBrowsing(library.browsingCoverURLs)
         // Retry covers that failed, such as after a timeout, once. Mounted covers reload from the
         // local cache when the generation changes; browsing itself never downloads.
-        guard !preparation.failed.isEmpty,
-            (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey
-        else { return }
-        await ArtworkStore.shared.forgetFailures()
-        let retry = await ArtworkStore.shared.prefetch(
-            books: preparation.failed, avatarURLs: [])
-        guard !Task.isCancelled, key == artworkKey, !retry.ratios.isEmpty else { return }
-        for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
-        artworkGeneration &+= 1
+        if !preparation.failed.isEmpty {
+            guard (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey else {
+                return
+            }
+            await ArtworkStore.shared.forgetFailures()
+            let retry = await ArtworkStore.shared.prefetch(
+                books: preparation.failed, avatarURLs: [])
+            guard !Task.isCancelled, key == artworkKey else { return }
+            if !retry.ratios.isEmpty {
+                for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
+                artworkGeneration &+= 1
+            }
+        }
 
+    }
+
+    /// Reopens the details that filtered My Shelf, over the view they opened from, and clears the
+    /// filter. `nil` without such a filter, so Back keeps opening the sidebar.
+    // ponytail: one level of history; after chained filters, Back reopens the latest origin.
+    private var returnToFilterOrigin: (() -> Void)? {
+        guard let origin = filterOrigin, library.shelfFilter != nil else { return nil }
+        return {
+            filterOrigin = nil
+            library.shelfFilter = nil
+            lastFocusedID = origin.book.id
+            showView(origin.view)
+            // Book Wall reopens its own details for a book it holds; other views use the cover.
+            if coordinator.current == .bookWall,
+                wallBooks.contains(where: { $0.id == origin.book.id })
+            {
+                coordinator.wallSelection = origin.book.id
+                wallDetail.requestedBookID = origin.book.id
+            } else {
+                selectedBook = origin.book
+            }
+        }
     }
 
     private func restoreSelection() {
@@ -568,6 +629,16 @@ struct ShelfView: View {
                                 prepared: prepared, viewportFrame: wallViewportFrame,
                                 isActive: sidebarItem == .view(.bookWall),
                                 reviewLoader: reviewLoader(for:),
+                                onShowShelf: { book, filter in
+                                    lastFocusedID = book.id
+                                    filterOrigin = (book, .bookWall)
+                                    library.shelfFilter = filter
+                                    showView(.shelf)
+                                },
+                                series: { library.series(for: library.book(withID: $0.id) ?? $0) },
+                                libraryBook: { library.book(withID: $0) },
+                                // A series book opens in the cover details, even one on the wall.
+                                onOpenBook: { selectedBook = $0 },
                                 onActivity: recordActivity,
                                 returnRevision: socialReturnRevision,
                                 detailState: wallDetail
@@ -635,6 +706,9 @@ struct ShelfView: View {
                 }
             }
             .ignoresSafeArea(edges: view.hasHeader ? .top : [])
+            // The one place main content handles Back: a shelf that details filtered returns to
+            // those details. Everywhere else the handler is `nil` and Back opens the sidebar.
+            .onExitCommand(perform: view == .shelf ? returnToFilterOrigin : nil)
             .task(
                 id: ShelfPreparationKey(
                     revision: library.presentationRevision, fontRevision: library.fontRevision,
@@ -820,7 +894,9 @@ struct ShelfView: View {
         let book = library.books.first { $0.id == (focusedBook ?? lastFocusedID) }
         return Group {
             if let book {
-                BookCaption(book: book, dateFormat: dateFormat)
+                BookCaption(
+                    book: book, dateFormat: dateFormat,
+                    comparesCommunity: library.shelfPreferences.sort == .hotTakes)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Select a book to look inside").appFont(size: 33, weight: .medium)
@@ -834,12 +910,25 @@ struct ShelfView: View {
 
     private var shelfStatus: some View {
         HStack(spacing: 22) {
+            if let filter = library.shelfFilter {
+                Button {
+                    library.shelfFilter = nil
+                } label: {
+                    Label(filter.name, systemImage: "xmark")
+                }
+                .buttonStyle(.glass)
+                .appFont(size: 24, weight: .medium)
+                .accessibilityLabel("Clear filter: \(filter.name)")
+                .accessibilityIdentifier("clear-shelf-filter")
+            }
             if library.isSample {
                 Text("Sample shelf").appFont(size: 21)
                     .foregroundStyle(palette.text.opacity(0.6))
             }
             Spacer()
         }
+        // A full-width section, so Down from any cover reaches the filter's clear button.
+        .focusSection()
     }
 
     private func shelfRow(rowHeight: CGFloat) -> some View {
@@ -867,22 +956,33 @@ struct ShelfView: View {
         VStack(spacing: 26) {
             Image(systemName: "books.vertical").appFont(size: 80, weight: .ultraLight)
                 .accessibilityHidden(true)
-            Text(library.isConnected ? "Your shelf is waiting" : "Make room for your books")
-                .appFont(size: 42)
+            Text(
+                library.shelfFilter != nil
+                    ? "No books on your shelf match"
+                    : library.isConnected ? "Your shelf is waiting" : "Make room for your books"
+            )
+            .appFont(size: 42)
             Text(
                 library.isConnected
                     ? "No books match your shelf choices. Change Show in Settings → Shelf."
                     : "Connect a source in Settings to explore your books."
             )
             .appFont(size: 25).multilineTextAlignment(.center).frame(maxWidth: 850)
-            HStack(spacing: 24) {
-                Button("Choose sources") {
-                    settingsSection = .sources
-                    sidebarItem = .settings
+            if let filter = library.shelfFilter {
+                Button("Show all books") { library.shelfFilter = nil }
+                    .buttonStyle(.glassProminent)
+                    .accessibilityLabel("Clear filter: \(filter.name)")
+                    .accessibilityIdentifier("clear-shelf-filter")
+            } else {
+                HStack(spacing: 24) {
+                    Button("Choose sources") {
+                        settingsSection = .sources
+                        sidebarItem = .settings
+                    }
+                    .buttonStyle(.glassProminent)
+                    .accessibilityIdentifier("choose-sources")
+                    Button("Explore a sample shelf") { library.showSample() }.buttonStyle(.glass)
                 }
-                .buttonStyle(.glassProminent)
-                .accessibilityIdentifier("choose-sources")
-                Button("Explore a sample shelf") { library.showSample() }.buttonStyle(.glass)
             }
         }
         .foregroundStyle(palette.text)
@@ -918,10 +1018,12 @@ private struct BookWallDetailOverlay: View {
 
     var body: some View {
         if state.isPresented {
-            BookWallDetailNavigationCover(palette: palette) { state.closeRevision += 1 }
-                .transition(
-                    PerformanceDiagnostics.isolates("wall-instant-cover-exit")
-                        ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
+            BookWallDetailNavigationCover(palette: palette, detailFrame: state.frame) {
+                state.closeRevision += 1
+            }
+            .transition(
+                PerformanceDiagnostics.isolates("wall-instant-cover-exit")
+                    ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
         }
     }
 }
@@ -929,7 +1031,9 @@ private struct BookWallDetailOverlay: View {
 /// Places Back above the tab control, which tvOS draws outside the selected tab's content.
 private struct BookWallDetailNavigationCover: View {
     let palette: ShelfPalette
+    let detailFrame: CGRect
     let onBack: () -> Void
+    @FocusState private var backFocused: Bool
 
     var body: some View {
         GeometryReader { geometry in
@@ -971,13 +1075,27 @@ private struct BookWallDetailNavigationCover: View {
                         }
                 }
                 if !PerformanceDiagnostics.isolates("wall-no-detail-back") {
-                    Button(action: onBack) {
-                        Label("Back to view", systemImage: "chevron.left")
+                    // Back sits where cover details place it, in a full-height section over the
+                    // book's column, so Left from any detail control reaches it. Like cover
+                    // details, opening focuses Back first.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button(action: onBack) {
+                            Label("Back to view", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.glass)
+                        .focused($backFocused)
+                        .onAppear { backFocused = true }
+                        .accessibilityIdentifier("back-to-shelf")
+                        .frame(height: BookDetailCoverLayout.backHeight)
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.glass)
-                    .accessibilityIdentifier("back-to-shelf")
-                    .padding(.leading, 40)
-                    .padding(.top, 50)
+                    .frame(
+                        width: detailFrame.width * BookDetailCoverLayout.columnFraction,
+                        alignment: .leading
+                    )
+                    .focusSection()
+                    .padding(.leading, detailFrame.minX + BookDetailCoverLayout.horizontalPadding)
+                    .padding(.top, detailFrame.minY + BookDetailCoverLayout.verticalPadding)
                 }
             }
         }
@@ -1073,6 +1191,8 @@ struct ShelfPhoto: View {
 struct BookCaption: View {
     let book: Book
     let dateFormat: AppDateFormat
+    /// Replaces the stars with your rating beside the community's, for the Hot Takes sort.
+    var comparesCommunity = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1089,19 +1209,33 @@ struct BookCaption: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(book.formatLabel ?? "")
                 }
-                Text(book.title).appFont(size: 33, weight: .medium).lineLimit(1)
+                HStack(spacing: 10) {
+                    Text(book.title).lineLimit(1)
+                    // Fixed so a long title truncates before the status does.
+                    if book.isReading == true {
+                        Text("(Currently Reading)").fixedSize()
+                    }
+                }
+                .appFont(size: 33, weight: .medium)
             }
             Text(
                 [
                     book.author, book.primaryGenre,
-                    book.finished.map { _ in
-                        book.finishedLabel(format: dateFormat)
-                    },
+                    book.finished.map { _ in book.finishedLabel(format: dateFormat) },
                 ]
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             )
             .appFont(size: 29).opacity(0.82).lineLimit(1)
-            if let rating = book.rating { StarRating(rating: rating, size: 26).padding(.top, 4) }
+            if comparesCommunity, let rating = book.rating, let community = book.communityRating,
+                community > 0
+            {
+                Text(
+                    "You ★\(rating.formatted(.number.precision(.fractionLength(0...1)))) · Community ★\(community.formatted(.number.precision(.fractionLength(1))))"
+                )
+                .appFont(size: 29).opacity(0.82).padding(.top, 4)
+            } else if let rating = book.rating {
+                StarRating(rating: rating, size: 26).padding(.top, 4)
+            }
         }
     }
 }
@@ -1438,6 +1572,7 @@ struct ShelfRow: View {
             } else {
                 CoverView(
                     book: book, standsOnShelf: true,
+                    progressStyle: library.shelfPreferences.progressStyle,
                     onAspectRatio: { library.recordCoverRatio($0, for: book.id) }
                 )
                 .frame(width: dimensions.width, height: dimensions.height)

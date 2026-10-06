@@ -34,6 +34,12 @@ struct YearInReview: Equatable, Identifiable, Sendable {
     let genres: [Tally]
     /// The author with the most finished books, when at least two share an author.
     let topAuthor: Tally?
+    /// The book with the most pages; the latest finish wins a tie.
+    let longest: Book?
+    /// The book with the fewest pages, when the year has at least two books with page counts.
+    let shortest: Book?
+    /// The highest-rated book; the latest finish wins a tie.
+    let favorite: Book?
 
     var id: Int { year }
 
@@ -61,18 +67,25 @@ struct YearInReview: Equatable, Identifiable, Sendable {
                     ? lhs.id < rhs.id : (lhs.finished ?? "") < (rhs.finished ?? "")
             }
         self.books = books
+        let favorites = books.sorted { lhs, rhs in
+            (lhs.rating ?? -1) == (rhs.rating ?? -1)
+                ? Book.recentFirst(lhs, rhs) : (lhs.rating ?? -1) > (rhs.rating ?? -1)
+        }
+        favorite = favorites.first { $0.rating.map { (0...5).contains($0) && $0 > 0 } ?? false }
         if books.count > BookLimit.maximum {
-            let favorites = books.sorted { lhs, rhs in
-                (lhs.rating ?? -1) == (rhs.rating ?? -1)
-                    ? Book.recentFirst(lhs, rhs) : (lhs.rating ?? -1) > (rhs.rating ?? -1)
-            }
             let kept = Set(favorites.prefix(BookLimit.maximum).map(\.id))
             shelf = books.filter { kept.contains($0.id) }
         } else {
             shelf = books
         }
 
-        let paged = books.compactMap(\.pages).filter { $0 > 0 }
+        // `books` is earliest first, so the last of equal page counts is the latest finish.
+        let withPages = books.filter { ($0.pages ?? 0) > 0 }
+        let paged = withPages.compactMap(\.pages)
+        let maximumPages = paged.max()
+        let minimumPages = paged.min()
+        longest = withPages.last { $0.pages == maximumPages }
+        shortest = withPages.count < 2 ? nil : withPages.last { $0.pages == minimumPages }
         pages = paged.reduce(0, +)
         booksWithPages = paged.count
         let ratings = books.compactMap(\.rating).filter { (0...5).contains($0) }
@@ -108,6 +121,20 @@ struct YearInReview: Equatable, Identifiable, Sendable {
 }
 
 extension Book {
+    /// Books finished on `date`'s month and day in earlier years, most recent year first.
+    static func finishedOnThisDay(_ books: [Book], date: Date, calendar: Calendar) -> [Book] {
+        let today = calendar.dateComponents([.year, .month, .day], from: date)
+        let suffix = String(format: "-%02d-%02d", today.month ?? 0, today.day ?? 0)
+        return
+            books.filter { book in
+                guard let finished = book.finished?.prefix(10), finished.hasSuffix(suffix),
+                    let year = Int(finished.prefix(4)), year < (today.year ?? 0)
+                else { return false }
+                return true
+            }
+            .sorted(by: recentFirst)
+    }
+
     /// The year and month (1–12) of the recorded finish date, or `nil` when it is missing or
     /// malformed.
     var finishedYearMonth: (year: Int, month: Int)? {

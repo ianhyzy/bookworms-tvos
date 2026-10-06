@@ -219,4 +219,20 @@ final class CacheTests: XCTestCase {
                 for: book, style: style, natural: natural, rowHeight: 600), natural)
     }
 
+    func testTrimRemovesOldestFilesAndKeepsFolders() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory.appending(path: "browse"), withIntermediateDirectories: true)
+        for (index, name) in ["old", "middle", "new"].enumerated() {
+            let file = directory.appending(path: name)
+            try Data(count: 100).write(to: file)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: Double(index) * 100)],
+                ofItemAtPath: file.path())
+        }
+        ArtworkStore.trim(directory, to: 200)
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: directory.path())
+        XCTAssertEqual(Set(remaining), ["browse", "middle", "new"])
+    }
 }

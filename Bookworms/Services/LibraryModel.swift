@@ -11,18 +11,41 @@ final class LibraryModel {
         didSet {
             let years = YearInReview.all(from: allBooks)
             if years != readingYears { readingYears = years }
+            refreshOnThisDay()
         }
     }
+    /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
+    private(set) var seriesByID: [Int: SeriesInfo] = [:]
+
+    /// Covers of every series book, for the browsing artwork tier, which skips covers the library
+    /// tier already has. Owned books use their library cover. Series of books on My Shelf come
+    /// first. Prepared with the library.
+    private(set) var browsingCoverURLs: [URL] = []
+
+    func series(for book: Book) -> SeriesInfo? {
+        book.seriesID.flatMap { seriesByID[$0] }
+    }
+
+    /// Books finished on today's date in earlier years, for ambient mode. Prepared when the
+    /// library changes and when the app becomes active, so a new day is picked up.
+    private(set) var onThisDay: [Book] = []
+    /// The year `onThisDay` was chosen in, for "N years ago" labels.
+    private(set) var onThisDayYear = Calendar.current.component(.year, from: .now)
     /// Year in Review statistics for every year with a finished book, most recent first.
     /// Prepared when the library changes, so the view only reads them.
     private(set) var readingYears: [YearInReview] = []
     private(set) var hasLoadedLibrarySnapshot = false
+    /// Limits My Shelf to one author or genre until cleared. Not saved.
+    var shelfFilter: ShelfFilter? {
+        didSet { if shelfFilter != oldValue { updateShelf() } }
+    }
     @ObservationIgnored private let dependencies: LibraryDependencies
     @ObservationIgnored private let persistence: LibraryPersistence
     @ObservationIgnored private var sourceRevision = 0
     @ObservationIgnored private var sourceSaveRevision = 0
     @ObservationIgnored private var styleSaveRevision = 0
     @ObservationIgnored private var topShelfRevision = 0
+    @ObservationIgnored private var topShelfTask: Task<Void, Never>?
     @ObservationIgnored private var cloudRevision = 0
     @ObservationIgnored private var activeHardcoverAccountID: String?
     private var schedule: SourceSyncSchedule { SourceSyncSchedule(defaults: dependencies.defaults) }
@@ -78,6 +101,15 @@ final class LibraryModel {
     /// Reads the active Hardcover credential only at an explicit synchronization boundary.
     func hardcoverTokenForSync() -> String? {
         guard hardcoverEnabled, hardcoverConnected, !isSample else { return nil }
+        #if DEBUG && targetEnvironment(simulator)
+            // Matches `saveHardcoverCredential`: an unsigned simulator may keep the authorized
+            // bootstrap token only in this process, so social sync uses it too.
+            if dependencies.allowLaunchOverrides,
+                let token = ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"]
+            {
+                return dependencies.readCredential("hardcover-token") ?? token
+            }
+        #endif
         return dependencies.readCredential("hardcover-token")
     }
 
@@ -495,7 +527,8 @@ final class LibraryModel {
             hardcoverSessionExpired = false
             connectionRevision += 1
             hardcoverEnabled = true
-            await install(result.books, source: .hardcover, accountID: accountID)
+            await install(
+                result.books, source: .hardcover, accountID: accountID, series: result.series)
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
@@ -554,7 +587,9 @@ final class LibraryModel {
                             && activeHardcoverAccountID != nil)
                 let result = try await dependencies.fetchHardcover(token)
                 guard revision == sourceRevision, !Task.isCancelled else { return }
-                await install(result.books, source: .hardcover, accountID: result.accountID)
+                await install(
+                    result.books, source: .hardcover, accountID: result.accountID,
+                    series: result.series)
             } catch {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
@@ -649,7 +684,27 @@ final class LibraryModel {
             : nil
     }
 
+    func refreshOnThisDay() {
+        var date = Date.now
+        #if DEBUG && targetEnvironment(simulator)
+            if let argument = ProcessInfo.processInfo.arguments.first(where: {
+                $0.hasPrefix("--on-this-day-date=")
+            }),
+                let override = ISO8601DateFormatter()
+                    .date(
+                        from: argument.dropFirst("--on-this-day-date=".count) + "T12:00:00Z")
+            {
+                date = override
+            }
+        #endif
+        let books = Book.finishedOnThisDay(allBooks, date: date, calendar: .current)
+        let year = Calendar.current.component(.year, from: date)
+        if year != onThisDayYear { onThisDayYear = year }
+        if books != onThisDay { onThisDay = books }
+    }
+
     func becameActive() async {
+        refreshOnThisDay()
         guard hasStarted, !isSample else { return }
         await refresh()
     }
@@ -658,6 +713,7 @@ final class LibraryModel {
         guard !isLoading else { return }
         cancelShelfWork()
         allBooks = SampleLibrary.books
+        seriesByID = [SampleLibrary.series.id: SampleLibrary.series]
         #if DEBUG
             if dependencies.allowLaunchOverrides,
                 ProcessInfo.processInfo.arguments.contains("--sample-pages")
@@ -701,14 +757,21 @@ final class LibraryModel {
 
     func style(for book: Book) -> SpineStyle { styles[book.id] ?? .fallback(for: book) }
 
-    private func install(_ result: [Book], source: LibrarySource, accountID: String) async {
+    private func install(
+        _ result: [Book], source: LibrarySource, accountID: String, series: [SeriesInfo]? = nil
+    ) async {
         sourceErrors[source.rawValue] = nil
         if source == .hardcover {
             setActiveHardcoverAccountID(accountID)
             hardcoverSessionExpired = false
         }
+        let previousSeries = sourceSnapshots.last {
+            $0.source == source && $0.accountID == accountID
+        }?
+        .series
         let snapshot = SourceSnapshot(
-            source: source, accountID: accountID, books: result, syncedAt: dependencies.now())
+            source: source, accountID: accountID, books: result, syncedAt: dependencies.now(),
+            series: series ?? previousSeries)
         // A complete Hardcover sync replaces snapshots from older builds and accounts.
         sourceSnapshots.removeAll {
             $0.source == source && (source == .hardcover || $0.accountID == accountID)
@@ -768,6 +831,9 @@ final class LibraryModel {
                 $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
             }
         allBooks = LibraryMerge.books(from: enabled)
+        seriesByID = Dictionary(
+            (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        updateBrowsingCovers()
         syncedAt = enabled.map(\.syncedAt).max()
         styles = aiRecords.mapValues(\.style)
         updateShelf()
@@ -776,16 +842,32 @@ final class LibraryModel {
     private func updateShelf() {
         let measurement = PerformanceDiagnostics.begin("UpdateShelf")
         defer { measurement.end() }
+        let source = shelfFilter.map { filter in allBooks.filter(filter.matches) } ?? allBooks
         books =
             isSample
-            ? Array(allBooks.prefix(bookCount))
-            : shelfPreferences.select(allBooks, limit: bookCount)
+            ? Array(source.prefix(bookCount))
+            : shelfPreferences.select(source, limit: bookCount)
         if !isSample {
             restoreSavedStyles(books)
             restoreVisibleFonts()
             queueAutomaticGeneration()
         }
         publishTopShelf()
+        updateBrowsingCovers()
+    }
+
+    private func updateBrowsingCovers() {
+        let owned = Dictionary(
+            allBooks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let shelfSeries = books.compactMap(\.seriesID)
+        let order = shelfSeries + seriesByID.keys.sorted().filter { !shelfSeries.contains($0) }
+        var seen = Set<URL>()
+        let urls = order.compactMap { seriesByID[$0] }.flatMap(\.books)
+            .compactMap { entry in
+                owned[entry.id].map { $0.detailCoverURL ?? $0.coverURL } ?? entry.coverURL
+            }
+            .filter { seen.insert($0).inserted }
+        if urls != browsingCoverURLs { browsingCoverURLs = urls }
     }
 
     private func writeSyncDiagnostics() {
@@ -899,25 +981,42 @@ final class LibraryModel {
         await cloudTask?.value
     }
 
+    /// Waits for queued Top Shelf renders and publications.
+    func waitForTopShelf() async {
+        await topShelfTask?.value
+    }
+
     private func publishTopShelf() {
         let cached = Dictionary(
             dependencies.readTopShelf().map { ($0.id, $0.imageURL) },
             uniquingKeysWith: { first, _ in first })
+        let style = shelfPreferences.progressStyle
+        // Top Shelf mirrors the unfiltered shelf.
+        let shelf =
+            shelfFilter == nil || isSample
+            ? books : shelfPreferences.select(allBooks, limit: bookCount)
         let items: [TopShelfBook] =
             isSample
             ? []
-            : books.prefix(10)
+            : shelf.prefix(10)
                 .compactMap { book in
                     guard book.isHardcoverBook,
                         let url = book.detailCoverURL ?? book.coverURL ?? cached[book.id],
                         url.scheme == "https"
                     else { return nil }
-                    return TopShelfBook(id: book.id, title: book.title, imageURL: url)
+                    return TopShelfBook(
+                        id: book.id, title: book.title, imageURL: url,
+                        progress: book.isReading == true ? book.progress ?? 0 : nil,
+                        showsNativeProgress: style == .horizontal ? true : nil)
                 }
         topShelfRevision &+= 1
         let revision = topShelfRevision
         let persistence = persistence
-        Task.detached(priority: .utility) {
+        topShelfTask = Task.detached(priority: .utility) {
+            await persistence.beginTopShelf(revision: revision)
+            let items =
+                style == .vertical
+                ? await TopShelfPoster.render(items, artwork: .shared) : items
             await persistence.publishTopShelf(items, revision: revision)
         }
     }

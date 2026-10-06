@@ -21,25 +21,24 @@ My Shelf
 
 Year in Review
 
-![Year in Review](screenshots/5-year-in-review.jpg)
+![Year in Review](screenshots/2-year-in-review.jpg)
 
-Following
+Feed
 
-![Following](screenshots/2-following.jpg)
+![Feed](screenshots/3-feed.jpg)
 
 Compare Shelves
 
-![Compare Shelves](screenshots/3-compare-shelves.jpg)
+![Compare Shelves](screenshots/4-compare-shelves.jpg)
 
 Book Club
 
-![Book Club](screenshots/4-book-club.jpg)
+![Book Club](screenshots/5-book-club.jpg)
+
+Friends' Picks
+
+![Friends' Picks](screenshots/6-friends-picks.jpg)
 
 Book details
 
-![Book details](screenshots/6-book-details.jpg)
-
-Photo credits:
-* Gold frame: [ohamina - Magnific.com](https://www.magnific.com/free-psd/elegant-gold-ornate-picture-frame_409112548.htm#fromView=keyword&page=1&position=2&uuid=ff7f9ec6-72b7-402c-81cb-047760d51bf3&track=ais_hybrid&query=Gold+frame+template)
-* `WalnutWood`: [Black Walnut Veneer 01](https://polyhaven.com/a/black_walnut_veneer_01).
-* `OakWood`: [White Oak Veneer](https://polyhaven.com/a/white_oak_veneer).
+![Book details](screenshots/7-book-details.jpg)

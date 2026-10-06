@@ -22,7 +22,7 @@ enum SocialQuery: String {
         query SocialLibrary($user: Int!, $offset: Int!, $language: String!) {
           user_books(where: {user_id: {_eq: $user}, _or: [{rating: {_is_null: false}}, {last_read_date: {_is_null: false}}]},
             order_by: {id: asc}, limit: 100, offset: $offset) {
-            id rating review review_has_spoilers last_read_date likes_count
+            id rating review review_has_spoilers last_read_date likes_count status_id
             book { id title description pages cached_contributors image { url width height }
               editions(where: {image_id: {_is_null: false},
                   _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
@@ -128,6 +128,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             let reviewHasSpoilers: Bool
             let lastReadDate: String?
             let likesCount: Int?
+            let statusID: Int?
             let book: SourceBook
             let edition: Edition?
             enum CodingKeys: String, CodingKey {
@@ -135,6 +136,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                 case reviewHasSpoilers = "review_has_spoilers"
                 case lastReadDate = "last_read_date"
                 case likesCount = "likes_count"
+                case statusID = "status_id"
             }
         }
         struct Result: Decodable {
@@ -150,8 +152,11 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                     user: user, offset: offset, language: HardcoverClient.coverLanguage),
                 token: token)
             for row in result.userBooks {
+                var book = Self.book(row.book, edition: row.edition)
+                // Friends' Picks excludes books marked Read even without a read date.
+                book.isRead = row.statusID == HardcoverClient.readStatus ? true : nil
                 books[row.book.id] = ReaderBook(
-                    book: Self.book(row.book, edition: row.edition), rating: row.rating,
+                    book: book, rating: row.rating,
                     review: ReviewText.clean(row.review), hasSpoilers: row.reviewHasSpoilers,
                     finished: row.lastReadDate, likes: row.likesCount.map { max(0, $0) })
             }

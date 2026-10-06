@@ -61,6 +61,9 @@
                     arguments.contains("--start-view=bookWall")
                         || arguments.contains("--test-enable-book-wall")
                     ? [.shelf, .bookWall] : [.shelf]
+                // Ambient mode would otherwise include every view, making social views active and
+                // their unstubbed Hardcover queries race the scenario's network checks.
+                preferences.ambientViews = []
                 defaults.set(try! JSONEncoder().encode(preferences), forKey: "viewPreferences")
             }
             if let argument = ProcessInfo.processInfo.arguments.first(where: {
@@ -315,6 +318,7 @@
         private var pending = [ScenarioURLProtocol]()
         private var requestCount = 0
         private var unexpectedCount = 0
+        private var unexpectedURLs: [String] = []
         private var deliveredArtwork = 0
 
         var artworkRoot: URL? { lock.withLock { root } }
@@ -402,6 +406,7 @@
                     }
                 }
                 unexpectedCount += 1
+                unexpectedURLs.append(url.absoluteString)
                 return (-2, Data())
             }
             guard let result else { return }
@@ -427,6 +432,7 @@
             lock.withLock {
                 [
                     "requests": requestCount, "unexpected": unexpectedCount,
+                    "unexpectedURLs": unexpectedURLs,
                     "heldArtwork": pending.count, "deliveredArtwork": deliveredArtwork,
                 ]
             }

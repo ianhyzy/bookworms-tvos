@@ -1,3 +1,4 @@
+import ImageIO
 import TVServices
 import XCTest
 
@@ -15,6 +16,16 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(monthEnd.finishedLabel(format: .dayFirst), "31/01/2026")
         let invalid = Book(id: 3, title: "Book", author: "Author", finished: "2026-02-30")
         XCTAssertEqual(invalid.finishedLabel(format: .iso), "Date not recorded")
+    }
+
+    func testLengthLabelUsesMinutesOnlyForAudiobooksWithARecordedLength() {
+        var book = Book(id: 1, title: "Book", author: "Author", pages: 304, format: "Listened")
+        XCTAssertEqual(book.lengthLabel, "304 pages")
+        book.audioSeconds = 44_550
+        XCTAssertEqual(book.lengthLabel, "743 minutes")
+        book.format = "Ebook"
+        XCTAssertEqual(book.lengthLabel, "304 pages")
+        XCTAssertNil(Book(id: 2, title: "Book", author: "Author").lengthLabel)
     }
 
     func testGenreTagsKeepEnglishAndDropForeignLanguages() {
@@ -320,6 +331,44 @@ final class LibraryTests: XCTestCase {
         XCTAssertNotEqual(lightPlain.shelf, lightWood.shelf)
     }
 
+    func testTopShelfPosterDimsTheUnreadPartAndBleedsLightLeft() throws {
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil, width: 100, height: 150, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(CGColor(gray: 0.5, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 100, height: 150))
+        let png = NSMutableData()
+        let destination = try XCTUnwrap(
+            CGImageDestinationCreateWithData(png, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let jpeg = try XCTUnwrap(TopShelfPoster.sweep(png as Data, progress: 0.4))
+        let image = try XCTUnwrap(
+            CGImageSourceCreateWithData(jpeg as CFData, nil)
+                .flatMap {
+                    CGImageSourceCreateImageAtIndex($0, 0, nil)
+                })
+        func brightness(x: Int) throws -> UInt8 {
+            var pixel: [UInt8] = [0, 0, 0, 0]
+            let sample = try XCTUnwrap(
+                CGContext(
+                    data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            sample.draw(image, in: CGRect(x: -x, y: -75, width: 100, height: 150))
+            return pixel[0]
+        }
+        // Gray converts to sRGB on drawing, so compare against the measured read part.
+        let read = Int(try brightness(x: 20))
+        XCTAssertEqual(
+            read, Int(try brightness(x: 5)), accuracy: 3, "The read part keeps its color")
+        XCTAssertGreaterThan(
+            Int(try brightness(x: 38)), read + 10, "Light bleeds left from the reader's place")
+        XCTAssertLessThan(Int(try brightness(x: 70)), read * 3 / 4, "The unread part dims")
+    }
+
     func testTopShelfContentUsesPostersAndValidatedBookLinks() throws {
         let books = (1...12)
             .map {
@@ -334,6 +383,23 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(item.displayAction?.url, URL(string: "bookworms://book/1"))
         XCTAssertEqual(BookLink.id(from: books[0].actionURL), 1)
         XCTAssertNil(TopShelfSnapshot.content(for: []))
+        var reading = books[0]
+        reading.progress = 0.4
+        let split = try XCTUnwrap(TopShelfSnapshot.content(for: [reading, books[1]]))
+        XCTAssertEqual(split.sections.map(\.title), ["Now reading", "Recently read"])
+        XCTAssertEqual(
+            split.sections[0].items.first?.imageURL(for: .screenScale1x), reading.imageURL)
+        XCTAssertEqual(split.sections[0].items.first?.playbackProgress, 0)
+        reading.showsNativeProgress = true
+        let native = try XCTUnwrap(TopShelfSnapshot.content(for: [reading]))
+        XCTAssertEqual(
+            native.sections[0].items.first?.playbackProgress, 0.4,
+            "The horizontal style uses Top Shelf's native progress bar")
+        reading.showsNativeProgress = nil
+        reading.posterURL = URL(filePath: "/tmp/1-400.jpg")
+        let swept = try XCTUnwrap(TopShelfSnapshot.content(for: [reading]))
+        XCTAssertEqual(
+            swept.sections[0].items.first?.imageURL(for: .screenScale1x), reading.posterURL)
         for value in [
             "https://book/1", "bookworms://other/1", "bookworms://book/-1",
             "bookworms://book/1?token=x", "bookworms://book/1/2",

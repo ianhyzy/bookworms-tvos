@@ -10,6 +10,9 @@ parser.add_argument("--secret-ref", required=True, help="1Password reference; ne
 parser.add_argument("--simulator")
 parser.add_argument("--device")
 parser.add_argument("--credential", choices=["hardcover", "gemini"], default="hardcover")
+parser.add_argument(
+    "--app-arg", action="append", default=[],
+    help="Launch argument for the app, such as --start-view=shelf; repeat for several")
 args = parser.parse_args()
 if bool(args.simulator) == bool(args.device):
     parser.error("Specify either --simulator or --device.")
@@ -33,7 +36,8 @@ if args.simulator:
     environment = os.environ.copy()
     environment["SIMCTL_CHILD_" + variable] = token
     result = subprocess.run(
-        ["xcrun", "simctl", "launch", "--terminate-running-process", args.simulator, "gay.ian.Bookworms"],
+        ["xcrun", "simctl", "launch", "--terminate-running-process", args.simulator, "gay.ian.Bookworms",
+         *args.app_arg],
         env=environment, capture_output=True, text=True,
     )
 else:
@@ -41,7 +45,7 @@ else:
     environment["DEVICECTL_CHILD_" + variable] = token
     result = subprocess.run(
         ["xcrun", "devicectl", "device", "process", "launch", "--device", args.device,
-         "--terminate-existing", "gay.ian.Bookworms"],
+         "--terminate-existing", "gay.ian.Bookworms", *args.app_arg],
         env=environment, capture_output=True, text=True,
     )
 

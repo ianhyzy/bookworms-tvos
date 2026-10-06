@@ -53,7 +53,8 @@ final class ScenarioNavigationTests: XCTestCase {
         let network = try XCTUnwrap(evidence["network"] as? [String: Any])
         XCTAssertEqual(
             network["unexpected"] as? Int, 0,
-            "A scenario attempted an unconfigured network request.")
+            "A scenario attempted an unconfigured network request: \(network["unexpectedURLs"] ?? "")"
+        )
         XCTAssertEqual(
             evidence["sample"] as? Bool, false, "Scenarios must exercise normal startup.")
         XCTAssertEqual(evidence["generating"] as? Bool, false)
@@ -262,6 +263,14 @@ final class ScenarioNavigationTests: XCTestCase {
                         "The Hardcover login is invalid or expired. Reconnect in Settings."
                 }
                 XCTAssertTrue(app.staticTexts[error].waitForExistence(timeout: 5))
+                // A rejected login must be reconnected before syncing again, and its error
+                // appears once.
+                XCTAssertEqual(app.buttons["sync-now"].isEnabled, scenario != "error")
+                if scenario == "error" {
+                    XCTAssertEqual(
+                        app.staticTexts.matching(NSPredicate(format: "label == %@", error)).count, 1
+                    )
+                }
                 capture(app, "scenario-\(scenario)-sources-error")
                 try audit(app)
                 RemoteNavigation.showShelf(app)

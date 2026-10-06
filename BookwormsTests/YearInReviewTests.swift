@@ -52,6 +52,40 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(review.topAuthor, .init(name: "Author", count: 4))
     }
 
+    func testRecordsPickLongestShortestAndFavorite() throws {
+        let review = try XCTUnwrap(
+            YearInReview.all(from: [
+                book(1, finished: "2025-01-01", rating: 5, pages: 640),
+                book(2, finished: "2025-02-01", rating: 3, pages: 180),
+                book(3, finished: "2025-03-01", rating: 5, pages: 640),
+                book(4, finished: "2025-04-01", pages: 0),
+            ])
+            .first)
+        XCTAssertEqual(review.longest?.id, 3, "The latest finish wins a tie")
+        XCTAssertEqual(review.shortest?.id, 2)
+        XCTAssertEqual(review.favorite?.id, 3)
+        let single = try XCTUnwrap(
+            YearInReview.all(from: [book(1, finished: "2025-01-01", pages: 300)]).first)
+        XCTAssertEqual(single.longest?.id, 1)
+        XCTAssertNil(single.shortest, "One paged book isn't also the shortest")
+        XCTAssertNil(single.favorite)
+    }
+
+    func testOnThisDayFindsEarlierYearsMostRecentFirst() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let today = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 10, day: 4)))
+        let books = [
+            book(1, finished: "2021-10-04"), book(2, finished: "2025-10-04T22:00:00Z"),
+            book(3, finished: "2026-10-04"), book(4, finished: "2025-10-05"),
+            book(5, finished: nil),
+        ]
+        XCTAssertEqual(
+            Book.finishedOnThisDay(books, date: today, calendar: calendar).map(\.id), [2, 1],
+            "Today's own finishes and other days are left out")
+    }
+
     func testGenresAndAuthorsRankByCountThenName() throws {
         let review = try XCTUnwrap(
             YearInReview.all(from: [
@@ -100,20 +134,20 @@ final class YearInReviewTests: XCTestCase {
 
     func testPreferencesSavedBeforeYearInReviewAddItOnce() throws {
         let old = Data(
-            #"{"enabled":["My Shelf","Following"],"comparisonOrder":"Top rated · All time","sharedReadsSort":"Rating agreement","comparisonCount":20,"ambientMinutes":10,"sessionMinutes":0}"#
+            #"{"enabled":["My Shelf","Feed"],"comparisonOrder":"Top rated · All time","sharedReadsSort":"Rating agreement","comparisonCount":20,"ambientMinutes":10,"sessionMinutes":0}"#
                 .utf8)
         var saved = try JSONDecoder().decode(ViewPreferences.self, from: old)
         XCTAssertNil(saved.offeredViews)
         saved.validate()
         // Book Wall, added later, stays off until the user turns it on.
-        XCTAssertEqual(saved.orderedViews, [.shelf, .yearInReview, .following])
+        XCTAssertEqual(saved.orderedViews, [.shelf, .yearInReview, .following, .friendsPicks])
         // Turning it off afterward persists.
         saved.enabled.removeAll { $0 == .yearInReview }
         var reloaded = try JSONDecoder()
             .decode(
                 ViewPreferences.self, from: JSONEncoder().encode(saved))
         reloaded.validate()
-        XCTAssertEqual(reloaded.orderedViews, [.shelf, .following])
+        XCTAssertEqual(reloaded.orderedViews, [.shelf, .following, .friendsPicks])
         XCTAssertFalse(reloaded.ambientOrderedViews.contains(.yearInReview))
     }
 }

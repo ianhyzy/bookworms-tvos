@@ -27,6 +27,7 @@ struct AmbientView: View {
                 !social.presentation.mine.isEmpty || !social.presentation.theirs.isEmpty
             case .shared:
                 !social.presentation.shared.isEmpty
+            case .friendsPicks: !social.presentation.picks.isEmpty
             case .yearInReview, .bookWall: false
             }
         }
@@ -108,7 +109,14 @@ struct AmbientView: View {
     @ViewBuilder private func presentation(size: CGSize) -> some View {
         switch controller.view {
         case .shelf:
-            ambientShelf(books: library.books, size: size, photo: photos[0])
+            // Books finished on this date in earlier years lead each visit to the shelf.
+            let picks = library.onThisDay.prefix(Self.onThisDayLimit)
+            if controller.contentIndex < picks.count {
+                onThisDay(picks[controller.contentIndex], size: size)
+            } else {
+                ambientShelf(
+                    books: library.books, size: size, photo: photos[0], offset: picks.count)
+            }
         case .comparison:
             VStack(spacing: 35) {
                 ambientShelf(
@@ -149,14 +157,42 @@ struct AmbientView: View {
                     }
                 }
             }
+        case .friendsPicks:
+            ambientShelf(
+                books: social.presentation.picks.map(\.book), size: size, coversOnly: true,
+                photo: photos[0])
         case .yearInReview, .bookWall:
             EmptyView()
         }
     }
 
-    private func ambientShelf(books: [Book], size: CGSize, coversOnly: Bool = false, photo: String)
-        -> some View
-    {
+    static let onThisDayLimit = 5
+
+    /// One book finished on today's date in an earlier year, beside its cover.
+    private func onThisDay(_ book: Book, size: CGSize) -> some View {
+        let years = library.onThisDayYear - (book.finishedYearMonth?.year ?? 0)
+        return HStack(spacing: 55) {
+            CoverView(book: book).frame(width: size.width / 3, height: size.height * 0.8)
+            VStack(alignment: .leading, spacing: 18) {
+                Text(years == 1 ? "One year ago today" : "\(years) years ago today")
+                    .appFont(size: 30).foregroundStyle(.secondary)
+                Text(book.title).appFont(size: 52, weight: .semibold).lineLimit(3)
+                Text(book.author).appFont(size: 32)
+                HStack(spacing: 16) {
+                    Text("You finished it").appFont(size: 28).foregroundStyle(.secondary)
+                    if let rating = book.rating { StarRating(rating: rating, size: 28) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("on-this-day")
+    }
+
+    /// `offset` is the number of content slots shown before the shelf's first page.
+    private func ambientShelf(
+        books: [Book], size: CGSize, coversOnly: Bool = false, photo: String, offset: Int = 0
+    ) -> some View {
         let candidates = Dictionary(
             books.compactMap { book in library.savedSpineStyle(for: book).map { (book.id, $0) } },
             uniquingKeysWith: { first, _ in first })
@@ -168,7 +204,7 @@ struct AmbientView: View {
             rowHeight: size.height - 20)
         return VStack(spacing: 0) {
             if !pages.isEmpty {
-                let index = controller.contentIndex % pages.count
+                let index = max(0, controller.contentIndex - offset) % pages.count
                 let page = pages[index]
                 // Full pages spread across the shelf; a partial last page starts at the left.
                 HStack(
@@ -186,8 +222,11 @@ struct AmbientView: View {
                                     book: book, style: style, dimensions: dimensions,
                                     isFocused: false, fontRevision: library.fontRevision)
                             } else {
-                                CoverView(book: book, standsOnShelf: true)
-                                    .frame(width: dimensions.width, height: dimensions.height)
+                                CoverView(
+                                    book: book, standsOnShelf: true,
+                                    progressStyle: library.shelfPreferences.progressStyle
+                                )
+                                .frame(width: dimensions.width, height: dimensions.height)
                             }
                         }
                     }

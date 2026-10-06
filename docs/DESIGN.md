@@ -26,10 +26,10 @@ Details show the full cover in its original proportions, title, author, descript
 
 ## Home Screen
 
-The Top Shelf extension shows the first ten books of the selected shelf collection that have HTTPS artwork. Selecting a cover opens that book's details. The extension receives no API credentials.
+The Top Shelf extension shows the first ten books of the selected shelf collection that have HTTPS artwork, split into **Now reading** and **Recently read**. **Now reading** follows **Settings → Shelf → Progress bars**: **Vertical** posters are drawn with the My Shelf light sweep, **Horizontal** uses the Top Shelf progress bar, and **Don't show** uses plain covers. Selecting a cover opens that book's details. The extension receives no API credentials.
 
 ## Visual review
 
 Check both appearances on Apple TV at normal viewing distance: long titles, missing covers, partial shelves with photos, Compare Shelves alignment, VoiceOver labels, Reduce Motion, and focus restoration. Simulator screenshots help catch layout regressions but do not show real covers or TV-distance readability. See [testing](TESTING.md) and [icon assets](../design/icon/README.md).
 
-See [social views and ambient mode](SOCIAL_VIEWS_AND_AMBIENT.md) for Following, Compare Shelves, Book Club, and ambient playback.
+See [social views and ambient mode](SOCIAL_VIEWS_AND_AMBIENT.md) for Feed, Compare Shelves, Book Club, Friends' Picks, and ambient playback.

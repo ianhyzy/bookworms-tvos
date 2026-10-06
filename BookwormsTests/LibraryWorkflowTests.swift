@@ -1,4 +1,5 @@
 import XCTest
+import os
 
 @testable import Bookworms
 
@@ -54,6 +55,83 @@ final class LibraryWorkflowTests: XCTestCase {
         let saved = dependencies.sourceStore.load()
         XCTAssertEqual(saved.first { $0.source == .hardcover }?.books.map(\.id), [3])
         XCTAssertEqual(saved.first { $0.source == .cwa }?.books.map(\.id), [2])
+    }
+
+    func testSyncedSeriesPersistAndMatchTheirBooks() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86401)])
+        var book = fixture.book(3)
+        book.seriesID = 7
+        book.coverURL = URL(string: "https://covers.example/library-3.jpg")
+        let series = SeriesInfo(
+            id: 7, name: "Fictional Saga",
+            books: [
+                .init(
+                    id: 3, title: "One", position: 1, releaseYear: 2024,
+                    coverURL: URL(string: "https://covers.example/series-3.jpg")),
+                .init(
+                    id: 4, title: "Two", position: 2, releaseYear: nil,
+                    coverURL: URL(string: "https://covers.example/series-4.jpg")),
+            ])
+        var dependencies = fixture.dependencies()
+        var seriesFetchFails = false
+        dependencies.fetchHardcover = { _ in
+            HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [book],
+                series: seriesFetchFails ? nil : [series])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertEqual(model.series(for: book)?.books.map(\.id), [3, 4])
+        XCTAssertEqual(
+            model.browsingCoverURLs.map(\.lastPathComponent), ["library-3.jpg", "series-4.jpg"],
+            "Owned series books use their library cover")
+        var saved = dependencies.sourceStore.load()
+        XCTAssertEqual(saved.first { $0.source == .hardcover }?.series, [series])
+
+        seriesFetchFails = true
+        fixture.time += 10
+        await model.refresh(manual: true)
+        XCTAssertEqual(
+            model.series(for: book)?.books.map(\.id), [3, 4],
+            "A failed series fetch keeps the cached series")
+        saved = dependencies.sourceStore.load()
+        XCTAssertEqual(saved.first { $0.source == .hardcover }?.series, [series])
+    }
+
+    func testFilteredShelfStillPublishesTheUnfilteredTopShelf() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        func covered(_ id: Int, author: String = "Fictional author") -> Book {
+            var book = fixture.book(id)
+            book.author = author
+            book.coverURL = URL(string: "https://covers.example/\(id).jpg")
+            return book
+        }
+        try fixture.save([fixture.snapshot(.hardcover, books: [covered(1)], age: 86401)])
+        fixture.defaults.set(2, forKey: "bookCount")
+        var dependencies = fixture.dependencies()
+        var library = [covered(1, author: "Filtered author"), covered(2)]
+        dependencies.fetchHardcover = { _ in
+            HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: library)
+        }
+        let published = OSAllocatedUnfairLock<[Set<Int>]>(initialState: [])
+        dependencies.writeTopShelf = { books in
+            published.withLock { $0.append(Set(books.map(\.id))) }
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.shelfFilter = .author("Filtered author")
+        XCTAssertEqual(model.books.map(\.id), [1])
+        library.append(covered(3))
+        fixture.time += 10
+        await model.refresh(manual: true)
+        await model.waitForTopShelf()
+        XCTAssertEqual(model.books.map(\.id), [1], "The filter still limits My Shelf")
+        XCTAssertEqual(
+            published.withLock { $0.last?.count }, 2,
+            "A sync during a filter publishes the unfiltered shelf within Books shown")
     }
 
     func testRejectedHardcoverReplacementRetainsCredentialAndSnapshot() async throws {

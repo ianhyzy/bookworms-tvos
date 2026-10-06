@@ -90,7 +90,9 @@ final class SourceLibraryTests: XCTestCase {
             Book(id: 2, title: "A", author: "Author", rating: 5, isOwned: true),
             Book(id: 3, title: "B", author: "Author", isOwned: true),
         ]
-        XCTAssertEqual(ShelfPreferences().select(books, limit: 20).map(\.id), [1])
+        XCTAssertEqual(ShelfPreferences().collection, .all, "My Shelf shows All Books by default")
+        XCTAssertEqual(
+            ShelfPreferences(collection: .standard).select(books, limit: 20).map(\.id), [1])
         var prefs = ShelfPreferences(collection: .owned, sort: .rating)
         XCTAssertEqual(prefs.select(books, limit: 20).map(\.id), [2, 3])
         prefs.reversed = true
@@ -102,13 +104,145 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(prefs.select(books, limit: 2).map(\.id), [2, 3])
     }
 
+    func testDefaultAndAllBooksLeadWithThreeMostRecentlyStartedCurrentReads() throws {
+        let reading = (1...4)
+            .map {
+                Book(
+                    id: $0, title: "Reading \($0)", author: "Author", finished: "2025-01-01",
+                    isRead: true, isReading: true, started: "2026-09-0\($0)")
+            }
+        let read = [
+            Book(id: 10, title: "Older", author: "Author", finished: "2026-01-01"),
+            Book(id: 11, title: "Newer", author: "Author", finished: "2026-08-01"),
+            Book(id: 12, title: "Unread", author: "Author", isOwned: true),
+        ]
+        let prefs = ShelfPreferences(collection: .standard, sort: .title)
+        XCTAssertEqual(prefs.select(read + reading, limit: 40).map(\.id), [4, 3, 2, 11, 10])
+        XCTAssertEqual(prefs.select(read + reading, limit: 2).map(\.id), [4, 3])
+        let all = ShelfPreferences(collection: .all, sort: .title)
+        XCTAssertEqual(
+            all.select(read + reading, limit: 40).map(\.id), [4, 3, 2, 11, 10, 1, 12],
+            "All Books pins current reads once, then sorts the rest, including other current reads")
+        XCTAssertEqual(all.select(reading, limit: 40).count, 4)
+        var owned = reading[0]
+        owned.isOwned = true
+        XCTAssertEqual(
+            ShelfPreferences(collection: .owned, sort: .title).select([owned] + read, limit: 40)
+                .map(\.id), [1, 12], "Owned Books doesn't pin current reads")
+        let legacy = try JSONDecoder()
+            .decode(
+                ShelfPreferences.self,
+                from: Data(#"{"collection":"Read Books","sort":"Title","reversed":false}"#.utf8))
+        XCTAssertEqual(legacy.collection, .standard)
+        XCTAssertEqual(legacy.progressStyle, .vertical, "Older choices gain the vertical sweep")
+        let unknown = try JSONDecoder()
+            .decode(ShelfPreferences.self, from: Data(#"{"progressStyle":"Diagonal"}"#.utf8))
+        XCTAssertEqual(unknown, ShelfPreferences())
+        var hidden = ShelfPreferences()
+        hidden.progressStyle = .hidden
+        XCTAssertEqual(
+            try JSONDecoder().decode(ShelfPreferences.self, from: JSONEncoder().encode(hidden)),
+            hidden)
+    }
+
+    @MainActor func testShelfFilterLimitsTheShelfUntilCleared() {
+        let library = LibraryModel()
+        library.showSample()
+        library.shelfFilter = .author("Alex Rowan")
+        XCTAssertEqual(library.books.map(\.id), [1, 8])
+        library.shelfFilter = .genre("Fantasy")
+        XCTAssertEqual(library.books.map(\.id), [1])
+        library.shelfFilter = nil
+        XCTAssertEqual(library.books.count, SampleLibrary.books.count)
+        XCTAssertTrue(
+            ShelfFilter.genre("Litrpg")
+                .matches(Book(id: 9, title: "", author: "", genres: ["litrpg"])))
+    }
+
+    func testSeriesKeepsOneMainBookPerPositionInOrder() throws {
+        let json = #"""
+            {"series": [{"id": 7, "name": "Ana and Din Mysteries", "book_series": [
+              {"position": 1, "book": {"id": 11, "title": "The Tainted Cup", "release_year": 2024,
+                "image": {"url": "https://assets.example/1.jpg"}}},
+              {"position": 1, "book": {"id": 99, "title": "The Tainted Cup (Large Print)"}},
+              {"position": 1.5, "book": {"id": 15, "title": "A Novella"}},
+              {"position": 2, "book": {"id": 12, "title": "A Drop of Corruption",
+                "image": {"url": "http://insecure.example/2.jpg"}}},
+              {"position": 3, "book": null}
+            ]}]}
+            """#
+        let response = try JSONDecoder().decode(SeriesResponse.self, from: Data(json.utf8))
+        let series = HardcoverClient.normalize(try XCTUnwrap(response.series.first))
+        XCTAssertEqual(series.name, "Ana and Din Mysteries")
+        XCTAssertEqual(
+            series.books.map(\.id), [11, 12],
+            "The most-read book wins each position; companions and empty rows are left out")
+        XCTAssertEqual(series.books[0].releaseYear, 2024)
+        XCTAssertNotNil(series.books[0].coverURL)
+        XCTAssertNil(series.books[1].coverURL, "Only HTTPS covers are kept")
+        XCTAssertEqual(SeriesInfo.positionLabel(3), "#3")
+        XCTAssertEqual(SeriesInfo.positionLabel(2.5), "#2.5")
+    }
+
+    func testHotTakesSortByGapFromCommunityRating() {
+        let books = [
+            Book(id: 1, title: "Agree", author: "A", rating: 4, communityRating: 4.1),
+            Book(id: 2, title: "Loved", author: "A", rating: 5, communityRating: 2.9),
+            Book(id: 3, title: "Unrated", author: "A", communityRating: 3),
+            Book(id: 4, title: "Panned", author: "A", rating: 1, communityRating: 4.2),
+        ]
+        let prefs = ShelfPreferences(collection: .all, sort: .hotTakes)
+        XCTAssertEqual(prefs.select(books, limit: 40).map(\.id), [4, 2, 1, 3])
+    }
+
+    func testCurrentReadProgressPrefersPercentThenPagesThenSecondsAndClamps() throws {
+        func read(_ pages: Int?, edition: Int? = nil) -> CurrentRead {
+            CurrentRead(
+                startedAt: nil, progressPages: pages, edition: CurrentRead.Length(pages: edition))
+        }
+        func progress(_ read: CurrentRead, pages: Int? = 100, audio: Int? = nil) -> Double? {
+            HardcoverClient.progress(of: read, pages: pages, audioSeconds: audio)
+        }
+        XCTAssertEqual(progress(read(50, edition: 200)), 0.25)
+        XCTAssertEqual(progress(read(50)), 0.5)
+        XCTAssertEqual(progress(read(500)), 1)
+        XCTAssertNil(progress(read(nil)))
+        XCTAssertNil(progress(read(10), pages: nil))
+        XCTAssertNil(HardcoverClient.progress(of: nil, pages: 100, audioSeconds: 100))
+
+        let percent = CurrentRead(startedAt: nil, progress: 84.5, progressPages: 10)
+        XCTAssertEqual(
+            progress(percent)!, 0.845, accuracy: 0.0001,
+            "Hardcover's percentage wins, as for an audiobook tracked by percent")
+        let listened = CurrentRead(
+            startedAt: nil, progressSeconds: 1800, edition: CurrentRead.Length(audioSeconds: 3600))
+        XCTAssertEqual(progress(listened, pages: nil), 0.5)
+        XCTAssertEqual(
+            progress(CurrentRead(startedAt: nil, progressSeconds: 900), pages: nil, audio: 3600),
+            0.25, "Listening time falls back to the library edition's length")
+        XCTAssertEqual(progress(CurrentRead(startedAt: nil, progress: 120)), 1)
+        XCTAssertNil(progress(CurrentRead(startedAt: nil, progress: .nan)))
+
+        let decoded = try JSONDecoder()
+            .decode(
+                CurrentRead.self,
+                from: Data(
+                    #"{"started_at":"2026-09-22","progress":84.5,"progress_pages":null,"progress_seconds":72505,"edition":{"pages":null,"audio_seconds":85800}}"#
+                        .utf8))
+        XCTAssertEqual(decoded.progressSeconds, 72505)
+        XCTAssertEqual(decoded.edition?.audioSeconds, 85800)
+        XCTAssertEqual(progress(decoded, pages: nil)!, 0.845, accuracy: 0.0001)
+    }
+
     func testEveryShelfSortSupportsReverseAndDeterministicTies() {
         let first = Book(
             id: 1, title: "Alpha", author: "Alpha", pages: 100,
-            finished: "2026-01-01", rating: 2, isOwned: true, publicationYear: 2000)
+            finished: "2026-01-01", rating: 2, communityRating: 4, isOwned: true,
+            publicationYear: 2000)
         let second = Book(
             id: 2, title: "Zulu", author: "Zulu", pages: 500,
-            finished: "2026-02-01", rating: 5, isOwned: true, publicationYear: 2020)
+            finished: "2026-02-01", rating: 5, communityRating: 4.5, isOwned: true,
+            publicationYear: 2020)
         for sort in ShelfSort.allCases {
             let expected = [.dateRead, .rating, .year].contains(sort) ? [2, 1] : [1, 2]
             let forward = ShelfPreferences(collection: .all, sort: sort)

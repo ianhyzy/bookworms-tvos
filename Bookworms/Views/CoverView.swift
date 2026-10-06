@@ -4,6 +4,8 @@ struct CoverView: View {
     let book: Book
     /// Draws a contact shadow where the cover's base meets a `ShelfBoard`.
     var standsOnShelf = false
+    /// How a current read shows `Book.progress` on the cover.
+    var progressStyle = ProgressStyle.hidden
     var onAspectRatio: ((Double) -> Void)? = nil
     @Environment(\.isFocused) private var isFocused
     @Environment(\.coverIsPressed) private var isPressed
@@ -36,6 +38,34 @@ struct CoverView: View {
             }
             artwork(with: currentImage, compact: geometry.size.height < 350)
                 .frame(width: width, height: height)
+                .overlay(alignment: .leading) {
+                    if progressStyle == .vertical, currentImage != nil,
+                        let progress = book.progress
+                    {
+                        progressSweep(progress, width: width)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if progressStyle == .horizontal, currentImage != nil,
+                        let progress = book.progress
+                    {
+                        // A static gradient darkens the cover's base so the bar reads on
+                        // light covers.
+                        ZStack(alignment: .bottom) {
+                            LinearGradient(
+                                colors: [.black.opacity(0), .black.opacity(0.6)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                            .frame(height: height * 0.16)
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .padding(.horizontal, width * 0.06)
+                                .padding(.bottom, width * 0.04)
+                        }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
+                }
                 .clipShape(.rect(cornerRadius: cornerRadius))
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius)
@@ -107,11 +137,36 @@ struct CoverView: View {
         onAspectRatio?(Double(decoded.width) / Double(decoded.height))
     }
 
+    /// A static light sweep: the read part keeps its color, the unread part dims, and light
+    /// bleeds left from the reader's place. A gradient fill keeps it free of blur and offscreen
+    /// passes. `TopShelfPoster.sweep` draws the same proportions.
+    private func progressSweep(_ progress: Double, width: CGFloat) -> some View {
+        let x = width * progress
+        let bleed = min(x, width * TopShelfPoster.bleedFraction)
+        return ZStack(alignment: .leading) {
+            Rectangle().fill(.black.opacity(TopShelfPoster.dimOpacity))
+                .frame(width: width - x).offset(x: x)
+            LinearGradient(
+                colors: [.white.opacity(0), .white.opacity(TopShelfPoster.bleedOpacity)],
+                startPoint: .leading, endPoint: .trailing
+            )
+            .frame(width: bleed).offset(x: x - bleed)
+        }
+        .frame(width: width, alignment: .leading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private func artwork(with currentImage: UIImage?, compact: Bool) -> some View {
         ZStack {
             if let currentImage {
                 Image(uiImage: currentImage).resizable().scaledToFit()
                     .accessibilityLabel("Cover of \(book.title)")
+                    .accessibilityValue(
+                        progressStyle != .hidden
+                            ? book.progress.map { "\(Int(($0 * 100).rounded())) percent read" }
+                                ?? "" : ""
+                    )
                     .accessibilityIdentifier("detail-cover")
             } else {
                 Rectangle().fill(.gray.opacity(0.18))

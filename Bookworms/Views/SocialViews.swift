@@ -25,7 +25,7 @@ extension View {
     }
 }
 
-/// Following, Compare Shelves, and Book Club content.
+/// Feed, Compare Shelves, and Book Club content.
 ///
 /// The focus engine owns directional movement. Header controls, cover rows, and review actions are
 /// focus sections, so movement between them is native. Focus is assigned only when content appears
@@ -45,6 +45,7 @@ struct SocialViews: View {
     @State private var photoSeed = Int.random(in: 0..<1000)
     @State private var upperRequest: ShelfBookFocusRequest?
     @State private var lowerRequest: ShelfBookFocusRequest?
+    @State private var picksRequest: ShelfBookFocusRequest?
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("spoilerPolicy") private var spoilerPolicy = SpoilerPolicy.alwaysHide
     private var reader: ReaderProfile? { social.presentation.reader }
@@ -55,6 +56,7 @@ struct SocialViews: View {
             case .following: following
             case .comparison: comparison
             case .shared: shared
+            case .friendsPicks: friendsPicks
             case .shelf, .yearInReview, .bookWall: EmptyView()
             }
         }
@@ -113,8 +115,79 @@ struct SocialViews: View {
             } else if !social.following.isEmpty {
                 isReaderPickerFocused = true
             }
+        case .friendsPicks:
+            if let id = coordinator.picks.selectedID ?? social.presentation.picks.first?.id {
+                picksRequest = ShelfBookFocusRequest(
+                    id: id, revision: (picksRequest?.revision ?? 0) + 1)
+            }
         case .shelf, .yearInReview, .bookWall: break
         }
+    }
+
+    /// Books that followed readers rated highly and you haven't read, on one shelf. The caption
+    /// names the readers who rated the focused book.
+    private var friendsPicks: some View {
+        let picks = social.presentation.picks
+        return Group {
+            if picks.isEmpty {
+                empty(
+                    "Friends' picks",
+                    social.isLoading
+                        ? "Loading your friends' libraries…"
+                        : "Books that people you follow rated 4 stars or higher, and you haven't read, appear here."
+                )
+            } else {
+                GeometryReader { geometry in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Spacer(minLength: 30)
+                        ComparisonBookshelf(
+                            library: library,
+                            books: picks.map {
+                                ReaderBook(
+                                    book: $0.book, rating: $0.averageRating, review: nil,
+                                    hasSpoilers: false, finished: nil)
+                            },
+                            state: coordinator.picks, rowHeight: geometry.size.height * 0.6,
+                            width: geometry.size.width - 2 * PagedRowLayout.edgeInset,
+                            emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[0],
+                            isLoading: social.isLoading, column: 0, focusRequest: picksRequest,
+                            onSelect: selectBook, onFocus: { _ in onActivity() }
+                        )
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("friends-picks")
+                        pickCaption(picks.first { $0.id == coordinator.picks.selectedID })
+                            .frame(height: 134, alignment: .topLeading)
+                            .padding(.top, 24)
+                        Spacer(minLength: 12)
+                    }
+                }
+            }
+        }
+        .onAppear { photoSeed = Int.random(in: 0..<1000) }
+    }
+
+    private func pickCaption(_ pick: FriendPick?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let pick {
+                Text(pick.book.title).appFont(size: 33, weight: .medium).lineLimit(1)
+                HStack(spacing: 18) {
+                    Text("Loved by").appFont(size: 27).opacity(0.82)
+                    ForEach(pick.fans.prefix(3)) { fan in
+                        ReaderLabel(name: fan.displayName, avatarURL: fan.avatarURL, size: 27)
+                    }
+                    if pick.fans.count > 3 {
+                        Text("and \(pick.fans.count - 3) more").appFont(size: 27).opacity(0.82)
+                    }
+                }
+                Text(
+                    "\(pick.book.author) · Friends' average ★\(pick.averageRating.formatted(.number.precision(.fractionLength(1))))"
+                )
+                .appFont(size: 27).opacity(0.82).lineLimit(1)
+            } else {
+                Text("Select a book to look inside").appFont(size: 33, weight: .medium)
+            }
+        }
+        .accessibilityHidden(true)
     }
 
     private var feed: [FeedActivity] { Array(social.activities.prefix(20)) }
@@ -791,8 +864,20 @@ struct ReviewReadingView: View {
                 Button("Reveal spoilers") { revealed = true }.buttonStyle(.glassProminent)
             } else {
                 ScrollView {
-                    Text(review.text).appFont(size: 28)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Each line renders on the GPU: as one CPU-drawn text block, a long review
+                    // or description redrew on the main thread every frame while the sheet
+                    // closed, dropping about 15 frames on Apple TV 4K (2nd generation). Separate
+                    // lines keep each texture well under the size limit.
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(
+                            Array(review.text.components(separatedBy: "\n").enumerated()),
+                            id: \.offset
+                        ) {
+                            Text($0.element.isEmpty ? " " : $0.element).appFont(size: 28)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .drawingGroup()
+                        }
+                    }
                 }
                 .scrollPosition($scrollPosition)
                 .scrollIndicators(.hidden)
