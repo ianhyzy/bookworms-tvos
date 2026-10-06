@@ -62,8 +62,15 @@ final class DevicePerformanceTests: XCTestCase {
         let description = scenario == "description"
         if description {
             // My Shelf opens with focus on its first book; open its details.
+            XCTAssertTrue(
+                app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-'"))
+                    .allElementsBoundByIndex.contains { focused($0) },
+                "The description scenario starts from a focused My Shelf book.")
             XCUIRemote.shared.press(.select)
             XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 10))
+            XCTAssertTrue(
+                app.buttons["show-full-description"].waitForExistence(timeout: 5),
+                "The first book's description must overflow to show Show more.")
             RemoteNavigation.moveFocus(to: app.buttons["show-full-description"], in: app)
         }
         print("PERFORMANCE_READY")

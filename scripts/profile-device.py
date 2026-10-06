@@ -61,6 +61,8 @@ def main():
         parser.error('Isolation requires --diagnostics')
     if args.capture_set != 'full' and args.scenario != 'bookWall':
         parser.error('Reduced capture sets require --scenario bookWall')
+    if args.scenario == 'description' and args.view != 0:
+        parser.error('The description scenario opens a book from My Shelf (--view 0)')
     template, instruments = capture_configuration(args.scenario, args.capture_set, args.template)
     recorder_options = ['--template', template] if template else []
     recorder_options.extend(value for name in instruments for value in ['--instrument', name])
