@@ -18,6 +18,7 @@ This repository contains **Bookworms - eBook Display**, a Swift 6 and SwiftUI ap
 | Social data and comparisons | [SocialLibraryModel.swift](Bookworms/Services/SocialLibraryModel.swift), [SocialPresentation.swift](Bookworms/Models/SocialPresentation.swift) |
 | Cover caching and appearance | [ArtworkStore.swift](Bookworms/Services/ArtworkStore.swift), [CoverView.swift](Bookworms/Views/CoverView.swift) |
 | Snapshots and iCloud | [SourceLibraryStore.swift](Bookworms/Services/SourceLibraryStore.swift), [CloudLibraryStore.swift](Bookworms/Services/CloudLibraryStore.swift) |
+| Mac spine companion records | [SpineCloudStore.swift](Bookworms/Services/SpineCloudStore.swift), [handoff](docs/handoffs/2026-10-06-spine-companion.md) |
 | Home Screen extension | [ContentProvider.swift](BookwormsTopShelf/ContentProvider.swift), [TopShelfSnapshot.swift](Shared/TopShelfSnapshot.swift) |
 | Targets and build settings | [project.yml](project.yml) |
 

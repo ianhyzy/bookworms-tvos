@@ -21,9 +21,9 @@ The extension does not call `UserDefaults` or read file timestamps. Do not copy 
 | AI providers | No requests while generation is disabled | Retained implementation only; saved keys and designs remain stored. |
 | Google Fonts and font hosting | No requests while generated spines are disabled | Retained implementation for spine fonts only. |
 | Artwork hosts | Cover and avatar URL requests | Display and analyze cover artwork. |
-| Private CloudKit database | Source snapshots and saved design records, only when the user turns on iCloud storage (off by default) | Restore and merge the user's library and designs. |
+| Private CloudKit database | Source snapshots, saved legacy designs, a Hardcover account worklist, and Mac-generated spine designs, only when the user turns on iCloud storage (off by default) | Restore the library and exchange design work with the Mac companion. |
 
-Network recipients can observe connection metadata such as an IP address. The app has no advertising or analytics SDK. The local request ledger does not upload diagnostics. Cloud archives exclude credentials but include source identities and reading metadata. Turning off iCloud does not delete its archive.
+Network recipients can observe connection metadata such as an IP address. The app has no advertising or analytics SDK. The local request ledger does not upload diagnostics. Cloud archives and spine records exclude credentials but include the Hardcover account ID, book IDs, and reading metadata. Spine records contain colors, typography choices, and hashes, not cover image bytes. Disabling or disconnecting Hardcover schedules deletion of the local companion design cache. Turning off iCloud does not delete cloud records.
 
 ## Collection disclosures
 

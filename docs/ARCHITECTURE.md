@@ -1,6 +1,6 @@
 # Architecture
 
-Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the shelf, settings, and details. UIKit and Core Text measure and render the retained spine implementation. Generated-spine views and AI provider generation remain disabled. No companion rendering service is required. On supported Apple TV models, Book Wall generates its own spine textures from genre metadata and selected cover images. See [Book Wall models, animation, and local spines](BOOK_WALL.md).
+Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the shelf, settings, and details. UIKit and Core Text measure and render the retained spine implementation. Generated-spine views and AI provider generation remain disabled. No companion rendering service is required. An optional Mac companion prepares separate spine design records in private CloudKit; current tvOS views do not display them. On supported Apple TV models, Book Wall generates its own spine textures from genre metadata and selected cover images. See [Book Wall models, animation, and local spines](BOOK_WALL.md).
 
 ## Components
 
@@ -18,6 +18,7 @@ Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the s
 | `AIStyleGenerator`, `GoogleFontLibrary` | Match covers against the full font catalog and download licensed font candidates. |
 | `AutomaticSpineGeneration`, `AIStyleStore` | Select missing designs, record attempt cooldowns, and retain completed designs. |
 | `CloudLibraryStore`, `SourceLibraryStore` | Merge cloud archives and persist source snapshots and sync schedules. |
+| `SpineCloudStore` | Publish the complete Hardcover worklist and validate and cache companion designs without feeding views. |
 | `TopShelfSnapshot`, `ContentProvider` | Share public cover metadata with the Home Screen extension and open book details through validated links. |
 
 Source code is in [Bookworms](../Bookworms), [BookwormsTopShelf](../BookwormsTopShelf), and [Shared](../Shared). The [XcodeGen configuration](../project.yml) defines targets, signing identifiers, and test plans.
@@ -29,7 +30,7 @@ Source code is in [Bookworms](../Bookworms), [BookwormsTopShelf](../BookwormsTop
 3. Merge source metadata and compute the selected shelves and shared-book intersections.
 4. Prepare covers and feed avatars for enabled bounded collections using existing cover URLs. Book Wall preparation starts from the loaded current-year snapshot; opening the wall waits if its textures and models are not ready. Share source downloads and persist one reusable image per URL.
 5. Mount library views. Paging, details, and ambient playback read caches without network calls; selecting the details rating histogram fetches community reviews.
-6. Save snapshots and queue cloud updates. Spine generation for the retained views and spine font restoration remain disabled; their implementation and data are retained. Book Wall generates its spines locally from cover pixels and genre metadata.
+6. Save snapshots and queue cloud updates. After a complete Hardcover snapshot reaches CloudKit, publish its account-specific spine worklist. With iCloud storage on, read and cache companion designs separately at launch, on activation, and after each cloud save. Spine generation for the retained views and spine font restoration remain disabled; their implementation and data are retained. Book Wall generates its spines locally from cover pixels and genre metadata.
 
 Service actors own asynchronous I/O and caches. The main-actor library model publishes UI state. Internal task handles and caches are excluded from Observation to avoid unrelated view updates.
 
@@ -41,6 +42,6 @@ The RealityRenderer adapter owns a display link and an opaque Metal layer tagged
 
 ## Boundaries
 
-Credentials stay in Keychain and are not included in cloud archives or Top Shelf snapshots. Hardcover exposes fixed GraphQL read queries and returns the authenticated account ID with each complete library fetch. CWA fetches OPDS metadata and covers, not ebook files. Sample-library tests use fictional books and local responses.
+Credentials stay in Keychain and are not included in cloud archives, worklists, designs, or Top Shelf snapshots. Hardcover exposes fixed GraphQL read queries and returns the authenticated account ID with each complete library fetch. CWA fetches OPDS metadata and covers, not ebook files. Sample-library tests use fictional books and local responses.
 
 Operational errors and generation progress appear in Settings. The shelf remains available from cached data when a network service fails. See [sources and iCloud](SOURCES_AND_ICLOUD.md), [storage policies](STORAGE_AND_PERFORMANCE.md), and [testing](TESTING.md).

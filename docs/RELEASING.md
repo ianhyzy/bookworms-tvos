@@ -51,7 +51,7 @@ The verifier checks display names, the arm64 requirement, the CloudKit push enti
 
 Local preparation ends before upload. When distribution is authorized, open the archive in Xcode Organizer, validate and distribute through App Store Connect. Verify production entitlements after distribution signing. Keep the manually selected build number consistent; if Xcode changes it, record and verify the final uploaded number.
 
-The production CloudKit schema contains `LibraryArchive` with its `archive` asset. Deploy any new record type or field to production before a TestFlight build uses it. Complete beta metadata and export compliance in App Store Connect. Start with internal testing; external testing requires Apple's beta review. Verify launch, navigation, source credentials, refresh/cache behavior, Top Shelf, offline recovery, and production iCloud on the exact distributed candidate.
+The production CloudKit schema contains `LibraryArchive` with its `archive` asset. The companion integration adds `SpineWorklistV1` and `SpineDesignV1`, each with a `payload` data field. Deploy these record types to production before a TestFlight build uses them. Confirm that a signed Mac writes a design and a signed Apple TV reads and caches it from the same private container. Complete beta metadata and export compliance in App Store Connect. Start with internal testing; external testing requires Apple's beta review. Verify launch, navigation, source credentials, refresh/cache behavior, Top Shelf, offline recovery, and production iCloud on the exact distributed candidate.
 
 Compilation and local signature verification do not establish distribution or physical-device readiness.
 
