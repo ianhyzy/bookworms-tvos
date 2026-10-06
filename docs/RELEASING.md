@@ -49,14 +49,15 @@ The verifier checks display names, the arm64 requirement, the CloudKit push enti
 
 ## App Store submission
 
-Local preparation ends before upload. After an authorized upload:
+Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. The production schema contains `LibraryArchive` with its `archive` asset.
 
-1. Deploy any new CloudKit record type or field to production. The production schema contains `LibraryArchive` with its `archive` asset.
-2. Wait for Apple to finish processing the build.
-3. In App Store Connect, open the tvOS version whose number matches `MARKETING_VERSION`, or create it. Under **Build**, select the uploaded build. If Xcode changed the build number, record and verify the final number.
-4. Complete the listing, **App Privacy**, **Age Rating**, **App Review Information**, and **Pricing and Availability** from [App Store information](#app-store-information).
-5. Under **App Store Version Release**, choose **Manually release this version** so an approved build goes live only when you release it.
-6. Select **Add for Review**, then **Submit to App Review**.
+After an authorized upload:
+
+1. Wait for Apple to finish processing the build.
+2. In App Store Connect, open the tvOS version whose number matches `MARKETING_VERSION`, or create it. Under **Build**, select the uploaded build. If Xcode changed the build number, record and verify the final number.
+3. Complete the listing, **App Privacy**, **Age Rating**, **App Review Information**, and **Pricing and Availability** from [App Store information](#app-store-information).
+4. Under **App Store Version Release**, choose **Manually release this version** so an approved build goes live only when you release it.
+5. Select **Add for Review**, then **Submit to App Review**.
 
 To check the exact candidate with production signing and production CloudKit before submission, export it from Xcode Organizer with **Release Testing** and install it on the registered Apple TV. Verify launch, navigation, source credentials, refresh and cache behavior, Top Shelf, offline recovery, and production iCloud.
 
@@ -72,7 +73,7 @@ Compilation and local signature verification do not establish distribution or ph
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
 | Price | Free, with no in-app purchases. Bookworms is free and open source. |
-| Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
+| Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; create the output folder with `mkdir -p .local/app-store-screenshots`, then resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
 | App Privacy | **Data Not Collected**; see [privacy implementation](PRIVACY.md) |
 | Age rating | The app shows Hardcover reviews, which are user-generated content. Answer the questionnaire accordingly. |
 | Content rights | The app shows third-party content: Hardcover metadata, covers, profile photos, and reviews. |

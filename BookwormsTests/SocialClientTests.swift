@@ -96,6 +96,8 @@ private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
             } else if query == SocialQuery.blocked.rawValue {
                 data = ["user_blocks": [["blocked_user_id": 3]]]
             } else if query == SocialQuery.bookReviews.rawValue {
+                let variables = payload["variables"] as? [String: Any]
+                XCTAssertEqual(variables?["blocked"] as? [Int], [3])
                 // Reader 3 is blocked, including a review whose profile Hardcover withholds.
                 let rows: [(id: Int, user: Int?, profile: [String: Any]?)] = [
                     (10, 2, profile), (11, 3, ["id": 3, "username": "blocked"]), (12, 3, nil),

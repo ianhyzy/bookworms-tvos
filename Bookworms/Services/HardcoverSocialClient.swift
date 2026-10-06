@@ -43,8 +43,8 @@ enum SocialQuery: String {
         }
         """
     case bookReviews = """
-        query BookReviews($book: Int!) {
-          user_books(where: {book_id: {_eq: $book}, has_review: {_eq: true}},
+        query BookReviews($book: Int!, $blocked: [Int!]!) {
+          user_books(where: {book_id: {_eq: $book}, has_review: {_eq: true}, user_id: {_nin: $blocked}},
             order_by: [{likes_count: desc}, {reviewed_at: desc_nulls_last}], limit: 50) {
             id rating review review_has_spoilers likes_count user_id user { id username name image { url } }
           }
@@ -65,6 +65,7 @@ struct SocialVariables: Encodable, Sendable {
     var users: [Int]? = nil
     var book: Int? = nil
     var language: String? = nil
+    var blocked: [Int]? = nil
 }
 
 protocol SocialLibraryFetching: Sendable {
@@ -248,8 +249,10 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             enum CodingKeys: String, CodingKey { case userBooks = "user_books" }
         }
         let blocked = try await blockedReaders(owner: owner(token: token).id, token: token)
+        // Excluding blocked readers in the query keeps them from taking any of the 50 places.
         let result: Result = try await fetch(
-            .bookReviews, variables: SocialVariables(book: book), token: token)
+            .bookReviews, variables: SocialVariables(book: book, blocked: blocked.sorted()),
+            token: token)
         let anonymous = ReaderProfile(
             id: 0, username: "reader", name: "Hardcover reader", avatarURL: nil)
         return result.userBooks.compactMap(\.row)
