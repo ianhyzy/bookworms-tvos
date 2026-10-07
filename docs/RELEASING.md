@@ -69,6 +69,7 @@ Compilation and local signature verification do not establish distribution or ph
 | --- | --- |
 | Name | Bookworms - eBook Display |
 | Privacy policy URL | https://ian.gay/bookworms-privacy-policy/ |
+| Apple TV privacy policy | Required for tvOS, because Apple TV has no browser. Paste the plain text from [Apple TV privacy policy text](#apple-tv-privacy-policy-text). App Review reviews it, and the Apple TV App Store displays it. |
 | Support and marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
@@ -93,7 +94,48 @@ Social views show only readers the account follows. Book details can also show p
 Book Wall is off by default. Turn it on in Settings > Views. It requires Apple TV 4K (2nd generation) or later.
 ```
 
-Keep the published privacy policy consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update it before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
+### Apple TV privacy policy text
+
+Paste this text into the **Apple TV Privacy Policy** field. Update it with the published policy, and change the effective date when either changes.
+
+```text
+Bookworms privacy policy
+
+Effective October 1, 2026. Contact: bookworms@ian.gay
+Web version: ian.gay/bookworms-privacy-policy
+
+Summary
+Bookworms shows your Hardcover reading library on your Apple TV. The developer doesn't operate a server and doesn't receive your data. There's no account with the developer, and no advertising, analytics, or tracking.
+
+Information Bookworms uses
+When you connect Hardcover, Bookworms saves your sign-in in the Apple TV's Keychain and uses it to read the following directly from Hardcover:
+- Your library and reading history, such as books, reading status and progress, dates, and ratings.
+- Social information from readers you follow, such as profiles, profile photos, libraries, activity, ratings, and reviews. Bookworms also shows public Hardcover reviews of a book when you choose to view them.
+- The list of readers you blocked, so Bookworms can hide them.
+
+Bookworms only reads this information and never changes your Hardcover account. Hardcover's policies govern the data Hardcover holds, including the moderation of reviews.
+
+Covers and profile photos download from the addresses Hardcover provides. Those servers receive standard connection information, such as your IP address. Your settings are stored in the app.
+
+Where data is stored
+Downloaded information, images, and settings stay on your Apple TV. Bookworms may remove cached data when space is needed and download it again at the next sync. A troubleshooting log records the status and timing of recent requests. It excludes credentials and book content, and it never leaves your Apple TV.
+
+iCloud storage is optional and off by default. If you turn it on, Bookworms saves a copy of your library information to your private iCloud database so your Apple TVs can restore it. The developer can't access that copy. It excludes your Hardcover sign-in, images, and social information. Apple's privacy policy governs iCloud.
+
+Your choices
+- Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV.
+- Revoke Bookworms' access at any time on Hardcover's Authorized Apps page.
+- Turning off iCloud storage in Settings > General stops syncing. The existing copy stays in iCloud until you remove Bookworms' data in your Apple Account's iCloud storage settings.
+- Deleting Bookworms from your Apple TV removes all local data.
+
+Children
+Bookworms isn't directed to children and doesn't knowingly collect information from them.
+
+Changes
+Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new effective date.
+```
+
+Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
 
 ## Verify the release candidate
 
