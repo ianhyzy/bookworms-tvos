@@ -32,8 +32,11 @@
             else { return nil }
             let name = String(argument.dropFirst("--test-scenario=".count))
             precondition(
-                ["artwork", "delayed-artwork", "offline", "partial", "empty", "error"]
-                    .contains(name), "Unknown simulator test scenario")
+                [
+                    "artwork", "delayed-artwork", "offline", "partial", "empty", "error",
+                    "welcome", "welcome-error",
+                ]
+                .contains(name), "Unknown simulator test scenario")
             let runtime = ScenarioRuntime(name: name)
             current = runtime
             return runtime
@@ -52,6 +55,9 @@
             try! FileManager.default.createDirectory(
                 at: storageDirectory, withIntermediateDirectories: true)
             defaults.set(false, forKey: "iCloudEnabled")
+            if name.hasPrefix("welcome"), !defaults.bool(forKey: "testHardcoverAuthorized") {
+                credentials.removeAll()
+            }
             if defaults.data(forKey: "viewPreferences") == nil {
                 var preferences = ViewPreferences()
                 // Book Wall tests enable it here instead of through Settings, then still enter it
@@ -113,7 +119,9 @@
         private func installControlChannel() {
             let channel =
                 ProcessInfo.processInfo.environment["BOOKWORMS_SCENARIO_CONTROL"] ?? "manual"
-            for command in ["probe", "release-artwork", "advance-clock"] {
+            for command in [
+                "probe", "release-artwork", "advance-clock", "approve-hardcover", "release-library",
+            ] {
                 let name = "gay.ian.Bookworms.scenario.\(channel).\(command)"
                 CFNotificationCenterAddObserver(
                     CFNotificationCenterGetDarwinNotifyCenter(), nil,
@@ -138,8 +146,18 @@
                 defaults: defaults, storageDirectory: storageDirectory)
             dependencies.allowLaunchOverrides = false
             dependencies.readCredential = { [self] in credentials[$0] }
-            dependencies.saveCredential = { [self] value, account in credentials[account] = value }
-            dependencies.removeCredential = { [self] in credentials[$0] = nil }
+            dependencies.saveCredential = { [self] value, account in
+                credentials[account] = value
+                if account == "hardcover-token", name.hasPrefix("welcome") {
+                    defaults.set(true, forKey: "testHardcoverAuthorized")
+                }
+            }
+            dependencies.removeCredential = { [self] account in
+                credentials[account] = nil
+                if account == "hardcover-token", name.hasPrefix("welcome") {
+                    defaults.set(false, forKey: "testHardcoverAuthorized")
+                }
+            }
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [ScenarioURLProtocol.self]
             let client = HardcoverClient(session: URLSession(configuration: configuration))
@@ -148,6 +166,16 @@
                 return try await client.fetchLibrary(token: token)
             }
             dependencies.validateHardcover = { token in try await client.validateToken(token) }
+            dependencies.requestHardcoverDeviceAuth = { try await client.requestDeviceAuth() }
+            dependencies.pollHardcoverDeviceToken = {
+                try await client.pollDeviceToken(deviceCode: $0)
+            }
+            dependencies.exchangeHardcoverCode = { try await client.exchangeAuthorizationCode($0) }
+            if name.hasPrefix("welcome") {
+                // The transport holds the first poll until the test approves; no wall-clock wait
+                // is needed to reach the code screen or control its completion.
+                dependencies.sleep = { _ in try Task.checkCancellation() }
+            }
             dependencies.fetchCWA = { [self] _, _ in
                 sourceCalls += 1
                 throw SourceError.credentials
@@ -178,6 +206,8 @@
             guard url.scheme == "bookworms", url.host == "testing" else { return false }
             switch url.path {
             case "/release-artwork": ScenarioNetwork.state.releaseArtwork()
+            case "/approve-hardcover": ScenarioNetwork.state.approveHardcover()
+            case "/release-library": ScenarioNetwork.state.releaseLibrary()
             case "/advance-clock":
                 if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
                     let text = components.queryItems?.first(where: { $0.name == "seconds" })?.value,
@@ -195,6 +225,9 @@
                 "cloudCalls": cloudCalls, "network": ScenarioNetwork.state.evidence(),
                 "sample": library.isSample, "generating": library.isGenerating,
                 "bookIDs": library.books.map(\.id), "loading": library.isLoading,
+                "welcomeCompleted": library.hasCompletedWelcome,
+                "welcomeOffered": library.shouldOfferWelcome,
+                "hardcoverConnected": library.hardcoverConnected,
                 "ambient": ambient.isActive, "ambientIndex": ambient.contentIndex,
                 "idleTimerDisabled": UIApplication.shared.isIdleTimerDisabled,
                 "appearance": defaults.string(forKey: "appearance") ?? "system",
@@ -316,6 +349,10 @@
         private var root: URL?
         private var released = false
         private var pending = [ScenarioURLProtocol]()
+        private var authorizationApproved = false
+        private var pendingAuthorization = [ScenarioURLProtocol]()
+        private var libraryReleased = false
+        private var pendingLibrary = [ScenarioURLProtocol]()
         private var requestCount = 0
         private var unexpectedCount = 0
         private var unexpectedURLs: [String] = []
@@ -328,8 +365,12 @@
                 self.scenario = scenario
                 self.root = artworkRoot
                 self.images = images
-                released = scenario != "delayed-artwork"
+                released = scenario != "delayed-artwork" && !scenario.hasPrefix("welcome")
                 pending = []
+                authorizationApproved = false
+                pendingAuthorization = []
+                libraryReleased = !scenario.hasPrefix("welcome")
+                pendingLibrary = []
                 requestCount = 0
                 unexpectedCount = 0
                 deliveredArtwork = 0
@@ -369,6 +410,13 @@
                 {
                     if scenario == "offline" { return (-1, Data()) }
                     if scenario == "error" { return (401, Data()) }
+                    if scenario.hasPrefix("welcome") {
+                        if !authorizationApproved {
+                            pendingAuthorization.append(request)
+                            return nil
+                        }
+                        return (200, Self.authorizedToken)
+                    }
                     return (400, Data(#"{"error":"authorization_pending"}"#.utf8))
                 }
                 if url.absoluteString == "https://hardcover.app/oauth/token",
@@ -396,6 +444,11 @@
                         return (200, Data(#"{"data":{"me":[{"id":42}]}}"#.utf8))
                     }
                     if query.hasPrefix("query ShelfLibrary(") {
+                        if !libraryReleased {
+                            pendingLibrary.append(request)
+                            return nil
+                        }
+                        if scenario == "welcome-error" { return (403, Data()) }
                         let rows = scenario == "empty" ? [] : ScenarioFixtures.rows
                         return (
                             200,
@@ -414,7 +467,39 @@
         }
 
         func cancel(_ request: ScenarioURLProtocol) {
-            lock.withLock { pending.removeAll { $0 === request } }
+            lock.withLock {
+                pending.removeAll { $0 === request }
+                pendingAuthorization.removeAll { $0 === request }
+                pendingLibrary.removeAll { $0 === request }
+            }
+        }
+
+        private static var authorizedToken: Data {
+            Data(#"{"access_token":"hc_pat_fictional_ui_fixture","token_type":"Bearer"}"#.utf8)
+        }
+
+        func approveHardcover() {
+            let held = lock.withLock {
+                authorizationApproved = true
+                let held = pendingAuthorization
+                pendingAuthorization = []
+                return held
+            }
+            for request in held { request.finish(status: 200, data: Self.authorizedToken) }
+        }
+
+        func releaseLibrary() {
+            let held: ([ScenarioURLProtocol], Int, Data) = lock.withLock {
+                libraryReleased = true
+                let held = pendingLibrary
+                pendingLibrary = []
+                let status = scenario == "welcome-error" ? 403 : 200
+                let data = try! JSONSerialization.data(withJSONObject: [
+                    "data": ["user_books": ScenarioFixtures.rows]
+                ])
+                return (held, status, data)
+            }
+            for request in held.0 { request.finish(status: held.1, data: held.2) }
         }
 
         func releaseArtwork() {
@@ -434,6 +519,8 @@
                     "requests": requestCount, "unexpected": unexpectedCount,
                     "unexpectedURLs": unexpectedURLs,
                     "heldArtwork": pending.count, "deliveredArtwork": deliveredArtwork,
+                    "heldAuthorization": pendingAuthorization.count,
+                    "heldLibrary": pendingLibrary.count,
                 ]
             }
         }

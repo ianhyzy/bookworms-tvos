@@ -13,6 +13,7 @@
 		06E219F03B5FC2B5B5A3A11F /* OfflineTestPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4ED7CF6E97284ACFC518B65 /* OfflineTestPolicy.swift */; };
 		085016EE97D66C5E7C53689D /* SpineTextRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231509B79CBBB761366E401B /* SpineTextRenderer.swift */; };
 		08954C8A4F9F85B0BAFB8752 /* SpineStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7C377D256C8484B49AC4B9B /* SpineStyle.swift */; };
+		08B09F5D77ACBED602B0FEBB /* HardcoverConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA76DA467F4A638010B02043 /* HardcoverConnectionView.swift */; };
 		0A4C3B6D545AD4C5C6CBB589 /* AmbientView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 299DC2145E57031515C1299D /* AmbientView.swift */; };
 		0C941F81194609F17ED852AD /* ComparisonBookshelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD15ED4A371F7D2C1E369E23 /* ComparisonBookshelf.swift */; };
 		0F3E2E723CC5B94A6EF7477B /* SpineAuthorLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E4189770AB6C94FAED8949 /* SpineAuthorLayout.swift */; };
@@ -108,6 +109,7 @@
 		EE00FB64CF9BB5A78B526E97 /* PerformanceDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A43F79C27410CA184237F7 /* PerformanceDiagnosticsTests.swift */; };
 		EEAB09C5A8489AF50677E6CF /* RatingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CEAE1FF7663BF109E6E0DD /* RatingsView.swift */; };
 		F1317925B64323F07852FFA7 /* LibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 088594A772FF060C2F835818 /* LibraryModel.swift */; };
+		F846E551A8CE3B3AC7982767 /* LibraryWelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46A8D35D0BB9E4754E0D22E /* LibraryWelcomeView.swift */; };
 		FF22BE44E9C8A2858CF37B6C /* LibraryPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C721274F0630A85130E385 /* LibraryPersistence.swift */; };
 /* End PBXBuildFile section */
 
@@ -253,6 +255,7 @@
 		D034111C42F557409C97FF62 /* AmbientController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientController.swift; sourceTree = "<group>"; };
 		D2131B44006285208B88BBF3 /* RemoteNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteNavigation.swift; sourceTree = "<group>"; };
 		D3CEAE1FF7663BF109E6E0DD /* RatingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatingsView.swift; sourceTree = "<group>"; };
+		D46A8D35D0BB9E4754E0D22E /* LibraryWelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryWelcomeView.swift; sourceTree = "<group>"; };
 		D974693141176CD2A92DBC59 /* BookWallNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallNavigationTests.swift; sourceTree = "<group>"; };
 		E33888C168046BFF434AADEE /* CloudLibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudLibraryStore.swift; sourceTree = "<group>"; };
 		E4A2AD46F061D9459E4F2BE0 /* CWAClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CWAClient.swift; sourceTree = "<group>"; };
@@ -265,6 +268,7 @@
 		F81FE316BEF0A415995A950D /* SettingsInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInteractionTests.swift; sourceTree = "<group>"; };
 		F906B2997E16682756654DA8 /* ShelfNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfNavigationTests.swift; sourceTree = "<group>"; };
 		F9506F46014E55734BFE9C2F /* SpineFontProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpineFontProfile.swift; sourceTree = "<group>"; };
+		FA76DA467F4A638010B02043 /* HardcoverConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardcoverConnectionView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -349,6 +353,8 @@
 				A847C8F051A95D80AF04A830 /* BookWallView.swift */,
 				AD15ED4A371F7D2C1E369E23 /* ComparisonBookshelf.swift */,
 				1E96643E6AD6A9B38AC8A744 /* CoverView.swift */,
+				FA76DA467F4A638010B02043 /* HardcoverConnectionView.swift */,
+				D46A8D35D0BB9E4754E0D22E /* LibraryWelcomeView.swift */,
 				40CED90EFA1702669E842843 /* PerformanceDiagnosticObserver.swift */,
 				D3CEAE1FF7663BF109E6E0DD /* RatingsView.swift */,
 				099BF6C6069C79350E8D5F47 /* SettingsView.swift */,
@@ -737,6 +743,7 @@
 				6FB1D806D46FC1C9184E7EA9 /* CredentialStore.swift in Sources */,
 				D28077C8A93A3A8DED5FF37E /* GoogleFontLibrary.swift in Sources */,
 				9FA572A4021F37FCD45CDCED /* HardcoverClient.swift in Sources */,
+				08B09F5D77ACBED602B0FEBB /* HardcoverConnectionView.swift in Sources */,
 				55DD34B5417C08A08001A9E3 /* HardcoverSocialClient.swift in Sources */,
 				AC49499F99D8B42982E5EA10 /* HardcoverToken.swift in Sources */,
 				52ABC63B7FADEB06EA06DEE9 /* InteractionActivity.swift in Sources */,
@@ -744,6 +751,7 @@
 				F1317925B64323F07852FFA7 /* LibraryModel.swift in Sources */,
 				FF22BE44E9C8A2858CF37B6C /* LibraryPersistence.swift in Sources */,
 				8A002662C6557DF39815B1F5 /* LibrarySources.swift in Sources */,
+				F846E551A8CE3B3AC7982767 /* LibraryWelcomeView.swift in Sources */,
 				06E219F03B5FC2B5B5A3A11F /* OfflineTestPolicy.swift in Sources */,
 				DB25333923CBBEA6360672C5 /* PerformanceDiagnosticObserver.swift in Sources */,
 				D14173598C660A4A5A63677E /* PerformanceDiagnostics.swift in Sources */,
@@ -886,7 +894,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 8;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = KSZ7QR8Y88;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -956,7 +964,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 8;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = KSZ7QR8Y88;
 				ENABLE_NS_ASSERTIONS = NO;

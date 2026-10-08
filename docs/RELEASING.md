@@ -25,7 +25,11 @@ Check the highest uploaded build in App Store Connect, then run:
 python3 scripts/release.py prepare --highest-uploaded-build 2
 ```
 
-Use the actual highest uploaded number. The command increments beyond both that number and the current local build, preserves the marketing version, regenerates the project, runs the complete offline suite, archives Release, and verifies the archive. A failed step stops the pipeline. It records the source snapshot and digest, source commit, tool versions, test output, dSYMs, and verification in a unique ignored `.local/releases/` candidate directory. Do not edit source files while it runs.
+Use the actual highest uploaded number. Obtain the user's explicit test request before preparation, as required by [AGENTS.md](../AGENTS.md). The command increments beyond both that number and the current local build, preserves the marketing version, regenerates the project, dispatches one detached Local test worker, archives Release, and verifies the archive.
+
+The agent harness tracks the release command while it waits for the worker, for at most two bounded two-hour waits. It reads the dispatch log only after the worker exits and requires a passing compact handoff for the exact candidate sources. Failed, blocked, or incomplete tests stop preparation before archiving; the command does not retry them. Read the worker's `handoff.md` for the result; keep visual review and live-provider checks separate.
+
+Preparation records the source snapshot and digest, source commit, tool versions, worker PID and evidence paths, test counts, dSYMs, and verification in a unique ignored `.local/releases/` candidate directory. Do not edit source files while it runs.
 
 Use the printed candidate directory for the next commands:
 
@@ -84,9 +88,9 @@ Use these App Review notes, adjusted to the build:
 ```text
 Bookworms shows a Hardcover (hardcover.app) reading library on Apple TV. It only reads the account; it never changes it.
 
-Without an account: on the start screen, select "Explore a sample shelf".
+Without an account: select "Explore sample library" in the welcome popup. If the popup has already been dismissed, select "Explore a sample shelf" on My Shelf.
 
-With the demo account: open Settings > Sources > Connect Hardcover. Scan the QR code, or open hardcover.app/link on a phone or computer, sign in with the demo account, enter the code shown on the TV, and select Authorize. The TV connects automatically.
+With the demo account: select "Connect Hardcover" in the welcome popup, or open Settings > Sources > Connect Hardcover. Scan the QR code, or open hardcover.app/link on a phone or computer, sign in with the demo account, enter the code shown on the TV, and select Authorize. The TV connects automatically and shows progress while the library downloads and the shelf prepares.
 
 Social views show only readers the account follows. Book details can also show public Hardcover reviews of that book. Hardcover moderates all reviews; users report and block readers in the Hardcover app and website. Bookworms reads the account's block list and never shows readers the account blocked.
 

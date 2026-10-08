@@ -23,6 +23,7 @@ struct ShelfView: View {
     @State private var photoSeed = Int.random(in: 0..<1000)
     @State private var activity = InteractionActivity()
     @State private var hasEnteredShelf = false
+    @State private var isWelcomePresented = false
     @State private var preparedArtwork: ViewArtworkKey?
     @State private var artworkGeneration = 0
     @State private var presentationStyles: [Int: SpineStyle] = [:]
@@ -195,7 +196,7 @@ struct ShelfView: View {
     var body: some View {
         // The tab hierarchy and these lifecycle modifiers are separate expressions; together
         // they exceed the type checker's time limit.
-        tabs
+        welcomePresentation
             .fullScreenCover(isPresented: waitsForBookWall) {
                 bookWallWaitingView
             }
@@ -204,10 +205,12 @@ struct ShelfView: View {
             #endif
             #if DEBUG && targetEnvironment(simulator)
                 .overlay(alignment: .topLeading) {
-                    if let scenario = ScenarioRuntime.current { ScenarioProbe(runtime: scenario) }
+                    if !isWelcomePresented, let scenario = ScenarioRuntime.current {
+                        ScenarioProbe(runtime: scenario)
+                    }
                 }
                 .background(alignment: .topLeading) {
-                    if FocusTransitionProbe.isEnabled {
+                    if !isWelcomePresented && FocusTransitionProbe.isEnabled {
                         FocusTransitionProbe().frame(width: 1, height: 1)
                     }
                 }
@@ -337,6 +340,47 @@ struct ShelfView: View {
                     }
                 #endif
             }
+    }
+
+    /// Startup decides eligibility before the sheet appears. Choosing a source keeps the same
+    /// presentation alive through authorization, download, and the first artwork preparation.
+    private var welcomePresentation: some View {
+        tabs
+            .sheet(isPresented: $isWelcomePresented, onDismiss: finishWelcomeDismissal) {
+                LibraryWelcomeView(
+                    library: library,
+                    isLibraryReady: preparedArtwork == artworkKey
+                        && (library.books.isEmpty || !preparedPages.isEmpty),
+                    onDismiss: { isWelcomePresented = false }
+                )
+                .appTypography()
+                #if DEBUG && targetEnvironment(simulator)
+                    // Native sheets hide the presenting view's accessibility probes.
+                    .overlay(alignment: .topLeading) {
+                        if let scenario = ScenarioRuntime.current {
+                            ScenarioProbe(runtime: scenario)
+                        }
+                    }
+                    .background(alignment: .topLeading) {
+                        if FocusTransitionProbe.isEnabled {
+                            FocusTransitionProbe().frame(width: 1, height: 1)
+                        }
+                    }
+                #endif
+            }
+            .onChange(of: library.shouldOfferWelcome, initial: true) {
+                if library.shouldOfferWelcome { isWelcomePresented = true }
+            }
+    }
+
+    private func finishWelcomeDismissal() {
+        recordActivity()
+        guard isShowingMainView, coordinator.current == .shelf else { return }
+        let entry = preparedPages.first?.books.first?.id ?? library.books.first?.id
+        if let entry {
+            hasEnteredShelf = true
+            requestBookFocus(lastFocusedID ?? entry)
+        }
     }
 
     private func finishAmbientDismissal() {
@@ -478,7 +522,7 @@ struct ShelfView: View {
     private var canHideControls: Bool {
         (focusedBook != nil || coordinator.current != .shelf) && !voiceOver
             && !library.books.isEmpty && isShowingMainView && selectedBook == nil
-            && !ambient.isActive
+            && !ambient.isActive && !isWelcomePresented
     }
 
     private func recordActivity() {
@@ -525,7 +569,9 @@ struct ShelfView: View {
                 // A newer library can replace the prepared books before this focus transaction runs.
                 guard key == artworkKey, preparedArtwork == key else { return }
                 // Selecting a main view later moves focus into it natively.
-                guard isShowingMainView, selectedBook == nil, !ambient.isActive else { return }
+                guard isShowingMainView, selectedBook == nil, !ambient.isActive,
+                    !isWelcomePresented
+                else { return }
                 if coordinator.current == .shelf {
                     guard
                         let entry =

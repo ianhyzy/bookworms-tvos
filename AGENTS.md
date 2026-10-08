@@ -120,7 +120,7 @@ Maintain [VIEWS.md](VIEWS.md) for tvOS view options and [DATASOURCES.md](DATASOU
 - Test the exact candidate; prior test passes do not validate later changes. Use Xcode Organizer validation for distribution signing and App Store checks. Verify CloudKit production separately.
 - Local preparation does not authorize an upload, external invitation, or production CloudKit deployment. Follow the user's explicit release scope; do not ask again for actions already authorized.
 
-- Use `python3 scripts/release.py prepare --highest-uploaded-build N` for new candidates after checking App Store Connect. This increments the build, runs tests, archives, and verifies; do not separately bump the number first. Do not modify candidate sources while preparation runs.
+- Use `python3 scripts/release.py prepare --highest-uploaded-build N` for new candidates after checking App Store Connect and receiving the user's explicit test request. This increments the build, dispatches one detached Local test worker, waits in the harness-tracked release command, requires a passing exact-source handoff, then archives and verifies; do not separately bump the number first or rerun tests. Do not modify candidate sources while preparation runs. Read only the worker's compact `handoff.md` afterward.
 - Use the release script's `validate` command for Apple checks. Run `upload` only with user authorization; it requires validation, a clean working tree, and the recorded source digest. Treat `upload-requested` as uncertain and check App Store Connect before retrying. The signed-in Xcode account or a private API key outside the repository supplies credentials.
 
 ## Visual revision evidence

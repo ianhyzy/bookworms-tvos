@@ -9,7 +9,9 @@ from pathlib import Path
 import plistlib
 import re
 import subprocess
+import sys
 import tarfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -63,6 +65,57 @@ def authentication():
     return []
 
 
+def release_tests(candidate, data):
+    """Run one detached Local worker and require its exact-source handoff."""
+    dispatch = output(sys.executable, 'scripts/test-worker.py', '--detach')
+    (candidate / 'tests.log').write_text(dispatch + '\n')
+    print(dispatch, flush=True)
+    match = re.fullmatch(
+        r'Started local worker PID (\d+)\. Read (.+) after it finishes\. '
+        r'No model supervision is needed\.', dispatch)
+    if not match:
+        raise SystemExit('Test worker did not provide a PID and dispatch log.')
+    pid = int(match.group(1))
+    dispatch_path = Path(match.group(2)).resolve()
+    worker_root = (ROOT / '.local/test-worker').resolve()
+    if not dispatch_path.is_relative_to(worker_root):
+        raise SystemExit('Test worker dispatch log is outside its evidence directory.')
+    data['testWorkerPID'] = pid
+    data['testWorkerDispatch'] = str(dispatch_path)
+    save(candidate / 'candidate.json', data)
+    # The release command is tracked by the agent harness while the worker runs.
+    # Do not inspect worker logs during either bounded two-hour wait.
+    for _ in range(480):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(30)
+    else:
+        raise SystemExit('Test worker is still running; preserve its PID and evidence.')
+    result = re.search(r'^(passed|failed|blocked): (.+/handoff\.md)$',
+                       dispatch_path.read_text(), re.MULTILINE)
+    if not result:
+        raise SystemExit('Test worker exited without a compact handoff; inspect its dispatch log.')
+    handoff_path = Path(result.group(2)).resolve()
+    if not handoff_path.is_relative_to(worker_root):
+        raise SystemExit('Test worker handoff is outside its evidence directory.')
+    handoff = json.loads(handoff_path.with_suffix('.json').read_text())
+    data['testWorkerHandoff'] = str(handoff_path)
+    data['tests'] = dict(status=handoff.get('status'), profile=handoff.get('profile'),
+                         counts=handoff.get('counts'))
+    save(candidate / 'candidate.json', data)
+    valid = (result.group(1) == 'passed' and handoff.get('schema_version') == 1
+             and handoff.get('status') == 'passed' and handoff.get('profile') == 'local'
+             and handoff.get('runner_exit_code') == 0 and not handoff.get('failures')
+             and bool(handoff.get('runs')))
+    for key in ('source', 'source_after'):
+        valid = valid and (handoff.get(key) or {}).get('sha256') == data['sourceDigest']
+    if not valid or source_digest() != data['sourceDigest']:
+        raise SystemExit(f'Release tests did not pass for the candidate sources: {handoff_path}')
+    print('Release tests passed:', handoff_path, flush=True)
+
+
 def prepare(args):
     spec = ROOT / 'project.yml'
     text = spec.read_text()
@@ -88,9 +141,7 @@ def prepare(args):
             if (ROOT / name).is_file():
                 snapshot.add(ROOT / name, arcname=name)
     save(candidate / 'candidate.json', data)
-    run(['python3', 'scripts/test-local.py'], candidate / 'tests.log')
-    data['tests'] = 'passed; result bundle path recorded in tests.log'
-    save(candidate / 'candidate.json', data)
+    release_tests(candidate, data)
     run(['xcodebuild', '-project', 'Bookworms.xcodeproj', '-scheme', 'BookwormsDevice',
          '-configuration', 'Release', '-destination', 'generic/platform=tvOS',
          'CLANG_ENABLE_CODE_COVERAGE=NO', '-derivedDataPath', '.build-release',

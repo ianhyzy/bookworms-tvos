@@ -45,9 +45,17 @@ The helper defaults to Release for installs and Debug for tests. It removes this
 
 For pairing, open **Settings → Remotes and Devices → Remote App and Devices** on Apple TV, then use **Window → Devices and Simulators** in Xcode. Follow [performance diagnosis](PERFORMANCE_DIAGNOSIS.md) for profiling. Simulator timings and coverage builds do not establish physical-device performance.
 
+To check first-launch setup on an existing install after the owner authorizes removing the TV's saved Hardcover account:
+
+```sh
+python3 scripts/device-build.py --device APPLE_TV_UDID --team TEAM_ID --reset-hardcover-setup
+```
+
+The launch resets the local Hardcover credential, Hardcover and legacy library snapshots, account identity, sync history, source error, and welcome completion flag. It re-enables Hardcover and defers iCloud restoration until welcome setup completes for that launch. It preserves CWA credentials and snapshots, artwork, saved designs, and display settings. A retained CWA account or snapshot still suppresses the welcome popup. The reset flag applies only to this launch; later launches retain the newly connected account. If credential removal fails, the reset stops before deleting snapshots.
+
 ## Handle credentials and external data
 
-Store provider credentials in Keychain. Use fixed read-only Hardcover queries and the scopes in [Hardcover authentication](HARDCOVER_AUTHENTICATION.md). The app accepts personal access tokens; it rejects legacy JWTs and OAuth access tokens. Cached books remain available during reconnection.
+Store provider credentials in Keychain. Use fixed read-only Hardcover queries and the scopes in [Hardcover authentication](HARDCOVER_AUTHENTICATION.md). The app accepts Hardcover personal access tokens and OAuth bearer tokens. Cached books remain available during reconnection.
 
 For authorized Debug bootstrap, pass a 1Password reference rather than a literal token:
 
