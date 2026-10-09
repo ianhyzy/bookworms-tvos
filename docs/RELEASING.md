@@ -25,7 +25,11 @@ Check the highest uploaded build in App Store Connect, then run:
 python3 scripts/release.py prepare --highest-uploaded-build 2
 ```
 
-Use the actual highest uploaded number. The command increments beyond both that number and the current local build, preserves the marketing version, regenerates the project, runs the complete offline suite, archives Release, and verifies the archive. A failed step stops the pipeline. It records the source snapshot and digest, source commit, tool versions, test output, dSYMs, and verification in a unique ignored `.local/releases/` candidate directory. Do not edit source files while it runs.
+Use the actual highest uploaded number. Obtain the user's explicit test request before preparation, as required by [AGENTS.md](../AGENTS.md). The command increments beyond both that number and the current local build, preserves the marketing version, regenerates the project, dispatches one detached Local test worker, archives Release, and verifies the archive.
+
+The agent harness tracks the release command while it waits for the worker, for at most two bounded two-hour waits. It reads the dispatch log only after the worker exits and requires a passing compact handoff for the exact candidate sources. Failed, blocked, or incomplete tests stop preparation before archiving; the command does not retry them. Read the worker's `handoff.md` for the result; keep visual review and live-provider checks separate.
+
+Preparation records the source snapshot and digest, source commit, tool versions, worker PID and evidence paths, test counts, dSYMs, and verification in a unique ignored `.local/releases/` candidate directory. Do not edit source files while it runs.
 
 Use the printed candidate directory for the next commands:
 
@@ -63,6 +67,18 @@ To check the exact candidate with production signing and production CloudKit bef
 
 Compilation and local signature verification do not establish distribution or physical-device readiness.
 
+## Public storefront availability
+
+Keep **China mainland** unavailable for the public App Store release. Apple's [regional requirements](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information) require an NPPA internet publishing permit for apps with book or magazine content there. Enable that storefront only after supplying the required permit and receiving the owner's approval.
+
+In App Store Connect → **Pricing and Availability** → **App Availability** → **Manage Availability**:
+
+1. Select the current countries and regions, with **China mainland** deselected. Hong Kong, Macau, and Taiwan remain selected.
+2. Clear **Make your app automatically available in all future App Store countries or regions**. Check regional requirements before adding a new storefront.
+3. Confirm the changes. Verify that **China mainland** shows **Not Available** on the saved availability page.
+
+Apple documents the selection controls in [Manage availability for your app](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/manage-availability-for-your-app-on-the-app-store).
+
 ## App Store information
 
 | Field | Value |
@@ -74,6 +90,7 @@ Compilation and local signature verification do not establish distribution or ph
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
 | Price | Free, with no in-app purchases. Bookworms is free and open source. |
+| Availability | All current storefronts except China mainland; automatic availability in future storefronts is off. Follow [public storefront availability](#public-storefront-availability). |
 | Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; create the output folder with `mkdir -p .local/app-store-screenshots`, then resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
 | App Privacy | **Data Not Collected**; see [privacy implementation](PRIVACY.md) |
 | Age rating | The app shows Hardcover reviews, which are user-generated content. Answer the questionnaire accordingly. |
@@ -85,9 +102,9 @@ Use these App Review notes, adjusted to the build:
 ```text
 Bookworms shows a Hardcover (hardcover.app) reading library on Apple TV. It only reads the account; it never changes it.
 
-Without an account: on the start screen, select "Explore a sample shelf".
+Without an account: select "Explore sample library" in the welcome popup. If the popup has already been dismissed, select "Explore a sample shelf" on My Shelf.
 
-With the demo account: open Settings > Sources > Connect Hardcover. Scan the QR code, or open hardcover.app/link on a phone or computer, sign in with the demo account, enter the code shown on the TV, and select Authorize. The TV connects automatically.
+With the demo account: select "Connect Hardcover" in the welcome popup, or open Settings > Sources > Connect Hardcover. Scan the QR code, or open hardcover.app/link on a phone or computer, sign in with the demo account, enter the code shown on the TV, and select Authorize. The TV connects automatically and shows progress while the library downloads and the shelf prepares.
 
 Social views show only readers the account follows. Book details can also show public Hardcover reviews of that book. Hardcover moderates all reviews; users report and block readers in the Hardcover app and website. Bookworms reads the account's block list and never shows readers the account blocked.
 

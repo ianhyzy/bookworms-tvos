@@ -2,6 +2,29 @@ import Foundation
 import Observation
 import UIKit
 
+/// The work performed after Hardcover authorizes this Apple TV.
+enum HardcoverConnectionPhase: Equatable {
+    case validatingAccount
+    case downloadingLibrary
+    case savingLibrary
+
+    var title: String {
+        switch self {
+        case .validatingAccount: "Connecting to Hardcover"
+        case .downloadingLibrary: "Downloading your library"
+        case .savingLibrary: "Saving your library"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .validatingAccount: "Checking your account…"
+        case .downloadingLibrary: "Gathering your books and reading history…"
+        case .savingLibrary: "Keeping your books available on this Apple TV…"
+        }
+    }
+}
+
 @MainActor @Observable
 final class LibraryModel {
     private(set) var books: [Book] = [] {
@@ -156,6 +179,65 @@ final class LibraryModel {
     }
     private(set) var styles: [Int: SpineStyle] = [:]
     private(set) var isLoading = false
+    private(set) var hardcoverConnectionPhase: HardcoverConnectionPhase?
+    private(set) var hasCompletedWelcome: Bool
+
+    /// Offer setup only after startup has checked local snapshots and the saved account.
+    var shouldOfferWelcome: Bool {
+        hasLoadedLibrarySnapshot && !hasCompletedWelcome && !hardcoverConnected && !hasCWAPassword
+            && !isSample
+            && sourceSnapshots.isEmpty && allBooks.isEmpty
+    }
+
+    func completeWelcome() {
+        hasCompletedWelcome = true
+        dependencies.defaults.set(true, forKey: "hasCompletedWelcome")
+        if cloudSyncSuppressedForWelcome {
+            cloudSyncSuppressedForWelcome = false
+            queueCloudSync()
+        }
+    }
+
+    /// Removes the local Hardcover login and library before startup for a fresh sign-in check.
+    /// Other provider accounts, artwork, saved designs, and display preferences are retained.
+    func resetHardcoverSetup() async throws {
+        guard !hasStarted else { throw SetupResetError.alreadyStarted }
+        dependencies.removeCredential("hardcover-token")
+        guard dependencies.readCredential("hardcover-token") == nil else {
+            throw SetupResetError.credentialRemovalFailed
+        }
+        sourceSaveRevision &+= 1
+        sourceSnapshots = try await persistence.resetHardcoverSnapshot(
+            legacyURL: snapshotURL, revision: sourceSaveRevision)
+        let defaults = dependencies.defaults
+        for key in [
+            "activeHardcoverAccountID", "hasCompletedWelcome", "syncAttempt.hardcover",
+            "syncSuccess.hardcover",
+        ] {
+            defaults.removeObject(forKey: key)
+        }
+        activeHardcoverAccountID = nil
+        hasCompletedWelcome = false
+        hardcoverConnected = false
+        hardcoverSessionExpired = false
+        sourceErrors[LibrarySource.hardcover.rawValue] = nil
+        // Remote snapshots must not restore the account while its first-run flow is open.
+        cloudSyncSuppressedForWelcome = true
+        hardcoverEnabled = true
+    }
+
+    private enum SetupResetError: LocalizedError {
+        case alreadyStarted
+        case credentialRemovalFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .alreadyStarted: "Restart Bookworms before resetting Hardcover setup."
+            case .credentialRemovalFailed: "The saved Hardcover login could not be removed."
+            }
+        }
+    }
+
     private(set) var hardcoverConnected = false
     /// Whether Hardcover rejected the saved login during the latest sync. The credential stays
     /// saved; Settings offers a new link code instead of showing the account as connected.
@@ -231,6 +313,8 @@ final class LibraryModel {
     private var snapshotURL: URL { dependencies.legacySnapshotURL }
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
     @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var isStarting = false
+    @ObservationIgnored private var cloudSyncSuppressedForWelcome = false
     @ObservationIgnored private var lastManualRefresh: Date?
 
     init(dependencies: LibraryDependencies = LibraryDependencies()) {
@@ -240,6 +324,7 @@ final class LibraryModel {
             styleCacheURL: dependencies.styleStore.cacheURL,
             writeTopShelf: dependencies.writeTopShelf)
         let defaults = dependencies.defaults
+        hasCompletedWelcome = defaults.bool(forKey: "hasCompletedWelcome")
         credentials = CredentialAvailability(read: dependencies.readCredential)
         bookCount = Self.clampedBookCount(
             defaults.object(forKey: "bookCount") as? Int ?? BookLimit.maximum)
@@ -280,7 +365,18 @@ final class LibraryModel {
     }
 
     func start() async {
-        guard !hasStarted else { return }
+        guard !hasStarted, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
+        if dependencies.allowLaunchOverrides,
+            ProcessInfo.processInfo.arguments.contains("--reset-hardcover-setup")
+        {
+            do {
+                try await resetHardcoverSetup()
+            } catch {
+                message = readable(error)
+            }
+        }
         hasStarted = true
         if dependencies.allowLaunchOverrides,
             ProcessInfo.processInfo.arguments.contains("--sample-library")
@@ -328,7 +424,19 @@ final class LibraryModel {
         }
         rebuildLibrary()
         hasLoadedLibrarySnapshot = true
-        if iCloudEnabled { queueCloudSync() } else { cloudStatus = "iCloud storage is off." }
+        if cloudSyncSuppressedForWelcome, !shouldOfferWelcome {
+            // A retained provider can skip setup, so no welcome completion will release this gate.
+            cloudSyncSuppressedForWelcome = false
+        }
+        if iCloudEnabled {
+            if cloudSyncSuppressedForWelcome {
+                cloudStatus = "iCloud storage waits until setup finishes."
+            } else {
+                queueCloudSync()
+            }
+        } else {
+            cloudStatus = "iCloud storage is off."
+        }
         #if DEBUG
             if dependencies.allowLaunchOverrides,
                 let token = ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"]
@@ -429,8 +537,17 @@ final class LibraryModel {
                             self.hardcoverDeviceAuth = nil
                             return
                         case .success(let token):
+                            guard !self.isLoading else {
+                                // Approval consumes the code; show a retry instead of a stopped waiter.
+                                self.hardcoverDeviceAuth = nil
+                                self.hardcoverDeviceAuthMessage =
+                                    "A library sync is finishing. Request a new link code to connect."
+                                return
+                            }
                             self.hardcoverDeviceAuth = nil
                             self.hardcoverDeviceAuthMessage = nil
+                            self.isLoading = true
+                            defer { self.isLoading = false }
                             _ = await self.connectValidatedToken(
                                 token, revision: self.sourceRevision)
                             return
@@ -458,6 +575,8 @@ final class LibraryModel {
 
     func connectWithCode(_ rawCode: String) async -> Bool {
         guard !isLoading else { return false }
+        // Manual entry replaces device polling, so only one authorization can install a library.
+        cancelHardcoverDeviceAuth()
         isLoading = true
         let revision = sourceRevision
         defer { isLoading = false }
@@ -487,6 +606,9 @@ final class LibraryModel {
     }
 
     private func connectValidatedToken(_ token: String, revision: Int) async -> Bool {
+        hardcoverConnectionPhase = .validatingAccount
+        message = nil
+        defer { hardcoverConnectionPhase = nil }
         do {
             let accountID = try await dependencies.validateHardcover(token)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
@@ -519,6 +641,7 @@ final class LibraryModel {
                 .begin(
                     .hardcover, now: dependencies.now(), manual: accountChanged,
                     hasSnapshot: hasSnapshot)
+            hardcoverConnectionPhase = .downloadingLibrary
             let result = try await dependencies.fetchHardcover(token)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
             guard result.accountID == accountID else { throw HardcoverError.invalidToken }
@@ -527,6 +650,7 @@ final class LibraryModel {
             hardcoverSessionExpired = false
             connectionRevision += 1
             hardcoverEnabled = true
+            hardcoverConnectionPhase = .savingLibrary
             await install(
                 result.books, source: .hardcover, accountID: accountID, series: result.series)
             return true
@@ -731,6 +855,7 @@ final class LibraryModel {
         books = Array(allBooks.prefix(bookCount))
         styles = [:]
         isSample = true
+        completeWelcome()
         message = nil
         publishTopShelf()
     }
@@ -904,7 +1029,7 @@ final class LibraryModel {
 
     func queueCloudSync() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
-        guard hasStarted, iCloudEnabled, !isSample else { return }
+        guard hasStarted, iCloudEnabled, !isSample, !cloudSyncSuppressedForWelcome else { return }
         cloudPending = true
         guard cloudTask == nil else { return }
         let revision = cloudRevision
