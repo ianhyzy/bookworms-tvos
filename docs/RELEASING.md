@@ -31,6 +31,8 @@ The agent harness tracks the release command while it waits for the worker, for 
 
 Preparation records the source snapshot and digest, source commit, tool versions, worker PID and evidence paths, test counts, dSYMs, and verification in a unique ignored `.local/releases/` candidate directory. Do not edit source files while it runs.
 
+The candidate snapshot and test handoff share [source selection and hashing](../scripts/source-identity.py). They include tracked files and untracked files allowed by `.gitignore` and `.git/info/exclude`. They ignore global and system Git configuration and external excludes files, so personal Git settings cannot change the candidate's source list. Put local artifact exclusions in the repository ignore rules.
+
 Use the printed candidate directory for the next commands:
 
 ```sh
