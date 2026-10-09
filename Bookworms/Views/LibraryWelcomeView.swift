@@ -3,7 +3,7 @@ import SwiftUI
 /// Keeps first-run setup modal until the selected library is ready to browse.
 struct LibraryWelcomeView: View {
     let library: LibraryModel
-    let isLibraryReady: Bool
+    let isLibraryReady: @MainActor () -> Bool
     let onDismiss: () -> Void
 
     @State private var stage = Stage.choices
@@ -32,7 +32,7 @@ struct LibraryWelcomeView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("library-welcome")
         .onChange(of: stage) { finishIfReady() }
-        .onChange(of: isLibraryReady) { finishIfReady() }
+        .onChange(of: isLibraryReady()) { finishIfReady() }
         .onExitCommand {
             switch stage {
             case .choices: onDismiss()
@@ -97,7 +97,8 @@ struct LibraryWelcomeView: View {
     }
 
     private func finishIfReady() {
-        guard stage == .preparation, isLibraryReady else { return }
+        // The sheet can retain the empty shelf's readiness while newly downloaded books publish.
+        guard stage == .preparation, isLibraryReady() else { return }
         finish()
     }
 

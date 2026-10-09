@@ -349,8 +349,10 @@ struct ShelfView: View {
             .sheet(isPresented: $isWelcomePresented, onDismiss: finishWelcomeDismissal) {
                 LibraryWelcomeView(
                     library: library,
-                    isLibraryReady: preparedArtwork == artworkKey
-                        && (library.books.isEmpty || !preparedPages.isEmpty),
+                    isLibraryReady: {
+                        preparedArtwork == artworkKey
+                            && (library.books.isEmpty || !preparedPages.isEmpty)
+                    },
                     onDismiss: { isWelcomePresented = false }
                 )
                 .appTypography()
