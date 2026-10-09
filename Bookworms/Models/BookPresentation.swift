@@ -89,6 +89,16 @@ struct ShelfPreparationKey: Equatable {
     let height: CGFloat
 }
 
+/// Keeps committed shelf pages tied to the content, fonts, and geometry used to arrange them.
+struct PreparedShelfPages {
+    let key: ShelfPreparationKey
+    let pages: [ShelfPage]
+
+    func isReady(for requestedKey: ShelfPreparationKey) -> Bool {
+        key == requestedKey && !pages.isEmpty
+    }
+}
+
 struct ComparisonPreparationKey: Equatable {
     let books: [ReaderBook]
     let revision: Int

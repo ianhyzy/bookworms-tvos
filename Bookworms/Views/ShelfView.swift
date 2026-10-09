@@ -18,7 +18,9 @@ struct ShelfView: View {
     @State private var sidebarItem: SidebarItem
     @State private var settingsSection = SettingsView.initialSection()
     @State private var ambient = AmbientController()
-    @State private var preparedPages: [ShelfPage] = []
+    @State private var requestedShelfPreparationKey: ShelfPreparationKey?
+    @State private var preparedShelf: PreparedShelfPages?
+    private var preparedPages: [ShelfPage] { preparedShelf?.pages ?? [] }
     /// Chooses the shelf photo; changes each time My Shelf appears.
     @State private var photoSeed = Int.random(in: 0..<1000)
     @State private var activity = InteractionActivity()
@@ -97,6 +99,7 @@ struct ShelfView: View {
             [
                 "artworkReady": preparedArtwork == artworkKey,
                 "pagesReady": !preparedPages.isEmpty,
+                "pagesCurrent": shelfPagesAreReady,
                 "hasEnteredShelf": hasEnteredShelf,
                 "focusedBook": focusedBook ?? -1,
                 "requestedBook": bookFocusRequest?.id ?? -1,
@@ -351,7 +354,7 @@ struct ShelfView: View {
                     library: library,
                     isLibraryReady: {
                         preparedArtwork == artworkKey
-                            && (library.books.isEmpty || !preparedPages.isEmpty)
+                            && (library.books.isEmpty || shelfPagesAreReady)
                     },
                     onDismiss: { isWelcomePresented = false }
                 )
@@ -394,6 +397,18 @@ struct ShelfView: View {
         let libraryRevision: Int
         let books: [Book]
         let avatarURLs: [URL]
+    }
+
+    private var currentShelfPreparationKey: ShelfPreparationKey? {
+        guard let requestedShelfPreparationKey else { return nil }
+        return ShelfPreparationKey(
+            revision: library.presentationRevision, fontRevision: library.fontRevision,
+            width: requestedShelfPreparationKey.width, height: requestedShelfPreparationKey.height)
+    }
+
+    private var shelfPagesAreReady: Bool {
+        guard let key = currentShelfPreparationKey else { return false }
+        return preparedShelf?.isReady(for: key) ?? false
     }
 
     private struct BookWallPreparationKey: Equatable {
@@ -660,6 +675,9 @@ struct ShelfView: View {
             let rowHeight = geometry.size.height * 0.60
             // Matches the shelf's horizontal padding and PagedRow's inner edge insets.
             let available = geometry.size.width - 160 - 2 * PagedRowLayout.edgeInset
+            let shelfPreparationKey = ShelfPreparationKey(
+                revision: library.presentationRevision, fontRevision: library.fontRevision,
+                width: available, height: rowHeight)
             ZStack(alignment: .bottomTrailing) {
                 // The wall renders behind the TabView in a full-screen surface. Its tab
                 // stays transparent so sidebar chrome remains above the same 3D models.
@@ -757,14 +775,17 @@ struct ShelfView: View {
             // The one place main content handles Back: a shelf that details filtered returns to
             // those details. Everywhere else the handler is `nil` and Back opens the sidebar.
             .onExitCommand(perform: view == .shelf ? returnToFilterOrigin : nil)
-            .task(
-                id: ShelfPreparationKey(
-                    revision: library.presentationRevision, fontRevision: library.fontRevision,
-                    width: available, height: rowHeight)
-            ) {
-                guard available > 0, rowHeight > 0 else { return }
+            .task(id: shelfPreparationKey) {
+                guard !Task.isCancelled, available > 0, rowHeight > 0,
+                    shelfPreparationKey.revision == library.presentationRevision,
+                    shelfPreparationKey.fontRevision == library.fontRevision
+                else { return }
+                requestedShelfPreparationKey = shelfPreparationKey
                 if !preparedPages.isEmpty {
                     do { try await activity.waitUntilQuiet() } catch { return }
+                }
+                guard !Task.isCancelled, shelfPreparationKey == currentShelfPreparationKey else {
+                    return
                 }
                 let measurement = PerformanceDiagnostics.begin("DeferredRepack")
                 defer { measurement.end() }
@@ -779,7 +800,7 @@ struct ShelfView: View {
                     books: library.books, styles: styles, coverRatios: library.coverRatios,
                     width: available, rowHeight: rowHeight)
                 presentationStyles = styles
-                preparedPages = updated
+                preparedShelf = PreparedShelfPages(key: shelfPreparationKey, pages: updated)
                 openRequestedBook()
             }
             .onChange(of: preparedPages.map { $0.books.map(\.id) }, initial: true) {

@@ -51,7 +51,7 @@ To check first-launch setup on an existing install after the owner authorizes re
 python3 scripts/device-build.py --device APPLE_TV_UDID --team TEAM_ID --reset-hardcover-setup
 ```
 
-The launch resets the local Hardcover credential, Hardcover and legacy library snapshots, account identity, sync history, source error, and welcome completion flag. It re-enables Hardcover and defers iCloud restoration until welcome setup completes for that launch. It preserves CWA credentials and snapshots, artwork, saved designs, and display settings. A retained CWA account or snapshot still suppresses the welcome popup. The reset flag applies only to this launch; later launches retain the newly connected account. If credential removal fails, the reset stops before deleting snapshots.
+The launch resets the local Hardcover credential, Hardcover and legacy library snapshots, account identity, sync history, source error, and welcome completion flag. It re-enables Hardcover and defers iCloud restoration until welcome setup completes when the popup is needed. It preserves CWA credentials and snapshots, artwork, saved designs, and display settings. A retained CWA account or snapshot suppresses the welcome popup and allows normal iCloud sync to resume after startup. The reset flag applies only to this launch; later launches retain the newly connected account. If credential removal fails, the reset stops before deleting snapshots.
 
 ## Handle credentials and external data
 

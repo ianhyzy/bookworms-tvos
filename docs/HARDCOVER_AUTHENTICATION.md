@@ -31,6 +31,8 @@ Select **Connect Hardcover** in the popup, or open **Settings → Sources → Co
 
 The card requests a code as soon as it opens. **New code** replaces an expired code, and **Enter a code instead** shows a text field for an authorization code typed with the remote. A loading card shows account validation, library download, and saving progress. A failed connection returns to the sign-in card with an error and controls to try again.
 
+If authorization completes while another library operation is running, the app clears the consumed code and asks you to try again after that operation finishes. Select **Get link code** to request a fresh code. The app keeps the existing account and shelf until a new connection succeeds.
+
 The welcome popup then shows **Preparing your library** while the app loads covers and arranges the shelf. It closes when that preparation finishes. Transitions fade between stages and respect Reduce Motion. Back from sign-in returns to the two welcome choices. Back from the initial choices closes the popup without completing setup, so it appears again on the next launch. Back during preparation completes setup and closes the popup. Choosing a sample library or completing setup persists the welcome completion flag. Saved accounts and snapshots also prevent the popup from appearing, including accounts whose source is disabled.
 
 In Settings, Back closes the sign-in card. The empty shelf still offers **Choose sources**, which opens **Settings → Sources**, and **Explore a sample shelf**.
@@ -47,4 +49,4 @@ After the owner authorizes removing the TV's saved Hardcover account, build and 
 python3 scripts/device-build.py --device APPLE_TV_UDID --team TEAM_ID --reset-hardcover-setup
 ```
 
-This launch removes the local Hardcover login, Hardcover and legacy snapshots, account identity, Hardcover sync history and error, and welcome completion flag. It preserves CWA accounts and snapshots, cached artwork, saved designs, and display settings. iCloud restoration waits until welcome setup completes for this launch. A retained CWA account or snapshot still suppresses the popup. The flag resets only this launch; subsequent launches keep the newly connected account. See [device development](DEVELOPMENT.md#work-with-a-physical-apple-tv).
+This launch removes the local Hardcover login, Hardcover and legacy snapshots, account identity, Hardcover sync history and error, and welcome completion flag. It preserves CWA accounts and snapshots, cached artwork, saved designs, and display settings. iCloud restoration waits until welcome setup completes when the popup is needed. A retained CWA account or snapshot suppresses the popup and allows normal iCloud sync to resume after startup. The flag resets only this launch; subsequent launches keep the newly connected account. See [device development](DEVELOPMENT.md#work-with-a-physical-apple-tv).

@@ -424,6 +424,10 @@ final class LibraryModel {
         }
         rebuildLibrary()
         hasLoadedLibrarySnapshot = true
+        if cloudSyncSuppressedForWelcome, !shouldOfferWelcome {
+            // A retained provider can skip setup, so no welcome completion will release this gate.
+            cloudSyncSuppressedForWelcome = false
+        }
         if iCloudEnabled {
             if cloudSyncSuppressedForWelcome {
                 cloudStatus = "iCloud storage waits until setup finishes."
@@ -533,7 +537,13 @@ final class LibraryModel {
                             self.hardcoverDeviceAuth = nil
                             return
                         case .success(let token):
-                            guard !self.isLoading else { return }
+                            guard !self.isLoading else {
+                                // Approval consumes the code; show a retry instead of a stopped waiter.
+                                self.hardcoverDeviceAuth = nil
+                                self.hardcoverDeviceAuthMessage =
+                                    "A library sync is finishing. Request a new link code to connect."
+                                return
+                            }
                             self.hardcoverDeviceAuth = nil
                             self.hardcoverDeviceAuthMessage = nil
                             self.isLoading = true
