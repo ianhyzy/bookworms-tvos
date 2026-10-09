@@ -126,7 +126,7 @@ Your choices
 - Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV.
 - Revoke Bookworms' access at any time on Hardcover's Authorized Apps page.
 - Turning off iCloud storage in Settings > General stops syncing. The existing copy stays in iCloud until you remove Bookworms' data in your Apple Account's iCloud storage settings.
-- Deleting Bookworms from your Apple TV removes all local data.
+- Deleting Bookworms from your Apple TV removes app files and settings, but your Hardcover sign-in may remain in the Apple TV Keychain. To remove it, choose Settings > Sources > Disconnect Hardcover before deleting Bookworms.
 
 Children
 Bookworms isn't directed to children and doesn't knowingly collect information from them.
