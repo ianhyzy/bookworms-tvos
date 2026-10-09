@@ -2,7 +2,7 @@
 """Prepare, validate, or explicitly upload a reproducible tvOS release candidate."""
 import argparse
 import datetime
-import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,6 +14,9 @@ import tarfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("source_identity", ROOT / "scripts/source-identity.py")
+sources = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sources)
 
 
 def output(*args):
@@ -21,18 +24,11 @@ def output(*args):
 
 
 def source_files():
-    names = subprocess.check_output(
-        ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=ROOT)
-    return sorted(set(n.decode() for n in names.split(b'\0') if n))
+    return sources.source_files(ROOT)
 
 
-def source_digest():
-    digest = hashlib.sha256()
-    for name in source_files():
-        path = ROOT / name
-        if path.is_file():
-            digest.update(name.encode() + b'\0' + path.read_bytes() + b'\0')
-    return digest.hexdigest()
+def source_digest(names=None):
+    return sources.source_digest(ROOT, names)
 
 
 def run(args, log):
@@ -128,16 +124,17 @@ def prepare(args):
     candidate = ROOT / '.local/releases' / f'{version}-{build}-{timestamp}'
     candidate.mkdir(parents=True, exist_ok=False)
     data = dict(version=version, build=build, highestUploadedBuild=args.highest_uploaded_build,
-                status='preparing', sourceCommit=output('git', 'rev-parse', 'HEAD'),
+                status='preparing', sourceCommit=sources.git_text(ROOT, 'rev-parse', 'HEAD'),
                 xcode=output('xcodebuild', '-version'), xcodegen=output('xcodegen', '--version'))
     save(candidate / 'candidate.json', data)
     spec.write_text(re.sub(r"CURRENT_PROJECT_VERSION: '\d+'",
                           f"CURRENT_PROJECT_VERSION: '{build}'", text, count=1))
     run(['xcodegen', 'generate'], candidate / 'generate.log')
-    data['sourceDigest'] = source_digest()
-    data['sourceStatus'] = output('git', 'status', '--short')
+    names = source_files()
+    data['sourceDigest'] = source_digest(names)
+    data['sourceStatus'] = sources.git_text(ROOT, 'status', '--short')
     with tarfile.open(candidate / 'source-snapshot.tar.gz', 'w:gz') as snapshot:
-        for name in source_files():
+        for name in names:
             if (ROOT / name).is_file():
                 snapshot.add(ROOT / name, arcname=name)
     save(candidate / 'candidate.json', data)
@@ -163,7 +160,7 @@ def distribute(args):
     if args.command == 'upload':
         if data['status'] != 'validated':
             raise SystemExit('Run validate on this candidate before uploading.')
-        if output('git', 'status', '--porcelain'):
+        if sources.git_text(ROOT, 'status', '--porcelain'):
             raise SystemExit('Commit the candidate sources before uploading; working tree is dirty.')
         if source_digest() != data['sourceDigest']:
             raise SystemExit('Candidate sources changed. Prepare and validate a new candidate.')
@@ -181,7 +178,7 @@ def distribute(args):
     # Mark uncertain uploads before the request, so an interrupted command cannot silently retry.
     if uploading:
         data['status'] = 'upload-requested'
-        data['uploadCommit'] = output('git', 'rev-parse', 'HEAD')
+        data['uploadCommit'] = sources.git_text(ROOT, 'rev-parse', 'HEAD')
         save(candidate / 'candidate.json', data)
     run(['xcodebuild', '-exportArchive', '-archivePath', str(candidate / 'Bookworms.xcarchive'),
          '-exportOptionsPlist', str(option_path), '-exportPath', str(candidate / args.command),
