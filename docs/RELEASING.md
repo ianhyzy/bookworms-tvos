@@ -67,6 +67,18 @@ To check the exact candidate with production signing and production CloudKit bef
 
 Compilation and local signature verification do not establish distribution or physical-device readiness.
 
+## Public storefront availability
+
+Keep **China mainland** unavailable for the public App Store release. Apple's [regional requirements](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information) require an NPPA internet publishing permit for apps with book or magazine content there. Enable that storefront only after supplying the required permit and receiving the owner's approval.
+
+In App Store Connect → **Pricing and Availability** → **App Availability** → **Manage Availability**:
+
+1. Select the current countries and regions, with **China mainland** deselected. Hong Kong, Macau, and Taiwan remain selected.
+2. Clear **Make your app automatically available in all future App Store countries or regions**. Check regional requirements before adding a new storefront.
+3. Confirm the changes. Verify that **China mainland** shows **Not Available** on the saved availability page.
+
+Apple documents the selection controls in [Manage availability for your app](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/manage-availability-for-your-app-on-the-app-store).
+
 ## App Store information
 
 | Field | Value |
@@ -78,6 +90,7 @@ Compilation and local signature verification do not establish distribution or ph
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
 | Price | Free, with no in-app purchases. Bookworms is free and open source. |
+| Availability | All current storefronts except China mainland; automatic availability in future storefronts is off. Follow [public storefront availability](#public-storefront-availability). |
 | Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; create the output folder with `mkdir -p .local/app-store-screenshots`, then resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
 | App Privacy | **Data Not Collected**; see [privacy implementation](PRIVACY.md) |
 | Age rating | The app shows Hardcover reviews, which are user-generated content. Answer the questionnaire accordingly. |
