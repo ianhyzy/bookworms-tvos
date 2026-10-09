@@ -14,7 +14,7 @@ struct LibraryWelcomeView: View {
     private enum Choice { case hardcover, sample }
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             switch stage {
             case .choices:
                 choices.transition(contentTransition)
