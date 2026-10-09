@@ -115,6 +115,109 @@ final class ScenarioNavigationTests: XCTestCase {
         RemoteNavigation.moveFocus(to: element, in: XCUIApplication())
     }
 
+    private func openWelcomeHardcover(_ app: XCUIApplication) throws {
+        let connect = app.buttons["welcome-connect-hardcover"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 15))
+        waitForFocus(connect)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
+        _ = try waitForProbe(app) {
+            ($0["network"] as? [String: Any])?["heldAuthorization"] as? Int == 1
+        }
+        RemoteNavigation.moveFocus(to: app.buttons["hardcover-manual-entry"], in: app)
+    }
+
+    func testHardcoverSignInActionSectionHasCountedDirectionalBoundaries() throws {
+        let app = launch("welcome", focusProbe: true)
+        try openWelcomeHardcover(app)
+        let manual = app.buttons["hardcover-manual-entry"]
+        let newCode = app.buttons["hardcover-new-code"]
+        XCTAssertFalse(app.textFields["hardcover-token"].exists)
+        RemoteNavigation.pressWithoutMoving(.up, in: app, from: manual)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: manual)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: manual)
+        RemoteNavigation.press(.right, in: app, expecting: newCode)
+        RemoteNavigation.pressWithoutMoving(.up, in: app, from: newCode)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: newCode)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: newCode)
+        RemoteNavigation.press(.left, in: app, expecting: manual)
+        XCTAssertEqual(try probe(app)["sourceCalls"] as? Int, 0)
+    }
+
+    func testHardcoverManualEntrySectionHasCountedDirectionalBoundaries() throws {
+        let app = launch("welcome", focusProbe: true)
+        try openWelcomeHardcover(app)
+        let manual = app.buttons["hardcover-manual-entry"]
+        let newCode = app.buttons["hardcover-new-code"]
+        XCUIRemote.shared.press(.select)
+        let code = app.textFields["hardcover-token"]
+        let connect = app.buttons["hardcover-manual-connect"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertFalse(connect.isEnabled)
+        RemoteNavigation.press(.down, in: app, expecting: code)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: code)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: code)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: code)
+        // The text field spans both upper actions. Native geometry may choose either;
+        // both are legitimate section-entry targets, but the move must happen exactly once.
+        RemoteNavigation.press(.up, in: app, expecting: [manual, newCode])
+        RemoteNavigation.press(.down, in: app, expecting: code)
+
+        XCUIRemote.shared.press(.select)
+        let fictionalCode = "fictional-navigation-code"
+        app.typeText(fictionalCode)
+        XCUIRemote.shared.press(.menu)
+        waitForFocus(code)
+        XCTAssertEqual(code.value as? String, fictionalCode)
+        XCTAssertTrue(connect.isEnabled)
+        RemoteNavigation.press(.right, in: app, expecting: connect)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: connect)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: connect)
+        RemoteNavigation.press(.up, in: app, expecting: newCode)
+        RemoteNavigation.press(.down, in: app, expecting: code)
+        RemoteNavigation.press(.right, in: app, expecting: connect)
+        RemoteNavigation.press(.left, in: app, expecting: code)
+        RemoteNavigation.press(.up, in: app, expecting: [manual, newCode])
+        XCTAssertEqual(try probe(app)["sourceCalls"] as? Int, 0)
+    }
+
+    func testHardcoverRetryAndManualSectionsHaveCountedDirectionalBoundaries() throws {
+        let app = launch("welcome-error", focusProbe: true)
+        try openWelcomeHardcover(app)
+        command("approve-hardcover", app: app)
+        _ = try waitForProbe(app) {
+            ($0["network"] as? [String: Any])?["heldLibrary"] as? Int == 1
+        }
+        command("release-library", app: app)
+        XCTAssertTrue(app.staticTexts["hardcover-connection-error"].waitForExistence(timeout: 5))
+        let retry = app.buttons["hardcover-device-retry"]
+        let manual = app.buttons["hardcover-manual-entry"]
+        XCTAssertFalse(app.buttons["hardcover-new-code"].exists)
+        RemoteNavigation.moveFocus(to: retry, in: app)
+        RemoteNavigation.pressWithoutMoving(.up, in: app, from: retry)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: retry)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: retry)
+        RemoteNavigation.press(.down, in: app, expecting: manual)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: manual)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: manual)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: manual)
+        RemoteNavigation.press(.up, in: app, expecting: retry)
+        RemoteNavigation.press(.down, in: app, expecting: manual)
+
+        XCUIRemote.shared.press(.select)
+        let code = app.textFields["hardcover-token"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["hardcover-manual-connect"].isEnabled)
+        RemoteNavigation.press(.down, in: app, expecting: code)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: code)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: code)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: code)
+        RemoteNavigation.press(.up, in: app, expecting: manual)
+        RemoteNavigation.press(.up, in: app, expecting: retry)
+        RemoteNavigation.press(.down, in: app, expecting: manual)
+        XCTAssertEqual(try probe(app)["welcomeCompleted"] as? Bool, false)
+    }
+
     func testWelcomeDefaultFocusAndSampleChoicePersistAcrossRelaunch() throws {
         let app = launch("welcome", focusProbe: true)
         let welcome = app.descendants(matching: .any)["library-welcome"].firstMatch

@@ -96,6 +96,7 @@ UI tests launch the app with `--focus-probe`. In Debug simulator builds, this in
 [RemoteNavigation.swift](../BookwormsUITests/RemoteNavigation.swift) provides the shared helpers:
 
 - `press(_:in:expecting:)` presses a direction, waits for the expected element, observes a one-second settle window, and requires exactly one focus update. A second update is a bounce.
+- Its array overload accepts a small explicit set of valid destinations when native geometry allows more than one, such as Up from the wide Hardcover authorization field. It still requires exactly one settled focus update.
 - `pressWithoutMoving(_:in:from:)` requires zero focus updates where no item exists in that direction.
 - `visibleButtons(_:prefix:in:)` returns fully visible items from left to right, because offscreen pages are mounted too.
 - `open(_:arguments:)` launches on My Shelf and selects a view from the sidebar, which is how users reach every other view. Use it for view-entry tests. `launch(view:arguments:)` opens a view directly with `--start-view=`, which also adds that view to the sidebar if it was turned off; initial focus on that path can land in the header or sidebar, so do not use it to test entry focus. `selectView`, `focusSidebarItem`, and `openSettings` navigate through the sidebar.
@@ -106,6 +107,6 @@ The settle window is an observation period for late focus updates, not synchroni
 
 [ShelfNavigationTests](../BookwormsUITests/ShelfNavigationTests.swift) covers My Shelf and Year in Review, [BookWallNavigationTests](../BookwormsUITests/BookWallNavigationTests.swift) covers native sidebar entry and return, counted spine/header movement, repeated edge-book detail returns, replay, and on-screen focus targets. [SocialNavigationTests](../BookwormsUITests/SocialNavigationTests.swift) covers the social views. Use `openSettings`, `showShelf`, and `startAmbient` to reach sidebar destinations.
 
-[ScenarioNavigationTests](../BookwormsUITests/ScenarioNavigationTests.swift) covers the welcome popup's default focus, both choices, and every directional boundary with `RemoteNavigation` focus-update counts. It also covers Back, controlled authorization/download/preparation, failed downloads, and relaunch without repeating completed setup.
+[ScenarioNavigationTests](../BookwormsUITests/ScenarioNavigationTests.swift) covers the welcome popup's default focus, both choices, and every directional boundary with `RemoteNavigation` focus-update counts. It also checks the sign-in actions, empty and filled manual-entry rows, and retry section boundaries. The workflow cases cover Back, controlled authorization/download/preparation, failed downloads, and relaunch without repeating completed setup.
 
 Simulator tests use discrete remote presses. Verify Siri Remote swipes, rapid input, and paging animation on the physical Apple TV.
