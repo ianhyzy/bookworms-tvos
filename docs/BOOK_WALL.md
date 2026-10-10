@@ -1,6 +1,6 @@
 # Book Wall models, animation, and local spines
 
-Book Wall generates spine artwork on Apple TV. It does not call an AI service or download fonts. It may use the existing artwork store to fetch the selected cover before sampling that image locally. A book without a usable cover still gets a deterministic, readable spine. A book whose cover URL produced no image is downloaded again 30 seconds after preparation, as on the shelf; if the cover arrives, the book's spine, casing, and cover artwork change in place without another fall, and its slot keeps the proportions it was laid out with.
+Book Wall draws spine artwork on Apple TV, from a [companion design](#companion-designs) when the book has one and from local metadata otherwise. It does not call an AI service. It may use the existing artwork store to fetch the selected cover before sampling that image locally. A book without a usable cover still gets a deterministic, readable spine. A book whose cover URL produced no image is downloaded again 30 seconds after preparation, as on the shelf; if the cover arrives, the book's spine, casing, and cover artwork change in place without another fall, and its slot keeps the proportions it was laid out with.
 
 This document describes the implemented behavior and the constraints to preserve when changing it. See the [development handoff](handoffs/2026-09-29-book-wall.md) for work in progress and evidence locations, and [Book Wall checks](TESTING.md#book-wall-checks) for device verification.
 
@@ -44,6 +44,14 @@ Unrecognized or missing genres use Avenir Next Demi Bold. The selected face appl
 The app reduces the selected cover to a 32 × 32 RGB sample and groups colors into coarse color bins. The most common bin supplies the spine color. A contrasting sampled color supplies the text when it reaches at least **4.5:1** against the spine; otherwise the app chooses whichever of black or white gives stronger contrast. A second contrasting cover color supplies the decorative lines when available; they draw at 40% opacity so the lettering leads. The title and author use the same full-opacity text color, so both meet the same contrast threshold. When cover pixels are unavailable, the app uses the existing deterministic local background and a contrast-safe text color.
 
 Cover sampling and font choice run locally. A newer library snapshot or cover cannot be overwritten by a stale artwork result. The scene keeps its generated spines when a reader returns from book details.
+
+## Companion designs
+
+With iCloud storage on, the Apple TV reads `SpineDesignV1` records that the Bookworms iPhone or Mac companion saves for the active Hardcover account; see [sources and iCloud](SOURCES_AND_ICLOUD.md). While `BookPresentation.showsCompanionSpines` is on, a current-year book with a valid design uses the design's background, text, and accent colors, its typeface, and its title case instead of the cover palette and genre face. Validation requires at least 4.5:1 text contrast. Books without a design keep their local spines, so one wall can mix both.
+
+Before layout, preparation downloads and registers each design's Google Fonts face once per family and weight through `GoogleFontLibrary`, using the instance weight the companion chose. Downloaded faces stay in the font cache for later preparations. When a face is unavailable, the spine uses the system face for the design's typeface (`serif`, `sans`, `rounded`, or `monospaced`) and weight. A network failure stops further font downloads for that preparation. The layout measures each book's lettering in the face its spine uses, so the text-fit sizes in [book shape](#book-shape) hold for both kinds of spine.
+
+The wall is rebuilt when its books or their designs change. Designs for books outside the current year do not rebuild it.
 
 ## Book shape
 

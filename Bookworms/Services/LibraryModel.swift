@@ -105,6 +105,8 @@ final class LibraryModel {
         dependencies.diagnosticsDirectory.appending(path: "ai-progress.json")
     }
     private(set) var fontRevision = 0
+    /// Validated companion designs for the active Hardcover snapshot, keyed by book ID.
+    private(set) var spineDesigns: [Int: SpineDesignV1] = [:]
     private(set) var presentationRevision = 0
     private(set) var artworkRevision = 0
     private(set) var savedAIKeyAvailable = false
@@ -1180,12 +1182,17 @@ final class LibraryModel {
             return
         }
         spineDesignTask?.cancel()
+        if spineDesigns.values.contains(where: { $0.accountID != accountID }) {
+            spineDesigns = [:]
+        }
         let requestID = UUID()
         spineDesignTaskIdentity = (accountID, snapshot.syncedAt, requestID)
         spineDesignTask = Task { [weak self] in
             guard let self else { return }
-            _ = try? await dependencies.fetchSpineDesigns(accountID, snapshot.books)
+            let designs = try? await dependencies.fetchSpineDesigns(accountID, snapshot.books)
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
+            // A failed or cancelled read keeps the designs already shown.
+            if let designs, designs != spineDesigns { spineDesigns = designs }
             spineDesignTask = nil
             spineDesignTaskIdentity = nil
         }
@@ -1195,6 +1202,7 @@ final class LibraryModel {
     private func queueSpineCachePrune() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         spineDesignTask?.cancel()
+        spineDesigns = [:]
         let requestID = UUID()
         spineDesignTaskIdentity = ("", .distantPast, requestID)
         spineDesignTask = Task { [weak self] in

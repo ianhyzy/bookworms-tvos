@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import Observation
 import RealityKit
+import UIKit
 
 /// Artwork and layout that are ready before the 3D wall starts its falling animation.
 @MainActor
@@ -10,6 +11,8 @@ struct BookWallPreparedWall {
     /// later cover recovery updates.
     let id = UUID()
     let books: [Book]
+    /// Companion designs the spines were drawn from, keyed by book ID.
+    let designs: [Int: SpineDesignV1]
     let layout: BookWallLayout
     let bodies: [Int: ModelEntity]
     /// Shelf-front lettering for each book and for the resting hint.
@@ -33,11 +36,11 @@ final class BookWallPreparation {
 
     func isReady(for books: [Book]) -> Bool { prepared?.books == books }
 
-    func prepare(_ books: [Book]) async {
+    func prepare(_ books: [Book], designs: [Int: SpineDesignV1] = [:]) async {
         let fontStyle =
             AppFontStyle(rawValue: UserDefaults.standard.string(forKey: "fontStyle") ?? "")
             ?? .serif
-        if let prepared, prepared.books == books {
+        if let prepared, prepared.books == books, prepared.designs == designs {
             // A cancelled preparation may have left covers to retry.
             await retryMissingCovers(in: prepared, fontStyle: fontStyle)
             return
@@ -50,7 +53,11 @@ final class BookWallPreparation {
 
         let preparation = await ArtworkStore.shared.prefetch(books: books, avatarURLs: [])
         guard !Task.isCancelled else { return }
-        let layout = BookWallLayout(books: books, coverRatios: preparation.ratios)
+        // Layout measures lettering, so each design's face must be registered first.
+        await Self.loadFonts(for: designs.values)
+        guard !Task.isCancelled else { return }
+        let layout = BookWallLayout(
+            books: books, coverRatios: preparation.ratios, designs: designs)
         var bodies: [Int: ModelEntity] = [:]
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
         var missing: [Book] = []
@@ -66,7 +73,8 @@ final class BookWallPreparation {
                 for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             guard !Task.isCancelled else { return }
             if cover == nil, slot.book.coverURL != nil { missing.append(slot.book) }
-            let images = await rasterizer.render(slot: slot, cover: cover, fontStyle: fontStyle)
+            let images = await rasterizer.render(
+                slot: slot, cover: cover, design: designs[slot.book.id], fontStyle: fontStyle)
             guard !Task.isCancelled else { return }
             guard let spineImage = images.spine,
                 let spine = try? await TextureResource.generate(
@@ -99,7 +107,8 @@ final class BookWallPreparation {
             hint = await BookWallShelfLabel.prepare(image)
         }
         let wall = BookWallPreparedWall(
-            books: books, layout: layout, bodies: bodies, labels: labels, hint: hint)
+            books: books, designs: designs, layout: layout, bodies: bodies, labels: labels,
+            hint: hint)
         prepared = wall
         missingCovers = missing
         await retryMissingCovers(in: wall, fontStyle: fontStyle)
@@ -122,7 +131,8 @@ final class BookWallPreparation {
                 let cover = try? await ArtworkStore.shared.detailImage(
                     for: book, maximumPixelSize: 400, allowsNetwork: false)
             else { continue }
-            let images = await rasterizer.render(slot: slot, cover: cover, fontStyle: fontStyle)
+            let images = await rasterizer.render(
+                slot: slot, cover: cover, design: wall.designs[book.id], fontStyle: fontStyle)
             guard let spineImage = images.spine, let coverImage = images.cover,
                 let spine = try? await TextureResource.generate(
                     from: spineImage, options: .init(semantic: .color)),
@@ -138,6 +148,31 @@ final class BookWallPreparation {
     }
 }
 
+extension BookWallPreparation {
+    /// Downloads and registers each design's Google Fonts face once per family and weight.
+    /// A book whose face does not load uses the system face for its design's typeface and
+    /// weight. A network failure stops further downloads until the next preparation, so an
+    /// unreachable host delays the wall by at most one request timeout.
+    fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
+        var requested = Set<String>()
+        for design in designs {
+            guard let family = design.fontFamily, let name = design.fontPostScriptName,
+                UIFont(name: name, size: 12) == nil
+            else { continue }
+            let weight = design.instanceWeight ?? design.weight
+            guard requested.insert("\(family):\(weight)").inserted else { continue }
+            guard !Task.isCancelled else { return }
+            do {
+                _ = try await GoogleFontLibrary.shared.download(family: family, weight: weight)
+            } catch is URLError {
+                return
+            } catch {
+                continue
+            }
+        }
+    }
+}
+
 /// Draws cover-derived spine and board artwork away from the UI actor.
 private actor BookWallRasterizer {
     struct Images: Sendable {
@@ -148,8 +183,11 @@ private actor BookWallRasterizer {
         let label: CGImage?
     }
 
-    func render(slot: BookWallLayout.Slot, cover: CGImage?, fontStyle: AppFontStyle) -> Images {
-        let style = BookWallLocalSpine.style(for: slot.book, cover: cover)
+    func render(
+        slot: BookWallLayout.Slot, cover: CGImage?, design: SpineDesignV1?,
+        fontStyle: AppFontStyle
+    ) -> Images {
+        let style = BookWallLocalSpine.style(for: slot.book, cover: cover, design: design)
         let board = cover.flatMap {
             BookWallCoverTexture.make(
                 image: $0, slot: slot, edgeColor: style.background.uiColor)

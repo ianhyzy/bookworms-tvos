@@ -55,6 +55,18 @@
             try! FileManager.default.createDirectory(
                 at: storageDirectory, withIntermediateDirectories: true)
             defaults.set(false, forKey: "iCloudEnabled")
+            if ProcessInfo.processInfo.arguments.contains("--test-companion-designs") {
+                // A seeded account snapshot lets the launch design read finish before Book Wall
+                // prepares, so the wall builds once, with the designs.
+                defaults.set(true, forKey: "iCloudEnabled")
+                defaults.set("42", forKey: "activeHardcoverAccountID")
+                try! SourceLibraryStore(url: storageDirectory.appending(path: "sources.json"))
+                    .save([
+                        SourceSnapshot(
+                            source: .hardcover, accountID: "42", books: ScenarioFixtures.books,
+                            syncedAt: date)
+                    ])
+            }
             if name.hasPrefix("welcome"), !defaults.bool(forKey: "testHardcoverAuthorized") {
                 credentials.removeAll()
             }
@@ -184,6 +196,12 @@
                 cloudCalls += 1
                 return archive
             }
+            dependencies.readSpineWorklist = { nil }
+            dependencies.publishSpineWorklist = { _ in }
+            dependencies.fetchSpineDesigns = { accountID, books in
+                ProcessInfo.processInfo.arguments.contains("--test-companion-designs")
+                    ? ScenarioFixtures.designs(accountID: accountID, books: books) : [:]
+            }
             dependencies.now = { [self] in date }
             dependencies.readTopShelf = { [] }
             dependencies.writeTopShelf = { _ in }
@@ -287,6 +305,27 @@
         static var books: [Book] {
             let data = try! JSONSerialization.data(withJSONObject: rows)
             return HardcoverClient.normalize(try! JSONDecoder().decode([UserBook].self, from: data))
+        }
+
+        /// Fictional companion designs with no font family, so spines use system faces offline.
+        static func designs(accountID: String, books: [Book]) -> [Int: SpineDesignV1] {
+            let typefaces = ["serif", "sans", "rounded", "monospaced"]
+            return Dictionary(
+                books.map { book in
+                    (
+                        book.id,
+                        SpineDesignV1(
+                            version: 1, accountID: accountID, bookID: book.id,
+                            workItemHash: SpineCloudIdentity.workItemHash(
+                                accountID: accountID, book: book),
+                            coverHash: String(repeating: "0", count: 64),
+                            generatorVersion: "scenario",
+                            generatedAt: Date(timeIntervalSince1970: 1_789_603_200),
+                            backgroundHex: "#1F2A44", foregroundHex: "#F4E9D8",
+                            accentHex: "#C8A24A", typeface: typefaces[book.id % typefaces.count],
+                            weight: 700, uppercase: book.id.isMultiple(of: 2))
+                    )
+                }, uniquingKeysWith: { first, _ in first })
         }
 
         @MainActor static func images() -> [String: Data] {

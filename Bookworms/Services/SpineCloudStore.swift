@@ -22,7 +22,8 @@ struct SpineWorklistV1: Codable, Equatable, Sendable {
     }
 }
 
-/// A portable design produced by the Mac companion. This record does not control tvOS views.
+/// A portable spine design from a companion app. Book Wall draws it in place of the book's
+/// cover-derived spine while `BookPresentation.showsCompanionSpines` is on.
 struct SpineDesignV1: Codable, Equatable, Sendable {
     let version: Int
     let accountID: String
@@ -37,6 +38,15 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     let typeface: String
     let weight: Int
     let uppercase: Bool
+    /// The Google Fonts family, such as "EB Garamond". `typeface` and `weight` are the fallback.
+    var fontFamily: String? = nil
+    /// The PostScript name of the `fontFamily` instance closest to `weight`.
+    var fontPostScriptName: String? = nil
+    /// The weight of the `fontPostScriptName` instance (100...900), which can differ from
+    /// `weight` when the family lacks that weight.
+    var instanceWeight: Int? = nil
+    /// How the design was made when not by a model request, such as "series-reuse:12".
+    var provenance: String? = nil
 
     func isValid(accountID: String, book: Book) -> Bool {
         guard version == 1, self.accountID == accountID, bookID == book.id,
@@ -46,11 +56,18 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
             generatedAt.timeIntervalSince1970.isFinite,
             ["serif", "sans", "rounded", "monospaced"].contains(typeface),
             [400, 500, 600, 700].contains(weight),
+            instanceWeight.map({ (100...900).contains($0) && $0.isMultiple(of: 100) }) ?? true,
+            [fontFamily, fontPostScriptName, provenance].allSatisfy(Self.isShortLine),
             let background = Self.color(backgroundHex),
             let foreground = Self.color(foregroundHex),
             Self.color(accentHex) != nil
         else { return false }
         return foreground.contrast(with: background) >= 4.5
+    }
+
+    private static func isShortLine(_ value: String?) -> Bool {
+        guard let value else { return true }
+        return (1...80).contains(value.count) && !value.contains(where: \.isNewline)
     }
 
     private static func color(_ hex: String) -> StyleColor? {

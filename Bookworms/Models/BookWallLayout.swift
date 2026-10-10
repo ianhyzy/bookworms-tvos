@@ -1,5 +1,6 @@
 import CoreText
 import Foundation
+import UIKit
 
 /// Stable slots for one calendar year's books, including the space occupied by their covers.
 struct BookWallLayout: Sendable {
@@ -56,7 +57,9 @@ struct BookWallLayout: Sendable {
     let totalWidth: Float
     let slots: [Slot]
 
-    init(books: [Book], coverRatios: [Int: Double] = [:]) {
+    /// Sizes each book so its lettering fits in its companion design's face, or in the genre
+    /// face when it has none.
+    init(books: [Book], coverRatios: [Int: Double] = [:], designs: [Int: SpineDesignV1] = [:]) {
         let columnCount = min(
             5, max(3, (books.count + Self.booksPerColumn - 1) / Self.booksPerColumn))
         columns = columnCount
@@ -69,7 +72,10 @@ struct BookWallLayout: Sendable {
             }
         let laneDimensions = lanes.map { lane in
             lane.map { book in
-                Self.dimensions(for: book, coverRatio: coverRatios[book.id])
+                Self.dimensions(
+                    for: book, coverRatio: coverRatios[book.id],
+                    typography: BookWallLocalSpine.typography(
+                        for: book, design: designs[book.id]))
             }
         }
         // Each column fits its own longest book, so one long book does not widen every
@@ -122,7 +128,9 @@ struct BookWallLayout: Sendable {
         }
     }
 
-    private static func dimensions(for book: Book, coverRatio: Double?) -> Dimensions {
+    private static func dimensions(
+        for book: Book, coverRatio: Double?, typography: BookWallLocalSpine.Typography
+    ) -> Dimensions {
         let pages = Float(min(1_400, max(100, book.pages ?? 320)))
         let seed = Float((UInt64(bitPattern: Int64(book.id)) &* 2_654_435_761) % 101) / 100
         // The upright height grows with the square root of page count. Matching cover width
@@ -133,7 +141,8 @@ struct BookWallLayout: Sendable {
         let naturalHeight = 2.25 * coverScale + (seed - 0.5) * 0.09
         let initialHeight = max(
             Self.minimumBookHeight, naturalHeight,
-            Self.heightNeededForText(book, thickness: Self.minimumSpineThickness))
+            Self.heightNeededForText(
+                book, typography: typography, thickness: Self.minimumSpineThickness))
         let naturalThickness =
             Self.minimumSpineThickness + max(0, pages - 250) * 0.0009
             + seed * 0.025
@@ -143,7 +152,9 @@ struct BookWallLayout: Sendable {
         let variety =
             Float((UInt64(bitPattern: Int64(book.id)) &* 40_503 &+ 12_345) % 1_000) / 999
         let textThickness = max(
-            Self.minimumSpineThickness, Self.thicknessNeededForText(book, height: initialHeight))
+            Self.minimumSpineThickness,
+            Self.thicknessNeededForText(
+                book, typography: typography, height: initialHeight))
         let spineThickness =
             max(min(naturalThickness, Self.maximumPageThickness), textThickness)
             * (1 + variety * 0.25)
@@ -162,23 +173,25 @@ struct BookWallLayout: Sendable {
             coverWidth: bookHeight * ratio)
     }
 
-    private static func heightNeededForText(_ book: Book, thickness: Float) -> Float {
-        let font = CTFontCreateWithName(
-            BookWallLocalSpine.fontName(for: book) as CFString, Self.minimumTitleFontSize, nil)
+    private static func heightNeededForText(
+        _ book: Book, typography: BookWallLocalSpine.Typography, thickness: Float
+    ) -> Float {
+        let font = typography.font(size: Self.minimumTitleFontSize) as CTFont
         let longest =
-            (book.title + " " + book.author).split(whereSeparator: \.isWhitespace)
+            (typography.title(for: book) + " " + book.author).split(whereSeparator: \.isWhitespace)
             .map { textWidth(String($0), font: font) }.max() ?? 0
         let usableWidth = Float(longest / (420 * 0.94 * 0.80))
         return max(Self.minimumBookHeight, usableWidth, thickness * Self.minimumLengthToThickness)
     }
 
-    private static func thicknessNeededForText(_ book: Book, height: Float) -> Float {
+    private static func thicknessNeededForText(
+        _ book: Book, typography: BookWallLocalSpine.Typography, height: Float
+    ) -> Float {
         let availableWidth = CGFloat(height * 0.94 * 420 * 0.80)
-        let title = CTFontCreateWithName(
-            BookWallLocalSpine.fontName(for: book) as CFString, Self.minimumTitleFontSize, nil)
-        let author = CTFontCreateWithName(
-            BookWallLocalSpine.fontName(for: book) as CFString, Self.minimumAuthorFontSize, nil)
-        let titleLines = wrappedLineCount(book.title, font: title, width: availableWidth)
+        let title = typography.font(size: Self.minimumTitleFontSize) as CTFont
+        let author = typography.font(size: Self.minimumAuthorFontSize) as CTFont
+        let titleLines = wrappedLineCount(
+            typography.title(for: book), font: title, width: availableWidth)
         let authorLines = wrappedLineCount(book.author, font: author, width: availableWidth)
         let titleHeight = CGFloat(titleLines) * CTFontGetAscent(title) * 1.22
         let authorHeight = CGFloat(authorLines) * CTFontGetAscent(author) * 1.25

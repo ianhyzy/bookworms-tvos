@@ -156,7 +156,7 @@ Changes
 Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new effective date.
 ```
 
-Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
+Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. Companion spines (`BookPresentation.showsCompanionSpines`) request Google Fonts faces during Book Wall preparation; update both texts before uploading a candidate with that switch on. iCloud storage is opt-in.
 
 ## Verify the release candidate
 

@@ -1,16 +1,63 @@
 import Foundation
 import UIKit
 
-/// Builds a portable-looking spine from local book metadata and the selected cover image.
+/// Builds a portable-looking spine from a companion design, or from local book metadata and the
+/// selected cover image when the book has no design.
 enum BookWallLocalSpine {
     struct Style: Equatable, Sendable {
         let background: StyleColor
         let foreground: StyleColor
         let accent: StyleColor
-        let fontName: String
+        let typography: Typography
     }
 
-    static func style(for book: Book, cover: CGImage?) -> Style {
+    /// The spine's face and title case.
+    struct Typography: Equatable, Sendable {
+        /// A PostScript name, used when the face is registered in this process.
+        let fontName: String?
+        /// The system face for a missing `fontName`: "serif", "sans", "rounded", or "monospaced".
+        var typeface = "sans"
+        /// The system face's weight, from 400 to 700.
+        var weight = 600
+        var uppercase = false
+
+        func font(size: CGFloat) -> UIFont {
+            if let fontName, let font = UIFont(name: fontName, size: size) { return font }
+            let system = UIFont.systemFont(
+                ofSize: size,
+                weight: weight >= 700
+                    ? .bold : weight >= 600 ? .semibold : weight >= 500 ? .medium : .regular)
+            let design: UIFontDescriptor.SystemDesign =
+                switch typeface {
+                case "serif": .serif
+                case "rounded": .rounded
+                case "monospaced": .monospaced
+                default: .default
+                }
+            return system.fontDescriptor.withDesign(design)
+                .map { UIFont(descriptor: $0, size: size) } ?? system
+        }
+
+        func title(for book: Book) -> String { uppercase ? book.title.uppercased() : book.title }
+    }
+
+    static func typography(for book: Book, design: SpineDesignV1?) -> Typography {
+        guard let design else { return Typography(fontName: fontName(for: book)) }
+        return Typography(
+            fontName: design.fontPostScriptName, typeface: design.typeface, weight: design.weight,
+            uppercase: design.uppercase)
+    }
+
+    /// Uses the companion design's colors and type when one exists; otherwise samples the cover.
+    static func style(for book: Book, cover: CGImage?, design: SpineDesignV1? = nil) -> Style {
+        if let design, let background = try? StyleColor(hex: design.backgroundHex),
+            let foreground = try? StyleColor(hex: design.foregroundHex),
+            let accent = try? StyleColor(hex: design.accentHex)
+        {
+            return Style(
+                background: background, foreground: foreground, accent: accent,
+                typography: typography(for: book, design: design))
+        }
         let samples = cover.flatMap(sampleColors) ?? []
         return style(for: book, samples: samples)
     }
@@ -37,7 +84,7 @@ enum BookWallLocalSpine {
             .color ?? foreground
         return Style(
             background: background, foreground: foreground, accent: accent,
-            fontName: fontName(for: book))
+            typography: typography(for: book, design: nil))
     }
 
     /// Uses the first recognized ranked genre, falling back to a general-fiction face.

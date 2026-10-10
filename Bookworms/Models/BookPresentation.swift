@@ -6,6 +6,9 @@ enum BookPresentation {
     /// Temporarily hide generated artwork and provider configuration without removing saved designs.
     nonisolated static let showsGeneratedSpines = false
     nonisolated static let spineGenerationEnabled = false
+    /// Draws Book Wall spines from companion `SpineDesignV1` records. Books without a design keep
+    /// their cover-derived spines.
+    nonisolated static let showsCompanionSpines = true
     /// Temporarily hide the Calibre Web Automated source in Settings. Its client, saved
     /// configuration, credentials, and sync remain.
     nonisolated static let offersCWA = false

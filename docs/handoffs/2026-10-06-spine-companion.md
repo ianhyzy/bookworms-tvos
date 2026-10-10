@@ -1,13 +1,14 @@
-# Mac spine companion handoff
+# Spine companion handoff
 
-The Mac spine companion is a menu bar Mac app that designs book spines from Hardcover covers and shares them with the Apple TV app through private CloudKit. The work spans two independent repositories. This handoff describes the hand port of the tvOS integration onto the `spine-companion` branch, based on `main` at `f234539`, on October 6, 2026.
+The iPhone and Mac spine companions design book spines from Hardcover covers and share them with the Apple TV app through private CloudKit. Book Wall draws them. The work spans three independent repositories. This handoff describes the tvOS integration on the `spine-companion` branch, which includes `main` through `8eb58e8`.
 
 ## Where things are
 
 | Piece | Location | State |
 | --- | --- | --- |
+| iPhone app | `~/Documents/BookwormsApps/ios`, private GitHub repository `ianhyzy/bookworms-ios` | Generates designs with Private Cloud Compute (generator `ios-pcc-v1`). Its designs add the optional `fontFamily`, `fontPostScriptName`, `instanceWeight`, and `provenance` fields. |
 | Mac app (**Bookworms Spines**) | `~/Documents/BookwormsApps/macos`, private GitHub repository `ianhyzy/bookworms-macos` | About 1,300 lines of Swift with contract tests. Committed on `main`. |
-| tvOS integration | Branch `spine-companion`, worktree `~/Developer/worktrees/bookworms-tvos-spine-companion`, based on `main` at `f234539` | `SpineCloudStore`, the `LibraryDependencies` hooks, worklist publication, design fetch and cache, `SpineCloudTests`, workflow tests, and the doc updates, ported by hand from `5c58281`. No view reads the design cache. |
+| tvOS integration | Branch `spine-companion`, worktree `~/Developer/worktrees/bookworms-tvos-spine-companion` | `SpineCloudStore`, worklist publication, design fetch and cache, and [Book Wall companion designs](../BOOK_WALL.md#companion-designs) behind `BookPresentation.showsCompanionSpines`. |
 | Original tvOS integration | Branch `spine-display`, commit `5c58281` | The port supersedes it. Its worktree is removed; keep the branch until `spine-companion` merges. |
 
 ## How the companion works
@@ -15,10 +16,10 @@ The Mac spine companion is a menu bar Mac app that designs book spines from Hard
 1. The Apple TV syncs the full Hardcover library and, with iCloud storage on, saves it to the `library-v1` archive in the private database of `iCloud.gay.ian.Bookworms`. The archive holds the full fetched library, not the displayed limit.
 2. After that archive save, the TV publishes a `SpineWorklistV1` record (record name `spine-worklist-v1`, JSON in a `payload` data field) from the snapshot in the uploaded archive. It holds the active Hardcover account ID, the snapshot's sync date, and every book ID, sorted and deduplicated. The TV publishes a nonempty list only while the Hardcover source is enabled with a connected, unexpired credential whose authenticated account matches the snapshot. A TV with an expired session or no credential publishes nothing and leaves the record unchanged. Disabling or disconnecting Hardcover publishes an empty list.
 3. The Mac subscribes to worklist changes. It reads book metadata from the matching account snapshot in `library-v1`, downloads each cover over HTTPS, and analyzes it with Vision OCR and the on-device Foundation Models system model. It never receives a Hardcover credential or calls a cloud AI service.
-4. The Mac writes one `SpineDesignV1` record per book: background, foreground, and accent colors (`#RRGGBB`), a typeface (`serif`, `sans`, `rounded`, or `monospaced`), a weight (400–700), an uppercase flag, a work-item hash of the book metadata, a cover-content hash, and a generator version.
-5. The TV validates designs in bounded batches (matching account, book, and work-item hash; foreground contrast at least 4.5:1) and caches them in `Caches/Bookworms/spine-designs-v1.json`, separate from the retained API-key design store. It reads designs at launch, on activation, and after each cloud sync.
+4. The Mac writes one `SpineDesignV1` record per book: background, foreground, and accent colors (`#RRGGBB`), a typeface (`serif`, `sans`, `rounded`, or `monospaced`), a weight (400–700), an uppercase flag, a work-item hash of the book metadata, a cover-content hash, and a generator version. The iPhone app follows the same steps with Private Cloud Compute and also names a Google Fonts family and instance.
+5. The TV validates designs in bounded batches (matching account, book, and work-item hash; foreground contrast at least 4.5:1; optional font fields bounded as on the iPhone) and caches them in `Caches/Bookworms/spine-designs-v1.json`, separate from the retained API-key design store. It reads designs at launch, on activation, and after each cloud sync, then publishes them to Book Wall, which downloads each design's Google Fonts face during preparation.
 
-The JSON contract lives in `macos/BookwormsMac/Models/CloudContract.swift` and in `Bookworms/Services/SpineCloudStore.swift`. Keep them identical.
+The JSON contract lives in `ios/Bookworms/Models/CloudContract.swift`, `macos/BookwormsMac/Models/CloudContract.swift`, and `Bookworms/Services/SpineCloudStore.swift`. Keep them compatible; all three pin the same digests.
 
 ## How the port differs from `5c58281`
 
@@ -40,14 +41,16 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 | Color hex case | `#` + 6 uppercase hex digits | Same | None; the Mac emits uppercase. |
 | `generatorVersion` | Any non-blank string | Must equal `mac-foundation-models-v1` to skip regeneration | None on the TV. |
 | Archive size the Mac reads | No bound on the TV | At most 50 MB | A very large archive stops the Mac; the TV does not warn. |
+
+The iPhone app validates like the Mac, plus the optional font fields, which the TV checks the same way. Unlike the TV, the iPhone keeps showing a design whose work-item hash no longer matches the book, so after a metadata edit the TV shows the local spine until a companion regenerates the design.
 | Extra `Book` fields | Encoded in `library-v1` | Ignored by `CloudBook` | None. |
 
 ## Remaining steps
 
-1. **Decide the display** with the owner: companion designs for Book Wall spines, shelf spines, or both. Book Wall currently generates its own spines on the TV ([Book Wall](../BOOK_WALL.md)). Add the chosen view behind a presentation switch in `BookPresentation`.
-2. **Signed end-to-end check**: a signed Mac and the Apple TV on one iCloud account. Confirm the worklist lists every book, a Mac design reaches the TV cache, and views still show covers. See [testing](../TESTING.md).
+1. **Signed end-to-end check**: a signed iPhone or Mac and the Apple TV on one iCloud account. Confirm the worklist lists every book, a companion design reaches the TV cache with its font fields, and Book Wall shows it while other views show covers. See [testing](../TESTING.md).
+2. **Privacy policy**: Book Wall now requests Google Fonts faces. Update the published policy and the [policy text](../RELEASING.md#apple-tv-privacy-policy-text) before uploading a candidate with `showsCompanionSpines` on.
 3. **Deploy `SpineWorklistV1` and `SpineDesignV1`** (each with a `payload` data field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
-4. **Design refresh cadence**: the TV refetches every design record on launch, activation, and after each cloud sync. When a view consumes designs, consider a `SpineDesignV1` subscription with silent push, as the Mac does for the worklist.
+4. **Design refresh cadence**: the TV refetches every design record on launch, activation, and after each cloud sync. A new design for a current-year book rebuilds Book Wall, even while it is on screen. Consider a `SpineDesignV1` subscription with silent push, as the Mac does for the worklist.
 5. **Validator alignment**: decide whether the TV should adopt the Mac's lowercase-only `coverHash` and the account ID length bound.
 
 ## Commands
@@ -68,7 +71,6 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 
 ## Open questions for the owner
 
-- Should companion designs drive Book Wall spines, shelf spines, or both?
 - Disabling or disconnecting Hardcover on one Apple TV publishes an empty worklist, which pauses the companion for every TV on the iCloud account until another TV's next cloud sync republishes. Should a local disable clear the shared worklist?
 - After a relaunch, a revoked credential can publish one nonempty worklist before the first failed refresh marks the session expired. The account is still the last authenticated one. Is that acceptable?
 - Is the Foundation Models design quality good enough on the owner's library, or does the analyzer need tuning first?

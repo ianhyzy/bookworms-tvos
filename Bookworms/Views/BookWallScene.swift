@@ -2279,14 +2279,13 @@ enum BookWallSpineTexture {
                         x: x, y: size.height * 0.1, width: stripeWidth,
                         height: size.height * 0.8))
             }
-            let descriptor =
-                UIFont(name: style.fontName, size: 40)?.fontDescriptor
-                ?? UIFont.systemFont(ofSize: 40, weight: .semibold).fontDescriptor
+            let descriptor = style.typography.font(size: 40).fontDescriptor
             let titleBounds = CGRect(
                 x: inset * 1.6, y: size.height * BookWallLayout.titleTop,
                 width: size.width - inset * 3.2, height: size.height * BookWallLayout.titleShare)
             drawText(
-                book.title, descriptor: descriptor, color: style.foreground.uiColor,
+                style.typography.title(for: book), descriptor: descriptor,
+                color: style.foreground.uiColor,
                 in: titleBounds,
                 maximumSize: Int(size.height),
                 minimumSize: Int(BookWallLayout.minimumTitleFontSize))

@@ -72,6 +72,36 @@ final class SpineCloudTests: XCTestCase {
         XCTAssertTrue(cache.isEmpty)
     }
 
+    func testCompanionFontFieldsSurviveCacheAndBoundValidation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let book = book()
+        var styled = design(for: book)
+        styled.fontFamily = "EB Garamond"
+        styled.fontPostScriptName = "EBGaramond-SemiBold"
+        styled.instanceWeight = 600
+        styled.provenance = "series-reuse:12"
+        let database = FakeSpineDatabase()
+        try await database.put(styled)
+        _ = try await SpineCloudStore(database: database, cacheURL: cacheURL)
+            .designs(accountID: "42", books: [book])
+        let offline = SpineCloudStore(
+            database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
+        let retained = try await offline.designs(accountID: "42", books: [book])
+        XCTAssertEqual(retained[7], styled)
+
+        var unbounded = styled
+        unbounded.instanceWeight = 650
+        XCTAssertFalse(unbounded.isValid(accountID: "42", book: book))
+        unbounded = styled
+        unbounded.fontFamily = String(repeating: "A", count: 81)
+        XCTAssertFalse(unbounded.isValid(accountID: "42", book: book))
+        unbounded = styled
+        unbounded.provenance = "two\nlines"
+        XCTAssertFalse(unbounded.isValid(accountID: "42", book: book))
+    }
+
     func testEmptyAccountSelectionPrunesPriorAccountCacheWhileOffline() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let cacheURL = directory.appending(path: "spine-designs.json")

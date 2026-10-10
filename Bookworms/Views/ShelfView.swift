@@ -59,10 +59,15 @@ struct ShelfView: View {
         return library.readingYears.first { $0.year == year }?.books ?? []
     }
     private var wallPreparationKey: BookWallPreparationKey {
-        BookWallPreparationKey(
+        let books = wallBooks
+        var designs: [Int: SpineDesignV1] = [:]
+        if BookPresentation.showsCompanionSpines {
+            for book in books { designs[book.id] = library.spineDesigns[book.id] }
+        }
+        return BookWallPreparationKey(
             loaded: library.hasLoadedLibrarySnapshot,
             enabled: coordinator.preferences.orderedViews.contains(.bookWall),
-            books: wallBooks, retry: bookWallPreparationRetry)
+            books: books, designs: designs, retry: bookWallPreparationRetry)
     }
     private var waitsForBookWall: Binding<Bool> {
         Binding(
@@ -236,7 +241,7 @@ struct ShelfView: View {
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
-                await bookWallPreparation.prepare(key.books)
+                await bookWallPreparation.prepare(key.books, designs: key.designs)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
@@ -415,6 +420,8 @@ struct ShelfView: View {
         let loaded: Bool
         let enabled: Bool
         let books: [Book]
+        /// Only the wall's own designs, so designs for other books do not rebuild it.
+        let designs: [Int: SpineDesignV1]
         let retry: Int
     }
 
