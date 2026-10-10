@@ -51,7 +51,8 @@ The iPhone app validates like the Mac, plus the optional font fields, which the 
 2. **Privacy policy**: Book Wall now requests Google Fonts faces. Update the published policy and the [policy text](../RELEASING.md#apple-tv-privacy-policy-text) before uploading a candidate with `showsCompanionSpines` on.
 3. **Deploy `SpineWorklistV1` and `SpineDesignV1`** (each with a `payload` data field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
 4. **Design refresh cadence**: the TV refetches every design record on launch, activation, and after each cloud sync. A new design for a current-year book rebuilds Book Wall, even while it is on screen. Consider a `SpineDesignV1` subscription with silent push, as the Mac does for the worklist.
-5. **Validator alignment**: decide whether the TV should adopt the Mac's lowercase-only `coverHash` and the account ID length bound.
+5. **Latest design wins**: the owner wants each resource to use its latest version, whichever app made it. The Apple TV already does this for designs. The iPhone regenerates any design whose generator is not `ios-pcc-v1`, and the Mac regenerates any design whose generator is not `mac-foundation-models-v1`, so the companions overwrite each other. Change both to keep a valid design whose work-item and cover hashes still match.
+6. **Validator alignment**: decide whether the TV should adopt the Mac's lowercase-only `coverHash` and the account ID length bound.
 
 ## Commands
 

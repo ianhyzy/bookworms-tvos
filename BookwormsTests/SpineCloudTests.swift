@@ -193,6 +193,32 @@ final class SpineCloudTests: XCTestCase {
         XCTAssertTrue(cache.isEmpty)
     }
 
+    func testLatestSavedDesignReplacesCachedDesignFromAnotherGenerator() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let book = book()
+        let database = FakeSpineDatabase()
+        let store = SpineCloudStore(database: database, cacheURL: cacheURL)
+        try await database.put(design(for: book))
+        _ = try await store.designs(accountID: "42", books: [book])
+
+        let base = design(for: book, typeface: "sans", foregroundHex: "#000000")
+        let latest = SpineDesignV1(
+            version: 1, accountID: "42", bookID: book.id, workItemHash: base.workItemHash,
+            coverHash: base.coverHash, generatorVersion: "ios-pcc-v1",
+            generatedAt: base.generatedAt.addingTimeInterval(60), backgroundHex: "#40FFC0",
+            foregroundHex: "#000000", accentHex: "#123456", typeface: "sans", weight: 700,
+            uppercase: true, fontFamily: "Inter", fontPostScriptName: "Inter-Bold",
+            instanceWeight: 700)
+        try await database.put(latest)
+        let refreshed = try await store.designs(accountID: "42", books: [book])
+        XCTAssertEqual(refreshed[7], latest)
+        let cache = try JSONDecoder()
+            .decode([String: SpineDesignV1].self, from: Data(contentsOf: cacheURL))
+        XCTAssertEqual(Array(cache.values), [latest])
+    }
+
     func testIndividualFailureDoesNotHideLaterValidDesign() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let cacheURL = directory.appending(path: "spine-designs.json")
