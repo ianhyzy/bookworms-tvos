@@ -78,6 +78,36 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     }
 }
 
+/// The reader's choice of cover for one book in a companion app. Views try it before the book's
+/// default covers. Choosing the default cover deletes the record.
+struct CoverChoiceV1: Codable, Equatable, Sendable {
+    let version: Int
+    let accountID: String
+    let bookID: Int
+    let coverURL: URL
+    /// The Hardcover edition the cover belongs to, when it belongs to one.
+    var editionID: Int? = nil
+    let chosenAt: Date
+
+    func isValid(accountID: String, book: Book) -> Bool {
+        version == 1 && self.accountID == accountID && accountID.count <= 512 && bookID > 0
+            && bookID == book.id && Self.allows(coverURL)
+            && (editionID.map { $0 > 0 } ?? true) && chosenAt.timeIntervalSince1970.isFinite
+    }
+
+    /// Accepts only HTTPS URLs on public host names, as the iPhone companion's `CoverURLPolicy`
+    /// does, so a synced record cannot point the TV at a local network address.
+    static func allows(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
+            url.port == nil, url.fragment == nil, let host = url.host?.lowercased(),
+            host.contains("."), !host.hasSuffix("."), !host.hasSuffix(".local"),
+            !host.hasSuffix(".localhost"), !host.hasSuffix(".internal"), host != "localhost",
+            !host.contains(":"), !host.split(separator: ".").allSatisfy({ Int($0) != nil })
+        else { return false }
+        return true
+    }
+}
+
 extension Character {
     fileprivate var isASCIIHexDigit: Bool {
         isASCIIUppercaseHexDigit || ("0"..."9").contains(self) || ("a"..."f").contains(self)
@@ -92,6 +122,10 @@ enum SpineCloudIdentity {
 
     static func designRecordID(accountID: String, bookID: Int) -> CKRecord.ID {
         CKRecord.ID(recordName: "spine-design-v1-" + sha256("\(accountID):\(bookID)"))
+    }
+
+    static func coverChoiceRecordID(accountID: String, bookID: Int) -> CKRecord.ID {
+        CKRecord.ID(recordName: "cover-choice-v1-" + sha256("\(accountID):\(bookID)"))
     }
 
     static func workItemHash(accountID: String, book: Book) -> String {
@@ -149,7 +183,10 @@ actor SpineCloudStore {
 
     private let suppliedDatabase: (any SpineCloudDatabase)?
     private let cacheURL: URL
-    private var cacheGeneration: UInt64 = 0
+    private let coverChoiceCacheURL: URL
+    /// The latest read per record type. A later account selection owns that type's cache even
+    /// if an older CloudKit read resumes.
+    private var cacheGenerations: [String: UInt64] = [:]
 
     #if DEBUG
         private struct ReadStatus: Encodable {
@@ -165,21 +202,24 @@ actor SpineCloudStore {
             var ckErrorCode: Int?
         }
 
-        private func writeReadStatus(_ status: ReadStatus) {
-            let url = cacheURL.deletingLastPathComponent()
-                .appending(path: "spine-design-read-status.json")
+        private func writeReadStatus(_ status: ReadStatus, name: String) {
+            let url = cacheURL.deletingLastPathComponent().appending(path: name)
             try? FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? JSONEncoder().encode(status).write(to: url, options: .atomic)
         }
     #endif
 
+    /// Creates a store whose design cache is `cacheURL`. The cover-choice cache,
+    /// `cover-choices-v1.json`, sits in the same directory.
     init(
         database: (any SpineCloudDatabase)? = nil,
         cacheURL: URL = URL.cachesDirectory.appending(path: "Bookworms/spine-designs-v1.json")
     ) {
         suppliedDatabase = database
         self.cacheURL = cacheURL
+        coverChoiceCacheURL = cacheURL.deletingLastPathComponent()
+            .appending(path: "cover-choices-v1.json")
     }
 
     private func database() throws -> any SpineCloudDatabase {
@@ -257,37 +297,51 @@ actor SpineCloudStore {
         throw CloudStorageError.conflict
     }
 
-    /// Reads current records in bounded batches and keeps a separate validated disk cache.
+    /// Reads the active books' companion designs. See `records(_:accountID:books:)`.
     func designs(accountID: String, books: [Book]) async throws -> [Int: SpineDesignV1] {
-        // A later account selection owns the cache even if an older CloudKit read resumes.
-        cacheGeneration &+= 1
-        let generation = cacheGeneration
+        try await records(.designs(cacheURL: cacheURL), accountID: accountID, books: books)
+    }
+
+    /// Reads the active books' companion cover choices. See `records(_:accountID:books:)`.
+    func coverChoices(accountID: String, books: [Book]) async throws -> [Int: CoverChoiceV1] {
+        try await records(
+            .coverChoices(cacheURL: coverChoiceCacheURL), accountID: accountID, books: books)
+    }
+
+    /// Reads one record per book in bounded batches and keeps a separate validated disk cache.
+    ///
+    /// Returns cached records when CloudKit is unavailable. A missing or invalid current record
+    /// evicts the cached one, and an empty `accountID` clears the cache.
+    private func records<Value: Codable & Sendable>(
+        _ kind: CompanionRecordKind<Value>, accountID: String, books: [Book]
+    ) async throws -> [Int: Value] {
+        let generation = (cacheGenerations[kind.recordType] ?? 0) &+ 1
+        cacheGenerations[kind.recordType] = generation
         guard !accountID.isEmpty else {
             try Task.checkCancellation()
-            try saveCache([:], generation: generation)
+            try saveCache([String: Value](), to: kind, generation: generation)
             return [:]
         }
         let selected = Dictionary(
             books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         #if DEBUG
             var status = ReadStatus(phase: "loading_cache", requestedCount: selected.count)
-            writeReadStatus(status)
+            writeReadStatus(status, name: kind.statusName)
         #endif
         let selectedRecordNames = Set(
             selected.keys.map {
-                SpineCloudIdentity.designRecordID(accountID: accountID, bookID: $0).recordName
+                kind.recordID(accountID, $0).recordName
             })
         let bookIDByRecordName = Dictionary(
             uniqueKeysWithValues: selected.keys.map {
-                (SpineCloudIdentity.designRecordID(accountID: accountID, bookID: $0).recordName, $0)
+                (kind.recordID(accountID, $0).recordName, $0)
             })
-        var cache = loadCache().filter { selectedRecordNames.contains($0.key) }
-        var accepted: [Int: SpineDesignV1] = [:]
+        var cache = loadCache(kind).filter { selectedRecordNames.contains($0.key) }
+        var accepted: [Int: Value] = [:]
         for book in selected.values {
-            let key = SpineCloudIdentity.designRecordID(accountID: accountID, bookID: book.id)
-                .recordName
-            if let design = cache[key], design.isValid(accountID: accountID, book: book) {
-                accepted[book.id] = design
+            let key = kind.recordID(accountID, book.id).recordName
+            if let value = cache[key], kind.isValid(value, accountID, book) {
+                accepted[book.id] = value
             } else {
                 cache.removeValue(forKey: key)
             }
@@ -295,14 +349,14 @@ actor SpineCloudStore {
         #if DEBUG
             status.acceptedCount = accepted.count
             status.phase = "checking_cloud"
-            writeReadStatus(status)
+            writeReadStatus(status, name: kind.statusName)
         #endif
         if selected.isEmpty {
-            try checkCurrentGeneration(generation)
-            try saveCache(cache, generation: generation)
+            try checkCurrentGeneration(generation, of: kind)
+            try saveCache(cache, to: kind, generation: generation)
             #if DEBUG
                 status.phase = "complete"
-                writeReadStatus(status)
+                writeReadStatus(status, name: kind.statusName)
             #endif
             return [:]
         }
@@ -312,31 +366,29 @@ actor SpineCloudStore {
         } catch is CancellationError {
             #if DEBUG
                 status.phase = "cancelled"
-                writeReadStatus(status)
+                writeReadStatus(status, name: kind.statusName)
             #endif
             throw CancellationError()
         } catch {
             #if DEBUG
                 status.phase = "cloud_unavailable"
                 status.ckErrorCode = cloudKitErrorCode(error)
-                writeReadStatus(status)
+                writeReadStatus(status, name: kind.statusName)
             #endif
-            try checkCurrentGeneration(generation)
-            try? saveCache(cache, generation: generation)
+            try checkCurrentGeneration(generation, of: kind)
+            try? saveCache(cache, to: kind, generation: generation)
             return accepted
         }
-        try checkCurrentGeneration(generation)
+        try checkCurrentGeneration(generation, of: kind)
         let ids = selected.keys.sorted()
-            .map {
-                SpineCloudIdentity.designRecordID(accountID: accountID, bookID: $0)
-            }
+            .map { kind.recordID(accountID, $0) }
         for start in stride(from: 0, to: ids.count, by: 100) {
-            try checkCurrentGeneration(generation)
+            try checkCurrentGeneration(generation, of: kind)
             let batch = Array(ids[start..<min(start + 100, ids.count)])
             #if DEBUG
                 status.phase = "fetching_batch"
                 status.batchIndex = start / 100 + 1
-                writeReadStatus(status)
+                writeReadStatus(status, name: kind.statusName)
             #endif
             let fetched: [CKRecord.ID: Result<CKRecord, any Error>]
             do {
@@ -344,20 +396,20 @@ actor SpineCloudStore {
             } catch is CancellationError {
                 #if DEBUG
                     status.phase = "cancelled"
-                    writeReadStatus(status)
+                    writeReadStatus(status, name: kind.statusName)
                 #endif
                 throw CancellationError()
             } catch {
                 #if DEBUG
                     status.phase = "batch_failed"
                     status.ckErrorCode = cloudKitErrorCode(error)
-                    writeReadStatus(status)
+                    writeReadStatus(status, name: kind.statusName)
                 #endif
-                try checkCurrentGeneration(generation)
-                try? saveCache(cache, generation: generation)
+                try checkCurrentGeneration(generation, of: kind)
+                try? saveCache(cache, to: kind, generation: generation)
                 return accepted
             }
-            try checkCurrentGeneration(generation)
+            try checkCurrentGeneration(generation, of: kind)
             #if DEBUG
                 status.returnedCount += fetched.count
             #endif
@@ -387,14 +439,12 @@ actor SpineCloudStore {
                     #endif
                     continue
                 case .success(let record):
-                    guard record.recordType == "SpineDesignV1",
+                    guard record.recordType == kind.recordType,
                         let payload = record["payload"] as? Data,
-                        let design = try? JSONDecoder().decode(SpineDesignV1.self, from: payload),
-                        let book = selected[design.bookID],
-                        id
-                            == SpineCloudIdentity.designRecordID(
-                                accountID: accountID, bookID: design.bookID),
-                        design.isValid(accountID: accountID, book: book)
+                        let value = try? JSONDecoder().decode(Value.self, from: payload),
+                        let book = selected[kind.bookID(value)],
+                        id == kind.recordID(accountID, book.id),
+                        kind.isValid(value, accountID, book)
                     else {
                         #if DEBUG
                             status.invalidCount += 1
@@ -405,36 +455,38 @@ actor SpineCloudStore {
                         cache.removeValue(forKey: id.recordName)
                         continue
                     }
-                    accepted[design.bookID] = design
-                    cache[id.recordName] = design
+                    accepted[book.id] = value
+                    cache[id.recordName] = value
                 }
             }
             // A later batch may fail or be cancelled after this one has valid designs.
-            try saveCache(cache, generation: generation)
+            try saveCache(cache, to: kind, generation: generation)
             #if DEBUG
                 status.acceptedCount = accepted.count
                 status.phase = "batch_complete"
-                writeReadStatus(status)
+                writeReadStatus(status, name: kind.statusName)
             #endif
             if cancelled || Task.isCancelled {
                 #if DEBUG
                     status.phase = "cancelled"
-                    writeReadStatus(status)
+                    writeReadStatus(status, name: kind.statusName)
                 #endif
                 throw CancellationError()
             }
         }
         #if DEBUG
             status.phase = "complete"
-            writeReadStatus(status)
+            writeReadStatus(status, name: kind.statusName)
         #endif
-        try checkCurrentGeneration(generation)
+        try checkCurrentGeneration(generation, of: kind)
         return accepted
     }
 
-    private func checkCurrentGeneration(_ generation: UInt64) throws {
+    private func checkCurrentGeneration<Value>(
+        _ generation: UInt64, of kind: CompanionRecordKind<Value>
+    ) throws {
         try Task.checkCancellation()
-        guard generation == cacheGeneration else { throw CancellationError() }
+        guard generation == cacheGenerations[kind.recordType] else { throw CancellationError() }
     }
 
     #if DEBUG
@@ -444,17 +496,51 @@ actor SpineCloudStore {
         }
     #endif
 
-    private func loadCache() -> [String: SpineDesignV1] {
-        guard let data = try? Data(contentsOf: cacheURL) else { return [:] }
-        return (try? JSONDecoder().decode([String: SpineDesignV1].self, from: data)) ?? [:]
+    private func loadCache<Value>(_ kind: CompanionRecordKind<Value>) -> [String: Value] {
+        guard let data = try? Data(contentsOf: kind.cacheURL) else { return [:] }
+        return (try? JSONDecoder().decode([String: Value].self, from: data)) ?? [:]
     }
 
-    private func saveCache(_ cache: [String: SpineDesignV1], generation: UInt64) throws {
-        guard generation == cacheGeneration else { return }
+    private func saveCache<Value>(
+        _ cache: [String: Value], to kind: CompanionRecordKind<Value>, generation: UInt64
+    ) throws {
+        guard generation == cacheGenerations[kind.recordType] else { return }
         try FileManager.default.createDirectory(
-            at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            at: kind.cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        try encoder.encode(cache).write(to: cacheURL, options: .atomic)
+        try encoder.encode(cache).write(to: kind.cacheURL, options: .atomic)
+    }
+}
+
+/// One companion record type: its CloudKit names, local cache, and validation. Each book has at
+/// most one record, named from the account and book IDs.
+private struct CompanionRecordKind<Value: Codable & Sendable> {
+    let recordType: String
+    let cacheURL: URL
+    /// The DEBUG read-status file name, beside the cache.
+    let statusName: String
+    let recordID: (_ accountID: String, _ bookID: Int) -> CKRecord.ID
+    let bookID: (Value) -> Int
+    let isValid: (Value, _ accountID: String, Book) -> Bool
+}
+
+extension CompanionRecordKind where Value == SpineDesignV1 {
+    static func designs(cacheURL: URL) -> Self {
+        Self(
+            recordType: "SpineDesignV1", cacheURL: cacheURL,
+            statusName: "spine-design-read-status.json",
+            recordID: SpineCloudIdentity.designRecordID, bookID: \.bookID,
+            isValid: { $0.isValid(accountID: $1, book: $2) })
+    }
+}
+
+extension CompanionRecordKind where Value == CoverChoiceV1 {
+    static func coverChoices(cacheURL: URL) -> Self {
+        Self(
+            recordType: "CoverChoiceV1", cacheURL: cacheURL,
+            statusName: "cover-choice-read-status.json",
+            recordID: SpineCloudIdentity.coverChoiceRecordID, bookID: \.bookID,
+            isValid: { $0.isValid(accountID: $1, book: $2) })
     }
 }

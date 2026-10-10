@@ -882,6 +882,42 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(model.cloudStatus.contains("Local data is retained"))
     }
 
+    func testCompanionCoverChoiceLeadsDisplayedCoversWithoutChangingDesignInputs() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let detail = URL(string: "https://covers.example.test/detail.jpg")!
+        let catalog = URL(string: "https://covers.example.test/catalog.jpg")!
+        let chosen = URL(string: "https://covers.example.test/chosen.jpg")!
+        var first = fixture.book(1)
+        first.detailCoverURL = detail
+        first.coverURL = catalog
+        try fixture.save([fixture.snapshot(.hardcover, books: [first, fixture.book(2)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        var designBooks: [Book] = []
+        dependencies.fetchSpineDesigns = { _, books in
+            designBooks = books
+            return [:]
+        }
+        dependencies.fetchCoverChoices = { accountID, _ in
+            [
+                1: CoverChoiceV1(
+                    version: 1, accountID: accountID, bookID: 1, coverURL: chosen,
+                    chosenAt: fixture.time)
+            ]
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        let shown = try XCTUnwrap(model.books.first { $0.id == 1 })
+        XCTAssertEqual(shown.coverURLs, [chosen, detail, catalog])
+        XCTAssertNil(model.books.first { $0.id == 2 }?.chosenCoverURL)
+        XCTAssertEqual(designBooks.first { $0.id == 1 }?.coverURLs, [detail, catalog])
+    }
+
     func testCloudWorklistUsesCompleteHardcoverSnapshotAndClearsWhenDisabled() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -1291,6 +1327,7 @@ private final class LibraryWorkflowFixture {
         dependencies.readSpineWorklist = { nil }
         dependencies.publishSpineWorklist = { _ in }
         dependencies.fetchSpineDesigns = { _, _ in [:] }
+        dependencies.fetchCoverChoices = { _, _ in [:] }
         dependencies.sleep = { _ in
             XCTFail("Unexpected scheduled work")
             throw CancellationError()

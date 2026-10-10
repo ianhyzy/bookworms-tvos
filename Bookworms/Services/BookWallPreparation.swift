@@ -72,7 +72,7 @@ final class BookWallPreparation {
             let cover = try? await ArtworkStore.shared.detailImage(
                 for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             guard !Task.isCancelled else { return }
-            if cover == nil, slot.book.coverURL != nil { missing.append(slot.book) }
+            if cover == nil, !slot.book.coverURLs.isEmpty { missing.append(slot.book) }
             let images = await rasterizer.render(
                 slot: slot, cover: cover, design: designs[slot.book.id], fontStyle: fontStyle)
             guard !Task.isCancelled else { return }

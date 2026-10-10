@@ -102,6 +102,90 @@ final class SpineCloudTests: XCTestCase {
         XCTAssertFalse(unbounded.isValid(accountID: "42", book: book))
     }
 
+    func testCoverChoiceRecordNamesMatchIPhoneContract() {
+        XCTAssertEqual(
+            SpineCloudIdentity.coverChoiceRecordID(accountID: "42", bookID: 7).recordName,
+            "cover-choice-v1-755dac3729029e2e2976249c4e03b160c699ef71f296c346e22183dc23503c33")
+        XCTAssertEqual(
+            SpineCloudIdentity.coverChoiceRecordID(accountID: "reader-1", bookID: 1234).recordName,
+            "cover-choice-v1-83b1cd81db89961507083cb1fbc2f11d5a9e8a15e91f50b048ca7f7c9b2f3b1a")
+    }
+
+    func testCoverChoiceRejectsUnsafeURLsAndOtherBooks() throws {
+        let book = book()
+        func choice(_ url: String, accountID: String = "42", bookID: Int = 7, edition: Int? = 3)
+            -> CoverChoiceV1
+        {
+            CoverChoiceV1(
+                version: 1, accountID: accountID, bookID: bookID, coverURL: URL(string: url)!,
+                editionID: edition, chosenAt: Date(timeIntervalSince1970: 1_780_000_000))
+        }
+        XCTAssertTrue(
+            choice("https://assets.hardcover.app/edition.jpg").isValid(accountID: "42", book: book))
+        XCTAssertTrue(
+            choice("https://assets.hardcover.app/a.jpg", edition: nil)
+                .isValid(accountID: "42", book: book))
+        for url in [
+            "http://assets.hardcover.app/a.jpg", "https://user@assets.hardcover.app/a.jpg",
+            "https://assets.hardcover.app:8443/a.jpg", "https://assets.hardcover.app/a.jpg#x",
+            "https://localhost/a.jpg", "https://nas.local/a.jpg", "https://tv.internal/a.jpg",
+            "https://192.168.1.2/a.jpg", "https://[::1]/a.jpg", "https://intranet/a.jpg",
+        ] {
+            XCTAssertFalse(choice(url).isValid(accountID: "42", book: book), url)
+        }
+        XCTAssertFalse(
+            choice("https://assets.hardcover.app/a.jpg", edition: 0)
+                .isValid(accountID: "42", book: book))
+        XCTAssertFalse(
+            choice("https://assets.hardcover.app/a.jpg", bookID: 8)
+                .isValid(accountID: "42", book: book))
+        XCTAssertFalse(
+            choice("https://assets.hardcover.app/a.jpg").isValid(accountID: "other", book: book))
+
+        // The iPhone omits `editionID` when the cover belongs to no edition.
+        let payload = Data(
+            #"{"version":1,"accountID":"42","bookID":7,"coverURL":"https://assets.hardcover.app/a.jpg","chosenAt":801000000.5}"#
+                .utf8)
+        let decoded = try JSONDecoder().decode(CoverChoiceV1.self, from: payload)
+        XCTAssertNil(decoded.editionID)
+        XCTAssertTrue(decoded.isValid(accountID: "42", book: book))
+    }
+
+    func testCoverChoiceCachesOfflineAndDeletionRestoresDefaultCover() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let book = book()
+        let choice = CoverChoiceV1(
+            version: 1, accountID: "42", bookID: 7,
+            coverURL: URL(string: "https://assets.hardcover.app/edition.jpg")!, editionID: 3,
+            chosenAt: Date(timeIntervalSince1970: 1_780_000_000))
+        let database = FakeSpineDatabase()
+        try await database.put(choice)
+        try await database.put(design(for: book))
+        let store = SpineCloudStore(database: database, cacheURL: cacheURL)
+        let fetched = try await store.coverChoices(accountID: "42", books: [book])
+        XCTAssertEqual(fetched[7], choice)
+        let designs = try await store.designs(accountID: "42", books: [book])
+        XCTAssertEqual(designs.count, 1, "Designs and choices keep separate caches")
+
+        let offline = SpineCloudStore(
+            database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
+        let retained = try await offline.coverChoices(accountID: "42", books: [book])
+        XCTAssertEqual(retained[7], choice)
+
+        await database.deleteCoverChoice(accountID: "42", bookID: 7)
+        let cleared = try await store.coverChoices(accountID: "42", books: [book])
+        XCTAssertTrue(cleared.isEmpty)
+        let cache = try JSONDecoder()
+            .decode(
+                [String: CoverChoiceV1].self,
+                from: Data(contentsOf: directory.appending(path: "cover-choices-v1.json")))
+        XCTAssertTrue(cache.isEmpty)
+        let keptDesigns = try await offline.designs(accountID: "42", books: [book])
+        XCTAssertEqual(keptDesigns.count, 1)
+    }
+
     func testEmptyAccountSelectionPrunesPriorAccountCacheWhileOffline() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let cacheURL = directory.appending(path: "spine-designs.json")
@@ -309,6 +393,23 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
     init(status: CKAccountStatus = .available) { self.status = status }
 
     func accountStatus() -> CKAccountStatus { status }
+
+    func put(_ choice: CoverChoiceV1) throws {
+        let name =
+            SpineCloudIdentity.coverChoiceRecordID(
+                accountID: choice.accountID, bookID: choice.bookID
+            )
+            .recordName
+        payloads[name] = try JSONEncoder().encode(choice)
+        recordTypes[name] = "CoverChoiceV1"
+    }
+
+    func deleteCoverChoice(accountID: String, bookID: Int) {
+        let name =
+            SpineCloudIdentity.coverChoiceRecordID(accountID: accountID, bookID: bookID).recordName
+        payloads[name] = nil
+        recordTypes[name] = nil
+    }
 
     func put(_ design: SpineDesignV1) throws {
         let name =

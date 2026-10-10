@@ -17,7 +17,7 @@ enum CoverSize {
 
 enum CoverImageCacheKey {
     static func key(for book: Book, size: Int) -> String {
-        let urlString = book.detailCoverURL?.absoluteString ?? book.coverURL?.absoluteString ?? ""
+        let urlString = book.preferredCoverURL?.absoluteString ?? ""
         return "\(book.id):\(urlString)@\(size)"
     }
 }
@@ -310,15 +310,15 @@ actor ArtworkStore {
         return data
     }
 
-    /// Returns the preferred cover, `detailCoverURL`, or the alternate `coverURL` if it fails.
-    /// Sync chooses both from the library snapshot; rendering never queries Hardcover for covers.
+    /// Returns the first of `coverURLs` that loads: the reader's chosen cover, `detailCoverURL`,
+    /// then `coverURL`. Sync and companion choices supply them; rendering never queries Hardcover
+    /// for covers.
     func detailData(
         for book: Book, maximumPixelSize: Int = 2400, allowsNetwork: Bool = true
     ) async throws -> Data {
         var attempted = Set<URL>()
         var lastError: Error = URLError(.cannotDecodeContentData)
-        for url in [book.detailCoverURL, book.coverURL].compactMap(\.self)
-        where attempted.insert(url).inserted {
+        for url in book.coverURLs where attempted.insert(url).inserted {
             do {
                 return try await data(
                     for: url, maximumPixelSize: maximumPixelSize, allowsNetwork: allowsNetwork)
@@ -358,7 +358,7 @@ actor ArtworkStore {
             guard !Task.isCancelled else { return result }
             let batch = Array(books[start..<min(start + 4, books.count)])
             await withTaskGroup(of: (Book, Double?, Bool).self) { group in
-                for book in batch where book.detailCoverURL != nil || book.coverURL != nil {
+                for book in batch where !book.coverURLs.isEmpty {
                     group.addTask {
                         guard !Task.isCancelled else { return (book, nil, false) }
                         let data: Data

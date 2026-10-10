@@ -9,6 +9,9 @@ enum BookPresentation {
     /// Draws Book Wall spines from companion `SpineDesignV1` records. Books without a design keep
     /// their cover-derived spines.
     nonisolated static let showsCompanionSpines = true
+    /// Shows the cover a reader chose in a companion app (`CoverChoiceV1`) before the book's
+    /// default covers, in every view and on Top Shelf.
+    nonisolated static let showsCompanionCovers = true
     /// Temporarily hide the Calibre Web Automated source in Settings. Its client, saved
     /// configuration, credentials, and sync remain.
     nonisolated static let offersCWA = false

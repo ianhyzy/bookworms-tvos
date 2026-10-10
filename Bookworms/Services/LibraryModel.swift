@@ -107,6 +107,9 @@ final class LibraryModel {
     private(set) var fontRevision = 0
     /// Validated companion designs for the active Hardcover snapshot, keyed by book ID.
     private(set) var spineDesigns: [Int: SpineDesignV1] = [:]
+    /// Validated companion cover choices for the active Hardcover snapshot, keyed by book ID.
+    /// `rebuildLibrary` applies them to displayed books.
+    @ObservationIgnored private var coverChoices: [Int: CoverChoiceV1] = [:]
     private(set) var presentationRevision = 0
     private(set) var artworkRevision = 0
     private(set) var savedAIKeyAvailable = false
@@ -970,6 +973,15 @@ final class LibraryModel {
                 $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
             }
         allBooks = LibraryMerge.books(from: enabled)
+        if BookPresentation.showsCompanionCovers, let accountID = hardcover?.accountID,
+            !coverChoices.isEmpty
+        {
+            for index in allBooks.indices where allBooks[index].isHardcoverBook {
+                if let choice = coverChoices[allBooks[index].id], choice.accountID == accountID {
+                    allBooks[index].chosenCoverURL = choice.coverURL
+                }
+            }
+        }
         seriesByID = Dictionary(
             (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         updateBrowsingCovers()
@@ -1003,7 +1015,7 @@ final class LibraryModel {
         var seen = Set<URL>()
         let urls = order.compactMap { seriesByID[$0] }.flatMap(\.books)
             .compactMap { entry in
-                owned[entry.id].map { $0.detailCoverURL ?? $0.coverURL } ?? entry.coverURL
+                owned[entry.id].map(\.preferredCoverURL) ?? entry.coverURL
             }
             .filter { seen.insert($0).inserted }
         if urls != browsingCoverURLs { browsingCoverURLs = urls }
@@ -1169,8 +1181,9 @@ final class LibraryModel {
         }
     }
 
-    /// Reads companion designs for the active Hardcover snapshot into the separate local cache.
-    /// One task runs per account and sync date; a newer selection cancels an older read.
+    /// Reads companion designs and cover choices for the active Hardcover snapshot into their
+    /// local caches. One task runs per account and sync date; a newer selection cancels an older
+    /// read.
     private func queueSpineDesignRefresh() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         guard iCloudEnabled, hardcoverEnabled, let accountID = activeHardcoverAccountID,
@@ -1190,24 +1203,32 @@ final class LibraryModel {
         spineDesignTask = Task { [weak self] in
             guard let self else { return }
             let designs = try? await dependencies.fetchSpineDesigns(accountID, snapshot.books)
+            let choices = try? await dependencies.fetchCoverChoices(accountID, snapshot.books)
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
-            // A failed or cancelled read keeps the designs already shown.
+            // A failed or cancelled read keeps the designs and covers already shown.
             if let designs, designs != spineDesigns { spineDesigns = designs }
+            if let choices, choices != coverChoices {
+                coverChoices = choices
+                rebuildLibrary()
+            }
             spineDesignTask = nil
             spineDesignTaskIdentity = nil
         }
     }
 
-    /// Clears the companion design cache once Hardcover is disabled or disconnected.
+    /// Clears the companion design and cover-choice caches once Hardcover is disabled or
+    /// disconnected.
     private func queueSpineCachePrune() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         spineDesignTask?.cancel()
         spineDesigns = [:]
+        coverChoices = [:]
         let requestID = UUID()
         spineDesignTaskIdentity = ("", .distantPast, requestID)
         spineDesignTask = Task { [weak self] in
             guard let self else { return }
             _ = try? await dependencies.fetchSpineDesigns("", [])
+            _ = try? await dependencies.fetchCoverChoices("", [])
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
             spineDesignTask = nil
             spineDesignTaskIdentity = nil
@@ -1217,6 +1238,11 @@ final class LibraryModel {
     /// Waits for the currently queued cloud operation without scheduling another upload.
     func waitForCloudSync() async {
         await cloudTask?.value
+    }
+
+    /// Waits for the current companion design and cover-choice read.
+    func waitForCompanionRecords() async {
+        await spineDesignTask?.value
     }
 
     /// Waits for queued Top Shelf renders and publications.
@@ -1239,7 +1265,7 @@ final class LibraryModel {
             : shelf.prefix(10)
                 .compactMap { book in
                     guard book.isHardcoverBook,
-                        let url = book.detailCoverURL ?? book.coverURL ?? cached[book.id],
+                        let url = book.preferredCoverURL ?? cached[book.id],
                         url.scheme == "https"
                     else { return nil }
                     return TopShelfBook(

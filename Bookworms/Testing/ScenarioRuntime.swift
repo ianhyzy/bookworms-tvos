@@ -202,6 +202,7 @@
                 ProcessInfo.processInfo.arguments.contains("--test-companion-designs")
                     ? ScenarioFixtures.designs(accountID: accountID, books: books) : [:]
             }
+            dependencies.fetchCoverChoices = { _, _ in [:] }
             dependencies.now = { [self] in date }
             dependencies.readTopShelf = { [] }
             dependencies.writeTopShelf = { _ in }

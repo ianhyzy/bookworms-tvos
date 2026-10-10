@@ -44,6 +44,9 @@ struct LibraryDependencies {
     var fetchSpineDesigns: @MainActor (String, [Book]) async throws -> [Int: SpineDesignV1] = {
         try await SpineCloudStore.shared.designs(accountID: $0, books: $1)
     }
+    var fetchCoverChoices: @MainActor (String, [Book]) async throws -> [Int: CoverChoiceV1] = {
+        try await SpineCloudStore.shared.coverChoices(accountID: $0, books: $1)
+    }
     var now: () -> Date = { Date() }
     var sleep: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     var readTopShelf: () -> [TopShelfBook] = { TopShelfSnapshot.read() }

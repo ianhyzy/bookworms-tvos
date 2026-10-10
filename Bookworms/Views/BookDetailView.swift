@@ -892,7 +892,7 @@ private struct SeriesPopup: View {
         let missing = series.books.enumerated()
             .sorted { abs($0.offset - current) < abs($1.offset - current) }
             .compactMap { offset, entry in
-                libraryBook(entry.id).map { $0.detailCoverURL ?? $0.coverURL } ?? entry.coverURL
+                libraryBook(entry.id).map(\.preferredCoverURL) ?? entry.coverURL
             }
         for start in stride(from: 0, to: missing.count, by: 6) {
             guard !Task.isCancelled else { return }

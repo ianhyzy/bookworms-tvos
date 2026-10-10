@@ -18,7 +18,7 @@ Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the s
 | `AIStyleGenerator`, `GoogleFontLibrary` | Match covers against the full font catalog and download licensed fonts for retained AI designs and Book Wall companion designs. |
 | `AutomaticSpineGeneration`, `AIStyleStore` | Select missing designs, record attempt cooldowns, and retain completed designs. |
 | `CloudLibraryStore`, `SourceLibraryStore` | Merge cloud archives and persist source snapshots and sync schedules. |
-| `SpineCloudStore` | Publish the complete Hardcover worklist, and validate and cache companion designs for Book Wall. |
+| `SpineCloudStore` | Publish the complete Hardcover worklist, and validate and cache companion designs for Book Wall and companion cover choices for every view. |
 | `TopShelfSnapshot`, `ContentProvider` | Share public cover metadata with the Home Screen extension and open book details through validated links. |
 
 Source code is in [Bookworms](../Bookworms), [BookwormsTopShelf](../BookwormsTopShelf), and [Shared](../Shared). The [XcodeGen configuration](../project.yml) defines targets, signing identifiers, and test plans.
@@ -30,7 +30,7 @@ Source code is in [Bookworms](../Bookworms), [BookwormsTopShelf](../BookwormsTop
 3. Merge source metadata and compute the selected shelves and shared-book intersections.
 4. Prepare covers and feed avatars for enabled bounded collections using existing cover URLs. Book Wall preparation starts from the loaded current-year snapshot; opening the wall waits if its textures and models are not ready. Share source downloads and persist one reusable image per URL.
 5. Mount library views. Paging, details, and ambient playback read caches without network calls; selecting the details rating histogram fetches community reviews.
-6. Save snapshots and queue cloud updates. After a complete Hardcover snapshot reaches CloudKit, publish its account-specific spine worklist. With iCloud storage on, read and cache companion designs separately at launch, on activation, and after each cloud save. Spine generation for the retained views and spine font restoration remain disabled; their implementation and data are retained. Book Wall draws spines from the active companion designs and generates the rest locally from cover pixels and genre metadata.
+6. Save snapshots and queue cloud updates. After a complete Hardcover snapshot reaches CloudKit, publish its account-specific spine worklist. With iCloud storage on, read and cache companion designs and cover choices separately at launch, on activation, and after each cloud save. A cover choice becomes the displayed book's first cover. Spine generation for the retained views and spine font restoration remain disabled; their implementation and data are retained. Book Wall draws spines from the active companion designs and generates the rest locally from cover pixels and genre metadata.
 
 Service actors own asynchronous I/O and caches. The main-actor library model publishes UI state. Internal task handles and caches are excluded from Observation to avoid unrelated view updates.
 

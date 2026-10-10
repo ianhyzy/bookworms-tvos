@@ -8,7 +8,7 @@ The iPhone and Mac spine companions design book spines from Hardcover covers and
 | --- | --- | --- |
 | iPhone app | `~/Documents/BookwormsApps/ios`, private GitHub repository `ianhyzy/bookworms-ios` | Generates designs with Private Cloud Compute (generator `ios-pcc-v1`). Its designs add the optional `fontFamily`, `fontPostScriptName`, `instanceWeight`, and `provenance` fields. |
 | Mac app (**Bookworms Spines**) | `~/Documents/BookwormsApps/macos`, private GitHub repository `ianhyzy/bookworms-macos` | About 1,300 lines of Swift with contract tests. Committed on `main`. |
-| tvOS integration | Branch `spine-companion`, worktree `~/Developer/worktrees/bookworms-tvos-spine-companion` | `SpineCloudStore`, worklist publication, design fetch and cache, and [Book Wall companion designs](../BOOK_WALL.md#companion-designs) behind `BookPresentation.showsCompanionSpines`. |
+| tvOS integration | Branch `spine-companion`, worktree `~/Developer/worktrees/bookworms-tvos-spine-companion` | `SpineCloudStore`, worklist publication, design and cover-choice fetch and caches, [Book Wall companion designs](../BOOK_WALL.md#companion-designs) behind `BookPresentation.showsCompanionSpines`, and companion cover choices in every view behind `showsCompanionCovers`. |
 | Original tvOS integration | Branch `spine-display`, commit `5c58281` | The port supersedes it. Its worktree is removed; keep the branch until `spine-companion` merges. |
 
 ## How the companion works
@@ -49,7 +49,7 @@ The iPhone app validates like the Mac, plus the optional font fields, which the 
 
 1. **Signed end-to-end check**: a signed iPhone or Mac and the Apple TV on one iCloud account. Confirm the worklist lists every book, a companion design reaches the TV cache with its font fields, and Book Wall shows it while other views show covers. See [testing](../TESTING.md).
 2. **Privacy policy**: Book Wall now requests Google Fonts faces. Update the published policy and the [policy text](../RELEASING.md#apple-tv-privacy-policy-text) before uploading a candidate with `showsCompanionSpines` on.
-3. **Deploy `SpineWorklistV1` and `SpineDesignV1`** (each with a `payload` data field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
+3. **Deploy `SpineWorklistV1`, `SpineDesignV1`, and `CoverChoiceV1`** (each with a `payload` Bytes field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
 4. **Design refresh cadence**: the TV refetches every design record on launch, activation, and after each cloud sync. A new design for a current-year book rebuilds Book Wall, even while it is on screen. Consider a `SpineDesignV1` subscription with silent push, as the Mac does for the worklist.
 5. **Latest design wins**: the owner wants each resource to use its latest version, whichever app made it. The Apple TV already does this for designs. The iPhone regenerates any design whose generator is not `ios-pcc-v1`, and the Mac regenerates any design whose generator is not its current `mac-foundation-models-v2`, so the companions overwrite each other. Change both to keep a valid design whose work-item and cover hashes still match.
 6. **Validator alignment**: decide whether the TV should adopt the Mac's lowercase-only `coverHash` and the account ID length bound.
