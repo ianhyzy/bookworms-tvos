@@ -39,7 +39,7 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 | `coverHash` format | 64 hex digits, either case | 64 lowercase hex digits | None; the Mac writes lowercase. The TV is looser. |
 | `workItemHash` format | Must equal the TV's own lowercase SHA-256 | 64 lowercase hex digits | None; the TV check is stricter and binds the design to the book. |
 | Color hex case | `#` + 6 uppercase hex digits | Same | None; the Mac emits uppercase. |
-| `generatorVersion` | Any non-blank string | Must equal `mac-foundation-models-v1` to skip regeneration | None on the TV. |
+| `generatorVersion` | Any non-blank string | Must equal `mac-foundation-models-v2` to skip regeneration | None on the TV. |
 | Archive size the Mac reads | No bound on the TV | At most 50 MB | A very large archive stops the Mac; the TV does not warn. |
 
 The iPhone app validates like the Mac, plus the optional font fields, which the TV checks the same way. Unlike the TV, the iPhone keeps showing a design whose work-item hash no longer matches the book, so after a metadata edit the TV shows the local spine until a companion regenerates the design.
@@ -51,7 +51,7 @@ The iPhone app validates like the Mac, plus the optional font fields, which the 
 2. **Privacy policy**: Book Wall now requests Google Fonts faces. Update the published policy and the [policy text](../RELEASING.md#apple-tv-privacy-policy-text) before uploading a candidate with `showsCompanionSpines` on.
 3. **Deploy `SpineWorklistV1` and `SpineDesignV1`** (each with a `payload` data field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
 4. **Design refresh cadence**: the TV refetches every design record on launch, activation, and after each cloud sync. A new design for a current-year book rebuilds Book Wall, even while it is on screen. Consider a `SpineDesignV1` subscription with silent push, as the Mac does for the worklist.
-5. **Latest design wins**: the owner wants each resource to use its latest version, whichever app made it. The Apple TV already does this for designs. The iPhone regenerates any design whose generator is not `ios-pcc-v1`, and the Mac regenerates any design whose generator is not `mac-foundation-models-v1`, so the companions overwrite each other. Change both to keep a valid design whose work-item and cover hashes still match.
+5. **Latest design wins**: the owner wants each resource to use its latest version, whichever app made it. The Apple TV already does this for designs. The iPhone regenerates any design whose generator is not `ios-pcc-v1`, and the Mac regenerates any design whose generator is not its current `mac-foundation-models-v2`, so the companions overwrite each other. Change both to keep a valid design whose work-item and cover hashes still match.
 6. **Validator alignment**: decide whether the TV should adopt the Mac's lowercase-only `coverHash` and the account ID length bound.
 
 ## Commands
