@@ -21,6 +21,13 @@ final class LiveServiceTests: XCTestCase {
         do {
             let books = try await HardcoverClient(session: session).fetchBooks(token: token)
             assertDecodedContract(books, source: .hardcover)
+            // Followed readers and community reviews both read the account's block list first.
+            let social = HardcoverSocialClient(client: HardcoverClient(session: session))
+            let owner = try await social.owner(token: token)
+            _ = try await social.following(owner: owner.id, token: token)
+            if let book = books.first {
+                _ = try await social.reviews(book: book.id, token: token)
+            }
         } catch {
             // Raw errors and decoded responses can contain private library or server data.
             XCTFail("Hardcover compatibility check failed: " + UserFacingError.message(error))

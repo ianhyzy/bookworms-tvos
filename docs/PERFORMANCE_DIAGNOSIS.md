@@ -144,7 +144,7 @@ After confirming slot overlap, compare `--variant wall-no-ibl` and `--variant wa
 
 Keep dated manifests, summaries, test results, and findings under `.local/performance-diagnosis/`. Traces and their exported tables take about 240 MB per run; delete them when the analysis is done with `python3 scripts/profile-book-wall.py --prune`. `profile-device.py` deletes the kernel-trace buffer, 1–2 GB, that `xctrace` leaves in the Mac's temporary folder after each recording. Label each finding confirmed, probable, not reproduced, or ruled out under stated conditions. List unperformed scenarios and the evidence needed to resolve uncertainty.
 
-Restore the ordinary Release app, preserve its data, and remove only this project's UI-test runner. Keep diagnostic switches disabled in distributable builds. No TestFlight upload is part of this procedure.
+Restore the ordinary Release app, preserve its data, and remove only this project's UI-test runner. Keep diagnostic switches disabled in distributable builds. No App Store upload is part of this procedure.
 
 ## References
 

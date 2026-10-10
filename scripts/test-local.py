@@ -5,6 +5,7 @@ import argparse
 import datetime
 import hashlib
 import html
+import importlib.util
 import json
 import math
 import os
@@ -17,6 +18,9 @@ import sys
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("source_identity", ROOT / "scripts/source-identity.py")
+sources = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sources)
 REMAINING_CHECKS = [
     "Live Hardcover/CWA authentication and response compatibility (separate read-only checks).",
     "Physical Apple TV performance, memory pressure, and Siri Remote gestures.",
@@ -73,19 +77,7 @@ def save_json(path, value):
 
 def source_identity():
     """Include tracked and untracked source, while excluding ignored build artifacts."""
-    names = run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], capture_output=True
-    ).stdout.split(b"\0")
-    digest = hashlib.sha256()
-    for name in sorted(set(n for n in names if n)):
-        path = ROOT / os.fsdecode(name)
-        if path.is_file():
-            digest.update(name + b"\0" + path.read_bytes() + b"\0")
-    return {
-        "commit": command_text(["git", "rev-parse", "HEAD"]),
-        "status": command_text(["git", "status", "--porcelain"]),
-        "sha256": digest.hexdigest(),
-    }
+    return sources.source_identity(ROOT, environment=offline_environment())
 
 
 def strip_swift_literals(source):

@@ -79,6 +79,31 @@ enum RemoteNavigation {
             file: file, line: line)
     }
 
+    /// Requires one stable focus update to one of the explicitly permitted entry items.
+    ///
+    /// Use only when a wide source overlaps multiple items in the destination section, so
+    /// native geometric selection can legitimately enter at either item.
+    static func press(
+        _ direction: XCUIRemote.Button, in app: XCUIApplication,
+        expecting expected: [XCUIElement], file: StaticString = #filePath, line: UInt = #line
+    ) {
+        guard !expected.isEmpty else {
+            XCTFail("A navigation check needs a permitted destination.", file: file, line: line)
+            return
+        }
+        let before = transitions(app)
+        XCUIRemote.shared.press(direction)
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in expected.contains(where: isFocused) }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [focused], timeout: 5), .completed,
+            "Expected focus on one of \(expected.map(\.identifier))", file: file, line: line)
+        assertSettled(app, after: before, expectedUpdates: 1, file: file, line: line)
+        XCTAssertTrue(
+            expected.contains(where: isFocused), "Focus left the permitted section without input",
+            file: file, line: line)
+    }
+
     /// Presses `direction` where no focusable item exists and requires that focus does not move.
     static func pressWithoutMoving(
         _ direction: XCUIRemote.Button, in app: XCUIApplication, from current: XCUIElement,

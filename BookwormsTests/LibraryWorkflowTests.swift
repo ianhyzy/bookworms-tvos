@@ -1,3 +1,4 @@
+import Observation
 import XCTest
 import os
 
@@ -5,6 +6,306 @@ import os
 
 @MainActor
 final class LibraryWorkflowTests: XCTestCase {
+    func testHardcoverSetupResetRemovesLocalAccountAndDefersCloudRestore() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "hasCompletedWelcome")
+        fixture.defaults.set(false, forKey: "hardcoverEnabled")
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.set(fixture.time, forKey: "syncAttempt.hardcover")
+        fixture.defaults.set(fixture.time, forKey: "syncSuccess.hardcover")
+        fixture.defaults.set(["hardcover": "Saved connection error"], forKey: "sourceErrors")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        let dependencies = fixture.dependencies()
+        let legacy = LibrarySnapshot(books: [fixture.book(1)], syncedAt: fixture.time)
+        try JSONEncoder().encode(legacy).write(to: dependencies.legacySnapshotURL)
+        let model = LibraryModel(dependencies: dependencies)
+
+        try await model.resetHardcoverSetup()
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertTrue(dependencies.sourceStore.load().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dependencies.legacySnapshotURL.path))
+        for key in [
+            "activeHardcoverAccountID", "hasCompletedWelcome", "syncAttempt.hardcover",
+            "syncSuccess.hardcover",
+        ] {
+            XCTAssertNil(fixture.defaults.object(forKey: key))
+        }
+        XCTAssertNil(model.sourceErrors["hardcover"])
+        XCTAssertTrue(model.hardcoverEnabled)
+        XCTAssertTrue(model.iCloudEnabled, "The reset preserves the owner's storage preference.")
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertTrue(model.books.isEmpty)
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertFalse(model.hasCompletedWelcome)
+        XCTAssertTrue(model.shouldOfferWelcome)
+        XCTAssertEqual(model.cloudStatus, "iCloud storage waits until setup finishes.")
+    }
+
+    func testHardcoverSetupResetRetainsCWAArtworkDesignsAndDisplaySettings() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "hasCompletedWelcome")
+        fixture.defaults.set(true, forKey: "cwaEnabled")
+        fixture.defaults.set("light", forKey: "appearance")
+        fixture.defaults.set(15, forKey: "bookCount")
+        fixture.defaults.set(fixture.time, forKey: "syncAttempt.cwa")
+        fixture.defaults.set(fixture.time, forKey: "syncSuccess.cwa")
+        fixture.defaults.set(
+            ["hardcover": "Hardcover error", "cwa": "CWA error"], forKey: "sourceErrors")
+        fixture.secrets["cwa-password"] = "fictional-password"
+        try fixture.save([
+            fixture.snapshot(.hardcover, books: [fixture.book(1)]),
+            fixture.snapshot(.cwa, books: [fixture.book(2)]),
+        ])
+        let dependencies = fixture.dependencies()
+        let record = AIStyleRecord(
+            bookID: 1, style: .fallback(for: fixture.book(1)),
+            font: DownloadedFont(
+                family: "Fixture", postScriptName: "Fixture-Regular", filePath: "fixture.ttf",
+                licensePath: "fixture-license.txt"),
+            weight: 400, provider: .openAI, model: "fixture-model", coverHash: "fixture-cover",
+            generatedAt: fixture.time, rationale: "Fictional saved design")
+        try dependencies.styleStore.save([1: record])
+        let designs = try Data(contentsOf: dependencies.styleStore.cacheURL)
+        let artworkURL = fixture.directory.appending(path: "artwork/retained-cover")
+        try FileManager.default.createDirectory(
+            at: artworkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let artwork = Data("Fictional retained artwork".utf8)
+        try artwork.write(to: artworkURL)
+        let model = LibraryModel(dependencies: dependencies)
+
+        try await model.resetHardcoverSetup()
+        XCTAssertEqual(dependencies.sourceStore.load().map(\.source), [.cwa])
+        XCTAssertEqual(dependencies.sourceStore.load().first?.books.map(\.id), [2])
+        XCTAssertEqual(fixture.secrets["cwa-password"], "fictional-password")
+        XCTAssertEqual(model.cwaConfiguration, fixture.configuration)
+        XCTAssertTrue(model.cwaEnabled)
+        XCTAssertEqual(fixture.defaults.object(forKey: "syncAttempt.cwa") as? Date, fixture.time)
+        XCTAssertEqual(fixture.defaults.object(forKey: "syncSuccess.cwa") as? Date, fixture.time)
+        XCTAssertEqual(model.sourceErrors["cwa"], "CWA error")
+        XCTAssertNil(model.sourceErrors["hardcover"])
+        XCTAssertEqual(fixture.defaults.string(forKey: "appearance"), "light")
+        XCTAssertEqual(model.bookCount, 15)
+        XCTAssertEqual(try Data(contentsOf: artworkURL), artwork)
+        XCTAssertEqual(try Data(contentsOf: dependencies.styleStore.cacheURL), designs)
+        XCTAssertEqual(fixture.defaults.data(forKey: AIStyleStore.key), designs)
+        await model.start()
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertFalse(model.shouldOfferWelcome, "A retained CWA account still suppresses setup.")
+        XCTAssertEqual(dependencies.styleStore.load()[1]?.rationale, record.rationale)
+    }
+
+    func testHardcoverSetupResetStopsWhenCredentialRemovalFails() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "hasCompletedWelcome")
+        fixture.defaults.set(false, forKey: "hardcoverEnabled")
+        fixture.defaults.set(fixture.time, forKey: "syncAttempt.hardcover")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.removeCredential = { _ in }
+        let legacy = LibrarySnapshot(books: [fixture.book(1)], syncedAt: fixture.time)
+        try JSONEncoder().encode(legacy).write(to: dependencies.legacySnapshotURL)
+        let model = LibraryModel(dependencies: dependencies)
+
+        do {
+            try await model.resetHardcoverSetup()
+            XCTFail("A retained Keychain credential must stop the reset.")
+        } catch {
+            XCTAssertFalse(error.localizedDescription.isEmpty)
+        }
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_original")
+        XCTAssertEqual(dependencies.sourceStore.load().first?.books.map(\.id), [1])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dependencies.legacySnapshotURL.path))
+        XCTAssertEqual(
+            fixture.defaults.string(forKey: "activeHardcoverAccountID"), fixture.hardcoverAccountID)
+        XCTAssertTrue(model.hasCompletedWelcome)
+        XCTAssertFalse(model.hardcoverEnabled)
+        XCTAssertEqual(
+            fixture.defaults.object(forKey: "syncAttempt.hardcover") as? Date, fixture.time)
+        await model.start()
+        XCTAssertTrue(model.hardcoverConnected)
+        XCTAssertFalse(model.shouldOfferWelcome)
+    }
+
+    func testHardcoverSetupResetResumesCloudWhenRetainedCWAStateSkipsWelcome() async throws {
+        for retainsCredential in [true, false] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            if retainsCredential {
+                fixture.secrets["cwa-password"] = "fictional-password"
+            }
+            var snapshots = [fixture.snapshot(.hardcover, books: [fixture.book(1)])]
+            if !retainsCredential {
+                snapshots.append(fixture.snapshot(.cwa, books: [fixture.book(2)]))
+            }
+            try fixture.save(snapshots)
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            var cloudCalls = 0
+            dependencies.syncCloud = { archive in
+                cloudCalls += 1
+                return archive
+            }
+            let model = LibraryModel(dependencies: dependencies)
+
+            try await model.resetHardcoverSetup()
+            await model.start()
+            await model.waitForCloudSync()
+
+            XCTAssertFalse(model.shouldOfferWelcome)
+            XCTAssertFalse(model.hasCompletedWelcome)
+            XCTAssertNil(fixture.secrets["hardcover-token"])
+            XCTAssertEqual(cloudCalls, 1, "Retained CWA state must not strand iCloud behind setup.")
+            XCTAssertTrue(model.cloudStatus.hasPrefix("Saved to iCloud."))
+            XCTAssertEqual(model.hasCWAPassword, retainsCredential)
+            XCTAssertEqual(
+                dependencies.sourceStore.load().map(\.source), retainsCredential ? [] : [.cwa])
+        }
+    }
+
+    func testWelcomeWaitsForStartupAndPersistsExplicitCompletion() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        let dependencies = fixture.dependencies()
+        let model = LibraryModel(dependencies: dependencies)
+        XCTAssertFalse(model.shouldOfferWelcome, "Startup must inspect saved state before setup.")
+        await model.start()
+        XCTAssertTrue(model.shouldOfferWelcome)
+        XCTAssertFalse(model.hasCompletedWelcome)
+        model.completeWelcome()
+        XCTAssertFalse(model.shouldOfferWelcome)
+        XCTAssertTrue(fixture.defaults.bool(forKey: "hasCompletedWelcome"))
+
+        let restored = LibraryModel(dependencies: dependencies)
+        await restored.start()
+        XCTAssertFalse(restored.shouldOfferWelcome)
+        XCTAssertTrue(restored.hasCompletedWelcome)
+    }
+
+    func testWelcomeSkipsSavedAccountsEvenWhenTheirSourcesAreDisabled() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(false, forKey: "hardcoverEnabled")
+        let hardcover = LibraryModel(dependencies: fixture.dependencies())
+        await hardcover.start()
+        XCTAssertTrue(hardcover.hardcoverConnected)
+        XCTAssertFalse(hardcover.isConnected)
+        XCTAssertFalse(hardcover.shouldOfferWelcome)
+
+        fixture.secrets.removeAll()
+        fixture.secrets["cwa-password"] = "fictional-password"
+        fixture.defaults.set(false, forKey: "cwaEnabled")
+        let cwa = LibraryModel(dependencies: fixture.dependencies())
+        await cwa.start()
+        XCTAssertTrue(cwa.hasCWAPassword)
+        XCTAssertFalse(cwa.isConnected)
+        XCTAssertFalse(cwa.shouldOfferWelcome)
+    }
+
+    func testWelcomeSkipsSavedEmptySnapshotWithoutCredentials() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        try fixture.save([fixture.snapshot(.hardcover, books: [])])
+        let model = LibraryModel(dependencies: fixture.dependencies())
+        await model.start()
+        XCTAssertTrue(model.books.isEmpty)
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertFalse(model.shouldOfferWelcome)
+        XCTAssertFalse(model.hasCompletedWelcome)
+    }
+
+    func testSampleChoiceCompletesWelcomeWithoutProviderRequests() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        let dependencies = fixture.dependencies()
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.shouldOfferWelcome)
+        model.showSample()
+        XCTAssertTrue(model.isSample)
+        XCTAssertFalse(model.books.isEmpty)
+        XCTAssertTrue(model.hasCompletedWelcome)
+        XCTAssertFalse(model.shouldOfferWelcome)
+        XCTAssertTrue(dependencies.sourceStore.load().isEmpty)
+
+        let restored = LibraryModel(dependencies: dependencies)
+        await restored.start()
+        XCTAssertTrue(restored.hasCompletedWelcome)
+        XCTAssertFalse(restored.shouldOfferWelcome)
+    }
+
+    func testFirstConnectionReportsValidationAndDownloadUntilSaved() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        let validation = ControlledLibraryResponse<String>("Account validation started")
+        let download = ControlledLibraryResponse<HardcoverLibrary>("Library download started")
+        var dependencies = fixture.dependencies()
+        dependencies.validateHardcover = { _ in try await validation.value() }
+        dependencies.fetchHardcover = { _ in try await download.value() }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let connection = Task { await model.connect("hc_pat_fictional_original") }
+        await fulfillment(of: [validation.started], timeout: 5)
+        XCTAssertTrue(model.isLoading)
+        if case .validatingAccount? = model.hardcoverConnectionPhase {
+        } else {
+            XCTFail("Account validation must have its own progress phase.")
+        }
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertFalse(model.hasCompletedWelcome)
+        validation.resolve(fixture.hardcoverAccountID)
+        await fulfillment(of: [download.started], timeout: 5)
+        if case .downloadingLibrary? = model.hardcoverConnectionPhase {
+        } else {
+            XCTFail("Library download must have its own progress phase.")
+        }
+        XCTAssertTrue(model.books.isEmpty)
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        download.resolve(
+            HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: [fixture.book(1)]))
+        let connected = await connection.value
+        XCTAssertTrue(connected)
+        XCTAssertFalse(model.isLoading)
+        XCTAssertNil(model.hardcoverConnectionPhase)
+        XCTAssertTrue(model.hardcoverConnected)
+        XCTAssertEqual(model.books.map(\.id), [1])
+        XCTAssertEqual(dependencies.sourceStore.load().first?.books.map(\.id), [1])
+        XCTAssertFalse(
+            model.hasCompletedWelcome, "The welcome view completes setup after artwork is ready.")
+    }
+
+    func testFailedFirstDownloadPreservesUncompletedWelcomeAndClearsProgress() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        var dependencies = fixture.dependencies()
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        dependencies.fetchHardcover = { _ in throw URLError(.notConnectedToInternet) }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let connected = await model.connect("hc_pat_fictional_original")
+        XCTAssertFalse(connected)
+        XCTAssertFalse(model.isLoading)
+        XCTAssertNil(model.hardcoverConnectionPhase)
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertTrue(dependencies.sourceStore.load().isEmpty)
+        XCTAssertNotNil(model.message)
+        XCTAssertTrue(model.shouldOfferWelcome)
+        XCTAssertFalse(model.hasCompletedWelcome)
+    }
+
     func testCachedOfflineStartupRetainsBooksAndErrorAcrossRelaunch() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -291,6 +592,61 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(model.hardcoverConnected)
         XCTAssertEqual(validations, 1)
         XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_replacement")
+    }
+
+    func testDeviceApprovalDuringCWARefreshClearsConsumedCodeAndOffersRetry() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        fixture.secrets["cwa-password"] = "fictional-password"
+        fixture.defaults.set(true, forKey: "cwaEnabled")
+        try fixture.save([fixture.snapshot(.cwa, books: [fixture.book(1)])])
+        let authorization = ControlledLibraryResponse<HardcoverDevicePollResult>(
+            "Device approval requested")
+        let download = ControlledLibraryResponse<[Book]>("CWA refresh started")
+        var dependencies = fixture.dependencies()
+        dependencies.fetchCWA = { _, _ in try await download.value() }
+        dependencies.requestHardcoverDeviceAuth = {
+            HardcoverDeviceAuth(
+                deviceCode: "fixture_device_code", userCode: "TEST-CODE",
+                verificationURI: URL(string: "https://hardcover.app/link")!,
+                verificationURIComplete: URL(string: "https://hardcover.app/link?c=TESTCODE")!,
+                expiresIn: 900, interval: 1)
+        }
+        dependencies.pollHardcoverDeviceToken = { _ in try await authorization.value() }
+        dependencies.sleep = { _ in }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.startHardcoverDeviceAuth()
+        await fulfillment(of: [authorization.started], timeout: 5)
+        let refresh = Task { await model.refresh(manual: true) }
+        await fulfillment(of: [download.started], timeout: 5)
+        XCTAssertTrue(model.isLoading)
+        let retryShown = expectation(description: "Consumed device code replaced by retry")
+        withObservationTracking {
+            _ = model.hardcoverDeviceAuthMessage
+        } onChange: {
+            retryShown.fulfill()
+        }
+
+        authorization.resolve(.success(token: "hc_pat_fictional_replacement"))
+        await fulfillment(of: [retryShown], timeout: 5)
+
+        XCTAssertNil(model.hardcoverDeviceAuth)
+        XCTAssertFalse(model.hardcoverDeviceAuthLoading)
+        XCTAssertEqual(
+            model.hardcoverDeviceAuthMessage,
+            "A library sync is finishing. Request a new link code to connect.")
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertNil(model.hardcoverConnectionPhase)
+        download.resolve([fixture.book(2)])
+        await refresh.value
+        XCTAssertFalse(model.isLoading)
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertEqual(dependencies.sourceStore.load().map(\.source), [.cwa])
+        XCTAssertNotNil(
+            model.hardcoverDeviceAuthMessage, "Finishing the refresh must preserve retry.")
     }
 
     func testRejectedCWAReplacementRetainsAccountAndCredential() async throws {

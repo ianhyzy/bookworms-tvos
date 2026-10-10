@@ -2,16 +2,21 @@
 """Prepare, validate, or explicitly upload a reproducible tvOS release candidate."""
 import argparse
 import datetime
-import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import plistlib
 import re
 import subprocess
+import sys
 import tarfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("source_identity", ROOT / "scripts/source-identity.py")
+sources = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sources)
 
 
 def output(*args):
@@ -19,18 +24,11 @@ def output(*args):
 
 
 def source_files():
-    names = subprocess.check_output(
-        ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=ROOT)
-    return sorted(set(n.decode() for n in names.split(b'\0') if n))
+    return sources.source_files(ROOT)
 
 
-def source_digest():
-    digest = hashlib.sha256()
-    for name in source_files():
-        path = ROOT / name
-        if path.is_file():
-            digest.update(name.encode() + b'\0' + path.read_bytes() + b'\0')
-    return digest.hexdigest()
+def source_digest(names=None):
+    return sources.source_digest(ROOT, names)
 
 
 def run(args, log):
@@ -63,6 +61,57 @@ def authentication():
     return []
 
 
+def release_tests(candidate, data):
+    """Run one detached Local worker and require its exact-source handoff."""
+    dispatch = output(sys.executable, 'scripts/test-worker.py', '--detach')
+    (candidate / 'tests.log').write_text(dispatch + '\n')
+    print(dispatch, flush=True)
+    match = re.fullmatch(
+        r'Started local worker PID (\d+)\. Read (.+) after it finishes\. '
+        r'No model supervision is needed\.', dispatch)
+    if not match:
+        raise SystemExit('Test worker did not provide a PID and dispatch log.')
+    pid = int(match.group(1))
+    dispatch_path = Path(match.group(2)).resolve()
+    worker_root = (ROOT / '.local/test-worker').resolve()
+    if not dispatch_path.is_relative_to(worker_root):
+        raise SystemExit('Test worker dispatch log is outside its evidence directory.')
+    data['testWorkerPID'] = pid
+    data['testWorkerDispatch'] = str(dispatch_path)
+    save(candidate / 'candidate.json', data)
+    # The release command is tracked by the agent harness while the worker runs.
+    # Do not inspect worker logs during either bounded two-hour wait.
+    for _ in range(480):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(30)
+    else:
+        raise SystemExit('Test worker is still running; preserve its PID and evidence.')
+    result = re.search(r'^(passed|failed|blocked): (.+/handoff\.md)$',
+                       dispatch_path.read_text(), re.MULTILINE)
+    if not result:
+        raise SystemExit('Test worker exited without a compact handoff; inspect its dispatch log.')
+    handoff_path = Path(result.group(2)).resolve()
+    if not handoff_path.is_relative_to(worker_root):
+        raise SystemExit('Test worker handoff is outside its evidence directory.')
+    handoff = json.loads(handoff_path.with_suffix('.json').read_text())
+    data['testWorkerHandoff'] = str(handoff_path)
+    data['tests'] = dict(status=handoff.get('status'), profile=handoff.get('profile'),
+                         counts=handoff.get('counts'))
+    save(candidate / 'candidate.json', data)
+    valid = (result.group(1) == 'passed' and handoff.get('schema_version') == 1
+             and handoff.get('status') == 'passed' and handoff.get('profile') == 'local'
+             and handoff.get('runner_exit_code') == 0 and not handoff.get('failures')
+             and bool(handoff.get('runs')))
+    for key in ('source', 'source_after'):
+        valid = valid and (handoff.get(key) or {}).get('sha256') == data['sourceDigest']
+    if not valid or source_digest() != data['sourceDigest']:
+        raise SystemExit(f'Release tests did not pass for the candidate sources: {handoff_path}')
+    print('Release tests passed:', handoff_path, flush=True)
+
+
 def prepare(args):
     spec = ROOT / 'project.yml'
     text = spec.read_text()
@@ -75,22 +124,21 @@ def prepare(args):
     candidate = ROOT / '.local/releases' / f'{version}-{build}-{timestamp}'
     candidate.mkdir(parents=True, exist_ok=False)
     data = dict(version=version, build=build, highestUploadedBuild=args.highest_uploaded_build,
-                status='preparing', sourceCommit=output('git', 'rev-parse', 'HEAD'),
+                status='preparing', sourceCommit=sources.git_text(ROOT, 'rev-parse', 'HEAD'),
                 xcode=output('xcodebuild', '-version'), xcodegen=output('xcodegen', '--version'))
     save(candidate / 'candidate.json', data)
     spec.write_text(re.sub(r"CURRENT_PROJECT_VERSION: '\d+'",
                           f"CURRENT_PROJECT_VERSION: '{build}'", text, count=1))
     run(['xcodegen', 'generate'], candidate / 'generate.log')
-    data['sourceDigest'] = source_digest()
-    data['sourceStatus'] = output('git', 'status', '--short')
+    names = source_files()
+    data['sourceDigest'] = source_digest(names)
+    data['sourceStatus'] = sources.git_text(ROOT, 'status', '--short')
     with tarfile.open(candidate / 'source-snapshot.tar.gz', 'w:gz') as snapshot:
-        for name in source_files():
+        for name in names:
             if (ROOT / name).is_file():
                 snapshot.add(ROOT / name, arcname=name)
     save(candidate / 'candidate.json', data)
-    run(['python3', 'scripts/test-local.py'], candidate / 'tests.log')
-    data['tests'] = 'passed; result bundle path recorded in tests.log'
-    save(candidate / 'candidate.json', data)
+    release_tests(candidate, data)
     run(['xcodebuild', '-project', 'Bookworms.xcodeproj', '-scheme', 'BookwormsDevice',
          '-configuration', 'Release', '-destination', 'generic/platform=tvOS',
          'CLANG_ENABLE_CODE_COVERAGE=NO', '-derivedDataPath', '.build-release',
@@ -112,7 +160,7 @@ def distribute(args):
     if args.command == 'upload':
         if data['status'] != 'validated':
             raise SystemExit('Run validate on this candidate before uploading.')
-        if output('git', 'status', '--porcelain'):
+        if sources.git_text(ROOT, 'status', '--porcelain'):
             raise SystemExit('Commit the candidate sources before uploading; working tree is dirty.')
         if source_digest() != data['sourceDigest']:
             raise SystemExit('Candidate sources changed. Prepare and validate a new candidate.')
@@ -130,7 +178,7 @@ def distribute(args):
     # Mark uncertain uploads before the request, so an interrupted command cannot silently retry.
     if uploading:
         data['status'] = 'upload-requested'
-        data['uploadCommit'] = output('git', 'rev-parse', 'HEAD')
+        data['uploadCommit'] = sources.git_text(ROOT, 'rev-parse', 'HEAD')
         save(candidate / 'candidate.json', data)
     run(['xcodebuild', '-exportArchive', '-archivePath', str(candidate / 'Bookworms.xcarchive'),
          '-exportOptionsPlist', str(option_path), '-exportPath', str(candidate / args.command),

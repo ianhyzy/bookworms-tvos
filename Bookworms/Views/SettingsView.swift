@@ -14,7 +14,6 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = AppAppearance.system
     @AppStorage("woodBackground") private var woodBackground = true
     @AppStorage("spoilerPolicy") private var spoilerPolicy = SpoilerPolicy.alwaysHide
-    @State private var token = ""
     @State private var apiKey = ""
     @State private var sourceEditor: LibrarySource?
     @State private var cwaDraft = CWAConfiguration()
@@ -32,8 +31,6 @@ struct SettingsView: View {
     }
     @Binding var section: Section
     @FocusState private var focusedSection: Section?
-    /// Shows the text field for a code typed with the remote instead of the link code.
-    @State private var entersCodeManually = false
     /// Leaves Settings for My Shelf, for example after choosing the sample shelf.
     let onShowShelf: () -> Void
 
@@ -97,7 +94,12 @@ struct SettingsView: View {
                 // lift and shadow, then pull it back out to keep the content aligned with Back.
                 ScrollView {
                     Group {
-                        if source == .hardcover { accountSettings } else { cwaSettings }
+                        if source == .hardcover {
+                            HardcoverConnectionView(library: library) { sourceEditor = nil }
+                                .environment(\.appFontStyle, .sansSerif)
+                        } else {
+                            cwaSettings
+                        }
                     }
                     .padding(Self.focusMargin)
                 }
@@ -108,30 +110,10 @@ struct SettingsView: View {
             .font(.system(size: 26))
             .fontDesign(.default)
             .onExitCommand {
-                library.cancelHardcoverDeviceAuth()
                 sourceEditor = nil
             }
-            .onAppear {
-                if source == .hardcover, needsHardcoverLink { library.startHardcoverDeviceAuth() }
-            }
-            .onChange(of: needsHardcoverLink) { _, needsLink in
-                // A sync can find the saved login expired while this sheet is open.
-                if source == .hardcover, needsLink, library.hardcoverDeviceAuth == nil,
-                    !library.hardcoverDeviceAuthLoading
-                {
-                    library.startHardcoverDeviceAuth()
-                }
-            }
             .onDisappear {
-                library.cancelHardcoverDeviceAuth()
-                token = ""
                 cwaPassword = ""
-            }
-            .onChange(of: library.hardcoverConnected) { _, connected in
-                if connected {
-                    token = ""
-                    sourceEditor = nil
-                }
             }
         }
         #if BOOKWORMS_DIAGNOSTICS
@@ -142,7 +124,6 @@ struct SettingsView: View {
         // Settings always uses the system font; only the font sample previews a style.
         .fontDesign(.default)
         .onDisappear {
-            token = ""
             apiKey = ""
         }
     }
@@ -353,7 +334,6 @@ struct SettingsView: View {
                 } else {
                     Button("Disconnect Hardcover", role: .destructive) {
                         library.disconnect()
-                        token = ""
                     }
                     .font(.system(size: 26))
                     .performanceGlassButton()
@@ -593,110 +573,9 @@ struct SettingsView: View {
     /// Space inside the source sheet's scroll view for a focused button's lift and shadow.
     private static let focusMargin: CGFloat = 40
 
-    /// Whether Settings should show the link-code flow: no saved login, or one Hardcover rejected.
+    /// Whether the source needs a login because none is saved or Hardcover rejected it.
     private var needsHardcoverLink: Bool {
         !library.hardcoverConnected || library.hardcoverSessionExpired
-    }
-
-    /// The Hardcover sign-in card, in the Apple TV sign-in layout: instructions and the link code
-    /// on the left, a large QR code on the right. Typing a code by hand is one press away.
-    private var accountSettings: some View {
-        HStack(alignment: .center, spacing: 70) {
-            VStack(alignment: .leading, spacing: 22) {
-                Text("Sign in to Hardcover").font(.system(size: 46, weight: .semibold))
-                if library.hardcoverSessionExpired {
-                    Text("Hardcover rejected the saved login. Sign in again to resume syncing.")
-                        .font(.system(size: 24)).foregroundStyle(.orange)
-                }
-                Text(
-                    "Scan the code with your phone, or go to **hardcover.app/link** and enter:"
-                )
-                .font(.system(size: 26)).foregroundStyle(.secondary)
-                .accessibilityIdentifier("hardcover-instructions")
-                linkCode
-                if library.hardcoverDeviceAuth != nil {
-                    HStack(spacing: 12) {
-                        ProgressView().controlSize(.small)
-                        Text(library.hardcoverDeviceAuthMessage ?? "Waiting for approval…")
-                            .font(.system(size: 23)).foregroundStyle(.secondary)
-                    }
-                    .accessibilityIdentifier("hardcover-device-status")
-                }
-                HStack(spacing: 25) {
-                    Button("Enter a code instead") { entersCodeManually.toggle() }
-                        .font(.system(size: 24))
-                        .performanceGlassButton()
-                        .accessibilityIdentifier("hardcover-manual-entry")
-                    if library.hardcoverDeviceAuth != nil {
-                        Button("New code") { library.startHardcoverDeviceAuth() }
-                            .font(.system(size: 24))
-                            .performanceGlassButton()
-                            .disabled(library.isLoading)
-                    }
-                }
-                .padding(.top, 8)
-                if entersCodeManually {
-                    HStack(spacing: 20) {
-                        TextField("Authorization code", text: $token)
-                            .font(.system(size: 26))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .accessibilityIdentifier("hardcover-token")
-                        Button(library.isLoading ? "Connecting…" : "Connect") {
-                            Task {
-                                if await library.connectWithCode(token) {
-                                    token = ""
-                                    sourceEditor = nil
-                                }
-                            }
-                        }
-                        .font(.system(size: 26))
-                        .performanceGlassButton()
-                        .disabled(token.isEmpty || library.isLoading)
-                    }
-                }
-                if let message = library.message {
-                    Text(message).font(.system(size: 23)).foregroundStyle(.orange)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Image("HardcoverTokenQR")
-                .interpolation(.none)
-                .resizable()
-                .frame(width: 320, height: 320)
-                .padding(18)
-                .background(.white, in: .rect(cornerRadius: 24))
-                .accessibilityLabel("QR code that opens hardcover.app/link")
-                .accessibilityIdentifier("hardcover-token-qr")
-        }
-        .disabled(library.isGenerating)
-    }
-
-    /// The device code, a spinner while Hardcover issues one, or a retry button after a failure.
-    @ViewBuilder private var linkCode: some View {
-        if let auth = library.hardcoverDeviceAuth {
-            Text(auth.userCode)
-                .font(.system(size: 64, weight: .bold, design: .monospaced))
-                .tracking(4)
-                .padding(.horizontal, 36).padding(.vertical, 16)
-                .background(.primary.opacity(0.1), in: .rect(cornerRadius: 18))
-                .accessibilityIdentifier("hardcover-device-code")
-        } else if library.hardcoverDeviceAuthLoading {
-            HStack(spacing: 16) {
-                ProgressView()
-                Text("Requesting code…").font(.system(size: 26)).foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 16)
-        } else {
-            HStack(spacing: 24) {
-                Button("Get link code") { library.startHardcoverDeviceAuth() }
-                    .font(.system(size: 26))
-                    .buttonStyle(.glassProminent)
-                if let failure = library.hardcoverDeviceAuthMessage {
-                    Text(failure).font(.system(size: 23)).foregroundStyle(.orange)
-                }
-            }
-        }
     }
 }
 

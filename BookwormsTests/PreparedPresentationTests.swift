@@ -4,6 +4,65 @@ import XCTest
 
 @MainActor
 final class PreparedPresentationTests: XCTestCase {
+    func testShelfPagesWaitForTheCurrentCoverDimensions() throws {
+        let suite = "PreparedPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var dependencies = LibraryDependencies(
+            defaults: defaults,
+            storageDirectory: FileManager.default.temporaryDirectory.appending(path: suite))
+        dependencies.allowLaunchOverrides = false
+        dependencies.readCredential = { _ in nil }
+        let library = LibraryModel(dependencies: dependencies)
+        let books = [Book(id: 1, title: "A fixture book", author: "A fixture author")]
+        let initialKey = ShelfPreparationKey(
+            revision: library.presentationRevision, fontRevision: library.fontRevision,
+            width: 1400, height: 600)
+        let initialPages = BookPresentation.pages(
+            books: books, styles: [:], coverRatios: library.coverRatios,
+            width: initialKey.width, rowHeight: initialKey.height)
+        let initial = PreparedShelfPages(key: initialKey, pages: initialPages)
+        XCTAssertTrue(initial.isReady(for: initialKey))
+
+        library.recordCoverRatio(0.45, for: 1)
+        let currentKey = ShelfPreparationKey(
+            revision: library.presentationRevision, fontRevision: library.fontRevision,
+            width: initialKey.width, height: initialKey.height)
+        XCTAssertFalse(initial.pages.isEmpty)
+        XCTAssertFalse(initial.isReady(for: currentKey))
+
+        let currentPages = BookPresentation.pages(
+            books: books, styles: [:], coverRatios: library.coverRatios,
+            width: currentKey.width, rowHeight: currentKey.height)
+        let current = PreparedShelfPages(key: currentKey, pages: currentPages)
+        XCTAssertNotEqual(
+            initial.pages.first?.dimensions[1]?.width, current.pages.first?.dimensions[1]?.width)
+        XCTAssertTrue(current.isReady(for: currentKey))
+    }
+
+    func testShelfPagesInvalidateForNewFontsAndGeometry() {
+        let books = [Book(id: 1, title: "A fixture book", author: "A fixture author")]
+        let key = ShelfPreparationKey(revision: 1, fontRevision: 2, width: 1400, height: 600)
+        let prepared = PreparedShelfPages(
+            key: key,
+            pages: BookPresentation.pages(
+                books: books, styles: [:], coverRatios: [:], width: key.width, rowHeight: key.height
+            ))
+        for requested in [
+            ShelfPreparationKey(revision: 1, fontRevision: 3, width: 1400, height: 600),
+            ShelfPreparationKey(revision: 1, fontRevision: 2, width: 1200, height: 600),
+            ShelfPreparationKey(revision: 1, fontRevision: 2, width: 1400, height: 500),
+        ] {
+            XCTAssertFalse(prepared.isReady(for: requested))
+        }
+        XCTAssertTrue(prepared.isReady(for: key))
+    }
+
+    func testEmptyShelfPagesDoNotSatisfyNonemptyLibraryPreparation() {
+        let key = ShelfPreparationKey(revision: 1, fontRevision: 2, width: 1400, height: 600)
+        XCTAssertFalse(PreparedShelfPages(key: key, pages: []).isReady(for: key))
+    }
+
     func testCredentialPresenceDoesNotReadDuringRendering() {
         var reads = 0
         var saved: String? = "fixture"

@@ -32,6 +32,41 @@ def result_summary(**overrides):
 REQUIRED = ["BookwormsTests/ExampleTests/testExample"]
 
 
+class SourceIdentityTests(unittest.TestCase):
+    def test_global_excludes_do_not_change_release_or_worker_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            root = folder / "repository"
+            root.mkdir()
+            environment = runner.sources.git_environment()
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True, env=environment)
+            (root / ".gitignore").write_text(".local/\n")
+            (root / "Tracked.swift").write_text("tracked source\n")
+            source = root / "Untracked.swift"
+            source.write_text("untracked source\n")
+            (root / ".local").mkdir()
+            artifact = root / ".local" / "artifact.txt"
+            artifact.write_text("ignored artifact\n")
+            subprocess.run(["git", "add", ".gitignore", "Tracked.swift"], cwd=root,
+                           check=True, env=environment)
+            excludes = folder / "owner-ignore"
+            excludes.write_text("Untracked.swift\n")
+            config = folder / "owner-gitconfig"
+            subprocess.run(["git", "config", "--file", str(config), "core.excludesFile", str(excludes)],
+                           check=True, env=environment)
+            baseline = runner.sources.source_digest(root)
+            with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+                self.assertEqual(runner.sources.source_files(root),
+                                 [".gitignore", "Tracked.swift", "Untracked.swift"])
+                self.assertEqual(runner.sources.source_digest(root), baseline)
+                self.assertEqual(runner.sources.source_digest(root, environment=runner.offline_environment()),
+                                 baseline)
+                artifact.write_text("different ignored artifact\n")
+                self.assertEqual(runner.sources.source_digest(root), baseline)
+                source.write_text("changed untracked source\n")
+                self.assertNotEqual(runner.sources.source_digest(root), baseline)
+
+
 class ResultValidationTests(unittest.TestCase):
     def test_pass_requires_actual_required_case(self):
         outcomes, failures = runner.validate_results(result_summary(), result_tree(), REQUIRED, 0)

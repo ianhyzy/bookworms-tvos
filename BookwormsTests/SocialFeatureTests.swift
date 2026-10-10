@@ -21,6 +21,13 @@ final class SocialFeatureTests: XCTestCase {
             FeedActivity.latestPerBook([older, missing, newest, tied, newest], limit: 2).map(\.id),
             [3, 2])
         XCTAssertEqual(FeedActivity.latestPerBook([older, newest, missing]).map(\.id), [2, 4])
+        let goal = FeedActivity(
+            id: 5, reader: older.reader, createdAt: "2026-09-18T10:00:00Z",
+            summary: "Shared a reading update", book: nil, likes: 0, rating: nil, review: nil,
+            hasSpoilers: false)
+        XCTAssertEqual(
+            FeedActivity.latestPerBook([goal, newest]).map(\.id), [2],
+            "Bookless events are left out")
     }
 
     func testDisabledViewsDoNotFetchUnusedDatasets() async throws {

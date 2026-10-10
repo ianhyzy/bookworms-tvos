@@ -18,11 +18,14 @@ struct ShelfView: View {
     @State private var sidebarItem: SidebarItem
     @State private var settingsSection = SettingsView.initialSection()
     @State private var ambient = AmbientController()
-    @State private var preparedPages: [ShelfPage] = []
+    @State private var requestedShelfPreparationKey: ShelfPreparationKey?
+    @State private var preparedShelf: PreparedShelfPages?
+    private var preparedPages: [ShelfPage] { preparedShelf?.pages ?? [] }
     /// Chooses the shelf photo; changes each time My Shelf appears.
     @State private var photoSeed = Int.random(in: 0..<1000)
     @State private var activity = InteractionActivity()
     @State private var hasEnteredShelf = false
+    @State private var isWelcomePresented = false
     @State private var preparedArtwork: ViewArtworkKey?
     @State private var artworkGeneration = 0
     @State private var presentationStyles: [Int: SpineStyle] = [:]
@@ -96,6 +99,7 @@ struct ShelfView: View {
             [
                 "artworkReady": preparedArtwork == artworkKey,
                 "pagesReady": !preparedPages.isEmpty,
+                "pagesCurrent": shelfPagesAreReady,
                 "hasEnteredShelf": hasEnteredShelf,
                 "focusedBook": focusedBook ?? -1,
                 "requestedBook": bookFocusRequest?.id ?? -1,
@@ -195,7 +199,7 @@ struct ShelfView: View {
     var body: some View {
         // The tab hierarchy and these lifecycle modifiers are separate expressions; together
         // they exceed the type checker's time limit.
-        tabs
+        welcomePresentation
             .fullScreenCover(isPresented: waitsForBookWall) {
                 bookWallWaitingView
             }
@@ -204,10 +208,12 @@ struct ShelfView: View {
             #endif
             #if DEBUG && targetEnvironment(simulator)
                 .overlay(alignment: .topLeading) {
-                    if let scenario = ScenarioRuntime.current { ScenarioProbe(runtime: scenario) }
+                    if !isWelcomePresented, let scenario = ScenarioRuntime.current {
+                        ScenarioProbe(runtime: scenario)
+                    }
                 }
                 .background(alignment: .topLeading) {
-                    if FocusTransitionProbe.isEnabled {
+                    if !isWelcomePresented && FocusTransitionProbe.isEnabled {
                         FocusTransitionProbe().frame(width: 1, height: 1)
                     }
                 }
@@ -339,6 +345,49 @@ struct ShelfView: View {
             }
     }
 
+    /// Startup decides eligibility before the sheet appears. Choosing a source keeps the same
+    /// presentation alive through authorization, download, and the first artwork preparation.
+    private var welcomePresentation: some View {
+        tabs
+            .sheet(isPresented: $isWelcomePresented, onDismiss: finishWelcomeDismissal) {
+                LibraryWelcomeView(
+                    library: library,
+                    isLibraryReady: {
+                        preparedArtwork == artworkKey
+                            && (library.books.isEmpty || shelfPagesAreReady)
+                    },
+                    onDismiss: { isWelcomePresented = false }
+                )
+                .appTypography()
+                #if DEBUG && targetEnvironment(simulator)
+                    // Native sheets hide the presenting view's accessibility probes.
+                    .overlay(alignment: .topLeading) {
+                        if let scenario = ScenarioRuntime.current {
+                            ScenarioProbe(runtime: scenario)
+                        }
+                    }
+                    .background(alignment: .topLeading) {
+                        if FocusTransitionProbe.isEnabled {
+                            FocusTransitionProbe().frame(width: 1, height: 1)
+                        }
+                    }
+                #endif
+            }
+            .onChange(of: library.shouldOfferWelcome, initial: true) {
+                if library.shouldOfferWelcome { isWelcomePresented = true }
+            }
+    }
+
+    private func finishWelcomeDismissal() {
+        recordActivity()
+        guard isShowingMainView, coordinator.current == .shelf else { return }
+        let entry = preparedPages.first?.books.first?.id ?? library.books.first?.id
+        if let entry {
+            hasEnteredShelf = true
+            requestBookFocus(lastFocusedID ?? entry)
+        }
+    }
+
     private func finishAmbientDismissal() {
         library.setAmbientActive(false)
         restoreSelection()
@@ -348,6 +397,18 @@ struct ShelfView: View {
         let libraryRevision: Int
         let books: [Book]
         let avatarURLs: [URL]
+    }
+
+    private var currentShelfPreparationKey: ShelfPreparationKey? {
+        guard let requestedShelfPreparationKey else { return nil }
+        return ShelfPreparationKey(
+            revision: library.presentationRevision, fontRevision: library.fontRevision,
+            width: requestedShelfPreparationKey.width, height: requestedShelfPreparationKey.height)
+    }
+
+    private var shelfPagesAreReady: Bool {
+        guard let key = currentShelfPreparationKey else { return false }
+        return preparedShelf?.isReady(for: key) ?? false
     }
 
     private struct BookWallPreparationKey: Equatable {
@@ -478,7 +539,7 @@ struct ShelfView: View {
     private var canHideControls: Bool {
         (focusedBook != nil || coordinator.current != .shelf) && !voiceOver
             && !library.books.isEmpty && isShowingMainView && selectedBook == nil
-            && !ambient.isActive
+            && !ambient.isActive && !isWelcomePresented
     }
 
     private func recordActivity() {
@@ -525,7 +586,9 @@ struct ShelfView: View {
                 // A newer library can replace the prepared books before this focus transaction runs.
                 guard key == artworkKey, preparedArtwork == key else { return }
                 // Selecting a main view later moves focus into it natively.
-                guard isShowingMainView, selectedBook == nil, !ambient.isActive else { return }
+                guard isShowingMainView, selectedBook == nil, !ambient.isActive,
+                    !isWelcomePresented
+                else { return }
                 if coordinator.current == .shelf {
                     guard
                         let entry =
@@ -612,6 +675,9 @@ struct ShelfView: View {
             let rowHeight = geometry.size.height * 0.60
             // Matches the shelf's horizontal padding and PagedRow's inner edge insets.
             let available = geometry.size.width - 160 - 2 * PagedRowLayout.edgeInset
+            let shelfPreparationKey = ShelfPreparationKey(
+                revision: library.presentationRevision, fontRevision: library.fontRevision,
+                width: available, height: rowHeight)
             ZStack(alignment: .bottomTrailing) {
                 // The wall renders behind the TabView in a full-screen surface. Its tab
                 // stays transparent so sidebar chrome remains above the same 3D models.
@@ -709,14 +775,17 @@ struct ShelfView: View {
             // The one place main content handles Back: a shelf that details filtered returns to
             // those details. Everywhere else the handler is `nil` and Back opens the sidebar.
             .onExitCommand(perform: view == .shelf ? returnToFilterOrigin : nil)
-            .task(
-                id: ShelfPreparationKey(
-                    revision: library.presentationRevision, fontRevision: library.fontRevision,
-                    width: available, height: rowHeight)
-            ) {
-                guard available > 0, rowHeight > 0 else { return }
+            .task(id: shelfPreparationKey) {
+                guard !Task.isCancelled, available > 0, rowHeight > 0,
+                    shelfPreparationKey.revision == library.presentationRevision,
+                    shelfPreparationKey.fontRevision == library.fontRevision
+                else { return }
+                requestedShelfPreparationKey = shelfPreparationKey
                 if !preparedPages.isEmpty {
                     do { try await activity.waitUntilQuiet() } catch { return }
+                }
+                guard !Task.isCancelled, shelfPreparationKey == currentShelfPreparationKey else {
+                    return
                 }
                 let measurement = PerformanceDiagnostics.begin("DeferredRepack")
                 defer { measurement.end() }
@@ -731,7 +800,7 @@ struct ShelfView: View {
                     books: library.books, styles: styles, coverRatios: library.coverRatios,
                     width: available, rowHeight: rowHeight)
                 presentationStyles = styles
-                preparedPages = updated
+                preparedShelf = PreparedShelfPages(key: shelfPreparationKey, pages: updated)
                 openRequestedBook()
             }
             .onChange(of: preparedPages.map { $0.books.map(\.id) }, initial: true) {

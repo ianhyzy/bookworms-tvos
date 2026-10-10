@@ -16,7 +16,7 @@ The extension does not call `UserDefaults` or read file timestamps. Do not copy 
 
 | Destination | Data sent | Purpose |
 | --- | --- | --- |
-| Hardcover | PAT in the authorization header; fixed read queries, book IDs, and selected reader IDs | Fetch account, library, edition, followed-reader, activity, rating, and review data. |
+| Hardcover | PAT in the authorization header; fixed read queries, book IDs, and selected reader IDs | Fetch account, library, edition, followed-reader, block-list, activity, rating, and review data. |
 | Configured CWA server | Local username/password through HTTPS Basic authentication; catalog and cover requests | Fetch owned books and protected covers. Hidden in Settings while `BookPresentation.offersCWA` is false. |
 | AI providers | No requests while generation is disabled | Retained implementation only; saved keys and designs remain stored. |
 | Google Fonts and font hosting | No requests while generated spines are disabled | Retained implementation for spine fonts only. |
@@ -27,7 +27,7 @@ Network recipients can observe connection metadata such as an IP address. The ap
 
 ## Collection disclosures
 
-The manifests declare required-reason API use; they do not yet declare collected-data categories. This is not a claim that no data leaves the device. The developer receives no user data, so **Data Not Collected** is the expected App Store privacy answer for the current build; confirm it against Apple's definitions when answering. Keep the manifest, the [published privacy policy](https://ian.gay/bookworms-privacy-policy/), and App Store privacy answers consistent.
+The manifests declare required-reason API use; they do not yet declare collected-data categories. This is not a claim that no data leaves the device. The developer receives no user data, so **Data Not Collected** is the expected App Store privacy answer for the current build; confirm it against Apple's definitions when answering. Keep the manifest, the [published privacy policy](https://ian.gay/bookworms-privacy-policy/), the [Apple TV privacy policy text](RELEASING.md#apple-tv-privacy-policy-text), and App Store privacy answers consistent.
 
 Apple distinguishes real-time request processing from retained collection. Generation is currently disabled. Reassess disclosure before enabling any automatic provider requests. See [Apple's privacy questionnaire guidance](https://developer.apple.com/app-store/app-privacy-details/).
 

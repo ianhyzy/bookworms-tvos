@@ -39,7 +39,11 @@ def main():
                         help="Choose Device for opt-in live-library checks")
     parser.add_argument("--configuration", choices=["Debug", "Release"], help="Defaults to Release for installs and Debug for tests")
     parser.add_argument("--start-view", help="Optional view to launch directly into (e.g. shared)")
+    parser.add_argument("--reset-hardcover-setup", action="store_true",
+                        help="Remove the saved Hardcover login and local snapshot, then open first-launch setup")
     args = parser.parse_args()
+    if args.reset_hardcover_setup and not args.start_view:
+        args.start_view = "shelf"
     defaults = json.loads(LOCAL_DEFAULTS.read_text()) if LOCAL_DEFAULTS.exists() else {}
     args.device = args.device or defaults.get("device")
     args.team = args.team or defaults.get("team")
@@ -89,6 +93,8 @@ def main():
                           "--terminate-existing", APP_ID]
         if args.start_view:
             launch_command.append(f"--start-view={args.start_view}")
+        if args.reset_hardcover_setup:
+            launch_command.append("--reset-hardcover-setup")
         run(launch_command)
     return result
 

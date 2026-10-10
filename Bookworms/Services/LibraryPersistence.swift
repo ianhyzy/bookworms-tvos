@@ -26,6 +26,16 @@ actor LibraryPersistence {
         try sourceStore.save(snapshots)
     }
 
+    /// Removes local Hardcover snapshots without deleting other providers or saved designs.
+    func resetHardcoverSnapshot(legacyURL: URL, revision: Int) throws -> [SourceSnapshot] {
+        let retained = sourceStore.load().filter { $0.source != .hardcover }
+        try saveSources(retained, revision: revision)
+        if FileManager.default.fileExists(atPath: legacyURL.path) {
+            try FileManager.default.removeItem(at: legacyURL)
+        }
+        return retained
+    }
+
     /// Returns encoded designs so preference updates can stay on their owning actor.
     func saveStyleCache(_ records: [Int: AIStyleRecord], revision: Int) throws -> Data? {
         guard revision >= styleRevision else { return nil }
