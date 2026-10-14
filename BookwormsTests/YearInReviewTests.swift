@@ -150,4 +150,32 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(reloaded.orderedViews, [.shelf, .following, .friendsPicks])
         XCTAssertFalse(reloaded.ambientOrderedViews.contains(.yearInReview))
     }
+
+    func testSeriesBundleIntoOneSpineAtTheFirstBooksPlace() throws {
+        func member(_ id: Int, series: Int?, name: String?, pages: Int?, finished: String)
+            -> Book
+        {
+            Book(
+                id: id, title: "Book \(id)", author: "Matt Dinniman", pages: pages,
+                finished: finished, seriesID: series, seriesName: name)
+        }
+        let books = [
+            member(1, series: 5, name: "Dungeon Crawler Carl", pages: 400, finished: "2026-01-02"),
+            member(2, series: nil, name: nil, pages: 200, finished: "2026-01-03"),
+            member(3, series: 5, name: "Dungeon Crawler Carl", pages: 500, finished: "2026-02-01"),
+            member(4, series: 6, name: "Solo", pages: 300, finished: "2026-03-01"),
+            member(5, series: 7, name: nil, pages: 300, finished: "2026-03-02"),
+            member(6, series: 7, name: nil, pages: 300, finished: "2026-03-03"),
+            member(7, series: 5, name: "Dungeon Crawler Carl", pages: nil, finished: "2026-04-01"),
+        ]
+        let review = try XCTUnwrap(YearInReview.all(from: books).first)
+        XCTAssertEqual(review.books.count, 7, "Statistics keep every book")
+        XCTAssertEqual(review.shelf.count, 7, "The cover shelf keeps every cover")
+        XCTAssertEqual(
+            review.spines.map(\.id), [1, 2, 4, 5, 6],
+            "A series of two or more takes its first book's place; unnamed series stay single")
+        XCTAssertEqual(review.spines[0].title, "Dungeon Crawler Carl ×3")
+        XCTAssertEqual(review.spines[0].pages, 900, "A bundle is as long as its books together")
+        XCTAssertEqual(review.spines[2].title, "Book 4", "One book of a series stays itself")
+    }
 }

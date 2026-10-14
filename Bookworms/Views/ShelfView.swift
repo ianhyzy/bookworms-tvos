@@ -56,7 +56,7 @@ struct ShelfView: View {
     private var controlsVisible: Bool { activity.controlsVisible }
     private var wallBooks: [Book] {
         let year = Calendar.current.component(.year, from: .now)
-        return library.readingYears.first { $0.year == year }?.books ?? []
+        return library.readingYears.first { $0.year == year }?.spines ?? []
     }
     private var wallPreparationKey: BookWallPreparationKey {
         BookWallPreparationKey(
