@@ -13,8 +13,13 @@ struct BookWallLayout: Sendable {
         let spineThickness: Float
         let coverWidth: Float
 
+        /// The lettered area of the spine, which focus targets and text fitting use.
         var spineFaceWidth: Float { bookHeight * 0.94 }
         var spineFaceHeight: Float { spineThickness * 0.88 }
+        /// The spine plane, which covers the casing's flat spine wall so the cloth's shading
+        /// and the cover's fold reach its edges.
+        var spineWallWidth: Float { bookHeight }
+        var spineWallHeight: Float { spineThickness }
         var collisionThickness: Float { spineThickness + BookWallLayout.coverWrapThickness * 2 }
     }
 

@@ -22,6 +22,9 @@ final class BookWallScene {
     private static let fieldOfView: Float = 30
     private static let coverFaceGap: Float = 0.0005
     private static let coverSurfaceOffset = coverWrapThickness + coverFaceGap
+    /// The spine plane's distance in front of the casing's spine wall. It spans the whole
+    /// wall, so a larger gap would show as a lip at the boards' edges.
+    private static let spineFaceOffset: Float = 0.002
     private static let fallGravity: Float = 22
     private static let minimumDropSpacing = 0.10
     private static let idleVerticalAmplitudePoints: CGFloat = 24
@@ -1804,13 +1807,14 @@ final class BookWallScene {
         body.physicsBody = physics
         // The spine plane is opaque and shares the case's surface settings, so it shades like
         // the case around it without a visible label edge, and the GPU skips the case's spine
-        // face behind it.
+        // face behind it. It covers the flat spine wall, so the cloth's shading and the
+        // cover's fold reach the boards' rounded edges.
         let face = ModelEntity(
             mesh: .generatePlane(
-                width: slot.spineFaceWidth, height: slot.spineFaceHeight),
+                width: slot.spineWallWidth, height: slot.spineWallHeight),
             materials: [spineMaterial(spine)])
         face.name = Self.spineFaceName
-        face.position.z = slot.coverWidth / 2 + 0.009
+        face.position.z = slot.coverWidth / 2 + Self.spineFaceOffset
         body.addChild(face)
         let coverFace = ModelEntity(
             mesh: BookWallHardcoverMesh.coverSurface(
@@ -1867,7 +1871,8 @@ final class BookWallScene {
             var points: [CGPoint] = []
             for x in [-slot.spineFaceWidth / 2, slot.spineFaceWidth / 2] {
                 for y in [-slot.spineFaceHeight / 2, slot.spineFaceHeight / 2] {
-                    let corner = pose * SIMD4<Float>(x, y, slot.coverWidth / 2 + 0.009, 1)
+                    let corner =
+                        pose * SIMD4<Float>(x, y, slot.coverWidth / 2 + spineFaceOffset, 1)
                     if let point = project(
                         [corner.x, corner.y, corner.z], cameraDepth: cameraDepth, in: viewport),
                         point.x.isFinite, point.y.isFinite
@@ -1899,7 +1904,16 @@ final class BookWallScene {
 
 /// Keeps source art intact and blends only a narrow, synthesized casing bleed.
 enum BookWallCoverTexture {
-    static func make(image: CGImage, slot: BookWallLayout.Slot, edgeColor: UIColor) -> CGImage? {
+    /// How far the fold reaches onto the front board from the joint: 3 mm at Book Wall's
+    /// scale, where a book about 4 units long stands for one about 20 cm long.
+    static let foldReach: Float = 0.06
+
+    /// Fits `image` to the front board, then folds the cover's `edgeColors` (head to tail)
+    /// and, at half strength, the `cloth` over the joint, as the spine shows them.
+    static func make(
+        image: CGImage, slot: BookWallLayout.Slot, cloth: StyleColor, edgeColors: [StyleColor]
+    ) -> CGImage? {
+        let edgeColor = cloth.uiColor
         let size = CGSize(width: 512, height: CGFloat(slot.bookHeight / slot.coverWidth) * 512)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -1970,6 +1984,16 @@ enum BookWallCoverTexture {
                         start: CGPoint(x: imageRect.minX, y: 0),
                         end: CGPoint(x: imageRect.minX - margin.width, y: 0),
                         caseColor: edgeColor, context: cg)
+                }
+                // The artwork's left edge is the joint (`BookWallHardcoverMesh.coverSurface`).
+                let fold = CGRect(
+                    x: 0, y: 0, width: size.width * CGFloat(foldReach / slot.coverWidth),
+                    height: size.height)
+                BookWallSpineTexture.drawFold(
+                    edgeColors, opacity: 1, in: fold, jointAtLeft: true, context: cg)
+                if !edgeColors.isEmpty {
+                    BookWallSpineTexture.drawFold(
+                        [cloth], opacity: 0.5, in: fold, jointAtLeft: true, context: cg)
                 }
             }
             .cgImage
@@ -2265,56 +2289,70 @@ enum BookWallShelfLabel {
     }
 }
 
+/// Draws a Book Wall spine: flat cloth, the lettering, and the cover's fold onto the spine,
+/// as the iPhone companion's flat cloth spine draws them.
 enum BookWallSpineTexture {
+    /// Spine texture density, in pixels per scene unit on both axes, so glyphs keep their
+    /// proportions on thick books.
+    static let pixelsPerUnit: CGFloat = 420
+    /// The share of the spine's thickness that the cover's fold covers from the front joint.
+    /// It ends before the lettering, so the lettering's contrast check against the flat cloth
+    /// still holds.
+    static let foldShare: CGFloat = 0.09
+
+    /// Draws the lettering on a transparent image the size of the spine plane
+    /// (`spineWallWidth` by `spineWallHeight`), within the centered lettered area
+    /// (`spineFaceWidth` by `spineFaceHeight`). The image's top edge is the front board's.
     static func make(for slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style) -> CGImage? {
         let book = slot.book
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
-        // Matching pixels per world unit on both axes keeps glyphs from stretching on thick books.
         let size = CGSize(
-            width: (CGFloat(slot.spineFaceWidth) * 420).rounded(),
-            height: (CGFloat(slot.spineFaceHeight) * 420).rounded())
+            width: (CGFloat(slot.spineWallWidth) * pixelsPerUnit).rounded(),
+            height: (CGFloat(slot.spineWallHeight) * pixelsPerUnit).rounded())
+        let face = CGSize(
+            width: CGFloat(slot.spineFaceWidth) * pixelsPerUnit,
+            height: CGFloat(slot.spineFaceHeight) * pixelsPerUnit)
+        let origin = CGPoint(
+            x: (size.width - face.width) / 2, y: (size.height - face.height) / 2)
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        let image = renderer.image { context in
-            let inset = max(18, size.width * 0.045)
-            let stripeWidth = max(4, size.height * 0.025)
-            // The accent stripes stay quiet so the lettering leads.
-            style.accent.uiColor.withAlphaComponent(0.4).setFill()
-            for x in [inset, size.width - inset - stripeWidth] {
-                context.cgContext.fill(
-                    CGRect(
-                        x: x, y: size.height * 0.1, width: stripeWidth,
-                        height: size.height * 0.8))
-            }
+        let image = renderer.image { _ in
+            let inset: CGFloat = max(18, face.width * 0.045)
+            let left: CGFloat = origin.x + inset * 1.6
+            let textWidth: CGFloat = face.width - inset * 3.2
             let descriptor =
                 UIFont(name: style.fontName, size: 40)?.fontDescriptor
                 ?? UIFont.systemFont(ofSize: 40, weight: .semibold).fontDescriptor
+            let titleTop: CGFloat = origin.y + face.height * BookWallLayout.titleTop
             let titleBounds = CGRect(
-                x: inset * 1.6, y: size.height * BookWallLayout.titleTop,
-                width: size.width - inset * 3.2, height: size.height * BookWallLayout.titleShare)
+                x: left, y: titleTop, width: textWidth,
+                height: face.height * BookWallLayout.titleShare)
             drawText(
                 book.title, of: book, style: style,
                 descriptor: descriptor, in: titleBounds,
-                maximumSize: Int(size.height),
+                maximumSize: Int(face.height),
                 minimumSize: Int(BookWallLayout.minimumTitleFontSize))
             let authorBounds = CGRect(
-                x: inset * 1.6,
-                y: size.height * (BookWallLayout.titleTop + BookWallLayout.titleShare),
-                width: size.width - inset * 3.2, height: size.height * BookWallLayout.authorShare)
+                x: left, y: titleBounds.maxY, width: textWidth,
+                height: face.height * BookWallLayout.authorShare)
             drawText(
                 book.author, of: book, style: style,
                 descriptor: descriptor, in: authorBounds,
-                maximumSize: Int(size.height * BookWallLayout.authorShare),
+                maximumSize: Int(face.height * BookWallLayout.authorShare),
                 minimumSize: Int(BookWallLayout.minimumAuthorFontSize))
         }
         return image.cgImage
     }
 
-    /// Composites the lettering over the spine color, for an opaque, lit spine surface.
-    /// Lit lettering reads about 10% dimmer than unlit lettering, so a light additive pass
-    /// brightens it.
-    static func filled(_ lettering: CGImage, background: UIColor) -> CGImage? {
+    /// Composites the lettering over flat cloth, for an opaque, lit spine surface: the cloth's
+    /// relief along the boards' edges and, on a thick book, blind-stamped bands, as `SpineView`
+    /// draws them; then the lettering; then the cover's `edgeColors` (head to tail) folding
+    /// over the front joint at half strength. Lit lettering reads about 10% dimmer than unlit
+    /// lettering, so a light additive pass brightens it.
+    static func filled(
+        _ lettering: CGImage, book: Book, cloth: StyleColor, edgeColors: [StyleColor]
+    ) -> CGImage? {
         let size = CGSize(width: lettering.width, height: lettering.height)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -2322,14 +2360,85 @@ enum BookWallSpineTexture {
         format.preferredRange = .standard
         let image = UIGraphicsImageRenderer(size: size, format: format)
             .image { context in
-                background.setFill()
+                let cg = context.cgContext
+                cloth.uiColor.setFill()
                 context.fill(CGRect(origin: .zero, size: size))
+                let shade = SpineView.relief(on: cloth)
+                drawGradient(
+                    [
+                        (UIColor(white: 0, alpha: shade), 0), (.clear, 0.05), (.clear, 0.95),
+                        (UIColor(white: 0, alpha: shade * 0.65), 1),
+                    ],
+                    from: .zero, to: CGPoint(x: 0, y: size.height), in: cg)
+                if SpineView.stamps(book) {
+                    let band = SpineView.bands(length: size.width, thickness: size.height)
+                    let shades = SpineView.bandShades(on: cloth)
+                    let lines = CGRect(
+                        x: 0, y: size.height * 0.1, width: band.line,
+                        height: size.height * 0.8)
+                    for slot in [band.inset, size.width - band.inset - band.slot] {
+                        // The shadow is on the head's side, the highlight on the tail's.
+                        let x = slot + (band.slot - band.line * 2) / 2
+                        UIColor(white: 0, alpha: shades.shadow).setFill()
+                        cg.fill(lines.offsetBy(dx: x, dy: 0))
+                        UIColor(white: 1, alpha: shades.light).setFill()
+                        cg.fill(lines.offsetBy(dx: x + band.line, dy: 0))
+                    }
+                }
                 let image = UIImage(cgImage: lettering)
                 image.draw(in: CGRect(origin: .zero, size: size))
                 image.draw(
                     in: CGRect(origin: .zero, size: size), blendMode: .plusLighter, alpha: 0.1)
+                drawFold(
+                    edgeColors, opacity: 0.5,
+                    in: CGRect(x: 0, y: 0, width: size.width, height: size.height * foldShare),
+                    jointAtLeft: false, context: cg)
             }
         return image.cgImage
+    }
+
+    /// Draws `colors`, spread evenly along the joint side of `rect` (its top edge, or its left
+    /// edge when `jointAtLeft` is true), fading from `opacity` at the joint to clear at the far
+    /// side with a smoothstep ease, as the companion's fold does.
+    static func drawFold(
+        _ colors: [StyleColor], opacity: CGFloat, in rect: CGRect, jointAtLeft: Bool,
+        context: CGContext
+    ) {
+        guard !colors.isEmpty, rect.width > 0, rect.height > 0 else { return }
+        // A gradient needs two stops; one color fills the joint evenly.
+        let colors = colors.count == 1 ? colors + colors : colors
+        let count = CGFloat(colors.count - 1)
+        let along = colors.enumerated().map { ($1.uiColor, CGFloat($0) / count) }
+        let fade = stride(from: CGFloat(0), through: 1, by: 0.125)
+            .map { share in
+                (UIColor(white: 0, alpha: opacity * (1 - share * share * (3 - 2 * share))), share)
+            }
+        let corner = CGPoint(x: rect.minX, y: rect.minY)
+        let width = CGPoint(x: rect.maxX, y: rect.minY)
+        let height = CGPoint(x: rect.minX, y: rect.maxY)
+        context.saveGState()
+        context.clip(to: rect)
+        context.beginTransparencyLayer(in: rect, auxiliaryInfo: nil)
+        drawGradient(along, from: corner, to: jointAtLeft ? height : width, in: context)
+        // Keeps the colors only as far as the fade's alpha.
+        context.setBlendMode(.destinationIn)
+        drawGradient(fade, from: corner, to: jointAtLeft ? width : height, in: context)
+        context.endTransparencyLayer()
+        context.restoreGState()
+    }
+
+    /// Fills the current clip with a linear gradient through `stops` (color, location).
+    static func drawGradient(
+        _ stops: [(UIColor, CGFloat)], from start: CGPoint, to end: CGPoint, in context: CGContext
+    ) {
+        guard
+            let gradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: stops.map(\.0.cgColor) as CFArray, locations: stops.map(\.1))
+        else { return }
+        context.drawLinearGradient(
+            gradient, start: start, end: end,
+            options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
     }
 
     /// Draws `text` in the largest size from `minimumSize` to `maximumSize` that fits `bounds`,
