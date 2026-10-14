@@ -148,7 +148,8 @@ struct AmbientView: View {
                     CoverView(book: shared.mine.book)
                         .frame(width: size.width / 3, height: size.height * 0.8)
                     VStack(alignment: .leading, spacing: 25) {
-                        Text(shared.mine.book.title).appFont(size: 40, weight: .semibold)
+                        BookText(shared.mine.book.title, of: shared.mine.book)
+                            .appFont(size: 40, weight: .semibold)
                             .lineLimit(3)
                         Text(shared.mine.book.author).appFont(size: 28)
                         ambientReview(
@@ -227,7 +228,8 @@ struct AmbientView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text(years == 1 ? "One year ago today" : "\(years) years ago today")
                     .appFont(size: 30).foregroundStyle(.secondary)
-                Text(book.title).appFont(size: 52, weight: .semibold).lineLimit(3)
+                BookText(book.title, of: book).appFont(size: 52, weight: .semibold)
+                    .lineLimit(3)
                 Text(book.author).appFont(size: 32)
                 HStack(spacing: 16) {
                     Text("You finished it").appFont(size: 28).foregroundStyle(.secondary)
@@ -310,9 +312,10 @@ struct AmbientView: View {
                 Text("· \(item.rating.map { String(format: "%.1f ★", $0) } ?? "Not rated")")
                     .appFont(size: 30)
             }
-            Text(
+            BookText(
                 hidesSpoilers
-                    ? "Review contains spoilers" : (item.reviewText ?? "No written review")
+                    ? "Review contains spoilers" : (item.reviewText ?? "No written review"),
+                of: item.book
             )
             .appFont(size: 25).lineLimit(5)
         }

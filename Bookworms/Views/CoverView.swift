@@ -171,7 +171,7 @@ struct CoverView: View {
             } else {
                 Rectangle().fill(.gray.opacity(0.18))
                 VStack(spacing: compact ? 12 : 20) {
-                    Text(book.title).appFont(size: compact ? 23 : 30)
+                    BookText(book.title, of: book).appFont(size: compact ? 23 : 30)
                         .multilineTextAlignment(.center).lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(book.author).appFont(size: 20).lineLimit(2)

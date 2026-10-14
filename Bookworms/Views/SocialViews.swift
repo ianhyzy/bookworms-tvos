@@ -169,7 +169,8 @@ struct SocialViews: View {
     private func pickCaption(_ pick: FriendPick?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let pick {
-                Text(pick.book.title).appFont(size: 33, weight: .medium).lineLimit(1)
+                BookText(pick.book.title, of: pick.book).appFont(size: 33, weight: .medium)
+                    .lineLimit(1)
                 HStack(spacing: 18) {
                     Text("Loved by").appFont(size: 27).opacity(0.82)
                     ForEach(pick.fans.prefix(3)) { fan in
@@ -266,7 +267,7 @@ struct SocialViews: View {
                 Button("Read review") {
                     review = ReviewPresentation(
                         title: activity.reader.displayName, text: text,
-                        spoilers: hidesSpoilers,
+                        spoilers: hidesSpoilers, book: activity.book,
                         byline: .init(
                             name: activity.reader.displayName,
                             avatarURL: activity.reader.avatarURL, rating: activity.rating,
@@ -385,7 +386,8 @@ struct SocialViews: View {
         }
         return HStack(alignment: .top, spacing: 48) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(book?.title ?? "Select a book").appFont(size: 33, weight: .medium)
+                BookText(book?.title ?? "Select a book", of: book)
+                    .appFont(size: 33, weight: .medium)
                     .lineLimit(1)
                 Text(book?.author ?? "")
                     .appFont(size: 29).opacity(0.82).lineLimit(1)
@@ -468,7 +470,7 @@ struct SocialViews: View {
                         }) ?? sharedBooks.first {
                             VStack(alignment: .leading, spacing: 16) {
                                 HStack(alignment: .firstTextBaseline, spacing: 24) {
-                                    Text(selected.mine.book.title)
+                                    BookText(selected.mine.book.title, of: selected.mine.book)
                                         .appFont(size: 32, weight: .semibold).lineLimit(1)
                                     Text(selected.mine.book.author).appFont(size: 25)
                                         .foregroundStyle(.secondary).lineLimit(1)
@@ -512,6 +514,7 @@ struct SocialViews: View {
             onRead: {
                 review = ReviewPresentation(
                     title: name, text: item.reviewText ?? "", spoilers: false,
+                    book: item.book,
                     byline: .init(
                         name: name, avatarURL: avatarURL, rating: item.rating,
                         likes: item.likes))
@@ -731,7 +734,7 @@ private struct SharedReviewCard: View {
                     let overflow = item.reviewText != nil && fullHeight > geometry.size.height
                     let actionAvailable = item.reviewText != nil && overflow
                     VStack(alignment: .leading, spacing: 18) {
-                        Text(text).appFont(size: 28)
+                        BookText(text, of: item.book).appFont(size: 28)
                             .lineLimit(
                                 actionAvailable
                                     ? max(1, Int((geometry.size.height - 90) / 36)) : nil
@@ -797,7 +800,8 @@ struct ActivityCard: View {
                 Text(activity.summary).appFont(size: isCompact ? 23 : 26)
                     .lineLimit(isCompact ? 1 : 2)
                 if let book = activity.book {
-                    Text(book.title).appFont(size: isCompact ? 27 : 30, weight: .semibold)
+                    BookText(book.title, of: book)
+                        .appFont(size: isCompact ? 27 : 30, weight: .semibold)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(book.author).appFont(size: 24).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -806,8 +810,10 @@ struct ActivityCard: View {
                 if let review = activity.review, !isCompact {
                     let hidesSpoilers =
                         activity.hasSpoilers && (spoilerPolicy == .alwaysHide || !isBookRead)
-                    Text(hidesSpoilers ? "Review contains spoilers" : review)
-                        .appFont(size: 23).lineLimit(2)
+                    BookText(
+                        hidesSpoilers ? "Review contains spoilers" : review, of: activity.book
+                    )
+                    .appFont(size: 23).lineLimit(2)
                 }
                 if let date = activity.date {
                     Text(dateFormat.string(from: date))
@@ -826,6 +832,8 @@ struct ReviewPresentation: Identifiable {
     let title: String
     let text: String
     let spoilers: Bool
+    /// The book the text is about, whose own words it may letter (`BookText`).
+    var book: Book? = nil
     /// The reviewer, shown instead of `title` with their photo, rating, and like count.
     var byline: Byline? = nil
 
@@ -873,7 +881,8 @@ struct ReviewReadingView: View {
                             Array(review.text.components(separatedBy: "\n").enumerated()),
                             id: \.offset
                         ) {
-                            Text($0.element.isEmpty ? " " : $0.element).appFont(size: 28)
+                            BookText($0.element.isEmpty ? " " : $0.element, of: review.book)
+                                .appFont(size: 28)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .drawingGroup()
                         }

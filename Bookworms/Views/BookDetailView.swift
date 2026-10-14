@@ -144,7 +144,7 @@ struct BookDetailView: View {
                     VStack(alignment: .leading, spacing: 22) {
                         VStack(alignment: .leading, spacing: 18) {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(book.title)
+                                BookText(book.title, of: book)
                                     .appFont(size: 56, weight: .semibold)
                                     .lineLimit(3).minimumScaleFactor(0.7)
                                     .accessibilityIdentifier("detail-title")
@@ -206,7 +206,7 @@ struct BookDetailView: View {
     /// overflow, which offers **Show more** to read the whole text in a sheet.
     private var description: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(descriptionText)
+            BookText(descriptionText, of: book)
                 .appFont(size: 27).lineSpacing(8)
                 .foregroundStyle(.primary.opacity(0.86))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -216,7 +216,7 @@ struct BookDetailView: View {
                     descriptionHeight = $0
                 }
                 .background(alignment: .topLeading) {
-                    Text(descriptionText)
+                    BookText(descriptionText, of: book)
                         .appFont(size: 27).lineSpacing(8)
                         .fixedSize(horizontal: false, vertical: true)
                         .hidden()
@@ -233,7 +233,7 @@ struct BookDetailView: View {
             {
                 let showMore = Button("Show more") {
                     readingDescription = ReviewPresentation(
-                        title: book.title, text: descriptionText, spoilers: false)
+                        title: book.title, text: descriptionText, spoilers: false, book: book)
                 }
                 // Book Wall shows details over its live 3D scene, without the cover. Glass there
                 // samples a layer that changes every frame, which kept the open state at 40 fps
@@ -514,7 +514,7 @@ struct BookReviewsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(book.title).appFont(size: 44, weight: .semibold).lineLimit(1)
+            BookText(book.title, of: book).appFont(size: 44, weight: .semibold).lineLimit(1)
                 .padding(.horizontal, Self.liftMargin)
                 // Space between the title and the edge where cards scroll out of view.
                 .padding(.bottom, 28)
@@ -574,7 +574,7 @@ struct BookReviewsView: View {
                 LazyVStack(spacing: 28) {
                     ForEach(reviews) { review in
                         BookReviewCard(
-                            review: review,
+                            review: review, book: book,
                             hidesSpoilers: review.hasSpoilers
                                 && (spoilerPolicy == .alwaysHide || book.isRead != true)
                         ) {
@@ -614,7 +614,7 @@ struct BookReviewsView: View {
         VStack(alignment: .leading, spacing: 20) {
             BookReviewHeader(review: review)
             ScrollView {
-                Text(review.text).appFont(size: 28).lineSpacing(8)
+                BookText(review.text, of: book).appFont(size: 28).lineSpacing(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 20)
             }
@@ -668,6 +668,7 @@ private struct BookReviewHeader: View {
 
 private struct BookReviewCard: View {
     let review: BookReview
+    let book: Book
     let hidesSpoilers: Bool
     let onRead: () -> Void
     @State private var shownHeight: CGFloat = 0
@@ -682,7 +683,8 @@ private struct BookReviewCard: View {
                         .foregroundStyle(.secondary)
                 } else {
                     // A hidden full-height copy detects whether five lines truncate the review.
-                    Text(review.text).appFont(size: 26).lineSpacing(6).lineLimit(5)
+                    BookText(review.text, of: book).appFont(size: 26).lineSpacing(6)
+                        .lineLimit(5)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .onGeometryChange(for: CGFloat.self) {
                             $0.size.height
@@ -690,7 +692,7 @@ private struct BookReviewCard: View {
                             shownHeight = $0
                         }
                         .background(alignment: .topLeading) {
-                            Text(review.text).appFont(size: 26).lineSpacing(6)
+                            BookText(review.text, of: book).appFont(size: 26).lineSpacing(6)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .hidden()
                                 .onGeometryChange(for: CGFloat.self) {
