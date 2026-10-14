@@ -14,6 +14,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     /// The book's position in `seriesID`, such as 3 for the third book. Companion works can have
     /// fractional positions.
     var seriesPosition: Double? = nil
+    /// The name of the `seriesID` series. Snapshots saved before series names were fetched
+    /// decode it as `nil` until the next sync. The iPhone reads it from the iCloud archive.
+    var seriesName: String? = nil
     var genres: [String]?
     var communityRating: Double?
     var ratingsCount: Int?
@@ -192,7 +195,8 @@ enum SampleLibrary {
                 repeating:
                     "A botanist returns to an island where the trees bloom only after sunset. As the seasons change, a forgotten family archive reveals a different history of the island and the people who call it home. ",
                 count: 8), pages: 384, finished: "2026-09-09", rating: 4.5, format: "Ebook",
-            seriesID: 1, seriesPosition: 1, genres: ["Fantasy", "Mystery"], communityRating: 4.24,
+            seriesID: 1, seriesPosition: 1, seriesName: "The Island Cycle",
+            genres: ["Fantasy", "Mystery"], communityRating: 4.24,
             ratingsCount: 100,
             ratingDistribution: [
                 RatingBucket(rating: 3, count: 10), RatingBucket(rating: 4, count: 56),
@@ -226,7 +230,7 @@ enum SampleLibrary {
         Book(
             id: 8, title: "Winter in the Orchard", author: "Alex Rowan",
             description: "The island's story continues.", pages: 410, finished: "2026-08-18",
-            format: "Audiobook", seriesID: 1, seriesPosition: 2,
+            format: "Audiobook", seriesID: 1, seriesPosition: 2, seriesName: "The Island Cycle",
             publicationYear: 2025),
     ]
 }
