@@ -28,8 +28,9 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
         self == .following || self == .comparison || self == .shared || self == .friendsPicks
     }
 
-    /// Whether ambient mode can show this view. Year in Review is interactive only.
-    var supportsAmbient: Bool { self != .yearInReview && self != .bookWall }
+    /// Whether ambient mode can show this view. Book Wall's 3D scene is interactive only; Year
+    /// in Review has a static ambient presentation.
+    var supportsAmbient: Bool { self != .bookWall }
 
     static var availableCases: [Self] {
         allCases.filter { $0 != .bookWall || BookWallAvailability.isSupported }

@@ -332,7 +332,7 @@ struct ShelfView: View {
             ) {
                 AmbientView(
                     controller: ambient, library: library, social: social,
-                    preferences: coordinator.preferences
+                    preferences: coordinator.preferences, reviewYear: coordinator.reviewYear
                 )
                 .appTypography()
                 #if DEBUG && targetEnvironment(simulator)

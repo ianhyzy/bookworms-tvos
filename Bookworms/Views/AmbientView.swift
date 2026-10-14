@@ -5,6 +5,8 @@ struct AmbientView: View {
     let library: LibraryModel
     let social: SocialLibraryModel
     let preferences: ViewPreferences
+    /// The year Year in Review shows; `nil` shows the most recent year.
+    let reviewYear: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
@@ -28,7 +30,8 @@ struct AmbientView: View {
             case .shared:
                 !social.presentation.shared.isEmpty
             case .friendsPicks: !social.presentation.picks.isEmpty
-            case .yearInReview, .bookWall: false
+            case .yearInReview: !library.readingYears.isEmpty
+            case .bookWall: false
             }
         }
     }
@@ -161,10 +164,58 @@ struct AmbientView: View {
             ambientShelf(
                 books: social.presentation.picks.map(\.book), size: size, coversOnly: true,
                 photo: photos[0])
-        case .yearInReview, .bookWall:
+        case .yearInReview:
+            if let review = library.yearInReview(reviewYear) {
+                yearInReview(review, size: size)
+            }
+        case .bookWall:
             EmptyView()
         }
     }
+
+    /// The year's headline numbers in large type above its covers, which page each minute. The
+    /// statistics are prepared with the library, so this only reads them.
+    private func yearInReview(_ review: YearInReview, size: CGSize) -> some View {
+        let shelfHeight = size.height * 0.56
+        return VStack(alignment: .leading, spacing: 34) {
+            Text("Your \(String(review.year)) in books").appFont(size: 52, weight: .semibold)
+            HStack(alignment: .top, spacing: 70) {
+                ambientStat("Books read", review.books.count.formatted())
+                if review.pages > 0 { ambientStat("Pages", review.pages.formatted()) }
+                if let average = review.averageRating {
+                    ambientStat(
+                        "Average rating",
+                        average.formatted(.number.precision(.fractionLength(1))) + " ★")
+                }
+                if let month = review.busiestMonth {
+                    ambientStat("Busiest month", Self.monthNames[month - 1])
+                }
+            }
+            if let author = review.topAuthor {
+                Text("Most-read author: \(author.name) · \(author.count) books")
+                    .appFont(size: 30).foregroundStyle(.secondary).lineLimit(1)
+            } else if !review.genres.isEmpty {
+                Text("Top genres: " + review.genres.prefix(3).map(\.name).joined(separator: " · "))
+                    .appFont(size: 30).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            ambientShelf(
+                books: review.shelf, size: CGSize(width: size.width, height: shelfHeight),
+                coversOnly: true, photo: photos[0])
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .accessibilityIdentifier("ambient-year-in-review")
+    }
+
+    private func ambientStat(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value).appFont(size: 72, weight: .semibold).lineLimit(1)
+            Text(title).appFont(size: 28).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private static let monthNames = Calendar.current.standaloneMonthSymbols
 
     static let onThisDayLimit = 5
 
