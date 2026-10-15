@@ -1,3 +1,4 @@
+import CoreText
 import Foundation
 import Observation
 import UIKit
@@ -113,12 +114,19 @@ final class LibraryModel {
     }
 
     func savedSpineStyle(for book: Book) -> SpineStyle? {
+        let font = aiRecords[book.id].flatMap { UIFont(name: $0.style.fontName, size: 23) }
         guard let record = aiRecords[book.id],
             BookPresentation.usesSpine(
-                hasSavedKey: savedAIKeyAvailable, hasDesign: true,
-                fontAvailable: UIFont(name: record.style.fontName, size: 23) != nil)
+                hasSavedKey: savedAIKeyAvailable, hasDesign: true, fontAvailable: font != nil)
         else { return nil }
-        return styles[book.id] ?? record.style
+        var style = styles[book.id] ?? record.style
+        // A registered face with the italic trait or a slant never renders, whatever its name.
+        if let font,
+            !SpineFontPolicy.isUpright(CTFontCreateWithName(font.fontName as CFString, 23, nil))
+        {
+            style.fontName = SpineFontPolicy.uprightFallback
+        }
+        return style
     }
 
     /// Reads the active Hardcover credential only at an explicit synchronization boundary.
