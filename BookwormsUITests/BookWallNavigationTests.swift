@@ -159,13 +159,49 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(app.buttons["book-wall-8"])
     }
 
-    private func openWall() -> XCUIApplication {
+    /// Books 5, 3, and 2 form one series, tied in a bundle on the left column above book 8,
+    /// first book on top. Each bundled book takes one counted focus move and opens its own
+    /// details.
+    func testSeriesBundleBooksTakeCountedFocusAndOpenTheirOwnDetails() {
+        let app = openWall(series: true)
+        let first = app.buttons["book-wall-8"]
+        let bottom = app.buttons["book-wall-2"]
+        let middle = app.buttons["book-wall-3"]
+        let top = app.buttons["book-wall-5"]
+        RemoteNavigation.press(.up, in: app, expecting: bottom)
+        RemoteNavigation.press(.up, in: app, expecting: middle)
+        RemoteNavigation.press(.up, in: app, expecting: top)
+        RemoteNavigation.press(.down, in: app, expecting: middle)
+        XCTAssertEqual(middle.label, "Tides of the Changing Coast, Alex Rowan")
+        XCTAssertEqual(middle.value as? String, "The Atlas Trilogy, 3 books")
+        XCTAssertEqual(first.value as? String ?? "", "", "A book on its own has no bundle")
+        RemoteNavigation.press(.right, in: app, expecting: app.buttons["book-wall-4"])
+        // Book 4 is thicker than one bundled book, so native geometry may enter either one
+        // beside it.
+        RemoteNavigation.press(.left, in: app, expecting: [middle, bottom])
+        RemoteNavigation.moveFocus(to: middle, in: app)
+        XCUIRemote.shared.press(.select)
+        let detail = app.staticTexts["detail-title"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        XCTAssertEqual(detail.label, "Tides of the Changing Coast")
+        capture(app, name: "Book-Wall-bundle-detail")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(middle.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(middle)
+        RemoteNavigation.press(.down, in: app, expecting: bottom)
+        RemoteNavigation.press(.down, in: app, expecting: first)
+        assertSpinesInsideScreen(app)
+        capture(app, name: "Book-Wall-bundle")
+    }
+
+    private func openWall(series: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "--test-scenario=artwork", "--start-view=shelf", "--test-enable-book-wall",
             "--focus-probe",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
         ]
+        if series { app.launchArguments.append("--test-series") }
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))

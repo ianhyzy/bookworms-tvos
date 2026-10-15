@@ -12,6 +12,9 @@ struct BookWallLayout: Sendable {
         let bookHeight: Float
         let spineThickness: Float
         let coverWidth: Float
+        /// The index in `BookWallLayout.bundles` of the series bundle this book is tied into, or
+        /// `nil` for a book on its own. A bundled book's spine is unlettered.
+        var bundle: Int? = nil
 
         /// The lettered area of the spine, which focus targets and text fitting use.
         var spineFaceWidth: Float { bookHeight * 0.94 }
@@ -21,6 +24,26 @@ struct BookWallLayout: Sendable {
         var spineWallWidth: Float { bookHeight }
         var spineWallHeight: Float { spineThickness }
         var collisionThickness: Float { spineThickness + BookWallLayout.coverWrapThickness * 2 }
+    }
+
+    /// Two or more books of one series, stacked in one column and tied with twine, as the iPhone
+    /// companion's Year Stack ties a series (`StackSpine`). The books keep their own spines and
+    /// covers, share one length like a series in one edition, and wear the first book's design.
+    struct SeriesBundle: Sendable {
+        /// The books in finish order, from the top of the bundle down.
+        let books: [Book]
+        let name: String
+        let column: Int
+        let x: Float
+        /// The bundle's bottom, at its lowest book's back cover.
+        let bottomY: Float
+        /// Every book's thickness with its covers.
+        let thickness: Float
+        /// Each book's length.
+        let length: Float
+        /// The top book's spine thickness, which sets the label's inset as the companion's
+        /// first slice does.
+        let topSpineThickness: Float
     }
 
     static let floorY: Float = -4.5
@@ -60,21 +83,40 @@ struct BookWallLayout: Sendable {
     /// Combined width of every column, each sized to its own longest book.
     let totalWidth: Float
     let slots: [Slot]
+    let bundles: [SeriesBundle]
 
+    /// Lays out `books`, given in finish order. Places (`Book.bundlingSeries(_:)`) take turns
+    /// across the columns, and each stacks from the floor up in finish order, so a bundle's books
+    /// rest on one another in one column. Within a bundle, the first book lies on top, as on the
+    /// companion's bundles.
     init(books: [Book], coverRatios: [Int: Double] = [:]) {
         let columnCount = min(
             5, max(3, (books.count + Self.booksPerColumn - 1) / Self.booksPerColumn))
         columns = columnCount
+        let places = Book.bundlingSeries(books)
         let lanes = (0..<columnCount)
             .map { column in
-                books.enumerated()
-                    .compactMap { index, book in
-                        index % columnCount == column ? book : nil
+                places.enumerated()
+                    .flatMap { index, place in
+                        index % columnCount == column ? Array(place.reversed()) : []
                     }
             }
+        let bundled = Set(places.filter { $0.count > 1 }.flatMap { $0.map(\.id) })
+        var lengths: [Int: Float] = [:]
+        for place in places where place.count > 1 {
+            let length =
+                place.map {
+                    Self.dimensions(for: $0, coverRatio: coverRatios[$0.id], lettered: false)
+                        .bookHeight
+                }
+                .max()
+            for book in place { lengths[book.id] = length }
+        }
         let laneDimensions = lanes.map { lane in
             lane.map { book in
-                Self.dimensions(for: book, coverRatio: coverRatios[book.id])
+                Self.dimensions(
+                    for: book, coverRatio: coverRatios[book.id],
+                    lettered: !bundled.contains(book.id), length: lengths[book.id])
             }
         }
         // Each column fits its own longest book, so one long book does not widen every
@@ -122,12 +164,31 @@ struct BookWallLayout: Sendable {
                 top += collisionThickness
             }
         }
+        var bundles: [SeriesBundle] = []
+        for place in places where place.count > 1 {
+            let stack = place.compactMap { book in slots.firstIndex { $0.book.id == book.id } }
+            guard let top = stack.first, let bottom = stack.last, let name = place[0].seriesName
+            else { continue }
+            for index in stack { slots[index].bundle = bundles.count }
+            let thickness = stack.reduce(0) { $0 + slots[$1].collisionThickness }
+            bundles.append(
+                SeriesBundle(
+                    books: place, name: name, column: slots[top].column, x: slots[top].x,
+                    bottomY: slots[bottom].restingY - slots[bottom].collisionThickness / 2,
+                    thickness: thickness, length: slots[top].bookHeight,
+                    topSpineThickness: slots[top].spineThickness))
+        }
+        self.bundles = bundles
         self.slots = slots.sorted {
             $0.row == $1.row ? $0.column < $1.column : $0.row < $1.row
         }
     }
 
-    private static func dimensions(for book: Book, coverRatio: Double?) -> Dimensions {
+    /// A book's size. An unlettered book, tied into a bundle, reserves no room for lettering,
+    /// and takes the bundle's `length` when one is given.
+    private static func dimensions(
+        for book: Book, coverRatio: Double?, lettered: Bool = true, length: Float? = nil
+    ) -> Dimensions {
         let pages = Float(min(1_400, max(100, book.pages ?? 320)))
         let seed = Float((UInt64(bitPattern: Int64(book.id)) &* 2_654_435_761) % 101) / 100
         // The upright height grows with the square root of page count. Matching cover width
@@ -138,7 +199,8 @@ struct BookWallLayout: Sendable {
         let naturalHeight = 2.25 * coverScale + (seed - 0.5) * 0.09
         let initialHeight = max(
             Self.minimumBookHeight, naturalHeight,
-            Self.heightNeededForText(book, thickness: Self.minimumSpineThickness))
+            lettered
+                ? Self.heightNeededForText(book, thickness: Self.minimumSpineThickness) : 0)
         let naturalThickness =
             Self.minimumSpineThickness + max(0, pages - 250) * 0.0009
             + seed * 0.025
@@ -147,15 +209,21 @@ struct BookWallLayout: Sendable {
         // on the minimums. Scaling only upward keeps the text-fit sizes valid.
         let variety =
             Float((UInt64(bitPattern: Int64(book.id)) &* 40_503 &+ 12_345) % 1_000) / 999
-        let textThickness = max(
-            Self.minimumSpineThickness, Self.thicknessNeededForText(book, height: initialHeight))
+        let textThickness =
+            lettered
+            ? max(
+                Self.minimumSpineThickness,
+                Self.thicknessNeededForText(book, height: initialHeight))
+            : Self.minimumSpineThickness
         let spineThickness =
             max(min(naturalThickness, Self.maximumPageThickness), textThickness)
             * (1 + variety * 0.25)
         let lengthVariety = Float((UInt64(bitPattern: Int64(book.id)) &* 69_069) % 997) / 996
-        let bookHeight = max(
-            initialHeight * (1 + lengthVariety * 0.22),
-            min(spineThickness * Self.minimumLengthToThickness, Self.maximumBookLength))
+        let bookHeight =
+            length
+            ?? max(
+                initialHeight * (1 + lengthVariety * 0.22),
+                min(spineThickness * Self.minimumLengthToThickness, Self.maximumBookLength))
         let ratio =
             coverRatio.flatMap { value -> Float? in
                 value.isFinite && value > 0 ? Float(value) : nil

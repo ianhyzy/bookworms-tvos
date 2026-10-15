@@ -8,7 +8,8 @@ This document describes the implemented behavior and the constraints to preserve
 
 | File | Responsibility |
 | --- | --- |
-| [BookWallLayout.swift](../Bookworms/Models/BookWallLayout.swift) | Book proportions, text-driven minimum sizes, column spacing, stack thickness, and covering allowance. |
+| [BookWallLayout.swift](../Bookworms/Models/BookWallLayout.swift) | Book proportions, text-driven minimum sizes, column spacing, stack thickness, covering allowance, and series bundles. |
+| [Tie.swift](../Bookworms/Views/Tie.swift) | A series bundle's twine, paper label, and tag, drawn into one texture, and the bundled books' cloth step. |
 | [BookWallPreparation.swift](../Bookworms/Services/BookWallPreparation.swift) | Prefetch artwork, derive layout, rasterize textures, and build reusable model entities before presentation. |
 | [BookWallLocalSpine.swift](../Bookworms/Models/BookWallLocalSpine.swift) | Genre fonts, sampled colors, and spine contrast. |
 | [BookWallHardcoverMesh.swift](../Bookworms/Models/BookWallHardcoverMesh.swift) | Continuous casing and shaped artwork meshes, corner profiles, bevel normals, and UV coordinates. |
@@ -39,7 +40,7 @@ The app checks the book's ranked genre tags and uses the first recognized catego
 
 Unrecognized or missing genres use Avenir Next Demi Bold. The selected face applies to both the title and author. The renderer measures words and draws each fitted line, then sizes the texture to the visible spine plane so letters keep their proportions. The title stays at or above 56 texture pixels and the author at or above 48. Below a 5% top margin, the title takes 58% of the spine's thickness and the author the next 32% (`titleTop`, `titleShare`, `authorShare`). Each grows to the largest size that fits its area, so thick spines get large lettering. The book's dimensions account for the words and line count before the spine texture is drawn.
 
-A series bundle (`Book.bundlingSeries(_:)`) takes the place of two or more books of one named series: its title is the series name and count, and its page count is the books' total, so the same sizing gives it a thick but book-shaped spine and larger or wrapped lettering. For *House of Leaves*, the spine and shelf label letter each "house" in its blue (`HouseOfLeaves.attributed`), fitted to the spine color or the shelf's wood.
+For *House of Leaves*, the spine and shelf label letter each "house" in its blue (`HouseOfLeaves.attributed`), fitted to the spine color or the shelf's wood.
 
 ## Cover palette and contrast
 
@@ -59,6 +60,18 @@ Spines match the iPhone companion's flat cloth spine. `BookWallSpineTexture.fill
 - **Fold.** The cover's edge colors fold over the front joint at half strength and fade out with a smoothstep ease across 9% of the spine's thickness (`foldShare`), before the lettering starts. On the front board, `BookWallCoverTexture` draws the edge colors at full strength, then the cloth at half strength, fading out across 3 mm at the wall's scale (`foldReach`, 0.06 units) from the joint. A book without cover art has no fold.
 
 The texture covers the casing's whole flat spine wall (`spineWallWidth` by `spineWallHeight`, the book's length and spine thickness), so the relief and fold reach the boards' rounded edges. The lettering keeps its place within the centered lettered area (`spineFaceWidth` by `spineFaceHeight`, 94% of the length and 88% of the thickness), which focus targets and text fitting also use. Because the wall shows the same baked model at rest, in flight, and in details, a book pulled from the wall starts its flight exactly as it rests.
+
+## Series bundles
+
+Two or more of the year's books from one named series (`Book.bundlingSeries(_:)`) stand together as a bundle tied with twine, as the iPhone companion's Year Stack ties a series (`StackSpine`, `ShareSpine`, `Tie`, `PaperLabel`, and `SeriesTag` in its `ShareCards.swift`). Only books with a Hardcover series name group.
+
+- **Place.** Places, a book or a bundle, take turns across the columns in finish order, so a bundle sits where the series' first finished book would. Its books stack on one another in one column with nothing between them, in finish order from the top down: the first book lies on top, as on the companion's bundles.
+- **Books.** Each book of the series is its own model, with its own cover, page edges, and thickness, so each one takes focus, pulls out, and opens its own details. The books share one length, the longest of theirs, like a series in one edition, and lie square: each takes the first book's sideways offset, and settling reseats them there whatever the fall did. They reserve no room for lettering, so a bundled book is as thick as its page count makes it, at least `minimumSpineThickness`.
+- **Binding.** The books are bound alike in the first book's design: its cloth, stepped for each book by up to 0.04 in OKLab lightness away from the design's ink (`BookWallLocalSpine.cloth(_:book:)`, `clothStep`), so a dark design stays dark and a light one light. Their spines are unlettered. Each keeps the [flat cloth spine](#flat-cloth-spine) of its own: the relief, its own cover's fold, and blind-stamped bands only when that book alone is at least 32 mm thick. The companion stamps a bundle's slices when the series together is that thick.
+- **Tie.** `Tie.image(for:)` draws the companion's tie at 256 pixels per unit, at which a typical wall bundle is as many pixels long as a companion bundle, so the companion's pixel sizes carry over: twine 1.1% of the length wide, at least 6 pixels, near the head (8% of the length) and the tail (82%), with a bow on the tail's twine and a manila luggage tag that hangs from it and shows the book count. Under them, a cream paper label with a ruled border, 88% of the bundle's thickness tall, runs from just before the head twine to a little past its lettering, short of the tag, and letters the series name in dark ink in semibold New York: at half the label's height on one line, then on two balanced lines when the label is tall enough, then smaller down to 30 pixels, and truncated only when nothing fits.
+- **Scene.** Preparation bakes each bundle's tie into one transparent texture and builds one plane for it (`BookWallScene.makeTie`), lit like the spines, 0.004 units in front of the spines' faces. It adds one entity and one draw call per bundle and no work per frame. The bundle falls as one: its books start together, stacked as they will rest, with the tie riding on the bottom book. Once the books settle, the tie moves to the scene root at its resting place. A focused book then slides out from under the tie, which stays on the wall, and a book that opens leaves the tie behind with the rest of the wall, which fades out and back in through the same opacity as the other books. The flying book is the same model at rest, in flight, and in details, so it does not change when it opens.
+
+VoiceOver reads a bundled book as its title and author, then the series name and book count, such as "Dungeon Crawler Carl, 3 books", as the companion's label and tag read.
 
 The retained shelf `SpineView` draws the same cloth for upright spines: 1-point corners at most (`SpineView.cornerRadius(thickness:)`, 2.5% of the thickness), the same relief with the front board's edge on the lettering's top side, and the same bands, with no rule line.
 

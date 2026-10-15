@@ -145,4 +145,59 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertTrue(BookWallAvailability.supports(machineIdentifier: "AppleTV14,1"))
         XCTAssertFalse(BookWallAvailability.supports(machineIdentifier: "unknown"))
     }
+
+    func testSeriesBundleStacksInOneColumnWithOneLengthAndTheFirstBookOnTop() throws {
+        func book(_ id: Int, series: Int? = nil, pages: Int) -> Book {
+            Book(
+                id: id, title: "Book \(id)", author: "Author", pages: pages,
+                seriesID: series, seriesName: series.map { _ in "The Series" })
+        }
+        let books = [
+            book(1, pages: 300), book(2, series: 9, pages: 250), book(3, pages: 320),
+            book(4, pages: 280), book(5, series: 9, pages: 700), book(6, series: 9, pages: 410),
+        ]
+        let layout = BookWallLayout(books: books)
+        let bundle = try XCTUnwrap(layout.bundles.first)
+        XCTAssertEqual(layout.bundles.count, 1)
+        XCTAssertEqual(bundle.books.map(\.id), [2, 5, 6])
+        XCTAssertEqual(bundle.name, "The Series")
+        let members = layout.slots.filter { $0.bundle == 0 }.sorted { $0.row < $1.row }
+        XCTAssertEqual(members.map(\.book.id), [6, 5, 2], "The first book lies on top")
+        XCTAssertEqual(Set(members.map(\.column)).count, 1, "A bundle stacks in one column")
+        XCTAssertEqual(
+            members.map(\.row), Array(members[0].row...members[0].row + 2),
+            "Nothing lies between a bundle's books")
+        XCTAssertTrue(members.allSatisfy { $0.bookHeight == bundle.length }, "One edition's length")
+        XCTAssertEqual(
+            bundle.thickness, members.reduce(0) { $0 + $1.collisionThickness }, accuracy: 0.0001)
+        XCTAssertEqual(
+            bundle.bottomY, members[0].restingY - members[0].collisionThickness / 2,
+            accuracy: 0.0001)
+        XCTAssertNil(layout.slots.first { $0.book.id == 1 }?.bundle)
+        for member in members {
+            XCTAssertGreaterThanOrEqual(
+                member.bookHeight,
+                min(
+                    member.spineThickness * BookWallLayout.minimumLengthToThickness,
+                    BookWallLayout.maximumBookLength),
+                "Each bundled book stays as book-shaped as a book on its own")
+        }
+    }
+
+    func testBundledClothStepsOnlyAwayFromTheInk() {
+        let dark = BookWallLocalSpine.Style(
+            background: StyleColor(red: 0.15, green: 0.2, blue: 0.3),
+            foreground: StyleColor(red: 1, green: 1, blue: 1), fontName: "Georgia")
+        for id in 1...20 {
+            let cloth = BookWallLocalSpine.cloth(dark, book: Book(id: id, title: "", author: ""))
+            XCTAssertLessThanOrEqual(cloth.oklab.l, dark.background.oklab.l + 0.000_1)
+            XCTAssertGreaterThanOrEqual(
+                dark.background.oklab.l - cloth.oklab.l, -0.000_1)
+            XCTAssertLessThanOrEqual(
+                dark.background.oklab.l - cloth.oklab.l, BookWallLocalSpine.clothStep + 0.01)
+            XCTAssertGreaterThanOrEqual(
+                cloth.contrast(with: dark.foreground),
+                dark.background.contrast(with: dark.foreground))
+        }
+    }
 }

@@ -154,7 +154,7 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertFalse(reloaded.ambientOrderedViews.contains(.bookWall))
     }
 
-    func testSeriesBundleIntoOneSpineAtTheFirstBooksPlace() throws {
+    func testSeriesTieIntoOneBundleAtTheFirstBooksPlace() throws {
         func member(_ id: Int, series: Int?, name: String?, pages: Int?, finished: String)
             -> Book
         {
@@ -172,13 +172,13 @@ final class YearInReviewTests: XCTestCase {
             member(7, series: 5, name: "Dungeon Crawler Carl", pages: nil, finished: "2026-04-01"),
         ]
         let review = try XCTUnwrap(YearInReview.all(from: books).first)
-        XCTAssertEqual(review.books.count, 7, "Statistics keep every book")
+        XCTAssertEqual(review.books.count, 7, "Statistics and Book Wall keep every book")
         XCTAssertEqual(review.shelf.count, 7, "The cover shelf keeps every cover")
+        let places = Book.bundlingSeries(review.books)
         XCTAssertEqual(
-            review.spines.map(\.id), [1, 2, 4, 5, 6],
-            "A series of two or more takes its first book's place; unnamed series stay single")
-        XCTAssertEqual(review.spines[0].title, "Dungeon Crawler Carl ×3")
-        XCTAssertEqual(review.spines[0].pages, 900, "A bundle is as long as its books together")
-        XCTAssertEqual(review.spines[2].title, "Book 4", "One book of a series stays itself")
+            places.map { $0.map(\.id) }, [[1, 3, 7], [2], [4], [5], [6]],
+            "A series of two or more ties at its first book's place, in finish order; one book of "
+                + "a series and unnamed series stay single")
+        XCTAssertEqual(places[0].map(\.title), ["Book 1", "Book 3", "Book 7"], "Books keep titles")
     }
 }

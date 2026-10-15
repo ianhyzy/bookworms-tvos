@@ -23,6 +23,7 @@
 		25B9BF7D8405453F0E0E5E52 /* DevicePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457F99A087A59612227CE930 /* DevicePerformanceTests.swift */; };
 		2B9A2B8C5BBC0DDAE0E2B693 /* BookWallPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4664FDF12F4575226EFE2BF2 /* BookWallPreparation.swift */; };
 		306C728C1F502D5BD78048A8 /* SocialLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1945BE7927079EC026064DC4 /* SocialLibraryModel.swift */; };
+		35E29598FD75DB4254537C6F /* Tie.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1A3CF12D0CA79EC1BD1AF3 /* Tie.swift */; };
 		38F2866C7B5E1981CD5A3B09 /* ShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FD194803F9CA77D000C719 /* ShelfView.swift */; };
 		3FEBDDE6E6B85FD6E4C9C9C1 /* RemoteNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2131B44006285208B88BBF3 /* RemoteNavigation.swift */; };
 		40A94A5AEE259BB7229DA2E8 /* AIConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C585BB060C96E2C526C93DE /* AIConfiguration.swift */; };
@@ -248,6 +249,7 @@
 		BB2EC841DEE5065CBC2D5512 /* BookWallHardcoverMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallHardcoverMesh.swift; sourceTree = "<group>"; };
 		BC4903ECD2C4C41FD217FAA6 /* SocialLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialLibrary.swift; sourceTree = "<group>"; };
 		BD248044777361FA581C524A /* APIUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIUsageStore.swift; sourceTree = "<group>"; };
+		BE1A3CF12D0CA79EC1BD1AF3 /* Tie.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tie.swift; sourceTree = "<group>"; };
 		BF92C639B243B2856606C1C3 /* SocialNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialNavigationTests.swift; sourceTree = "<group>"; };
 		C179DF4162B44730E39DA89F /* BookPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookPresentation.swift; sourceTree = "<group>"; };
 		C2547F66E0C15CE3CACD73A2 /* BookwormsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BookwormsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -370,6 +372,7 @@
 				ABD290ECD8071AD9B2F08F15 /* SpineAuthorText.swift */,
 				231509B79CBBB761366E401B /* SpineTextRenderer.swift */,
 				A56991945AF698A29FB0DA1D /* SpineView.swift */,
+				BE1A3CF12D0CA79EC1BD1AF3 /* Tie.swift */,
 				ABD792402E78441E4FE1D3BD /* YearInReviewView.swift */,
 			);
 			path = Views;
@@ -781,6 +784,7 @@
 				DCFD7DACE59B019353630D32 /* SpineTextMetrics.swift in Sources */,
 				085016EE97D66C5E7C53689D /* SpineTextRenderer.swift in Sources */,
 				0340625950B4EBF79BB9CE54 /* SpineView.swift in Sources */,
+				35E29598FD75DB4254537C6F /* Tie.swift in Sources */,
 				7393398A5BC4CB0CE49264C5 /* TopShelfPoster.swift in Sources */,
 				59A8123D5BE5B609BA8EFFD7 /* TopShelfSnapshot.swift in Sources */,
 				E1F523024C548532EB2F64D6 /* UserFacingError.swift in Sources */,
