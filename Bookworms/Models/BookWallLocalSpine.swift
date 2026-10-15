@@ -56,7 +56,7 @@ enum BookWallLocalSpine {
                 return "DINCondensed-Bold"
             }
             if genre.contains("horror") || genre.contains("gothic") {
-                return "Impact"
+                return SpineFontPolicy.impactReplacement
             }
             if genre.contains("romance") || genre.contains("love story") {
                 return "Avenir-Heavy"

@@ -83,7 +83,10 @@ actor GoogleFontLibrary {
             licensePath: directory.appending(path: "LICENSE.txt").path)
     }
 
+    /// Downloads and registers `family`. Throws `AIError.invalidFont` for a blocked family, such
+    /// as Impact, before reading the cache or the network.
     func download(family: String, weight: Int = 400) async throws -> DownloadedFont {
+        guard SpineFontPolicy.allows(family) else { throw AIError.invalidFont }
         if let font = cached(family: family, weight: weight) {
             if (try? register(font)) != nil { return font }
         }
