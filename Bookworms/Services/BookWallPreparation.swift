@@ -32,7 +32,8 @@ final class BookWallPreparation {
     /// Increments when a recovered cover replaces a prepared book's artwork, so the visible
     /// scene can draw again.
     private(set) var coverRevision = 0
-    /// Prepared books that have a cover URL but were built without their cover.
+    /// Books with a cover URL whose cover the wall was prepared without: wall books, and
+    /// series sources outside the wall whose cover sets their series-mates' colors.
     private var missingCovers: [Book] = []
     private let rasterizer = BookWallRasterizer()
 
@@ -79,6 +80,13 @@ final class BookWallPreparation {
         var bodies: [Int: ModelEntity] = [:]
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
         var missing: [Book] = []
+        for source in outside.values where source.coverURL != nil {
+            if (try? await ArtworkStore.shared.detailImage(
+                for: source, maximumPixelSize: 400, allowsNetwork: false)) == nil
+            {
+                missing.append(source)
+            }
+        }
         // One shared page-edge texture serves every book; without it pages stay plain.
         var pageEdge: TextureResource?
         if let image = BookWallPageTexture.make() {
@@ -134,8 +142,10 @@ final class BookWallPreparation {
     }
 
     /// Downloads missing covers again after 30 seconds, as the shelf does after a failure. A
-    /// recovered cover replaces the book's materials in place; its slot keeps the proportions
-    /// it was laid out with. Covers that still fail wait for the next preparation pass.
+    /// recovered cover replaces the materials in place of its book and of every wall book that
+    /// draws in its series design, since the source's cover sets their colors; each slot keeps
+    /// the proportions it was laid out with. Covers that still fail wait for the next
+    /// preparation pass.
     private func retryMissingCovers(in wall: BookWallPreparedWall, fontStyle: AppFontStyle)
         async
     {
@@ -143,17 +153,28 @@ final class BookWallPreparation {
         guard !failed.isEmpty, (try? await Task.sleep(for: .seconds(30))) != nil else { return }
         await ArtworkStore.shared.forgetFailures()
         _ = await ArtworkStore.shared.prefetch(books: failed, avatarURLs: [])
-        // ponytail: a source's cover that recovers later restyles the source alone; its
-        // series-mates keep the colors they were prepared with until the next preparation.
-        var styles: [Int: BookWallLocalSpine.Style] = [:]
+        var recovered = Set<Int>()
         for book in failed {
-            guard !Task.isCancelled, prepared?.books == wall.books else { return }
-            guard let slot = wall.layout.slots.first(where: { $0.book.id == book.id }),
-                let body = wall.bodies[book.id],
+            if (try? await ArtworkStore.shared.detailImage(
+                for: book, maximumPixelSize: 400, allowsNetwork: false)) != nil
+            {
+                recovered.insert(book.id)
+            }
+        }
+        let redrawn = wall.layout.slots.filter { slot in
+            recovered.contains(slot.book.id)
+                || wall.designs[slot.book.id].map { recovered.contains($0.id) } == true
+        }
+        var styles: [Int: BookWallLocalSpine.Style] = [:]
+        // Sources outside the wall have nothing to redraw once their cover loads.
+        var restored = recovered.subtracting(wall.layout.slots.map(\.book.id))
+        for slot in redrawn {
+            guard !Task.isCancelled, prepared?.id == wall.id else { return }
+            guard let body = wall.bodies[slot.book.id],
                 let cover = try? await ArtworkStore.shared.detailImage(
-                    for: book, maximumPixelSize: 400, allowsNetwork: false)
+                    for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             else { continue }
-            let design = await design(for: book, in: wall.designs, cache: &styles)
+            let design = await design(for: slot.book, in: wall.designs, cache: &styles)
             let images = await rasterizer.render(
                 slot: slot, cover: cover, design: design, fontStyle: fontStyle)
             guard let spineImage = images.spine, let coverImage = images.cover,
@@ -161,13 +182,15 @@ final class BookWallPreparation {
                     from: spineImage, options: .init(semantic: .color)),
                 let coverTexture = try? await TextureResource.generate(
                     from: coverImage, options: .init(semantic: .color)),
-                !Task.isCancelled, prepared?.books == wall.books
+                !Task.isCancelled, prepared?.id == wall.id
             else { continue }
             BookWallScene.applyArtwork(
                 to: body, style: images.style, spine: spine, cover: coverTexture)
-            missingCovers.removeAll { $0.id == book.id }
+            restored.insert(slot.book.id)
             coverRevision &+= 1
         }
+        guard prepared?.id == wall.id else { return }
+        missingCovers.removeAll { recovered.contains($0.id) && restored.contains($0.id) }
     }
 }
 
