@@ -37,11 +37,11 @@ final class BookWallScene {
     /// leave room for its shadow on the left.
     private static let detailShadowRoom: CGFloat = 0.12
     /// Environment-light exponent added at full detail level. Dimming the fill makes the
-    /// stage spotlight read as the key light.
-    private static let detailAmbientExponent: Float = -0.8
-    /// Environment-light exponent while the wall rests; calibrates the lit backdrop against
-    /// the SwiftUI background shown in other views.
-    private static let restingAmbientExponent: Float = 0
+    /// stage spotlight read as the key light; details end at an exponent of -0.8.
+    private static let detailAmbientExponent: Float = -1.05
+    /// Environment-light exponent while the wall rests: a little fill on every stack, so the
+    /// shelf light's falloff toward the outer stacks stays gentle.
+    private static let restingAmbientExponent: Float = 0.25
     // Lighting uses point lights and one directional light. `SpotLight` produced no visible
     // light on Apple TV at any intensity, cone, or orientation, while point lights at the
     // same positions did. Point-light intensity is lumens emitted in every direction and
@@ -78,23 +78,30 @@ final class BookWallScene {
     private static let focusPullOut: Float = 0.35
     private static let pullOutDuration: Float = 0.2
     /// The shelf light's offset from the stacks' center. Its falloff lights the middle
-    /// stacks most and leaves a round pool on the wall behind them.
-    private static let shelfLightOffset = SIMD3<Float>(0, 1.5, 4.5)
-    private static let shelfLightIntensity: Float = 400_000
+    /// stacks most. Far enough out that the middle stack gets about 1.7 times the light of an
+    /// outer one, so the middle books keep their detail.
+    private static let shelfLightOffset = SIMD3<Float>(0, 2, 7)
+    private static let shelfLightIntensity: Float = 750_000
+    private static let shelfLightRadius: Float = 40
     /// A light hidden just behind the stacks catches the tops and edges of the upper books.
     /// Its glow on the wall is baked into the backdrop (`restingWallLight`).
-    private static let poolLightIntensity: Float = 700_000
+    private static let poolLightIntensity: Float = 420_000
     /// The wall's lighting is baked into the backdrop image rather than lit live; a
     /// full-screen lit surface cost more GPU time than the rest of the scene. The factors
     /// scale each color channel of the wall image, which is shown without tone mapping.
     /// They were fitted to Simulator captures of the live-lit wall: a warm point light 3.3 units in front of the wall
     /// behind the stacks (the pool), the shelf light's faint wash, and the environment.
+    /// The pool and base were then softened from that fit: a 40 percent lower, wider pool over
+    /// a 6 percent brighter wall.
     private static let restingWallLight = BookWallBackdropBake.Lighting(
-        base: [0.368, 0.331, 0.279], pool: [0.840, 0.680, 0.409], wash: [0.200, 0.156, 0.128])
+        base: [0.390, 0.351, 0.296], pool: [0.504, 0.408, 0.245], wash: [0.200, 0.156, 0.128])
     /// The pool is centered this far above the stacks' center, with the falloff of a point
-    /// light `poolLightDistance` units from the wall. The wash is centered far above the frame.
+    /// light `poolGlowDistance` units from the wall, farther than the live pool light
+    /// (`poolLightDistance`), so the glow spreads wider. The wash is centered far above the
+    /// frame.
     private static let poolHeightOffset: Float = 0.5
     private static let poolLightDistance: Float = 3.3
+    private static let poolGlowDistance: Float = 5
     private static let washHeightOffset: Float = 11.9
     private static let washLightDistance: Float = 33
     /// With details open, the dimmed environment and the distant key light leave the wall
@@ -228,9 +235,10 @@ final class BookWallScene {
         topLight.look(at: .zero, from: Self.topLightDirection, relativeTo: nil)
         root.addChild(topLight)
         // A room lit mainly by one warm light in front of the stacks. The dim environment
-        // keeps the outer stacks readable while the middle ones sit in the brightest light.
+        // keeps the outer stacks readable while the middle ones sit in the most light.
         shelfLight.light = PointLightComponent(
-            color: Self.warmLight, intensity: Self.shelfLightIntensity, attenuationRadius: 30)
+            color: Self.warmLight, intensity: Self.shelfLightIntensity,
+            attenuationRadius: Self.shelfLightRadius)
         root.addChild(shelfLight)
         poolLight.light = PointLightComponent(
             color: Self.warmLight, intensity: Self.poolLightIntensity, attenuationRadius: 20)
@@ -1343,7 +1351,7 @@ final class BookWallScene {
                 wallImage,
                 resting: raw ? .init(base: .one, pool: .zero, wash: .zero) : Self.restingWallLight,
                 pool: glow(
-                    height: stackCenter + Self.poolHeightOffset, distance: Self.poolLightDistance),
+                    height: stackCenter + Self.poolHeightOffset, distance: Self.poolGlowDistance),
                 wash: glow(
                     height: stackCenter + Self.washHeightOffset, distance: Self.washLightDistance),
                 detailTop: Self.detailWallTop, detailBottom: Self.detailWallBottom),
