@@ -2442,7 +2442,13 @@ enum BookWallSpineTexture {
         let origin = CGPoint(
             x: (size.width - face.width) / 2, y: (size.height - face.height) / 2)
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        guard slot.bundle == nil else { return renderer.image { _ in }.cgImage }
+        guard slot.bundle == nil else {
+            // Unlettered cloth needs no glyph detail, so half the density keeps a bundle's many
+            // spines to a quarter of the memory.
+            let half = CGSize(
+                width: (size.width / 2).rounded(), height: (size.height / 2).rounded())
+            return UIGraphicsImageRenderer(size: half, format: format).image { _ in }.cgImage
+        }
         let image = renderer.image { _ in
             let inset: CGFloat = max(18, face.width * 0.045)
             let left: CGFloat = origin.x + inset * 1.6
