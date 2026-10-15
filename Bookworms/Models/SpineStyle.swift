@@ -33,6 +33,17 @@ enum SpineFontPolicy {
         !name.lowercased().contains("impact")
     }
 
+    /// Returns whether a family or PostScript name may design another book's spine, as the
+    /// iPhone companion's `BookAnalyzer.allowsFamily(_:)` rules: never Impact, and never an
+    /// italic or oblique face. Bangers and Shrikhand are slanted by design without saying so.
+    static func allowsFamily(_ name: String) -> Bool {
+        let name = name.lowercased()
+        return !["impact", "italic", "oblique", "bangers", "shrikhand"]
+            .contains {
+                name.contains($0)
+            }
+    }
+
     /// Returns `name`, or `impactReplacement` when `name` is Impact.
     static func allowedFontName(_ name: String) -> String {
         allows(name) ? name : impactReplacement

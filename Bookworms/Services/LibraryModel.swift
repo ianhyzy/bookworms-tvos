@@ -34,9 +34,26 @@ final class LibraryModel {
         didSet {
             let years = YearInReview.all(from: allBooks)
             if years != readingYears { readingYears = years }
+            let sources = Self.seriesSources(of: allBooks)
+            if sources != seriesSources { seriesSources = sources }
             refreshOnThisDay()
         }
     }
+    /// Each book that shares a series design, by ID, mapped to the book whose design it draws
+    /// with (`SeriesDesigns.sources`); a source maps to itself. Prepared with the library, never
+    /// on focus or remote input.
+    private(set) var seriesSources: [Int: Book] = [:]
+
+    /// `SeriesDesigns.sources` over `books`, judging each book's design by its Book Wall font.
+    /// Whether a source's font can letter each book is checked later, once, where a spine is
+    /// prepared.
+    nonisolated static func seriesSources(of books: [Book]) -> [Int: Book] {
+        let byID = Dictionary(books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let fonts = byID.mapValues(BookWallLocalSpine.fontName(for:))
+        return SeriesDesigns.sources(books: Array(byID.values), fonts: fonts)
+            .compactMapValues { byID[$0] }
+    }
+
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
     private(set) var seriesByID: [Int: SeriesInfo] = [:]
 
@@ -112,7 +129,19 @@ final class LibraryModel {
         presentationRevision += 1
     }
 
+    /// The style a saved spine draws `book` with: its series source's, when the source has a
+    /// usable saved style (`SeriesDesigns`), otherwise its own.
     func savedSpineStyle(for book: Book) -> SpineStyle? {
+        if let source = seriesSources[book.id], source.id != book.id,
+            let style = ownSavedSpineStyle(for: source),
+            SeriesDesigns.isUsableSource(style.fontName)
+        {
+            return style
+        }
+        return ownSavedSpineStyle(for: book)
+    }
+
+    private func ownSavedSpineStyle(for book: Book) -> SpineStyle? {
         guard let record = aiRecords[book.id],
             BookPresentation.usesSpine(
                 hasSavedKey: savedAIKeyAvailable, hasDesign: true,
@@ -880,7 +909,16 @@ final class LibraryModel {
         cancelHardcoverDeviceAuth()
     }
 
-    func style(for book: Book) -> SpineStyle { styles[book.id] ?? .fallback(for: book) }
+    /// The book's saved style, or its series source's when that source has a usable one
+    /// (`SeriesDesigns`).
+    func style(for book: Book) -> SpineStyle {
+        if let source = seriesSources[book.id], source.id != book.id, let style = styles[source.id],
+            SeriesDesigns.isUsableSource(style.fontName)
+        {
+            return style
+        }
+        return styles[book.id] ?? .fallback(for: book)
+    }
 
     private func install(
         _ result: [Book], source: LibrarySource, accountID: String, series: [SeriesInfo]? = nil

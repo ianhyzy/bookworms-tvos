@@ -41,6 +41,18 @@ Unrecognized or missing genres use Avenir Next Demi Bold. No spine uses Impact: 
 
 For *House of Leaves*, the spine and shelf label letter each "house" in its blue (`HouseOfLeaves.attributed`), fitted to the spine color or the shelf's wood.
 
+## Series designs
+
+Books of one series share a spine design, as on the iPhone and Mac companions (`SeriesDesigns`, with the same rules and names):
+
+- **Membership.** `SeriesDesigns.matches(_:_:)` holds the whole rule: the same `seriesID` and at least one shared author. Authors split on ", " and compare with case and diacritics folded, letters and digits only. To match a whole series whoever wrote it, return `true` after the series check there.
+- **Source.** Among a book and its matching series-mates in the whole library, the source is the one ranked first by `SeriesDesigns.ranksBefore(_:_:)`: the lowest `seriesPosition`, then the earliest finish, then the lowest ID, with a missing position or finish last. Only a usable design can be a source: one whose font `SpineFontPolicy.allowsFamily(_:)` allows, never Impact or an italic. `LibraryModel.seriesSources` maps each matching book to its source when the library snapshot changes, never on focus or remote input.
+- **Glyphs.** Preparation checks once whether the source's font has a glyph for every letter of the book's title and author (`SeriesDesigns.canLetter(_:fontName:)`). A book it can't letter keeps its own design.
+- **What's shared.** A book drawing with its source takes the source's `BookWallLocalSpine.Style`: the colors sampled from the source's cover and the source's genre font, with no tone step. It keeps its own cover on its board, its own cover's fold (`edgeColors`), and its own bands, by its own thickness. Layout fits its lettering in the source's font. A source finished in another year is not on the wall, so preparation prefetches its cover with the wall's books.
+- **Readiness.** `BookWallPreparation.prepare(_:sources:)` takes the wall books' sources, and the wall is ready only for the same books and sources, so a series that gains a better source prepares again.
+
+The hidden generated-spine views follow the same sources: `LibraryModel.style(for:)` and `savedSpineStyle(for:)`, which ambient mode uses, return the source's saved style when it has a usable one.
+
 ## Cover palette and contrast
 
 The app reduces the selected cover to a 32 × 32 RGB sample and groups colors into coarse color bins. The most common bin supplies the spine color. A contrasting sampled color supplies the text when it reaches at least **4.5:1** against the spine; otherwise the app chooses whichever of black or white gives stronger contrast. The title and author use the same full-opacity text color, so both meet the same contrast threshold. When cover pixels are unavailable, the app uses the existing deterministic local background and a contrast-safe text color.
