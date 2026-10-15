@@ -103,7 +103,7 @@ struct CoverView: View {
         }
         .task(
             id:
-                "\(book.id):\(pixelSize ?? 0):\(book.coverURL?.absoluteString ?? ""):\(book.detailCoverURL?.absoluteString ?? ""):\(artworkGeneration)"
+                "\(book.id):\(pixelSize ?? 0):\(book.coverURLs.map(\.absoluteString)):\(artworkGeneration)"
         ) { await load() }
     }
 
@@ -120,7 +120,7 @@ struct CoverView: View {
             }
         }
         failed = false
-        guard book.coverURL != nil || book.detailCoverURL != nil else { return }
+        guard !book.coverURLs.isEmpty else { return }
         do {
             let decoded = try await ArtworkStore.shared.detailImage(
                 for: book, maximumPixelSize: pixelSize, allowsNetwork: false)
@@ -178,7 +178,7 @@ struct CoverView: View {
                         .multilineTextAlignment(.center)
                     if !compact {
                         Text(
-                            (book.coverURL == nil && book.detailCoverURL == nil) || failed
+                            book.coverURLs.isEmpty || failed
                                 ? "Cover unavailable" : "Loading cover…"
                         )
                         .appFont(size: 22).foregroundStyle(.secondary).lineLimit(2)

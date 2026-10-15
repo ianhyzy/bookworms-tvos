@@ -1,6 +1,6 @@
 # Book Wall models, animation, and local spines
 
-Book Wall generates spine artwork on Apple TV. It does not call an AI service or download fonts. It may use the existing artwork store to fetch the selected cover before sampling that image locally. A book without a usable cover still gets a deterministic, readable spine. A book whose cover URL produced no image is downloaded again 30 seconds after preparation, as on the shelf; if the cover arrives, the book's spine, casing, and cover artwork change in place without another fall, and its slot keeps the proportions it was laid out with.
+Book Wall draws spine artwork on Apple TV, from a [companion design](#companion-designs) when the book has one and from local metadata otherwise. It does not call an AI service. It may use the existing artwork store to fetch the selected cover before sampling that image locally. A book without a usable cover still gets a deterministic, readable spine. A book whose cover URL produced no image is downloaded again 30 seconds after preparation, as on the shelf; if the cover arrives, the book's spine, casing, and cover artwork change in place without another fall, and its slot keeps the proportions it was laid out with.
 
 This document describes the implemented behavior and the constraints to preserve when changing it. See the [development handoff](handoffs/2026-09-29-book-wall.md) for work in progress and evidence locations, and [Book Wall checks](TESTING.md#book-wall-checks) for device verification.
 
@@ -73,6 +73,16 @@ Spines match the iPhone companion's flat cloth spine. `BookWallSpineTexture.fill
 The texture covers the casing's whole flat spine wall (`spineWallWidth` by `spineWallHeight`, the book's length and spine thickness), so the relief and fold reach the boards' rounded edges. The lettering keeps its place within the centered lettered area (`spineFaceWidth` by `spineFaceHeight`, 94% of the length and 88% of the thickness), which focus targets and text fitting also use. Because the wall shows the same baked model at rest, in flight, and in details, a book pulled from the wall starts its flight exactly as it rests.
 
 The retained shelf `SpineView` draws the same cloth for upright spines: 1-point corners at most (`SpineView.cornerRadius(thickness:)`, 2.5% of the thickness), the same relief with the front board's edge on the lettering's top side, and the same bands, with no rule line.
+
+## Companion designs
+
+With iCloud storage on, the Apple TV reads `SpineDesignV1` records that the Bookworms iPhone or Mac companion saves for the active Hardcover account; see [sources and iCloud](SOURCES_AND_ICLOUD.md). While `BookPresentation.showsCompanionSpines` is on, a current-year book with a valid design uses the design's background and text colors, its typeface, and its title case instead of the cover palette and genre face. Validation requires at least 4.5:1 text contrast. Books without a design keep their local spines, so one wall can mix both.
+
+Before layout, preparation downloads and registers each design's Google Fonts face once per family and weight through `GoogleFontLibrary`, using the instance weight the companion chose. Downloaded faces stay in the font cache for later preparations. When a face is unavailable, the spine uses the system face for the design's typeface (`serif`, `sans`, `rounded`, or `monospaced`) and weight. A network failure stops further font downloads for that preparation. The layout measures each book's lettering in the face its spine uses, so the text-fit sizes in [book shape](#book-shape) hold for both kinds of spine.
+
+A book of a series draws in its series source's companion design when the source has one ([series designs](#series-designs)). A design whose face the type rules block, such as Impact or a slanted script, shows Impact as Bebas Neue and any other blocked face in the design's system typeface, and its face is never downloaded.
+
+The wall is rebuilt when its books, their series sources, or those books' designs change. Designs for other books do not rebuild it.
 
 ## Book shape
 

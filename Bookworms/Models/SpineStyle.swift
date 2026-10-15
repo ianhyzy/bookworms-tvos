@@ -33,15 +33,21 @@ enum SpineFontPolicy {
         !name.lowercased().contains("impact")
     }
 
-    /// Returns whether a family or PostScript name may design another book's spine, as the
-    /// iPhone companion's `BookAnalyzer.allowsFamily(_:)` rules: never Impact, and never an
-    /// italic or oblique face. Bangers and Shrikhand are slanted by design without saying so.
+    /// Returns whether a family or PostScript name may letter a spine, as the iPhone
+    /// companion's `BookAnalyzer.allowsFamily(_:)` rules: never Impact, and never an italic,
+    /// oblique, or slanted face, in any case and with or without spaces. A PostScript style
+    /// that ends in "It", such as "Lora-BoldIt", counts as italic. The listed display and script
+    /// faces slant by design without saying so.
     static func allowsFamily(_ name: String) -> Bool {
-        let name = name.lowercased()
-        return !["impact", "italic", "oblique", "bangers", "shrikhand"]
-            .contains {
-                name.contains($0)
-            }
+        let lowered = name.lowercased().filter { !$0.isWhitespace }
+        let blocked = [
+            "impact", "italic", "oblique", "slanted", "bangers", "shrikhand", "dancingscript",
+            "pacifico", "satisfy", "greatvibes", "lobster", "courgette", "homemadeapple",
+            "rocksalt",
+        ]
+        let postScriptStyle = name.split(separator: "-").dropFirst().last
+        return !blocked.contains { lowered.contains($0) }
+            && postScriptStyle?.hasSuffix("It") != true
     }
 
     /// Returns `name`, or `impactReplacement` when `name` is Impact.

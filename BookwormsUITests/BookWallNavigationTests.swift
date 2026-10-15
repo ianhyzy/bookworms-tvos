@@ -108,6 +108,35 @@ final class BookWallNavigationTests: XCTestCase {
         capture(app, name: "Book-Wall-renderer-replayed")
     }
 
+    /// Companion designs change each spine's face and title case, and therefore book sizes.
+    func testCompanionDesignsKeepCountedFocusInEveryDirection() {
+        let app = openWall(companionDesigns: true)
+        XCTAssertEqual(app.staticTexts["book-wall-design-probe"].label, "8")
+        let first = app.buttons["book-wall-8"]
+        let second = app.buttons["book-wall-7"]
+        let middle = app.buttons["book-wall-4"]
+        let topRight = app.buttons["book-wall-3"]
+        let replay = app.buttons["book-wall-replay"]
+        let sidebar = app.staticTexts["Book Wall"].firstMatch
+
+        RemoteNavigation.press(.right, in: app, expecting: second)
+        RemoteNavigation.press(.up, in: app, expecting: middle)
+        RemoteNavigation.press(.down, in: app, expecting: second)
+        RemoteNavigation.press(.left, in: app, expecting: first)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: first)
+        RemoteNavigation.press(.left, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: first)
+        RemoteNavigation.press(.menu, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: first)
+        RemoteNavigation.moveFocus(to: topRight, in: app)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: topRight)
+        RemoteNavigation.press(.up, in: app, expecting: replay)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: replay)
+        RemoteNavigation.press(.down, in: app, expecting: topRight)
+        assertSpinesInsideScreen(app)
+        capture(app, name: "Book-Wall-companion-designs")
+    }
+
     func testRendererRestoresBothEdgeBooksAfterDetailsAndTabReentry() {
         let app = openWall()
         for (id, title) in [
@@ -159,13 +188,14 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(app.buttons["book-wall-8"])
     }
 
-    private func openWall() -> XCUIApplication {
+    private func openWall(companionDesigns: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "--test-scenario=artwork", "--start-view=shelf", "--test-enable-book-wall",
             "--focus-probe",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
         ]
+        if companionDesigns { app.launchArguments.append("--test-companion-designs") }
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
@@ -210,8 +240,11 @@ final class BookWallNavigationTests: XCTestCase {
     private func audit(_ app: XCUIApplication) throws {
         // The one-pixel probes report test evidence, not user-facing content.
         try app.auditAccessibility {
-            ["scenario-probe", "focus-transition-probe", "book-wall-fall-probe"]
-                .contains($0.element?.identifier ?? "")
+            [
+                "scenario-probe", "focus-transition-probe", "book-wall-fall-probe",
+                "book-wall-design-probe",
+            ]
+            .contains($0.element?.identifier ?? "")
         }
     }
 

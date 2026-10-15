@@ -34,8 +34,7 @@ final class LibraryModel {
         didSet {
             let years = YearInReview.all(from: allBooks)
             if years != readingYears { readingYears = years }
-            let sources = Self.seriesSources(of: allBooks)
-            if sources != seriesSources { seriesSources = sources }
+            refreshSeriesSources()
             refreshOnThisDay()
         }
     }
@@ -44,14 +43,25 @@ final class LibraryModel {
     /// on focus or remote input.
     private(set) var seriesSources: [Int: Book] = [:]
 
-    /// `SeriesDesigns.sources` over `books`, judging each book's design by its Book Wall font.
-    /// Whether a source's font can letter each book is checked later, once, where a spine is
-    /// prepared.
-    nonisolated static func seriesSources(of books: [Book]) -> [Int: Book] {
+    /// `SeriesDesigns.sources` over `books`, judging each book's design by its Book Wall font:
+    /// its companion design's family from `designs`, or its genre face. Whether a source's face
+    /// can letter each book is checked later, once, where a spine is prepared.
+    nonisolated static func seriesSources(
+        of books: [Book], designs: [Int: SpineDesignV1] = [:]
+    ) -> [Int: Book] {
         let byID = Dictionary(books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let fonts = byID.mapValues(BookWallLocalSpine.fontName(for:))
+        let fonts = byID.mapValues { book in
+            designs[book.id].map { $0.fontPostScriptName ?? $0.fontFamily ?? $0.typeface }
+                ?? BookWallLocalSpine.fontName(for: book)
+        }
         return SeriesDesigns.sources(books: Array(byID.values), fonts: fonts)
             .compactMapValues { byID[$0] }
+    }
+
+    private func refreshSeriesSources() {
+        let sources = Self.seriesSources(
+            of: allBooks, designs: BookPresentation.showsCompanionSpines ? spineDesigns : [:])
+        if sources != seriesSources { seriesSources = sources }
     }
 
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
@@ -88,6 +98,11 @@ final class LibraryModel {
     @ObservationIgnored private var topShelfTask: Task<Void, Never>?
     @ObservationIgnored private var cloudRevision = 0
     @ObservationIgnored private var activeHardcoverAccountID: String?
+    @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
+    @ObservationIgnored private var spineDesignTaskIdentity:
+        (
+            accountID: String, syncedAt: Date, requestID: UUID
+        )?
     private var schedule: SourceSyncSchedule { SourceSyncSchedule(defaults: dependencies.defaults) }
     var bookCount: Int {
         didSet {
@@ -117,6 +132,13 @@ final class LibraryModel {
         dependencies.diagnosticsDirectory.appending(path: "ai-progress.json")
     }
     private(set) var fontRevision = 0
+    /// Validated companion designs for the active Hardcover snapshot, keyed by book ID.
+    private(set) var spineDesigns: [Int: SpineDesignV1] = [:] {
+        didSet { if spineDesigns != oldValue { refreshSeriesSources() } }
+    }
+    /// Validated companion cover choices for the active Hardcover snapshot, keyed by book ID.
+    /// `rebuildLibrary` applies them to displayed books.
+    @ObservationIgnored private var coverChoices: [Int: CoverChoiceV1] = [:]
     private(set) var presentationRevision = 0
     private(set) var artworkRevision = 0
     private(set) var savedAIKeyAvailable = false
@@ -382,6 +404,7 @@ final class LibraryModel {
         invalidateCloudSync()
         rebuildLibrary()
         if hasStarted {
+            if !hardcoverEnabled { queueSpineCachePrune() }
             queueCloudSync()
         }
     }
@@ -391,6 +414,9 @@ final class LibraryModel {
         cloudTask?.cancel()
         cloudTask = nil
         cloudPending = false
+        spineDesignTask?.cancel()
+        spineDesignTask = nil
+        spineDesignTaskIdentity = nil
     }
 
     func start() async {
@@ -453,6 +479,7 @@ final class LibraryModel {
         }
         rebuildLibrary()
         hasLoadedLibrarySnapshot = true
+        if !hardcoverEnabled { queueSpineCachePrune() }
         if cloudSyncSuppressedForWelcome, !shouldOfferWelcome {
             // A retained provider can skip setup, so no welcome completion will release this gate.
             cloudSyncSuppressedForWelcome = false
@@ -461,6 +488,7 @@ final class LibraryModel {
             if cloudSyncSuppressedForWelcome {
                 cloudStatus = "iCloud storage waits until setup finishes."
             } else {
+                queueSpineDesignRefresh()
                 queueCloudSync()
             }
         } else {
@@ -860,6 +888,7 @@ final class LibraryModel {
         refreshOnThisDay()
         guard hasStarted, !isSample else { return }
         await refresh()
+        queueSpineDesignRefresh()
     }
 
     func showSample() {
@@ -994,6 +1023,15 @@ final class LibraryModel {
                 $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
             }
         allBooks = LibraryMerge.books(from: enabled)
+        if BookPresentation.showsCompanionCovers, let accountID = hardcover?.accountID,
+            !coverChoices.isEmpty
+        {
+            for index in allBooks.indices where allBooks[index].isHardcoverBook {
+                if let choice = coverChoices[allBooks[index].id], choice.accountID == accountID {
+                    allBooks[index].chosenCoverURL = choice.coverURL
+                }
+            }
+        }
         seriesByID = Dictionary(
             (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         updateBrowsingCovers()
@@ -1027,7 +1065,7 @@ final class LibraryModel {
         var seen = Set<URL>()
         let urls = order.compactMap { seriesByID[$0] }.flatMap(\.books)
             .compactMap { entry in
-                owned[entry.id].map { $0.detailCoverURL ?? $0.coverURL } ?? entry.coverURL
+                owned[entry.id].map(\.preferredCoverURL) ?? entry.coverURL
             }
             .filter { seen.insert($0).inserted }
         if urls != browsingCoverURLs { browsingCoverURLs = urls }
@@ -1085,10 +1123,29 @@ final class LibraryModel {
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return
                     }
+                    // A restored Apple TV without a credential shows the account that another
+                    // device listed for the companion, when the archive contains it. Read it
+                    // before merging so a snapshot installed during this read is kept.
+                    let restoredWorklist: SpineWorklistV1?
+                    if hardcoverConnected {
+                        restoredWorklist = nil
+                    } else {
+                        restoredWorklist = try? await dependencies.readSpineWorklist()
+                    }
+                    guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
+                        return
+                    }
                     let merged = remote.merging(
                         CloudLibraryArchive(sources: sourceSnapshots, designs: aiRecords))
                     sourceSnapshots = merged.sources
                     aiRecords = merged.designs
+                    if let worklist = restoredWorklist,
+                        sourceSnapshots.contains(where: {
+                            $0.source == .hardcover && $0.accountID == worklist.accountID
+                        })
+                    {
+                        setActiveHardcoverAccountID(worklist.accountID)
+                    }
                     cloudBacked = true
                     do {
                         let savedSourceRevision = try await saveSources()
@@ -1125,6 +1182,41 @@ final class LibraryModel {
                         schedule.seed(snapshot.source, date: snapshot.syncedAt)
                     }
                     rebuildLibrary()
+                    // Publish from the archive this sync uploaded so the Mac can match its sync
+                    // date. A snapshot installed since then sets `cloudPending`, so the next
+                    // loop iteration uploads it and republishes, even after a failed publish.
+                    if let accountID = activeHardcoverAccountID,
+                        let snapshot = remote.sources.first(where: {
+                            $0.source == .hardcover && $0.accountID == accountID
+                        })
+                    {
+                        // Only a connected, enabled, unexpired credential lists work, and that
+                        // credential's authenticated validate or fetch set the active account
+                        // ID, so no Hardcover request is needed here. An explicit local disable
+                        // clears the list. A credential-free restore can adopt an account but
+                        // never lists work, so it cannot reactivate a worklist that another
+                        // Apple TV cleared.
+                        let listsWork =
+                            hardcoverConnected && hardcoverEnabled && !hardcoverSessionExpired
+                        if listsWork || !hardcoverEnabled {
+                            let worklist = SpineWorklistV1(
+                                accountID: accountID, syncedAt: snapshot.syncedAt,
+                                bookIDs: listsWork ? snapshot.books.map(\.id) : [])
+                            do {
+                                try await dependencies.publishSpineWorklist(worklist)
+                                guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled
+                                else { return }
+                            } catch {
+                                guard revision == cloudRevision, !Task.isCancelled else { return }
+                                cloudStatus =
+                                    "Library saved to iCloud, but the spine worklist could not sync. "
+                                    + UserFacingError.message(error)
+                                if cloudPending { continue }
+                                return
+                            }
+                        }
+                    }
+                    queueSpineDesignRefresh()
                     cloudStatus =
                         "Saved to iCloud. Updated "
                         + dependencies.now().formatted(date: .omitted, time: .shortened)
@@ -1139,9 +1231,68 @@ final class LibraryModel {
         }
     }
 
+    /// Reads companion designs and cover choices for the active Hardcover snapshot into their
+    /// local caches. One task runs per account and sync date; a newer selection cancels an older
+    /// read.
+    private func queueSpineDesignRefresh() {
+        guard !PerformanceDiagnostics.isolates("background") else { return }
+        guard iCloudEnabled, hardcoverEnabled, let accountID = activeHardcoverAccountID,
+            let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
+        else { return }
+        if let identity = spineDesignTaskIdentity, spineDesignTask != nil,
+            identity.accountID == accountID, identity.syncedAt == snapshot.syncedAt
+        {
+            return
+        }
+        spineDesignTask?.cancel()
+        if spineDesigns.values.contains(where: { $0.accountID != accountID }) {
+            spineDesigns = [:]
+        }
+        let requestID = UUID()
+        spineDesignTaskIdentity = (accountID, snapshot.syncedAt, requestID)
+        spineDesignTask = Task { [weak self] in
+            guard let self else { return }
+            let designs = try? await dependencies.fetchSpineDesigns(accountID, snapshot.books)
+            let choices = try? await dependencies.fetchCoverChoices(accountID, snapshot.books)
+            guard spineDesignTaskIdentity?.requestID == requestID else { return }
+            // A failed or cancelled read keeps the designs and covers already shown.
+            if let designs, designs != spineDesigns { spineDesigns = designs }
+            if let choices, choices != coverChoices {
+                coverChoices = choices
+                rebuildLibrary()
+            }
+            spineDesignTask = nil
+            spineDesignTaskIdentity = nil
+        }
+    }
+
+    /// Clears the companion design and cover-choice caches once Hardcover is disabled or
+    /// disconnected.
+    private func queueSpineCachePrune() {
+        guard !PerformanceDiagnostics.isolates("background") else { return }
+        spineDesignTask?.cancel()
+        spineDesigns = [:]
+        coverChoices = [:]
+        let requestID = UUID()
+        spineDesignTaskIdentity = ("", .distantPast, requestID)
+        spineDesignTask = Task { [weak self] in
+            guard let self else { return }
+            _ = try? await dependencies.fetchSpineDesigns("", [])
+            _ = try? await dependencies.fetchCoverChoices("", [])
+            guard spineDesignTaskIdentity?.requestID == requestID else { return }
+            spineDesignTask = nil
+            spineDesignTaskIdentity = nil
+        }
+    }
+
     /// Waits for the currently queued cloud operation without scheduling another upload.
     func waitForCloudSync() async {
         await cloudTask?.value
+    }
+
+    /// Waits for the current companion design and cover-choice read.
+    func waitForCompanionRecords() async {
+        await spineDesignTask?.value
     }
 
     /// Waits for queued Top Shelf renders and publications.
@@ -1164,7 +1315,7 @@ final class LibraryModel {
             : shelf.prefix(10)
                 .compactMap { book in
                     guard book.isHardcoverBook,
-                        let url = book.detailCoverURL ?? book.coverURL ?? cached[book.id],
+                        let url = book.preferredCoverURL ?? cached[book.id],
                         url.scheme == "https"
                     else { return nil }
                     return TopShelfBook(

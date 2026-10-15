@@ -1,15 +1,74 @@
 import Foundation
 import UIKit
 
-/// Builds a portable-looking spine from local book metadata and the selected cover image.
+/// Builds a portable-looking spine from a companion design, or from local book metadata and the
+/// selected cover image when the book has no design.
 enum BookWallLocalSpine {
     struct Style: Equatable, Sendable {
         let background: StyleColor
         let foreground: StyleColor
-        let fontName: String
+        let typography: Typography
     }
 
-    static func style(for book: Book, cover: CGImage?) -> Style {
+    /// The spine's face and title case.
+    struct Typography: Equatable, Sendable {
+        /// A PostScript name, used when the face is registered in this process.
+        let fontName: String?
+        /// The system face for a missing `fontName`: "serif", "sans", "rounded", or "monospaced".
+        var typeface = "sans"
+        /// The system face's weight, from 400 to 700.
+        var weight = 600
+        var uppercase = false
+
+        func font(size: CGFloat) -> UIFont {
+            if let fontName, let font = UIFont(name: fontName, size: size) { return font }
+            let system = UIFont.systemFont(
+                ofSize: size,
+                weight: weight >= 700
+                    ? .bold : weight >= 600 ? .semibold : weight >= 500 ? .medium : .regular)
+            let design: UIFontDescriptor.SystemDesign =
+                switch typeface {
+                case "serif": .serif
+                case "rounded": .rounded
+                case "monospaced": .monospaced
+                default: .default
+                }
+            return system.fontDescriptor.withDesign(design)
+                .map { UIFont(descriptor: $0, size: size) } ?? system
+        }
+
+        func title(for book: Book) -> String { uppercase ? book.title.uppercased() : book.title }
+    }
+
+    /// The companion design's face, or the genre face without one. A design whose family or
+    /// face the type rules block (`SpineFontPolicy.allowsFamily(_:)`) shows Impact as
+    /// `SpineFontPolicy.impactReplacement` and any other blocked face, such as an italic or a
+    /// slanted script, in the design's system typeface.
+    static func typography(for book: Book, design: SpineDesignV1?) -> Typography {
+        guard let design else { return Typography(fontName: fontName(for: book)) }
+        let names = [design.fontFamily, design.fontPostScriptName].compactMap { $0 }
+        let fontName: String? =
+            if names.allSatisfy(SpineFontPolicy.allowsFamily) {
+                design.fontPostScriptName
+            } else if names.contains(where: { !SpineFontPolicy.allows($0) }) {
+                SpineFontPolicy.impactReplacement
+            } else {
+                nil
+            }
+        return Typography(
+            fontName: fontName, typeface: design.typeface, weight: design.weight,
+            uppercase: design.uppercase)
+    }
+
+    /// Uses the companion design's colors and type when one exists; otherwise samples the cover.
+    static func style(for book: Book, cover: CGImage?, design: SpineDesignV1? = nil) -> Style {
+        if let design, let background = try? StyleColor(hex: design.backgroundHex),
+            let foreground = try? StyleColor(hex: design.foregroundHex)
+        {
+            return Style(
+                background: background, foreground: foreground,
+                typography: typography(for: book, design: design))
+        }
         let samples = cover.flatMap(sampleColors) ?? []
         return style(for: book, samples: samples)
     }
@@ -29,7 +88,8 @@ enum BookWallLocalSpine {
             }?
             .color ?? safeText
         return Style(
-            background: background, foreground: foreground, fontName: fontName(for: book))
+            background: background, foreground: foreground,
+            typography: typography(for: book, design: nil))
     }
 
     /// The colors down a cover's spine-side edge, head to tail, for the fold of the cover onto

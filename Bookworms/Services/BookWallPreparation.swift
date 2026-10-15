@@ -1,7 +1,9 @@
 import CoreGraphics
+import CoreText
 import Foundation
 import Observation
 import RealityKit
+import UIKit
 
 /// Artwork and layout that are ready before the 3D wall starts its falling animation.
 @MainActor
@@ -12,9 +14,12 @@ struct BookWallPreparedWall {
     let books: [Book]
     /// The series design sources the wall was prepared for (`LibraryModel.seriesSources`).
     let sources: [Int: Book]
-    /// The source each book's spine draws with: its series source, when that source's font can
+    /// Companion designs the spines were drawn from, keyed by book ID, for wall books and
+    /// their series sources.
+    let designs: [Int: SpineDesignV1]
+    /// The source each book's spine draws with: its series source, when that source's face can
     /// letter the book. Other books draw their own.
-    let designs: [Int: Book]
+    let drawsWith: [Int: Book]
     let layout: BookWallLayout
     let bodies: [Int: ModelEntity]
     /// Shelf-front lettering for each book and for the resting hint.
@@ -36,17 +41,24 @@ final class BookWallPreparation {
     private var missingCovers: [Book] = []
     private let rasterizer = BookWallRasterizer()
 
-    func isReady(for books: [Book], sources: [Int: Book]) -> Bool {
-        prepared?.books == books && prepared?.sources == sources
+    func isReady(for books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1])
+        -> Bool
+    {
+        prepared?.books == books && prepared?.sources == sources && prepared?.designs == designs
     }
 
-    /// Prepares `books`, each drawn in its series source's design from `sources`
-    /// (`LibraryModel.seriesSources`) when that source's font can letter it, checked here once.
-    func prepare(_ books: [Book], sources: [Int: Book]) async {
+    /// Prepares `books`, each drawn in its companion design from `designs` when it has one,
+    /// or from its cover. A book with a series source in `sources` (`LibraryModel.seriesSources`)
+    /// draws in the source's design when the source's face can letter it, checked here once.
+    func prepare(
+        _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:]
+    ) async {
         let fontStyle =
             AppFontStyle(rawValue: UserDefaults.standard.string(forKey: "fontStyle") ?? "")
             ?? .serif
-        if let prepared, prepared.books == books, prepared.sources == sources {
+        if let prepared, prepared.books == books, prepared.sources == sources,
+            prepared.designs == designs
+        {
             // A cancelled preparation may have left covers to retry.
             await retryMissingCovers(in: prepared, fontStyle: fontStyle)
             return
@@ -57,24 +69,36 @@ final class BookWallPreparation {
         completedCount = 0
         totalCount = books.count
 
-        var designs: [Int: Book] = [:]
+        // Glyph checks and layout measure lettering, so each design's face must be registered
+        // first.
+        await Self.loadFonts(for: designs.values)
+        guard !Task.isCancelled else { return }
+        func typography(of book: Book) -> BookWallLocalSpine.Typography {
+            BookWallLocalSpine.typography(for: book, design: designs[book.id])
+        }
+        var drawsWith: [Int: Book] = [:]
+        var typographies: [Int: BookWallLocalSpine.Typography] = [:]
         for book in books {
-            guard let source = sources[book.id], source.id != book.id,
-                SeriesDesigns.canLetter(
-                    book, fontName: BookWallLocalSpine.fontName(for: source))
-            else { continue }
-            designs[book.id] = source
+            if let source = sources[book.id], source.id != book.id,
+                SeriesDesigns.canLetter(book, font: typography(of: source).font(size: 12) as CTFont)
+            {
+                drawsWith[book.id] = source
+                typographies[book.id] = typography(of: source)
+            } else if designs[book.id] != nil {
+                typographies[book.id] = typography(of: book)
+            }
         }
         // A source finished in another year is not on the wall, but its cover sets the colors.
         let ids = Set(books.map(\.id))
         var outside: [Int: Book] = [:]
-        for source in designs.values where !ids.contains(source.id) { outside[source.id] = source }
+        for source in drawsWith.values where !ids.contains(source.id) {
+            outside[source.id] = source
+        }
         let preparation = await ArtworkStore.shared.prefetch(
             books: books + outside.values.sorted { $0.id < $1.id }, avatarURLs: [])
         guard !Task.isCancelled else { return }
         let layout = BookWallLayout(
-            books: books, coverRatios: preparation.ratios,
-            fonts: designs.mapValues(BookWallLocalSpine.fontName(for:)))
+            books: books, coverRatios: preparation.ratios, typographies: typographies)
         var styles: [Int: BookWallLocalSpine.Style] = [:]
         var bodies: [Int: ModelEntity] = [:]
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
@@ -90,10 +114,12 @@ final class BookWallPreparation {
             let cover = try? await ArtworkStore.shared.detailImage(
                 for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             guard !Task.isCancelled else { return }
-            if cover == nil, slot.book.coverURL != nil { missing.append(slot.book) }
-            let design = await design(for: slot.book, in: designs, cache: &styles)
+            if cover == nil, !slot.book.coverURLs.isEmpty { missing.append(slot.book) }
+            let source = await sourceStyle(
+                for: slot.book, drawsWith: drawsWith, designs: designs, cache: &styles)
             let images = await rasterizer.render(
-                slot: slot, cover: cover, design: design, fontStyle: fontStyle)
+                slot: slot, cover: cover, source: source, design: designs[slot.book.id],
+                fontStyle: fontStyle)
             guard !Task.isCancelled else { return }
             guard let spineImage = images.spine,
                 let spine = try? await TextureResource.generate(
@@ -126,8 +152,8 @@ final class BookWallPreparation {
             hint = await BookWallShelfLabel.prepare(image)
         }
         let wall = BookWallPreparedWall(
-            books: books, sources: sources, designs: designs, layout: layout, bodies: bodies,
-            labels: labels, hint: hint)
+            books: books, sources: sources, designs: designs, drawsWith: drawsWith,
+            layout: layout, bodies: bodies, labels: labels, hint: hint)
         prepared = wall
         missingCovers = missing
         await retryMissingCovers(in: wall, fontStyle: fontStyle)
@@ -153,9 +179,11 @@ final class BookWallPreparation {
                 let cover = try? await ArtworkStore.shared.detailImage(
                     for: book, maximumPixelSize: 400, allowsNetwork: false)
             else { continue }
-            let design = await design(for: book, in: wall.designs, cache: &styles)
+            let source = await sourceStyle(
+                for: book, drawsWith: wall.drawsWith, designs: wall.designs, cache: &styles)
             let images = await rasterizer.render(
-                slot: slot, cover: cover, design: design, fontStyle: fontStyle)
+                slot: slot, cover: cover, source: source, design: wall.designs[book.id],
+                fontStyle: fontStyle)
             guard let spineImage = images.spine, let coverImage = images.cover,
                 let spine = try? await TextureResource.generate(
                     from: spineImage, options: .init(semantic: .color)),
@@ -172,18 +200,44 @@ final class BookWallPreparation {
 }
 
 extension BookWallPreparation {
-    /// The style `book` draws with when `designs` gives it a series source: the source's, from
-    /// the source's own cover. `nil` for a book that draws its own.
-    fileprivate func design(
-        for book: Book, in designs: [Int: Book], cache: inout [Int: BookWallLocalSpine.Style]
+    /// The style `book` draws with when `drawsWith` gives it a series source: the source's,
+    /// from the source's companion design or else its own cover. `nil` for a book that draws
+    /// its own.
+    fileprivate func sourceStyle(
+        for book: Book, drawsWith: [Int: Book], designs: [Int: SpineDesignV1],
+        cache: inout [Int: BookWallLocalSpine.Style]
     ) async -> BookWallLocalSpine.Style? {
-        guard let source = designs[book.id] else { return nil }
+        guard let source = drawsWith[book.id] else { return nil }
         if let style = cache[source.id] { return style }
         let cover = try? await ArtworkStore.shared.detailImage(
             for: source, maximumPixelSize: 400, allowsNetwork: false)
-        let style = await rasterizer.style(for: source, cover: cover)
+        let style = await rasterizer.style(for: source, cover: cover, design: designs[source.id])
         cache[source.id] = style
         return style
+    }
+
+    /// Downloads and registers each design's Google Fonts face once per family and weight.
+    /// A book whose face does not load uses the system face for its design's typeface and
+    /// weight. A network failure stops further downloads until the next preparation, so an
+    /// unreachable host delays the wall by at most one request timeout.
+    fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
+        var requested = Set<String>()
+        for design in designs {
+            guard let family = design.fontFamily, let name = design.fontPostScriptName,
+                SpineFontPolicy.allowsFamily(family), SpineFontPolicy.allowsFamily(name),
+                UIFont(name: name, size: 12) == nil
+            else { continue }
+            let weight = design.instanceWeight ?? design.weight
+            guard requested.insert("\(family):\(weight)").inserted else { continue }
+            guard !Task.isCancelled else { return }
+            do {
+                _ = try await GoogleFontLibrary.shared.download(family: family, weight: weight)
+            } catch is URLError {
+                return
+            } catch {
+                continue
+            }
+        }
     }
 }
 
@@ -197,18 +251,22 @@ actor BookWallRasterizer {
         let label: CGImage?
     }
 
-    func style(for book: Book, cover: CGImage?) -> BookWallLocalSpine.Style {
-        BookWallLocalSpine.style(for: book, cover: cover)
+    func style(for book: Book, cover: CGImage?, design: SpineDesignV1?)
+        -> BookWallLocalSpine.Style
+    {
+        BookWallLocalSpine.style(for: book, cover: cover, design: design)
     }
 
-    /// Draws `slot`'s spine, board, and shelf label. A book with a series source draws in
-    /// `design`, the source's colors and font, and keeps its own cover on its board and its own
-    /// cover's fold onto the spine and board; its bands follow its own thickness.
+    /// Draws `slot`'s spine, board, and shelf label in `source`, the series source's style,
+    /// when the book has one, else in its companion `design` or its cover's colors. A book drawn
+    /// in another book's style keeps its own cover on its board and its own cover's fold onto
+    /// the spine and board; its bands follow its own thickness.
     func render(
-        slot: BookWallLayout.Slot, cover: CGImage?, design: BookWallLocalSpine.Style?,
-        fontStyle: AppFontStyle
+        slot: BookWallLayout.Slot, cover: CGImage?, source: BookWallLocalSpine.Style?,
+        design: SpineDesignV1?, fontStyle: AppFontStyle
     ) -> Images {
-        let style = design ?? BookWallLocalSpine.style(for: slot.book, cover: cover)
+        let style =
+            source ?? BookWallLocalSpine.style(for: slot.book, cover: cover, design: design)
         let edge = cover.map(BookWallLocalSpine.edgeColors(of:)) ?? []
         let board = cover.flatMap {
             BookWallCoverTexture.make(

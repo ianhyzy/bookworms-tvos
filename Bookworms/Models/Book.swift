@@ -35,12 +35,27 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var started: String?
     /// The listening time of the reader's audiobook edition, when Hardcover records it.
     var audioSeconds: Int? = nil
+    /// The cover the reader chose in a companion app (`CoverChoiceV1`). The library sets it on
+    /// displayed books only; source snapshots and design hashes keep the default covers.
+    var chosenCoverURL: URL? = nil
 
     /// How far your rating is from the community average, when both are recorded.
     var ratingGap: Double? {
         guard let rating, rating > 0, let communityRating, communityRating > 0 else { return nil }
         return abs(rating - communityRating)
     }
+
+    /// The covers to try in order: the reader's choice, then the default covers as fallbacks.
+    var coverURLs: [URL] {
+        var urls: [URL] = []
+        for url in [chosenCoverURL, detailCoverURL, coverURL].compactMap(\.self)
+        where !urls.contains(url) {
+            urls.append(url)
+        }
+        return urls
+    }
+
+    var preferredCoverURL: URL? { chosenCoverURL ?? detailCoverURL ?? coverURL }
 
     var isHardcoverBook: Bool { sources?.contains(.hardcover) ?? (id < 1_000_000_000_000_000) }
 
