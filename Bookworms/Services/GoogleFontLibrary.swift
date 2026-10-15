@@ -147,15 +147,20 @@ actor GoogleFontLibrary {
         guard
             let descriptors = CTFontManagerCreateFontDescriptorsFromURL(file as CFURL)
                 as? [CTFontDescriptor],
-            let descriptor = descriptors.first
+            let ctFont = Self.uprightFont(in: descriptors)
         else { throw AIError.unavailableFont }
-        let ctFont = CTFontCreateWithFontDescriptor(descriptor, 32, nil)
         let font = DownloadedFont(
             family: family, postScriptName: CTFontCopyPostScriptName(ctFont) as String,
             filePath: file.path, licensePath: licenseFile.path)
         try register(font)
         try JSONEncoder().encode(font).write(to: manifestURL, options: .atomic)
         return font
+    }
+
+    /// The first face in a font file that has neither the italic trait nor a slant.
+    static func uprightFont(in descriptors: [CTFontDescriptor]) -> CTFont? {
+        descriptors.lazy.map { CTFontCreateWithFontDescriptor($0, 32, nil) }
+            .first(where: SpineFontPolicy.isUpright)
     }
 
     func restore(_ font: DownloadedFont, weight: Int) async throws -> DownloadedFont {
