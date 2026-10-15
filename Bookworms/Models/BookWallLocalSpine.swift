@@ -40,21 +40,13 @@ enum BookWallLocalSpine {
         func title(for book: Book) -> String { uppercase ? book.title.uppercased() : book.title }
     }
 
-    /// The companion design's face, or the genre face without one. A design whose family or
-    /// face the type rules block (`SpineFontPolicy.allowsFamily(_:)`) shows Impact as
-    /// `SpineFontPolicy.impactReplacement` and any other blocked face, such as an italic or a
-    /// slanted script, in the design's system typeface.
+    /// The companion design's face, or the genre face without one. A design in a face the type
+    /// rules block shows in `SpineFontPolicy.allowedFontName(_:)`'s upright stand-in, such as
+    /// Bebas Neue for Impact, or in the design's system typeface when that face is not
+    /// installed.
     static func typography(for book: Book, design: SpineDesignV1?) -> Typography {
         guard let design else { return Typography(fontName: fontName(for: book)) }
-        let names = [design.fontFamily, design.fontPostScriptName].compactMap { $0 }
-        let fontName: String? =
-            if names.allSatisfy(SpineFontPolicy.allowsFamily) {
-                design.fontPostScriptName
-            } else if names.contains(where: { !SpineFontPolicy.allows($0) }) {
-                SpineFontPolicy.impactReplacement
-            } else {
-                nil
-            }
+        let fontName = design.fontPostScriptName.map(SpineFontPolicy.allowedFontName)
         return Typography(
             fontName: fontName, typeface: design.typeface, weight: design.weight,
             uppercase: design.uppercase)

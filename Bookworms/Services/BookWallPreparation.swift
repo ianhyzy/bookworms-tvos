@@ -223,9 +223,11 @@ extension BookWallPreparation {
     fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
         var requested = Set<String>()
         for design in designs {
+            // A blocked family is never downloaded; an italic face of an allowed family loads
+            // the family's upright face, which `SpineFontPolicy.allowedFontName(_:)` names.
             guard let family = design.fontFamily, let name = design.fontPostScriptName,
-                SpineFontPolicy.allowsFamily(family), SpineFontPolicy.allowsFamily(name),
-                UIFont(name: name, size: 12) == nil
+                SpineFontPolicy.allows(family),
+                UIFont(name: SpineFontPolicy.allowedFontName(name), size: 12) == nil
             else { continue }
             let weight = design.instanceWeight ?? design.weight
             guard requested.insert("\(family):\(weight)").inserted else { continue }

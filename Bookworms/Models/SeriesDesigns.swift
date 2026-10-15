@@ -106,10 +106,13 @@ enum SeriesDesigns {
         book.finished.map { String($0.prefix(10)) } ?? "~"
     }
 
-    /// Returns whether another book may draw with a design in `fontName`: never a blocked
-    /// family (`SpineFontPolicy.allowsFamily(_:)`), such as Impact or an italic.
+    /// Returns whether another book may draw with a design in `fontName`: never a name
+    /// `SpineFontPolicy.allows(_:)` blocks, such as Impact, an italic, or a slanted face.
+    ///
+    /// The check stands on its own and doesn't rely on saved styles having been remapped to
+    /// allowed faces when they load.
     static func isUsableSource(_ fontName: String) -> Bool {
-        SpineFontPolicy.allowsFamily(fontName)
+        SpineFontPolicy.allows(fontName)
     }
 
     /// Maps each book that shares a series design to the book whose design it draws with. A

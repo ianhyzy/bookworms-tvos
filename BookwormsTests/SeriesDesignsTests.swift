@@ -63,9 +63,9 @@ final class SeriesDesignsTests: XCTestCase {
         }
         XCTAssertEqual(typography("EB Garamond", "EBGaramond-Bold").fontName, "EBGaramond-Bold")
         XCTAssertEqual(typography("Impact", "Impact").fontName, SpineFontPolicy.impactReplacement)
-        // A slanted script shows in the design's system typeface instead.
-        XCTAssertNil(typography("Dancing Script", "DancingScript-Bold").fontName)
-        XCTAssertNil(typography("Lora", "Lora-BoldIt").fontName)
+        // A slanted script or an italic shows in an upright stand-in.
+        XCTAssertEqual(typography("Dancing Script", "DancingScript-Bold").fontName, "Kalam-Regular")
+        XCTAssertEqual(typography("Lora", "Lora-BoldIt").fontName, "Lora-Bold")
         XCTAssertEqual(typography("Lora", "Lora-Bold").typeface, "serif")
         XCTAssertTrue(typography("Lora", "Lora-Bold").uppercase)
     }
