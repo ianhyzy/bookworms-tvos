@@ -115,31 +115,36 @@ enum SeriesDesigns {
         SpineFontPolicy.allows(fontName)
     }
 
-    /// Maps each book that shares a series design to the book whose design it draws with. A
-    /// source maps to itself; books that draw their own design are absent.
+    /// Maps each book that draws another book's spine design to that book, its source; a
+    /// source maps to itself, and a book that draws its own design and lends it to no one is
+    /// absent.
     ///
-    /// A book's source is the best-ranked book among it and its matching series-mates whose
-    /// font, from `fonts`, is usable. `canLetter` tells whether a source's font can letter a
-    /// book; a book it rejects, such as one whose title the font lacks glyphs for, keeps its own
-    /// design.
+    /// Only a root lends its design: a book that draws its own. Each series is decided in
+    /// `ranksBefore` order. A book takes the best-ranked earlier root that matches it, whose
+    /// font, from `fonts`, is usable, and whose font can letter it (`canLetter`); otherwise it is
+    /// a root itself. Matching isn't transitive, since book 2 can share an author with books 1
+    /// and 3 that share none, so this keeps a book from drawing a design another book borrowed:
+    /// book 3 then draws its own. The result doesn't depend on the order of `books`.
     static func sources(
         books: [Book], fonts: [Int: String],
         canLetter: (Book, String) -> Bool = { _, _ in true }
     ) -> [Int: Int] {
-        let candidates = Dictionary(
-            grouping: books.filter {
-                $0.seriesID != nil && fonts[$0.id].map(isUsableSource) == true
-            },
-            by: { $0.seriesID })
         var sources: [Int: Int] = [:]
-        for book in books {
-            guard
-                let source = candidates[book.seriesID]?
-                    .filter({ $0.id == book.id || matches(book, $0) }).min(by: ranksBefore),
-                source.id != book.id, let font = fonts[source.id], canLetter(book, font)
-            else { continue }
-            sources[book.id] = source.id
-            sources[source.id] = source.id
+        let series = Dictionary(grouping: books.filter { $0.seriesID != nil }, by: \.seriesID)
+        for books in series.values {
+            var roots: [Book] = []
+            for book in books.sorted(by: ranksBefore) {
+                if let root = roots.first(where: { root in
+                    guard matches(book, root), let font = fonts[root.id], isUsableSource(font)
+                    else { return false }
+                    return canLetter(book, font)
+                }) {
+                    sources[book.id] = root.id
+                    sources[root.id] = root.id
+                } else {
+                    roots.append(book)
+                }
+            }
         }
         return sources
     }
