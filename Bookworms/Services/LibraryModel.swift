@@ -339,6 +339,13 @@ final class LibraryModel {
             if iCloudEnabled {
                 queueCloudSync()
             } else {
+                // Companion designs and covers apply only with iCloud storage on. The on-disk
+                // caches stay, so turning iCloud back on restores them.
+                spineDesigns = [:]
+                if !coverChoices.isEmpty {
+                    coverChoices = [:]
+                    rebuildLibrary()
+                }
                 cloudStatus = "iCloud storage is off. Existing cloud data is retained."
             }
         }

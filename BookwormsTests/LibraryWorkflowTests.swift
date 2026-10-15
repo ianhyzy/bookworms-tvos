@@ -916,6 +916,11 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(shown.coverURLs, [chosen, detail, catalog])
         XCTAssertNil(model.books.first { $0.id == 2 }?.chosenCoverURL)
         XCTAssertEqual(designBooks.first { $0.id == 1 }?.coverURLs, [detail, catalog])
+
+        // Companion choices apply only with iCloud storage on.
+        model.iCloudEnabled = false
+        XCTAssertEqual(model.books.first { $0.id == 1 }?.coverURLs, [detail, catalog])
+        XCTAssertTrue(model.spineDesigns.isEmpty)
     }
 
     func testCloudWorklistUsesCompleteHardcoverSnapshotAndClearsWhenDisabled() async throws {

@@ -41,9 +41,9 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 | Color hex case | `#` + 6 uppercase hex digits | Same | None; the Mac emits uppercase. |
 | `generatorVersion` | Any non-blank string | Must equal `mac-foundation-models-v2` to skip regeneration | None on the TV. |
 | Archive size the Mac reads | No bound on the TV | At most 50 MB | A very large archive stops the Mac; the TV does not warn. |
+| Extra `Book` fields | Encoded in `library-v1` | Ignored by `CloudBook` | None. |
 
 The iPhone app validates like the Mac, plus the optional font fields, which the TV checks the same way. Unlike the TV, the iPhone keeps showing a design whose work-item hash no longer matches the book, so after a metadata edit the TV shows the local spine until a companion regenerates the design.
-| Extra `Book` fields | Encoded in `library-v1` | Ignored by `CloudBook` | None. |
 
 ## Remaining steps
 
