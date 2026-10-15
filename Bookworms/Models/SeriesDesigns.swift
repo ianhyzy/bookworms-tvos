@@ -79,7 +79,11 @@ enum SeriesDesigns {
                 source.id != book.id, let font = fonts[source.id], canLetter(book, font)
             else { continue }
             sources[book.id] = source.id
-            sources[source.id] = source.id
+        }
+        // Each source draws its own design unless it has a source of its own, so the result
+        // doesn't depend on the order of `books`.
+        for source in Set(sources.values) where sources[source] == nil {
+            sources[source] = source
         }
         return sources
     }

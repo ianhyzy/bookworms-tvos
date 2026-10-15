@@ -69,6 +69,22 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertNil(library[4])
     }
 
+    func testSourcesDoNotDependOnBookOrder() {
+        // Book 2 shares an author with books 1 and 3, which share none: book 3 draws book 2's
+        // design while book 2 draws book 1's, in any order.
+        let books = [
+            book(1, position: 1, author: "Ann Author"),
+            book(2, position: 2, author: "Ann Author, Co Writer"),
+            book(3, position: 3, author: "Co Writer"),
+        ]
+        let fonts = Dictionary(uniqueKeysWithValues: books.map { ($0.id, "Georgia-Bold") })
+        for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+            XCTAssertEqual(
+                SeriesDesigns.sources(books: order.map { books[$0] }, fonts: fonts),
+                [1: 1, 2: 1, 3: 2], "\(order)")
+        }
+    }
+
     func testAFontWithoutTheLettersGlyphsCannotLetterABook() {
         XCTAssertTrue(
             SeriesDesigns.canLetter(book(1, title: "Carl's Doomsday"), fontName: "Georgia-Bold"))
