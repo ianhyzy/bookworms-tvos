@@ -77,12 +77,13 @@ final class BookWallScene {
     /// cast a shadow on the spine below.
     private static let focusPullOut: Float = 0.35
     private static let pullOutDuration: Float = 0.2
-    /// The shelf light's offset from the stacks' center. Its falloff lights the middle
-    /// stacks most. Far enough out that the middle stack gets about 1.7 times the light of an
-    /// outer one, so the middle books keep their detail.
-    private static let shelfLightOffset = SIMD3<Float>(0, 2, 7)
-    private static let shelfLightIntensity: Float = 750_000
-    private static let shelfLightRadius: Float = 40
+    /// The shelf light's offset from the stacks' center: 30 units out in front, beyond where
+    /// any book flies to its details. From that far, every stack gets nearly the same light,
+    /// with no hotspot on the middle one. A light within a flight path would flash on a book as
+    /// it passed the light, so keep it out of the space between the stacks and the detail pose.
+    private static let shelfLightOffset = SIMD3<Float>(0, 3.25, 30)
+    private static let shelfLightIntensity: Float = 13_000_000
+    private static let shelfLightRadius: Float = 80
     /// A light hidden just behind the stacks catches the tops and edges of the upper books.
     /// Its glow on the wall is baked into the backdrop (`restingWallLight`).
     private static let poolLightIntensity: Float = 420_000
@@ -230,8 +231,8 @@ final class BookWallScene {
             color: .white, intensity: Self.restingTopIntensity)
         topLight.look(at: .zero, from: Self.topLightDirection, relativeTo: nil)
         root.addChild(topLight)
-        // A room lit mainly by one warm light in front of the stacks. The dim environment
-        // keeps the outer stacks readable while the middle ones sit in the most light.
+        // A room lit mainly by one distant warm light in front of the stacks, which lights
+        // every stack alike, and a dim environment.
         shelfLight.light = PointLightComponent(
             color: Self.warmLight, intensity: Self.shelfLightIntensity,
             attenuationRadius: Self.shelfLightRadius)
