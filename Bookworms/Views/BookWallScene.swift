@@ -171,15 +171,6 @@ final class BookWallScene {
     private var preparedBodies: [Int: ModelEntity] = [:]
     private var preparedWallID: UUID?
     private var bodies: [Int: ModelEntity] = [:]
-    /// Each series bundle's tie, by its index in `layout.bundles`. While its books fall, a tie
-    /// rides on the bundle's bottom book; once they rest, it hangs from the root, so a book
-    /// pulled out of the bundle slides out from under it.
-    private var ties: [Int: ModelEntity] = [:]
-    /// While a bundle falls, its upper books ride on its bottom book as children without
-    /// physics, so the bundle falls as one body: the bottom book's ID, the riders' IDs, and
-    /// their physics, restored when the bottom book lands.
-    private var riders: [Int: [Int]] = [:]
-    private var stowedPhysics: [Int: (PhysicsBodyComponent?, CollisionComponent?)] = [:]
     private var restingTransforms: [Int: Transform] = [:]
     private struct FlightFrame {
         var pose: Transform
@@ -369,7 +360,6 @@ final class BookWallScene {
         preparedWallID = prepared.id
         layout = prepared.layout
         preparedBodies = prepared.bodies
-        ties = prepared.ties
         labels = prepared.labels
         hintLabel = prepared.hint
         dropHeight = max(
@@ -387,8 +377,6 @@ final class BookWallScene {
         detailShadowCorners = nil
         shelf = nil
         bodies.removeAll()
-        riders.removeAll()
-        stowedPhysics.removeAll()
         restingTransforms.removeAll()
         flightFrames.removeAll()
         landedIDs.removeAll()
@@ -412,7 +400,6 @@ final class BookWallScene {
         dropTask?.cancel()
         preparedBodies = bodies
         for body in bodies.values { body.removeFromParent() }
-        for tie in ties.values { tie.removeFromParent() }
         bodies.removeAll()
         restingTransforms.removeAll()
         flightFrames.removeAll()
@@ -508,7 +495,6 @@ final class BookWallScene {
         physics.isContinuousCollisionDetectionEnabled = false
         body.physicsBody = physics
         landedIDs.insert(id)
-        releaseRiders(of: id)
     }
 
     func settle() {
@@ -533,15 +519,7 @@ final class BookWallScene {
             // leave a book partly sunk into its support, which hides the bottom of its spine.
             // Kinematic bodies keep their collision shapes for selection and the return flight.
             body.position.y = slot.restingY
-            // Twine holds a bundle's books square, whatever the fall did to them.
-            if slot.bundle != nil {
-                body.position.x = Self.restingPosition(for: slot, in: layout).x
-            }
             restingTransforms[slot.book.id] = body.transform
-        }
-        for (index, tie) in ties {
-            tie.setParent(root)
-            tie.position = Self.tiePosition(of: layout.bundles[index], in: layout)
         }
         isSettled = true
         showShelfLabel(for: selectedID)
@@ -1050,7 +1028,6 @@ final class BookWallScene {
         dropTask?.cancel()
         collisionSubscription?.cancel()
         continuingCollisionSubscription?.cancel()
-        for id in Array(riders.keys) { releaseRiders(of: id) }
         for slot in layout.slots {
             if bodies[slot.book.id] == nil { addBook(slot, falls: false) }
             guard let body = bodies[slot.book.id] else { continue }
@@ -1691,66 +1668,11 @@ final class BookWallScene {
         ]
     }
 
-    /// Adds `slot`'s book, at the drop height when it `falls`, otherwise at rest. A bundled book
-    /// brings the rest of its bundle and its tie: the bundle falls and lands as one, its books
-    /// stacked as they will rest, with the tie on its bottom book.
     private func addBook(_ slot: BookWallLayout.Slot, falls: Bool) {
-        guard let index = slot.bundle else {
-            place(slot, rise: falls ? dropHeight - slot.restingY : 0, falls: falls)
-            return
-        }
-        let members = layout.slots.filter { $0.bundle == index }.sorted { $0.row < $1.row }
-        guard let bottom = members.first, bodies[bottom.book.id] == nil else { return }
-        let rise = falls ? dropHeight - bottom.restingY : 0
-        for member in members { place(member, rise: rise, falls: falls) }
-        guard let base = bodies[bottom.book.id] else { return }
-        if let tie = ties[index] {
-            tie.position =
-                Self.tiePosition(of: layout.bundles[index], in: layout)
-                - Self.restingPosition(for: bottom, in: layout)
-            base.addChild(tie)
-        }
-        guard falls else { return }
-        // Falling books that touch push one another apart, so the upper books ride on the
-        // bottom one without physics until it lands (`releaseRiders(of:)`).
-        var ids: [Int] = []
-        for member in members.dropFirst() {
-            guard let body = bodies[member.book.id] else { continue }
-            stowedPhysics[member.book.id] = (body.physicsBody, body.collision)
-            body.components.remove(PhysicsBodyComponent.self)
-            body.components.remove(CollisionComponent.self)
-            body.setParent(base, preservingWorldTransform: true)
-            ids.append(member.book.id)
-        }
-        riders[bottom.book.id] = ids
-    }
-
-    /// Returns the books riding on a landed bundle's bottom book to the root, at rest on it,
-    /// with their physics, so later books land on them.
-    private func releaseRiders(of id: Int) {
-        guard let ids = riders.removeValue(forKey: id) else { return }
-        for rider in ids {
-            guard let body = bodies[rider] else { continue }
-            body.setParent(root, preservingWorldTransform: true)
-            if let (physics, collision) = stowedPhysics.removeValue(forKey: rider) {
-                if let collision { body.collision = collision }
-                if var physics {
-                    physics.mode = .kinematic
-                    physics.isContinuousCollisionDetectionEnabled = false
-                    body.physicsBody = physics
-                }
-            }
-            body.components.set(PhysicsMotionComponent())
-            landedIDs.insert(rider)
-        }
-    }
-
-    /// Adds `slot`'s book `rise` above its resting place, unless it is already on the wall.
-    private func place(_ slot: BookWallLayout.Slot, rise: Float, falls: Bool) {
         guard let body = preparedBodies.removeValue(forKey: slot.book.id) else { return }
         body.stopAllAnimations()
         var position = Self.restingPosition(for: slot, in: layout)
-        position.y += rise
+        if falls { position.y = dropHeight }
         body.position = position
         // Flat covers make supported contact agree with the stacked collision geometry.
         // A locked roll would leave one corner embedded in the book below it.
@@ -1766,35 +1688,6 @@ final class BookWallScene {
         root.addChild(body)
         bodies[slot.book.id] = body
         if !falls { landedIDs.insert(slot.book.id) }
-    }
-
-    /// Where a bundle's tie rests: over its books' spines, a little in front of them.
-    private static func tiePosition(
-        of bundle: BookWallLayout.SeriesBundle, in layout: BookWallLayout
-    ) -> SIMD3<Float> {
-        let front = (layout.slots.map(\.coverWidth).max() ?? 0) / 2
-        return [
-            bundle.x + offset(of: bundle.books[0].id), bundle.bottomY + bundle.thickness / 2,
-            front + spineFaceOffset + tieOffset,
-        ]
-    }
-
-    /// The tie's distance in front of the spines' faces.
-    private static let tieOffset: Float = 0.004
-
-    /// Builds a bundle's tie: one plane over the bundle's spines that shows `texture`
-    /// (`Tie.image(for:)`), lit like the spines.
-    static func makeTie(_ bundle: BookWallLayout.SeriesBundle, texture: TextureResource)
-        -> ModelEntity
-    {
-        var material = surface(color: .white, roughness: 0.7)
-        material.baseColor = .init(texture: .init(texture))
-        material.blending = .transparent(opacity: .init(floatLiteral: 1))
-        let tie = ModelEntity(
-            mesh: .generatePlane(width: bundle.length, height: bundle.thickness),
-            materials: [material])
-        tie.name = "book-wall-tie"
-        return tie
     }
 
     /// A nonmetallic surface with reduced reflectance. The studio environment is bright in
@@ -1964,19 +1857,11 @@ final class BookWallScene {
     private static func restingPosition(
         for slot: BookWallLayout.Slot, in layout: BookWallLayout
     ) -> SIMD3<Float> {
-        // A bundle's books share its first book's offset, so they lie square, as twine pulls a
-        // bundle.
-        let id = slot.bundle.map { layout.bundles[$0].books[0].id } ?? slot.book.id
+        let seed = Float((UInt64(bitPattern: Int64(slot.book.id)) &* 1_103_515_245) % 100) / 100
         // Spines sit flush on one front plane. Centered books of different depths would put
         // deeper spines nearer the camera, where they hide part of the book above or below.
         let front = (layout.slots.map(\.coverWidth).max() ?? slot.coverWidth) / 2
-        return [slot.x + offset(of: id), slot.restingY, front - slot.coverWidth / 2]
-    }
-
-    /// A book's seeded sideways offset from its column's center, up to 0.09 units either way.
-    private static func offset(of id: Int) -> Float {
-        let seed = Float((UInt64(bitPattern: Int64(id)) &* 1_103_515_245) % 100) / 100
-        return (seed - 0.5) * 0.18
+        return [slot.x + (seed - 0.5) * 0.18, slot.restingY, front - slot.coverWidth / 2]
     }
 
     /// Projects each spine at rest: its landed pose from `resting`, otherwise its planned pose.
@@ -2425,9 +2310,7 @@ enum BookWallSpineTexture {
 
     /// Draws the lettering on a transparent image the size of the spine plane
     /// (`spineWallWidth` by `spineWallHeight`), within the centered lettered area
-    /// (`spineFaceWidth` by `spineFaceHeight`). The image's top edge is the front board's. A book
-    /// tied into a series bundle is unlettered, as on the companion's bundles; the bundle's
-    /// paper label names the series.
+    /// (`spineFaceWidth` by `spineFaceHeight`). The image's top edge is the front board's.
     static func make(for slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style) -> CGImage? {
         let book = slot.book
         let format = UIGraphicsImageRendererFormat()
@@ -2442,13 +2325,6 @@ enum BookWallSpineTexture {
         let origin = CGPoint(
             x: (size.width - face.width) / 2, y: (size.height - face.height) / 2)
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        guard slot.bundle == nil else {
-            // Unlettered cloth needs no glyph detail, so half the density keeps a bundle's many
-            // spines to a quarter of the memory.
-            let half = CGSize(
-                width: (size.width / 2).rounded(), height: (size.height / 2).rounded())
-            return UIGraphicsImageRenderer(size: half, format: format).image { _ in }.cgImage
-        }
         let image = renderer.image { _ in
             let inset: CGFloat = max(18, face.width * 0.045)
             let left: CGFloat = origin.x + inset * 1.6

@@ -121,24 +121,6 @@ struct YearInReview: Equatable, Identifiable, Sendable {
 }
 
 extension Book {
-    /// Returns `books`, given in finish order, as Book Wall's places in that order: one book, or
-    /// two or more books of one named series tied in a bundle at the place of the first of them,
-    /// as the iPhone companion's `StackSpine.spines(_:)` groups them. A bundle keeps its books in
-    /// finish order. Books without a series name stay single.
-    static func bundlingSeries(_ books: [Book]) -> [[Book]] {
-        func series(_ book: Book) -> Int? {
-            book.seriesName?.isEmpty == false ? book.seriesID : nil
-        }
-        let groups = Dictionary(grouping: books.filter { series($0) != nil }) { series($0) ?? 0 }
-        var placed = Set<Int>()
-        return books.compactMap { book in
-            guard let id = series(book), let group = groups[id], group.count > 1 else {
-                return [book]
-            }
-            return placed.insert(id).inserted ? group : nil
-        }
-    }
-
     /// Books finished on `date`'s month and day in earlier years, most recent year first.
     static func finishedOnThisDay(_ books: [Book], date: Date, calendar: Calendar) -> [Book] {
         let today = calendar.dateComponents([.year, .month, .day], from: date)

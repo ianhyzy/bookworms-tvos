@@ -40,16 +40,6 @@ struct BookWallView: View {
     #endif
 
     private var books: [Book] { prepared.books }
-    /// Each bundled book's series name and count, such as "Dungeon Crawler Carl, 3 books".
-    private var bundles: [Int: String] {
-        var values: [Int: String] = [:]
-        for bundle in prepared.layout.bundles {
-            for book in bundle.books {
-                values[book.id] = "\(bundle.name), \(bundle.books.count) books"
-            }
-        }
-        return values
-    }
     private var entryID: Int? {
         #if DEBUG && targetEnvironment(simulator)
             // Scenario hook: chooses the entry book for Simulator captures.
@@ -119,7 +109,6 @@ struct BookWallView: View {
                 // position and stay mounted while books fall. Opening details waits for the
                 // books to settle.
                 if detailBook == nil && !isReturning {
-                    let bundleValues = bundles
                     ZStack(alignment: .topLeading) {
                         ForEach(books) { book in
                             if let frame = spineFrames[book.id] {
@@ -141,9 +130,6 @@ struct BookWallView: View {
                                 // its flight; other books cannot start competing flights.
                                 .disabled(openingBookID != nil && openingBookID != book.id)
                                 .accessibilityLabel("\(book.title), \(book.author)")
-                                // A bundled book reads as the companion reads its bundle: the
-                                // label's series name and the tag's count.
-                                .accessibilityValue(bundleValues[book.id] ?? "")
                                 .accessibilityHint("Open book details")
                                 .accessibilityIdentifier("book-wall-\(book.id)")
                                 // Position last: modifiers after `.position` apply to a

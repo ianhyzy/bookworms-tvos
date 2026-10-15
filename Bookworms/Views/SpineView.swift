@@ -135,7 +135,7 @@ struct SpineView: View {
 
     /// A number from 0 to 1 that `id` and `salt` decide, as the iPhone companion's
     /// `ShareStyle.unit(0, id, salt)` computes it.
-    nonisolated static func unit(_ id: Int, salt: UInt64) -> Double {
+    nonisolated private static func unit(_ id: Int, salt: UInt64) -> Double {
         var z =
             UInt64(bitPattern: Int64(id)) &* 0x9E37_79B9_7F4A_7C15 &+ salt
             &* 0xD1B5_4A32_D192_ED03

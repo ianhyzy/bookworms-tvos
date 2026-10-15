@@ -12,8 +12,6 @@ struct BookWallPreparedWall {
     let books: [Book]
     let layout: BookWallLayout
     let bodies: [Int: ModelEntity]
-    /// Each series bundle's tie, label, and tag (`Tie`), by its index in `layout.bundles`.
-    let ties: [Int: ModelEntity]
     /// Shelf-front lettering for each book and for the resting hint.
     let labels: [Int: BookWallShelfLabel.Prepared]
     let hint: BookWallShelfLabel.Prepared?
@@ -62,16 +60,13 @@ final class BookWallPreparation {
             pageEdge = try? await TextureResource.generate(
                 from: image, options: .init(semantic: .color))
         }
-        var designs: [Int: BookWallLocalSpine.Style] = [:]
         for slot in layout.slots {
             guard !Task.isCancelled else { return }
             let cover = try? await ArtworkStore.shared.detailImage(
                 for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             guard !Task.isCancelled else { return }
             if cover == nil, slot.book.coverURL != nil { missing.append(slot.book) }
-            let design = await design(for: slot, in: layout, cache: &designs)
-            let images = await rasterizer.render(
-                slot: slot, cover: cover, design: design, fontStyle: fontStyle)
+            let images = await rasterizer.render(slot: slot, cover: cover, fontStyle: fontStyle)
             guard !Task.isCancelled else { return }
             guard let spineImage = images.spine,
                 let spine = try? await TextureResource.generate(
@@ -97,14 +92,6 @@ final class BookWallPreparation {
             completedCount += 1
             await Task.yield()
         }
-        var ties: [Int: ModelEntity] = [:]
-        for (index, bundle) in layout.bundles.enumerated() {
-            guard let image = await rasterizer.tie(for: bundle),
-                let texture = try? await TextureResource.generate(
-                    from: image, options: .init(semantic: .color))
-            else { continue }
-            ties[index] = BookWallScene.makeTie(bundle, texture: texture)
-        }
         guard !Task.isCancelled else { return }
         var hint: BookWallShelfLabel.Prepared?
         if let image = BookWallShelfLabel.make("Choose a spine to open its book.", style: fontStyle)
@@ -112,7 +99,7 @@ final class BookWallPreparation {
             hint = await BookWallShelfLabel.prepare(image)
         }
         let wall = BookWallPreparedWall(
-            books: books, layout: layout, bodies: bodies, ties: ties, labels: labels, hint: hint)
+            books: books, layout: layout, bodies: bodies, labels: labels, hint: hint)
         prepared = wall
         missingCovers = missing
         await retryMissingCovers(in: wall, fontStyle: fontStyle)
@@ -128,9 +115,6 @@ final class BookWallPreparation {
         guard !failed.isEmpty, (try? await Task.sleep(for: .seconds(30))) != nil else { return }
         await ArtworkStore.shared.forgetFailures()
         _ = await ArtworkStore.shared.prefetch(books: failed, avatarURLs: [])
-        // ponytail: a bundle's books keep the design they were prepared with when only its first
-        // book's cover recovers; the next preparation pass dresses them alike again.
-        var designs: [Int: BookWallLocalSpine.Style] = [:]
         for book in failed {
             guard !Task.isCancelled, prepared?.books == wall.books else { return }
             guard let slot = wall.layout.slots.first(where: { $0.book.id == book.id }),
@@ -138,9 +122,7 @@ final class BookWallPreparation {
                 let cover = try? await ArtworkStore.shared.detailImage(
                     for: book, maximumPixelSize: 400, allowsNetwork: false)
             else { continue }
-            let design = await design(for: slot, in: wall.layout, cache: &designs)
-            let images = await rasterizer.render(
-                slot: slot, cover: cover, design: design, fontStyle: fontStyle)
+            let images = await rasterizer.render(slot: slot, cover: cover, fontStyle: fontStyle)
             guard let spineImage = images.spine, let coverImage = images.cover,
                 let spine = try? await TextureResource.generate(
                     from: spineImage, options: .init(semantic: .color)),
@@ -156,25 +138,6 @@ final class BookWallPreparation {
     }
 }
 
-extension BookWallPreparation {
-    /// The design a bundled book's spine wears: its bundle's first book's style, from that book's
-    /// cover, as the companion binds a bundle in its first book's design. `nil` for a book on its
-    /// own.
-    fileprivate func design(
-        for slot: BookWallLayout.Slot, in layout: BookWallLayout,
-        cache: inout [Int: BookWallLocalSpine.Style]
-    ) async -> BookWallLocalSpine.Style? {
-        guard let index = slot.bundle else { return nil }
-        if let design = cache[index] { return design }
-        let first = layout.bundles[index].books[0]
-        let cover = try? await ArtworkStore.shared.detailImage(
-            for: first, maximumPixelSize: 400, allowsNetwork: false)
-        let design = await rasterizer.style(for: first, cover: cover)
-        cache[index] = design
-        return design
-    }
-}
-
 /// Draws cover-derived spine and board artwork away from the UI actor.
 private actor BookWallRasterizer {
     struct Images: Sendable {
@@ -185,25 +148,8 @@ private actor BookWallRasterizer {
         let label: CGImage?
     }
 
-    func style(for book: Book, cover: CGImage?) -> BookWallLocalSpine.Style {
-        BookWallLocalSpine.style(for: book, cover: cover)
-    }
-
-    func tie(for bundle: BookWallLayout.SeriesBundle) -> CGImage? { Tie.image(for: bundle) }
-
-    /// Draws `slot`'s textures. A bundled book wears `design`, its bundle's first book's style,
-    /// in its own step of the design's cloth (`BookWallLocalSpine.cloth(_:book:)`), on an
-    /// unlettered spine; its own cover still folds onto its spine and front board.
-    func render(
-        slot: BookWallLayout.Slot, cover: CGImage?, design: BookWallLocalSpine.Style?,
-        fontStyle: AppFontStyle
-    ) -> Images {
-        let style =
-            design.map {
-                BookWallLocalSpine.Style(
-                    background: BookWallLocalSpine.cloth($0, book: slot.book),
-                    foreground: $0.foreground, fontName: $0.fontName)
-            } ?? BookWallLocalSpine.style(for: slot.book, cover: cover)
+    func render(slot: BookWallLayout.Slot, cover: CGImage?, fontStyle: AppFontStyle) -> Images {
+        let style = BookWallLocalSpine.style(for: slot.book, cover: cover)
         let edge = cover.map(BookWallLocalSpine.edgeColors(of:)) ?? []
         let board = cover.flatMap {
             BookWallCoverTexture.make(

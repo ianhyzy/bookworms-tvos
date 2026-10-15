@@ -260,8 +260,6 @@
         static let paths: [String?] = [
             "portrait", "square", "landscape", nil, "corrupt", "delayed", "portrait", "square",
         ]
-        /// The books `--test-series` ties into one series, by ID, with their positions.
-        static let seriesPositions = [5: 1, 3: 2, 2: 3]
         static var rows: [[String: Any]] {
             titles.enumerated()
                 .map { index, title in
@@ -279,18 +277,6 @@
                     ]
                     if let path = paths[index] {
                         book["image"] = ["url": "https://artwork.fixture.invalid/\(path)"]
-                    }
-                    // `--test-series` ties three of the books into one series, so Book Wall
-                    // shows a bundle.
-                    if ProcessInfo.processInfo.arguments.contains("--test-series"),
-                        let position = seriesPositions[index + 1]
-                    {
-                        book["book_series"] = [
-                            [
-                                "featured": true, "position": position,
-                                "series": ["id": 900, "name": "The Atlas Trilogy"],
-                            ]
-                        ]
                     }
                     return [
                         "id": index + 100, "status_id": 3, "rating": 4.0,

@@ -153,32 +153,4 @@ final class YearInReviewTests: XCTestCase {
             "Ambient mode includes Year in Review whether or not the sidebar shows it")
         XCTAssertFalse(reloaded.ambientOrderedViews.contains(.bookWall))
     }
-
-    func testSeriesTieIntoOneBundleAtTheFirstBooksPlace() throws {
-        func member(_ id: Int, series: Int?, name: String?, pages: Int?, finished: String)
-            -> Book
-        {
-            Book(
-                id: id, title: "Book \(id)", author: "Matt Dinniman", pages: pages,
-                finished: finished, seriesID: series, seriesName: name)
-        }
-        let books = [
-            member(1, series: 5, name: "Dungeon Crawler Carl", pages: 400, finished: "2026-01-02"),
-            member(2, series: nil, name: nil, pages: 200, finished: "2026-01-03"),
-            member(3, series: 5, name: "Dungeon Crawler Carl", pages: 500, finished: "2026-02-01"),
-            member(4, series: 6, name: "Solo", pages: 300, finished: "2026-03-01"),
-            member(5, series: 7, name: nil, pages: 300, finished: "2026-03-02"),
-            member(6, series: 7, name: nil, pages: 300, finished: "2026-03-03"),
-            member(7, series: 5, name: "Dungeon Crawler Carl", pages: nil, finished: "2026-04-01"),
-        ]
-        let review = try XCTUnwrap(YearInReview.all(from: books).first)
-        XCTAssertEqual(review.books.count, 7, "Statistics and Book Wall keep every book")
-        XCTAssertEqual(review.shelf.count, 7, "The cover shelf keeps every cover")
-        let places = Book.bundlingSeries(review.books)
-        XCTAssertEqual(
-            places.map { $0.map(\.id) }, [[1, 3, 7], [2], [4], [5], [6]],
-            "A series of two or more ties at its first book's place, in finish order; one book of "
-                + "a series and unnamed series stay single")
-        XCTAssertEqual(places[0].map(\.title), ["Book 1", "Book 3", "Book 7"], "Books keep titles")
-    }
 }
