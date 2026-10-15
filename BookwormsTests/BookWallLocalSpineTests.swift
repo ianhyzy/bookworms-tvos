@@ -1,3 +1,4 @@
+import CoreText
 import UIKit
 import XCTest
 
@@ -141,5 +142,48 @@ final class BookWallLocalSpineTests: XCTestCase {
             _ = try await fonts.download(family: "Impact", weight: 400)
             XCTFail("Impact downloaded")
         } catch AIError.invalidFont {}
+    }
+
+    /// The owner's standing rule: no italics. A saved style in a slanted or italic face loads in
+    /// an allowed upright one.
+    func testSlantedSavedFontsLoadUpright() throws {
+        let expected = [
+            "Impact": "BebasNeue", "Bangers-Regular": "Bungee-Regular",
+            "Shrikhand-Regular": "ChangaOne", "Bangers Italic": "Bungee-Regular",
+            "Lora-Italic": "Lora-Regular", "Lora-BoldItalic": "Lora-Bold",
+            "Lora Italic": "Lora-Regular",
+            "EBGaramond-It": "EBGaramond-Regular", "SourceSans3-SemiboldIt": "SourceSans3-Semibold",
+            "Georgia-BoldItalic": "Georgia-Bold", "Italic": "AvenirNext-DemiBold",
+            "Georgia-Bold": "Georgia-Bold",
+        ]
+        for (saved, shown) in expected {
+            XCTAssertEqual(SpineFontPolicy.allowedFontName(saved), shown, saved)
+            XCTAssertTrue(SpineFontPolicy.allows(shown), shown)
+        }
+        XCTAssertNotNil(UIFont(name: "Georgia-Bold", size: 24))
+        XCTAssertNotNil(UIFont(name: SpineFontPolicy.uprightFallback, size: 24))
+
+        for (saved, shown) in ["Bangers-Regular": "Bungee-Regular", "Lora-BoldItalic": "Lora-Bold"]
+        {
+            let data = Data(
+                """
+                {"background":{"red":0.1,"green":0.1,"blue":0.1},
+                "foreground":{"red":0.9,"green":0.9,"blue":0.9},"fontName":"\(saved)",
+                "uppercase":false,"recognizedTitle":true,"provenance":"Saved"}
+                """
+                .utf8)
+            XCTAssertEqual(try JSONDecoder().decode(SpineStyle.self, from: data).fontName, shown)
+        }
+
+        // A loaded face with the italic trait is passed over, whatever its name says.
+        let italic = CTFontCreateWithName("Georgia-Italic" as CFString, 24, nil)
+        let upright = CTFontCreateWithName("Georgia" as CFString, 24, nil)
+        XCTAssertEqual(CTFontCopyPostScriptName(italic) as String, "Georgia-Italic")
+        XCTAssertFalse(SpineFontPolicy.isUpright(italic))
+        XCTAssertTrue(SpineFontPolicy.isUpright(upright))
+        let descriptors = [italic, upright].map { CTFontCopyFontDescriptor($0) }
+        let chosen = try XCTUnwrap(GoogleFontLibrary.uprightFont(in: descriptors))
+        XCTAssertEqual(CTFontCopyPostScriptName(chosen) as String, "Georgia")
+        XCTAssertNil(GoogleFontLibrary.uprightFont(in: [descriptors[0]]))
     }
 }
