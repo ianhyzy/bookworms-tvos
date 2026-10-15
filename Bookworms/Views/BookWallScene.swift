@@ -175,6 +175,11 @@ final class BookWallScene {
     /// rides on the bundle's bottom book; once they rest, it hangs from the root, so a book
     /// pulled out of the bundle slides out from under it.
     private var ties: [Int: ModelEntity] = [:]
+    /// While a bundle falls, its upper books ride on its bottom book as children without
+    /// physics, so the bundle falls as one body: the bottom book's ID, the riders' IDs, and
+    /// their physics, restored when the bottom book lands.
+    private var riders: [Int: [Int]] = [:]
+    private var stowedPhysics: [Int: (PhysicsBodyComponent?, CollisionComponent?)] = [:]
     private var restingTransforms: [Int: Transform] = [:]
     private struct FlightFrame {
         var pose: Transform
@@ -382,6 +387,8 @@ final class BookWallScene {
         detailShadowCorners = nil
         shelf = nil
         bodies.removeAll()
+        riders.removeAll()
+        stowedPhysics.removeAll()
         restingTransforms.removeAll()
         flightFrames.removeAll()
         landedIDs.removeAll()
@@ -501,6 +508,7 @@ final class BookWallScene {
         physics.isContinuousCollisionDetectionEnabled = false
         body.physicsBody = physics
         landedIDs.insert(id)
+        releaseRiders(of: id)
     }
 
     func settle() {
@@ -1042,6 +1050,7 @@ final class BookWallScene {
         dropTask?.cancel()
         collisionSubscription?.cancel()
         continuingCollisionSubscription?.cancel()
+        for id in Array(riders.keys) { releaseRiders(of: id) }
         for slot in layout.slots {
             if bodies[slot.book.id] == nil { addBook(slot, falls: false) }
             guard let body = bodies[slot.book.id] else { continue }
@@ -1694,9 +1703,45 @@ final class BookWallScene {
         guard let bottom = members.first, bodies[bottom.book.id] == nil else { return }
         let rise = falls ? dropHeight - bottom.restingY : 0
         for member in members { place(member, rise: rise, falls: falls) }
-        if let body = bodies[bottom.book.id], let tie = ties[index] {
-            tie.position = Self.tiePosition(of: layout.bundles[index], in: layout) - body.position
-            body.addChild(tie)
+        guard let base = bodies[bottom.book.id] else { return }
+        if let tie = ties[index] {
+            tie.position =
+                Self.tiePosition(of: layout.bundles[index], in: layout)
+                - Self.restingPosition(for: bottom, in: layout)
+            base.addChild(tie)
+        }
+        guard falls else { return }
+        // Falling books that touch push one another apart, so the upper books ride on the
+        // bottom one without physics until it lands (`releaseRiders(of:)`).
+        var ids: [Int] = []
+        for member in members.dropFirst() {
+            guard let body = bodies[member.book.id] else { continue }
+            stowedPhysics[member.book.id] = (body.physicsBody, body.collision)
+            body.components.remove(PhysicsBodyComponent.self)
+            body.components.remove(CollisionComponent.self)
+            body.setParent(base, preservingWorldTransform: true)
+            ids.append(member.book.id)
+        }
+        riders[bottom.book.id] = ids
+    }
+
+    /// Returns the books riding on a landed bundle's bottom book to the root, at rest on it,
+    /// with their physics, so later books land on them.
+    private func releaseRiders(of id: Int) {
+        guard let ids = riders.removeValue(forKey: id) else { return }
+        for rider in ids {
+            guard let body = bodies[rider] else { continue }
+            body.setParent(root, preservingWorldTransform: true)
+            if let (physics, collision) = stowedPhysics.removeValue(forKey: rider) {
+                if let collision { body.collision = collision }
+                if var physics {
+                    physics.mode = .kinematic
+                    physics.isContinuousCollisionDetectionEnabled = false
+                    body.physicsBody = physics
+                }
+            }
+            body.components.set(PhysicsMotionComponent())
+            landedIDs.insert(rider)
         }
     }
 
