@@ -324,9 +324,7 @@ struct BookWallView: View {
             detailState.frame = detailFrame.offsetBy(
                 dx: viewportFrame.minX, dy: viewportFrame.minY)
             withAnimation(detailFade) {
-                // A series bundle shares its first book's ID and opens that book's details,
-                // whose series pop-up reaches the bundle's other books.
-                detailBook = libraryBook(book.id) ?? book
+                detailBook = book
                 detailState.isPresented = true
             }
         }

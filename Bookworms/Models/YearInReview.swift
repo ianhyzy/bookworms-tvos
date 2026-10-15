@@ -15,9 +15,6 @@ struct YearInReview: Equatable, Identifiable, Sendable {
     let year: Int
     /// Every book finished this year, earliest first.
     let books: [Book]
-    /// The year's books as Book Wall letters them, earliest first, with each series bundled
-    /// (`Book.bundlingSeries(_:)`).
-    let spines: [Book]
     /// The books the view's cover row shows, earliest first: every book, or the
     /// `BookLimit.maximum` highest rated when the year has more.
     let shelf: [Book]
@@ -70,7 +67,6 @@ struct YearInReview: Equatable, Identifiable, Sendable {
                     ? lhs.id < rhs.id : (lhs.finished ?? "") < (rhs.finished ?? "")
             }
         self.books = books
-        spines = Book.bundlingSeries(books)
         let favorites = books.sorted { lhs, rhs in
             (lhs.rating ?? -1) == (rhs.rating ?? -1)
                 ? Book.recentFirst(lhs, rhs) : (lhs.rating ?? -1) > (rhs.rating ?? -1)
@@ -125,32 +121,6 @@ struct YearInReview: Equatable, Identifiable, Sendable {
 }
 
 extension Book {
-    /// Returns `books` in their order, with two or more books of one named series replaced by a
-    /// single bundle at the place of the first of them. Books without a series name stay single.
-    ///
-    /// A bundle is the first book with the series name and count as its title, such as
-    /// "Dungeon Crawler Carl ×5", and the books' combined page count, so it letters and sizes as
-    /// one thick, book-shaped omnibus. It keeps the first book's ID, so selecting it reaches that
-    /// book, whose series pop-up lists the rest.
-    static func bundlingSeries(_ books: [Book]) -> [Book] {
-        func series(_ book: Book) -> Int? {
-            book.seriesName?.isEmpty == false ? book.seriesID : nil
-        }
-        let groups = Dictionary(grouping: books.filter { series($0) != nil }) { series($0) ?? 0 }
-        var placed = Set<Int>()
-        return books.compactMap { book in
-            guard let id = series(book), let group = groups[id], group.count > 1,
-                let name = book.seriesName
-            else { return book }
-            guard placed.insert(id).inserted else { return nil }
-            var bundle = book
-            bundle.title = "\(name) ×\(group.count)"
-            let pages = group.compactMap(\.pages)
-            bundle.pages = pages.isEmpty ? nil : pages.reduce(0, +)
-            return bundle
-        }
-    }
-
     /// Books finished on `date`'s month and day in earlier years, most recent year first.
     static func finishedOnThisDay(_ books: [Book], date: Date, calendar: Calendar) -> [Book] {
         let today = calendar.dateComponents([.year, .month, .day], from: date)

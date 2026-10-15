@@ -39,7 +39,7 @@ The app checks the book's ranked genre tags and uses the first recognized catego
 
 Unrecognized or missing genres use Avenir Next Demi Bold. The selected face applies to both the title and author. The renderer measures words and draws each fitted line, then sizes the texture to the visible spine plane so letters keep their proportions. The title stays at or above 56 texture pixels and the author at or above 48. Below a 5% top margin, the title takes 58% of the spine's thickness and the author the next 32% (`titleTop`, `titleShare`, `authorShare`). Each grows to the largest size that fits its area, so thick spines get large lettering. The book's dimensions account for the words and line count before the spine texture is drawn.
 
-A series bundle (`Book.bundlingSeries(_:)`) takes the place of two or more books of one named series: its title is the series name and count, and its page count is the books' total, so the same sizing gives it a thick but book-shaped spine and larger or wrapped lettering. For *House of Leaves*, the spine and shelf label letter each "house" in its blue (`HouseOfLeaves.attributed`), fitted to the spine color or the shelf's wood.
+For *House of Leaves*, the spine and shelf label letter each "house" in its blue (`HouseOfLeaves.attributed`), fitted to the spine color or the shelf's wood.
 
 ## Cover palette and contrast
 
