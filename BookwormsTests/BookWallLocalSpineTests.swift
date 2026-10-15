@@ -93,4 +93,53 @@ final class BookWallLocalSpineTests: XCTestCase {
             .map { SpineView.thickness(of: Book(id: $0, title: "B", author: "A", pages: 721)) }
         XCTAssertEqual(thicknesses.min(), 28)
     }
+
+    /// The owner's standing rule: no spine ever uses Impact, in any spelling, from any source.
+    @MainActor
+    func testImpactCanNeverBeChosenOrRendered() async throws {
+        for name in [
+            "Impact", "impact", "IMPACT", "Impact-Regular", "Impact Bold", "ImpactMT", " Impact ",
+        ] {
+            XCTAssertFalse(SpineFontPolicy.allows(name), name)
+            XCTAssertEqual(SpineFontPolicy.allowedFontName(name), "BebasNeue")
+        }
+        XCTAssertNotNil(UIFont(name: SpineFontPolicy.impactReplacement, size: 24))
+
+        let horror = Book(id: 1, title: "Book", author: "Author", genres: ["Gothic Horror"])
+        XCTAssertEqual(BookWallLocalSpine.fontName(for: horror), "BebasNeue")
+        XCTAssertTrue(SpineFontPolicy.allows(SpineStyle.fallback(for: horror).fontName))
+
+        // A style saved before this rule, in preferences, the cache, or iCloud, loads without it.
+        let saved = Data(
+            """
+            {"background":{"red":0.1,"green":0.1,"blue":0.1},
+            "foreground":{"red":0.9,"green":0.9,"blue":0.9},"fontName":"Impact",
+            "uppercase":true,"recognizedTitle":false,"provenance":"Local"}
+            """
+            .utf8)
+        let style = try JSONDecoder().decode(SpineStyle.self, from: saved)
+        XCTAssertEqual(style.fontName, "BebasNeue")
+        XCTAssertTrue(style.uppercase)
+        var georgia = style
+        georgia.fontName = "Georgia-Bold"
+        XCTAssertEqual(
+            try JSONDecoder().decode(SpineStyle.self, from: JSONEncoder().encode(georgia)), georgia)
+
+        // Generation never offers, downloads, or restores Impact.
+        let prompt = AIStyleGenerator.stylePrompt(
+            book: horror,
+            catalog: [
+                GoogleFontFamily(family: "Impact", category: "Sans Serif", isOpenSource: true),
+                GoogleFontFamily(family: "Oswald", category: "Sans Serif", isOpenSource: true),
+            ])
+        XCTAssertTrue(prompt.contains("Never choose Impact."))
+        XCTAssertFalse(prompt.contains("Impact|"))
+        XCTAssertTrue(prompt.contains("Oswald|Sans Serif"))
+        let fonts = GoogleFontLibrary(
+            root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        do {
+            _ = try await fonts.download(family: "Impact", weight: 400)
+            XCTFail("Impact downloaded")
+        } catch AIError.invalidFont {}
+    }
 }

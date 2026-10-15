@@ -28,7 +28,7 @@ The app checks the book's ranked genre tags and uses the first recognized catego
 | Fantasy and LitRPG | Georgia Bold |
 | Science fiction | Futura Bold |
 | Mystery, thriller, and crime | DIN Condensed Bold |
-| Horror and gothic | Impact |
+| Horror and gothic | Bebas Neue |
 | Romance | Avenir Heavy |
 | History and historical fiction | Times New Roman Bold |
 | Literary fiction and classics | Avenir Next Demi Bold |
@@ -38,7 +38,7 @@ The app checks the book's ranked genre tags and uses the first recognized catego
 | Poetry and verse | Verdana Bold |
 | Humor and satire | Courier New Bold |
 
-Unrecognized or missing genres use Avenir Next Demi Bold. The selected face applies to both the title and author. The renderer measures words and draws each fitted line, then sizes the texture to the visible spine plane so letters keep their proportions. The title stays at or above 56 texture pixels and the author at or above 48. Below a 5% top margin, the title takes 58% of the spine's thickness and the author the next 32% (`titleTop`, `titleShare`, `authorShare`). Each grows to the largest size that fits its area, so thick spines get large lettering. The book's dimensions account for the words and line count before the spine texture is drawn.
+Unrecognized or missing genres use Avenir Next Demi Bold. No spine uses Impact: a saved style that names it loads as Bebas Neue (`SpineFontPolicy`). The selected face applies to both the title and author. The renderer measures words and draws each fitted line, then sizes the texture to the visible spine plane so letters keep their proportions. The title stays at or above 56 texture pixels and the author at or above 48. Below a 5% top margin, the title takes 58% of the spine's thickness and the author the next 32% (`titleTop`, `titleShare`, `authorShare`). Each grows to the largest size that fits its area, so thick spines get large lettering. The book's dimensions account for the words and line count before the spine texture is drawn.
 
 For *House of Leaves*, the spine and shelf label letter each "house" in its blue (`HouseOfLeaves.attributed`), fitted to the spine color or the shelf's wood.
 

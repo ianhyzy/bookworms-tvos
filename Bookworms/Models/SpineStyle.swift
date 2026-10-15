@@ -20,9 +20,30 @@ struct StyleColor: Codable, Hashable, Sendable {
     static func seed(_ id: Int) -> UInt64 { UInt64(bitPattern: Int64(id)) &* 2_654_435_761 }
 }
 
+/// The owner's standing type rule: no spine ever uses Impact, which tvOS ships as a web font.
+enum SpineFontPolicy {
+    /// The PostScript name that replaces Impact.
+    ///
+    /// Bebas Neue is a heavy condensed sans in Impact's role. tvOS ships it as a system font, and
+    /// Google Fonts serves it, so every Bookworms app uses the same replacement.
+    static let impactReplacement = "BebasNeue"
+
+    /// Returns whether a family or PostScript name, in any case or style suffix, is allowed.
+    static func allows(_ name: String) -> Bool {
+        !name.lowercased().contains("impact")
+    }
+
+    /// Returns `name`, or `impactReplacement` when `name` is Impact.
+    static func allowedFontName(_ name: String) -> String {
+        allows(name) ? name : impactReplacement
+    }
+}
+
 struct SpineStyle: Codable, Hashable, Sendable {
     var background: StyleColor
     var foreground: StyleColor
+    /// A PostScript name. A saved style that names Impact decodes as
+    /// `SpineFontPolicy.impactReplacement`.
     var fontName: String
     var uppercase: Bool
     var recognizedTitle: Bool
@@ -41,6 +62,21 @@ struct SpineStyle: Codable, Hashable, Sendable {
             background: palettes[Int(seed % UInt64(palettes.count))], foreground: .paper,
             fontName: seed.isMultiple(of: 2) ? "Georgia-Bold" : "AvenirNextCondensed-DemiBold",
             uppercase: false, recognizedTitle: false, provenance: "Local fallback")
+    }
+}
+
+extension SpineStyle {
+    /// Decodes a saved, cached, or iCloud style, replacing a blocked font before any view
+    /// renders it.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        background = try container.decode(StyleColor.self, forKey: .background)
+        foreground = try container.decode(StyleColor.self, forKey: .foreground)
+        fontName = SpineFontPolicy.allowedFontName(
+            try container.decode(String.self, forKey: .fontName))
+        uppercase = try container.decode(Bool.self, forKey: .uppercase)
+        recognizedTitle = try container.decode(Bool.self, forKey: .recognizedTitle)
+        provenance = try container.decode(String.self, forKey: .provenance)
     }
 }
 
