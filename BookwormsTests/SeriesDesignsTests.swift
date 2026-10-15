@@ -53,12 +53,14 @@ final class SeriesDesignsTests: XCTestCase {
         fonts[1] = "Impact"
         fonts[6] = "Georgia-BoldItalic"
         let sources = SeriesDesigns.sources(books: books, fonts: fonts)
-        XCTAssertEqual(sources[1], 2, "Impact never designs another book, not even its own")
+        XCTAssertNil(
+            sources[1], "An Impact book ranks first, so it lends to no one and draws its own")
         XCTAssertEqual(sources[2], 2, "A source maps to itself")
         XCTAssertEqual(sources[3], 2)
         XCTAssertNil(sources[4], "A book by another author keeps its own design")
         XCTAssertNil(sources[5])
-        XCTAssertEqual(sources[6], 7, "An italic book draws with its usable series-mate")
+        XCTAssertNil(sources[6], "An italic book ranks first and draws its own, remapped upright")
+        XCTAssertNil(sources[7], "Only an earlier book lends its design")
         XCTAssertEqual(
             SeriesDesigns.sources(books: books, fonts: fonts) { book, _ in book.id != 3 }[3], nil,
             "A book the source's font can't letter keeps its own design")
@@ -69,9 +71,9 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertNil(library[4])
     }
 
-    func testSourcesDoNotDependOnBookOrder() {
-        // Book 2 shares an author with books 1 and 3, which share none: book 3 draws book 2's
-        // design while book 2 draws book 1's, in any order.
+    func testSourcesLendOnlyOwnDesignsInAnyBookOrder() {
+        // Book 2 shares an author with books 1 and 3, which share none. Book 2 draws book 1's
+        // design; book 3 may not draw the design book 2 borrowed, so it draws its own.
         let books = [
             book(1, position: 1, author: "Ann Author"),
             book(2, position: 2, author: "Ann Author, Co Writer"),
@@ -81,7 +83,7 @@ final class SeriesDesignsTests: XCTestCase {
         for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
             XCTAssertEqual(
                 SeriesDesigns.sources(books: order.map { books[$0] }, fonts: fonts),
-                [1: 1, 2: 1, 3: 2], "\(order)")
+                [1: 1, 2: 1], "\(order)")
         }
     }
 
