@@ -379,6 +379,12 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertFalse(
             SeriesDesigns.canLetter(book(3), fontName: "NoSuchFont-Bold"),
             "A missing font letters nothing")
+        XCTAssertTrue(
+            SeriesDesigns.canLetter(book(4, title: "Cafe\u{301}"), fontName: "Georgia-Bold"),
+            "Decomposed accents are checked in precomposed form")
+        XCTAssertTrue(
+            SeriesDesigns.canLetter(book(5, author: "", title: ""), fontName: "Georgia-Bold"),
+            "A spine with nothing to letter passes")
         XCTAssertEqual(
             SeriesDesigns.lettering(of: book(4, title: "Straße"), uppercase: true),
             "STRASSE MATT DINNIMAN", "A design in capitals is checked in capitals")

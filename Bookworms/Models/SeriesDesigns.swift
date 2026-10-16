@@ -240,12 +240,12 @@ enum SeriesDesigns {
     }
 
     /// Whether `font` has a glyph for every letter `book`'s spine draws, in capitals when
-    /// `uppercase` is set.
+    /// `uppercase` is set. The check uses the precomposed form, as the iPhone companion's
+    /// `DownloadedFont.covers(_:)` does, and lettering that is all whitespace passes.
     static func canLetter(_ book: Book, font: CTFont, uppercase: Bool = false) -> Bool {
-        let characters = Array(
-            lettering(of: book, uppercase: uppercase).unicodeScalars
-                .filter { !$0.properties.isWhitespace }
-                .map(String.init).joined().utf16)
+        let text = lettering(of: book, uppercase: uppercase).precomposedStringWithCanonicalMapping
+        let characters = Array(String(text.filter { !$0.isWhitespace }).utf16)
+        guard !characters.isEmpty else { return true }
         var glyphs = [CGGlyph](repeating: 0, count: characters.count)
         return CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count)
     }
