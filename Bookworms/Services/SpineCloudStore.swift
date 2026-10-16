@@ -429,8 +429,11 @@ actor SpineCloudStore {
         throw CloudStorageError.conflict
     }
 
-    /// Reads the active books' companion designs. See `records(_:accountID:subjects:)`.
-    func designs(accountID: String, books: [Book]) async throws -> [Int: SpineDesignV1] {
+    /// Reads the active books' companion designs, and whether CloudKit answered for every book.
+    /// See `records(_:accountID:subjects:)`.
+    func designs(accountID: String, books: [Book]) async throws
+        -> (values: [Int: SpineDesignV1], isComplete: Bool)
+    {
         try await records(
             .designs(cacheURL: cacheURL), accountID: accountID, subjects: Self.byID(books))
     }
@@ -439,11 +442,16 @@ actor SpineCloudStore {
     func coverChoices(accountID: String, books: [Book]) async throws -> [Int: CoverChoiceV1] {
         try await records(
             .coverChoices(cacheURL: coverChoiceCacheURL), accountID: accountID,
-            subjects: Self.byID(books))
+            subjects: Self.byID(books)
+        )
+        .values
     }
 
-    /// Reads the active books' companion series links. See `records(_:accountID:subjects:)`.
-    func seriesLinks(accountID: String, books: [Book]) async throws -> [Int: SeriesLinkV1] {
+    /// Reads the active books' companion series links, and whether CloudKit answered for every
+    /// book. See `records(_:accountID:subjects:)`.
+    func seriesLinks(accountID: String, books: [Book]) async throws
+        -> (values: [Int: SeriesLinkV1], isComplete: Bool)
+    {
         try await records(
             .seriesLinks(cacheURL: seriesLinkCacheURL), accountID: accountID,
             subjects: Self.byID(books))
@@ -456,7 +464,9 @@ actor SpineCloudStore {
     {
         try await records(
             .seriesLooks(cacheURL: seriesLookCacheURL), accountID: accountID,
-            subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first }))
+            subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first })
+        )
+        .values
     }
 
     /// Saves `look` as its group's look unless another device saved one first, and returns the
@@ -500,18 +510,20 @@ actor SpineCloudStore {
     /// Reads one record per subject, such as a book, in bounded batches and keeps a separate
     /// validated disk cache.
     ///
-    /// Returns cached records when CloudKit is unavailable. A missing or invalid current record
-    /// evicts the cached one, and an empty `accountID` clears the cache.
+    /// Returns cached records when CloudKit is unavailable, a batch fails, or a record fails for
+    /// a reason other than not existing; `isComplete` is then `false`, so callers that make
+    /// lasting decisions, such as creating a series look, can wait for a full read. A missing or
+    /// invalid current record evicts the cached one, and an empty `accountID` clears the cache.
     private func records<Key: Comparable & Hashable, Subject, Value: Codable & Sendable>(
         _ kind: CompanionRecordKind<Key, Subject, Value>, accountID: String,
         subjects selected: [Key: Subject]
-    ) async throws -> [Key: Value] {
+    ) async throws -> (values: [Key: Value], isComplete: Bool) {
         let generation = (cacheGenerations[kind.recordType] ?? 0) &+ 1
         cacheGenerations[kind.recordType] = generation
         guard !accountID.isEmpty else {
             try Task.checkCancellation()
             try saveCache([String: Value](), to: kind, generation: generation)
-            return [:]
+            return ([:], true)
         }
         #if DEBUG
             var status = ReadStatus(phase: "loading_cache", requestedCount: selected.count)
@@ -547,7 +559,7 @@ actor SpineCloudStore {
                 status.phase = "complete"
                 writeReadStatus(status, name: kind.statusName)
             #endif
-            return [:]
+            return ([:], true)
         }
         let database: any SpineCloudDatabase
         do {
@@ -566,9 +578,10 @@ actor SpineCloudStore {
             #endif
             try checkCurrentGeneration(generation, of: kind)
             try? saveCache(cache, to: kind, generation: generation)
-            return accepted
+            return (accepted, false)
         }
         try checkCurrentGeneration(generation, of: kind)
+        var isComplete = true
         let ids = selected.keys.sorted()
             .map { kind.recordID(accountID, $0) }
         for start in stride(from: 0, to: ids.count, by: 100) {
@@ -596,7 +609,7 @@ actor SpineCloudStore {
                 #endif
                 try checkCurrentGeneration(generation, of: kind)
                 try? saveCache(cache, to: kind, generation: generation)
-                return accepted
+                return (accepted, false)
             }
             try checkCurrentGeneration(generation, of: kind)
             #if DEBUG
@@ -608,6 +621,7 @@ actor SpineCloudStore {
                     #if DEBUG
                         status.missingCount += 1
                     #endif
+                    isComplete = false
                     continue
                 }
                 switch result {
@@ -622,6 +636,7 @@ actor SpineCloudStore {
                     continue
                 case .failure(let error):
                     if error is CancellationError { cancelled = true }
+                    isComplete = false
                     #if DEBUG
                         status.failedCount += 1
                         status.ckErrorCode = status.ckErrorCode ?? cloudKitErrorCode(error)
@@ -668,7 +683,7 @@ actor SpineCloudStore {
             writeReadStatus(status, name: kind.statusName)
         #endif
         try checkCurrentGeneration(generation, of: kind)
-        return accepted
+        return (accepted, isComplete)
     }
 
     private func checkCurrentGeneration<Key, Subject, Value>(

@@ -41,15 +41,17 @@ struct LibraryDependencies {
     var publishSpineWorklist: @MainActor (SpineWorklistV1) async throws -> Void = {
         try await SpineCloudStore.shared.publish($0)
     }
-    var fetchSpineDesigns: @MainActor (String, [Book]) async throws -> [Int: SpineDesignV1] = {
-        try await SpineCloudStore.shared.designs(accountID: $0, books: $1)
-    }
+    var fetchSpineDesigns:
+        @MainActor (String, [Book]) async throws -> (
+            values: [Int: SpineDesignV1], isComplete: Bool
+        ) = { try await SpineCloudStore.shared.designs(accountID: $0, books: $1) }
     var fetchCoverChoices: @MainActor (String, [Book]) async throws -> [Int: CoverChoiceV1] = {
         try await SpineCloudStore.shared.coverChoices(accountID: $0, books: $1)
     }
-    var fetchSeriesLinks: @MainActor (String, [Book]) async throws -> [Int: SeriesLinkV1] = {
-        try await SpineCloudStore.shared.seriesLinks(accountID: $0, books: $1)
-    }
+    var fetchSeriesLinks:
+        @MainActor (String, [Book]) async throws -> (
+            values: [Int: SeriesLinkV1], isComplete: Bool
+        ) = { try await SpineCloudStore.shared.seriesLinks(accountID: $0, books: $1) }
     var fetchSeriesLooks:
         @MainActor (String, [SeriesLookKey]) async throws -> [SeriesLookKey: SeriesLookV1] = {
             try await SpineCloudStore.shared.seriesLooks(accountID: $0, keys: $1)

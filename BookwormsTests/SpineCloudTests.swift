@@ -57,14 +57,16 @@ final class SpineCloudTests: XCTestCase {
         let database = FakeSpineDatabase()
         try await database.put(design(for: book))
         let online = SpineCloudStore(database: database, cacheURL: cacheURL)
-        let fetched = try await online.designs(accountID: "42", books: [book])
-        XCTAssertEqual(fetched[7]?.typeface, "serif")
+        let read = try await online.designs(accountID: "42", books: [book, self.book(id: 8)])
+        XCTAssertEqual(read.values[7]?.typeface, "serif")
+        XCTAssertTrue(read.isComplete, "A book without a design still counts as read")
 
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let retained = try await offline.designs(accountID: "42", books: [book])
-        XCTAssertEqual(retained[7]?.coverHash, String(repeating: "a", count: 64))
-        let other = try await offline.designs(accountID: "other", books: [book])
+        let offlineRead = try await offline.designs(accountID: "42", books: [book])
+        XCTAssertEqual(offlineRead.values[7]?.coverHash, String(repeating: "a", count: 64))
+        XCTAssertFalse(offlineRead.isComplete, "A cached read is not complete")
+        let other = try await offline.designs(accountID: "other", books: [book]).values
         XCTAssertTrue(other.isEmpty)
         let cache = try JSONDecoder()
             .decode(
@@ -88,7 +90,7 @@ final class SpineCloudTests: XCTestCase {
             .designs(accountID: "42", books: [book])
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let retained = try await offline.designs(accountID: "42", books: [book])
+        let retained = try await offline.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(retained[7], styled)
 
         var unbounded = styled
@@ -166,7 +168,7 @@ final class SpineCloudTests: XCTestCase {
         let store = SpineCloudStore(database: database, cacheURL: cacheURL)
         let fetched = try await store.coverChoices(accountID: "42", books: [book])
         XCTAssertEqual(fetched[7], choice)
-        let designs = try await store.designs(accountID: "42", books: [book])
+        let designs = try await store.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(designs.count, 1, "Designs and choices keep separate caches")
 
         let offline = SpineCloudStore(
@@ -182,7 +184,7 @@ final class SpineCloudTests: XCTestCase {
                 [String: CoverChoiceV1].self,
                 from: Data(contentsOf: directory.appending(path: "cover-choices-v1.json")))
         XCTAssertTrue(cache.isEmpty)
-        let keptDesigns = try await offline.designs(accountID: "42", books: [book])
+        let keptDesigns = try await offline.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(keptDesigns.count, 1)
     }
 
@@ -194,12 +196,12 @@ final class SpineCloudTests: XCTestCase {
         let database = FakeSpineDatabase()
         try await database.put(design(for: book))
         let online = SpineCloudStore(database: database, cacheURL: cacheURL)
-        let populated = try await online.designs(accountID: "42", books: [book])
+        let populated = try await online.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(populated.count, 1)
 
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let pruned = try await offline.designs(accountID: "other", books: [])
+        let pruned = try await offline.designs(accountID: "other", books: []).values
         XCTAssertTrue(pruned.isEmpty)
         let cache = try JSONDecoder()
             .decode(
@@ -215,14 +217,14 @@ final class SpineCloudTests: XCTestCase {
         let database = FakeSpineDatabase()
         try await database.put(design(for: book))
         let online = SpineCloudStore(database: database, cacheURL: cacheURL)
-        let populated = try await online.designs(accountID: "42", books: [book])
+        let populated = try await online.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(populated.count, 1)
 
         var changed = book
         changed.detailCoverURL = URL(string: "https://example.test/replaced.jpg")
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let pruned = try await offline.designs(accountID: "42", books: [changed])
+        let pruned = try await offline.designs(accountID: "42", books: [changed]).values
         XCTAssertTrue(pruned.isEmpty)
         let cache = try JSONDecoder()
             .decode(
@@ -239,7 +241,7 @@ final class SpineCloudTests: XCTestCase {
         try await database.put(design(for: book))
         await database.holdNextBatch()
         let store = SpineCloudStore(database: database, cacheURL: cacheURL)
-        let olderRead = Task { try await store.designs(accountID: "42", books: [book]) }
+        let olderRead = Task { try await store.designs(accountID: "42", books: [book]).values }
         await database.waitForHeldBatch()
 
         _ = try await store.designs(accountID: "", books: [])
@@ -265,11 +267,11 @@ final class SpineCloudTests: XCTestCase {
         let database = FakeSpineDatabase()
         let store = SpineCloudStore(database: database, cacheURL: cacheURL)
         try await database.put(design(for: book))
-        let initial = try await store.designs(accountID: "42", books: [book])
+        let initial = try await store.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(initial.count, 1)
 
         try await database.put(design(for: book, typeface: "external-font"))
-        let refreshed = try await store.designs(accountID: "42", books: [book])
+        let refreshed = try await store.designs(accountID: "42", books: [book]).values
         XCTAssertTrue(refreshed.isEmpty)
         let cache = try JSONDecoder()
             .decode(
@@ -296,7 +298,7 @@ final class SpineCloudTests: XCTestCase {
             uppercase: true, fontFamily: "Inter", fontPostScriptName: "Inter-Bold",
             instanceWeight: 700)
         try await database.put(latest)
-        let refreshed = try await store.designs(accountID: "42", books: [book])
+        let refreshed = try await store.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(refreshed[7], latest)
         let cache = try JSONDecoder()
             .decode([String: SpineDesignV1].self, from: Data(contentsOf: cacheURL))
@@ -315,7 +317,8 @@ final class SpineCloudTests: XCTestCase {
 
         let fetched = try await SpineCloudStore(database: database, cacheURL: cacheURL)
             .designs(accountID: "42", books: [first, second])
-        XCTAssertEqual(fetched.keys.sorted(), [2])
+        XCTAssertEqual(fetched.values.keys.sorted(), [2])
+        XCTAssertFalse(fetched.isComplete, "A failed record leaves the read incomplete")
         let persisted = try JSONDecoder()
             .decode([String: SpineDesignV1].self, from: Data(contentsOf: cacheURL))
         XCTAssertEqual(persisted.count, 1)
@@ -336,9 +339,23 @@ final class SpineCloudTests: XCTestCase {
         } catch is CancellationError {
             let offline = SpineCloudStore(
                 database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-            let retained = try await offline.designs(accountID: "42", books: books)
+            let retained = try await offline.designs(accountID: "42", books: books).values
             XCTAssertEqual(retained.keys.sorted(), [1])
         }
+    }
+
+    func testFailedBatchReturnsEarlierBatchesAsAnIncompleteRead() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let books = (1...101).map { book(id: $0) }
+        let database = FakeSpineDatabase()
+        try await database.put(design(for: books[0]))
+        await database.failBatch(number: 2, with: CKError(.serviceUnavailable))
+        let read = try await SpineCloudStore(database: database, cacheURL: cacheURL)
+            .designs(accountID: "42", books: books)
+        XCTAssertEqual(read.values.keys.sorted(), [1])
+        XCTAssertFalse(read.isComplete)
     }
 
     private let cityWatch = SeriesLookKey(seriesID: 1018, group: "City Watch|terrypratchett")
@@ -438,14 +455,14 @@ final class SpineCloudTests: XCTestCase {
         try await database.put(link)
         try await database.put(look())
         let online = SpineCloudStore(database: database, cacheURL: cacheURL)
-        let links = try await online.seriesLinks(accountID: "42", books: [book()])
+        let links = try await online.seriesLinks(accountID: "42", books: [book()]).values
         let looks = try await online.seriesLooks(accountID: "42", keys: [cityWatch])
         XCTAssertEqual(links, [7: link])
         XCTAssertEqual(looks, [cityWatch: look()])
 
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let cachedLinks = try await offline.seriesLinks(accountID: "42", books: [book()])
+        let cachedLinks = try await offline.seriesLinks(accountID: "42", books: [book()]).values
         let cachedLooks = try await offline.seriesLooks(accountID: "42", keys: [cityWatch])
         XCTAssertEqual(cachedLinks, [7: link])
         XCTAssertEqual(cachedLooks, [cityWatch: look()])
