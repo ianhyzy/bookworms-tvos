@@ -374,6 +374,10 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertFalse(
             SeriesDesigns.canLetter(book(3), fontName: "NoSuchFont-Bold"),
             "A missing font letters nothing")
+        XCTAssertEqual(
+            SeriesDesigns.lettering(of: book(4, title: "Straße"), uppercase: true),
+            "STRASSE MATT DINNIMAN", "A design in capitals is checked in capitals")
+        XCTAssertEqual(SeriesDesigns.lettering(of: book(5, title: "Mort")), "Mort Matt Dinniman")
     }
 
     /// A book drawing with its source's design takes the source's cloth and font, and keeps its

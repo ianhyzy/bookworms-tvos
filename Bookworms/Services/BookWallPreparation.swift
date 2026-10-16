@@ -56,9 +56,10 @@ final class BookWallPreparation {
     }
 
     /// Prepares `books`, each drawn in its series look from `looks`, else its companion design
-    /// from `designs`, else from its cover. A look draws only on a book its face can letter;
-    /// another book keeps its companion design, as on the iPhone. A book with a series source
-    /// in `sources` (`LibraryModel.seriesSources`) draws in the source's design when the
+    /// from `designs`, else from its cover. A look draws on a book unless the look's face loaded
+    /// and lacks a glyph of the book's title and author, in capitals when the look draws in
+    /// capitals; that book keeps its companion design, as on the iPhone. A book with a series
+    /// source in `sources` (`LibraryModel.seriesSources`) draws in the source's design when the
     /// source's face can letter it. Both checks run here, once.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
@@ -87,8 +88,15 @@ final class BookWallPreparation {
         var drawn = designs
         for book in books {
             guard let look = looks[book.id] else { continue }
-            let face = BookWallLocalSpine.typography(for: book, design: look).font(size: 12)
-            if SeriesDesigns.canLetter(book, font: face as CTFont) { drawn[book.id] = look }
+            let typography = BookWallLocalSpine.typography(for: book, design: look)
+            // A face that didn't load passes: the spine letters in the system face.
+            if let face = typography.loadedFont(size: 12),
+                !SeriesDesigns.canLetter(
+                    book, font: face as CTFont, uppercase: typography.uppercase)
+            {
+                continue
+            }
+            drawn[book.id] = look
         }
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
             BookWallLocalSpine.typography(for: book, design: drawn[book.id])
@@ -97,7 +105,9 @@ final class BookWallPreparation {
         var typographies: [Int: BookWallLocalSpine.Typography] = [:]
         for book in books {
             if let source = sources[book.id], source.id != book.id,
-                SeriesDesigns.canLetter(book, font: typography(of: source).font(size: 12) as CTFont)
+                SeriesDesigns.canLetter(
+                    book, font: typography(of: source).font(size: 12) as CTFont,
+                    uppercase: typography(of: source).uppercase)
             {
                 drawsWith[book.id] = source
                 typographies[book.id] = typography(of: source)

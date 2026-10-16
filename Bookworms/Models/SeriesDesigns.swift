@@ -223,24 +223,28 @@ enum SeriesDesigns {
         return sources
     }
 
-    /// The text a spine letters for `book`, for glyph checks: its title and author.
-    static func lettering(of book: Book) -> String {
-        book.title + " " + book.author
+    /// The text a spine letters for `book`, for glyph checks: its title and author, uppercased
+    /// when the design draws in capitals.
+    static func lettering(of book: Book, uppercase: Bool = false) -> String {
+        let text = book.title + " " + book.author
+        return uppercase ? text.uppercased() : text
     }
 
     /// Whether the font named `fontName` has a glyph for every letter `book`'s spine draws.
     /// Preparation checks this once per book; a font that is not installed letters nothing.
-    static func canLetter(_ book: Book, fontName: String) -> Bool {
+    static func canLetter(_ book: Book, fontName: String, uppercase: Bool = false) -> Bool {
         let font = CTFontCreateWithName(fontName as CFString, 12, nil)
         // CoreText substitutes a default face for a missing name; that face does not count.
         guard (CTFontCopyPostScriptName(font) as String) == fontName else { return false }
-        return canLetter(book, font: font)
+        return canLetter(book, font: font, uppercase: uppercase)
     }
 
-    /// Whether `font` has a glyph for every letter `book`'s spine draws.
-    static func canLetter(_ book: Book, font: CTFont) -> Bool {
+    /// Whether `font` has a glyph for every letter `book`'s spine draws, in capitals when
+    /// `uppercase` is set.
+    static func canLetter(_ book: Book, font: CTFont, uppercase: Bool = false) -> Bool {
         let characters = Array(
-            lettering(of: book).unicodeScalars.filter { !$0.properties.isWhitespace }
+            lettering(of: book, uppercase: uppercase).unicodeScalars
+                .filter { !$0.properties.isWhitespace }
                 .map(String.init).joined().utf16)
         var glyphs = [CGGlyph](repeating: 0, count: characters.count)
         return CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count)

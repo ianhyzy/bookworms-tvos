@@ -27,12 +27,7 @@ enum BookWallLocalSpine {
         /// The stand-in's registered face nearest `weight`, else `fontName`, else the system
         /// face for `typeface` and `weight`.
         func font(size: CGFloat) -> UIFont {
-            if let standInFamily,
-                let face = GoogleFontLibrary.registeredFace(family: standInFamily, nearest: weight)
-            {
-                return CTFontCreateCopyWithAttributes(face, size, nil, nil) as UIFont
-            }
-            if let fontName, let font = UIFont(name: fontName, size: size) { return font }
+            if let font = loadedFont(size: size) { return font }
             let system = UIFont.systemFont(
                 ofSize: size,
                 weight: weight >= 700
@@ -46,6 +41,17 @@ enum BookWallLocalSpine {
                 }
             return system.fontDescriptor.withDesign(design)
                 .map { UIFont(descriptor: $0, size: size) } ?? system
+        }
+
+        /// The stand-in's registered face nearest `weight`, else `fontName`, or `nil` when
+        /// neither is registered and the spine draws in the system face.
+        func loadedFont(size: CGFloat) -> UIFont? {
+            if let standInFamily,
+                let face = GoogleFontLibrary.registeredFace(family: standInFamily, nearest: weight)
+            {
+                return CTFontCreateCopyWithAttributes(face, size, nil, nil) as UIFont
+            }
+            return fontName.flatMap { UIFont(name: $0, size: size) }
         }
 
         func title(for book: Book) -> String { uppercase ? book.title.uppercased() : book.title }
