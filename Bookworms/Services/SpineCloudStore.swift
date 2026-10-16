@@ -45,7 +45,9 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     /// The weight of the `fontPostScriptName` instance (100...900), which can differ from
     /// `weight` when the family lacks that weight.
     var instanceWeight: Int? = nil
-    /// How the design was made when not by a model request, such as "series-reuse:12".
+    /// How the design was made, in space-separated tokens such as "model:apple/on-device" or
+    /// "series-reuse:12". The model token names the companion's model tier; Private Cloud
+    /// Compute's designs record none. The Apple TV doesn't read the tier.
     var provenance: String? = nil
 
     func isValid(accountID: String, book: Book) -> Bool {
@@ -116,7 +118,9 @@ struct CoverChoiceV1: Codable, Equatable, Sendable {
 
 /// The look a group of series books draws (`SeriesLookKey`), synced so every device draws the
 /// same one. The first device to save a group's look decides it; creating one never replaces
-/// another (`SpineCloudStore.createSeriesLook(_:)`).
+/// another (`SpineCloudStore.createSeriesLook(_:)`). A companion app may later remake a look
+/// that a weaker model tier made (`provenance`, or the `localOrigin`) and the reader never
+/// edited; Book Wall draws the remade look on its next read.
 struct SeriesLookV1: Codable, Equatable, Sendable {
     var version = 1
     let accountID: String
@@ -128,7 +132,9 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     /// "tvos-local-v1" for Book Wall's cover-sampled look.
     let origin: String
     let createdAt: Date
-    /// When a companion app last edited the look's colors or type.
+    /// When a companion app last edited the look's colors or type. A look copied from a design
+    /// whose colors the reader chose counts as edited at `createdAt`, so no companion upgrade
+    /// replaces those colors.
     var editedAt: Date? = nil
     let backgroundHex: String
     let foregroundHex: String
@@ -139,6 +145,11 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     var fontFamily: String? = nil
     var fontPostScriptName: String? = nil
     var instanceWeight: Int? = nil
+    /// The model token of the design the look copies (`SpineDesignV1.modelToken`), which tells
+    /// a companion app the model tier that made it. A look copies no other `provenance` token.
+    /// Private Cloud Compute's looks and Book Wall's cover-sampled looks record none; the
+    /// latter's `origin` marks them.
+    var provenance: String? = nil
 
     /// The origin of a look made from Book Wall's cover-sampled style.
     static let localOrigin = "tvos-local-v1"
@@ -150,7 +161,7 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
             && accountID.count <= 512 && self.key == key && seriesID > 0 && group.count <= 200
             && sourceBookID > 0 && createdAt.timeIntervalSince1970.isFinite
             && (editedAt?.timeIntervalSince1970.isFinite ?? true)
-            && SpineDesignV1.isShortLine(origin)
+            && SpineDesignV1.isShortLine(origin) && SpineDesignV1.isShortLine(provenance)
             && !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && design(bookID: sourceBookID, workItemHash: "").isValidLook
     }
@@ -175,15 +186,19 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
 }
 
 extension SeriesLookV1 {
-    /// A look for `key` copied from `design`, a group member's saved design.
+    /// A look for `key` copied from `design`, a group member's saved design. A design the reader
+    /// recolored (`hasReaderColors`) gives the look the reader's colors, so the look counts as
+    /// edited at `createdAt`, as the iPhone's look does.
     init(key: SeriesLookKey, design: SpineDesignV1, createdAt: Date) {
         self.init(
             accountID: design.accountID, seriesID: key.seriesID, group: key.group,
             sourceBookID: design.bookID, origin: design.generatorVersion, createdAt: createdAt,
+            editedAt: design.hasReaderColors ? createdAt : nil,
             backgroundHex: design.backgroundHex, foregroundHex: design.foregroundHex,
             accentHex: design.accentHex, typeface: design.typeface, weight: design.weight,
             uppercase: design.uppercase, fontFamily: design.fontFamily,
-            fontPostScriptName: design.fontPostScriptName, instanceWeight: design.instanceWeight)
+            fontPostScriptName: design.fontPostScriptName, instanceWeight: design.instanceWeight,
+            provenance: design.modelToken)
     }
 
     /// A look for `key` from Book Wall's cover-sampled `style` of `book`, the group's

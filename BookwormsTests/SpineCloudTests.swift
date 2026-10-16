@@ -444,6 +444,34 @@ final class SpineCloudTests: XCTestCase {
                 .isValid(accountID: "42", key: cityWatch))
     }
 
+    func testSeriesLookProvenanceDecodesWhenPresentAndFollowsTheDesignRule() throws {
+        let fields = #"""
+            "version": 1, "accountID": "42", "seriesID": 1018,
+            "group": "City Watch|terrypratchett", "sourceBookID": 123, "origin": "ios-pcc-v2",
+            "createdAt": 801000000, "backgroundHex": "#1A2B3C", "foregroundHex": "#F0E0D0",
+            "accentHex": "#C0A060", "typeface": "serif", "weight": 700, "uppercase": false
+            """#
+        func decode(_ extra: String = "") throws -> SeriesLookV1 {
+            try JSONDecoder().decode(SeriesLookV1.self, from: Data("{\(fields)\(extra)}".utf8))
+        }
+        XCTAssertNil(try decode().provenance, "A look saved before the field decodes")
+        let tiered = try decode(#", "provenance": "model:apple/on-device""#)
+        XCTAssertEqual(tiered.provenance, "model:apple/on-device")
+        XCTAssertTrue(tiered.isValid(accountID: "42", key: cityWatch))
+        XCTAssertEqual(
+            try JSONDecoder().decode(SeriesLookV1.self, from: JSONEncoder().encode(tiered)),
+            tiered)
+        XCTAssertNil(try decode(#", "provenance": null"#).provenance)
+
+        var invalid = tiered
+        invalid.provenance = "two\nlines"
+        XCTAssertFalse(invalid.isValid(accountID: "42", key: cityWatch))
+        invalid.provenance = String(repeating: "p", count: 81)
+        XCTAssertFalse(invalid.isValid(accountID: "42", key: cityWatch))
+        invalid.provenance = ""
+        XCTAssertFalse(invalid.isValid(accountID: "42", key: cityWatch))
+    }
+
     func testSeriesLinkPayloadDecodesAndValidatesItsBook() throws {
         let json = #"""
             {"version": 1, "accountID": "42", "bookID": 7, "linkedSeriesID": 2001,
