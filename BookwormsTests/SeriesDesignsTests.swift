@@ -27,6 +27,23 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertFalse(SeriesDesigns.matches(book(7, series: nil), book(8, series: nil)))
     }
 
+    func testDiscworldBooksShareADesignOnlyWithinTheirGroup() {
+        func discworld(_ id: Int, _ title: String) -> Book {
+            book(id, series: 1018, author: "Terry Pratchett", title: title)
+        }
+        let guards = discworld(1, "Guards! Guards!")
+        XCTAssertTrue(SeriesDesigns.matches(guards, discworld(2, "THUD")))
+        XCTAssertTrue(SeriesDesigns.matches(guards, discworld(3, "Night Watch: A Discworld Novel")))
+        XCTAssertFalse(SeriesDesigns.matches(guards, discworld(4, "Mort")))
+        XCTAssertTrue(
+            SeriesDesigns.matches(
+                discworld(5, "The Science of Discworld II: The Globe"),
+                discworld(6, "The Science of Discworld")))
+        // A book no group names keeps its own design.
+        let maurice = discworld(7, "The Amazing Maurice and His Educated Rodents")
+        XCTAssertFalse(SeriesDesigns.matches(maurice, discworld(8, "The Amazing Maurice")))
+    }
+
     func testSourcesRankByPositionThenFinishThenID() {
         XCTAssertTrue(SeriesDesigns.ranksBefore(book(9, position: 1), book(1, position: 2)))
         XCTAssertTrue(
