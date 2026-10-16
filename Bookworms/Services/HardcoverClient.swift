@@ -293,7 +293,7 @@ actor HardcoverClient {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
                 id last_read_date rating status_id
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
-                  book_series { featured position series { id name } }
+                  book_series { featured position compilation series { id name books_count primary_books_count } }
                   editions(where: {image_id: {_is_null: false},
                       _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
                     order_by: {users_count: desc}, limit: 5) {
@@ -644,6 +644,7 @@ actor HardcoverClient {
                 seriesID: membership?.series?.id,
                 seriesPosition: membership?.position,
                 seriesName: seriesName?.isEmpty == false ? seriesName : nil,
+                seriesMemberships: source.bookSeries?.compactMap(\.membership),
                 genres: source.genres,
                 communityRating: source.rating, ratingsCount: source.ratingsCount,
                 ratingDistribution: source.validRatingDistribution,
@@ -732,7 +733,7 @@ struct SourceBook: Decodable, Sendable {
     let pages: Int?
     let cachedContributors: [Contributor]?
     let image: CoverImage?
-    let bookSeries: [SeriesMembership]?
+    let bookSeries: [BookSeriesRow]?
     let cachedTags: [String: [BookTag]]?
     let rating: Double?
     let ratingsCount: Int?
@@ -845,12 +846,33 @@ struct CurrentRead: Decodable, Sendable {
         case edition
     }
 }
-struct SeriesMembership: Decodable, Sendable {
+/// One row of a book's Hardcover `book_series`.
+struct BookSeriesRow: Decodable, Sendable {
     let featured: Bool?
     let position: Double?
+    var compilation: Bool? = nil
     let series: SeriesIdentity?
     struct SeriesIdentity: Decodable, Sendable {
         let id: Int
         let name: String?
+        var booksCount: Int? = nil
+        var primaryBooksCount: Int? = nil
+        enum CodingKeys: String, CodingKey {
+            case id
+            case name
+            case booksCount = "books_count"
+            case primaryBooksCount = "primary_books_count"
+        }
+    }
+
+    /// The row as a `Book` membership, or `nil` without a series or a series name.
+    var membership: SeriesMembership? {
+        guard let series,
+            let name = series.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !name.isEmpty
+        else { return nil }
+        return SeriesMembership(
+            seriesID: series.id, name: name, position: position, featured: featured ?? false,
+            compilation: compilation ?? false, size: series.primaryBooksCount ?? series.booksCount)
     }
 }

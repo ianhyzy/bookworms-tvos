@@ -215,6 +215,46 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertNil(older.seriesName, "Books saved before series names decode without one")
     }
 
+    func testLibraryRowsKeepEveryNamedSeriesMembership() throws {
+        let json = #"""
+            [{"id": 100, "status_id": 3,
+              "book": {"id": 11, "title": "Guards! Guards!",
+                "book_series": [
+                  {"featured": true, "position": 8, "compilation": false,
+                    "series": {"id": 1018, "name": " Discworld\n", "books_count": 60,
+                      "primary_books_count": 41}},
+                  {"featured": false, "position": 1, "compilation": true,
+                    "series": {"id": 2001, "name": "City Watch", "books_count": 8}},
+                  {"featured": false, "position": 2, "series": null},
+                  {"position": 3, "series": {"id": 3000, "name": "  "}},
+                  {"position": null, "series": {"id": 4000, "name": "Unsized"}}]}}]
+            """#
+        let rows = try JSONDecoder().decode([UserBook].self, from: Data(json.utf8))
+        let book = try XCTUnwrap(HardcoverClient.normalize(rows).first)
+        XCTAssertEqual(
+            book.seriesMemberships,
+            [
+                SeriesMembership(
+                    seriesID: 1018, name: "Discworld", position: 8, featured: true, size: 41),
+                SeriesMembership(
+                    seriesID: 2001, name: "City Watch", position: 1, compilation: true, size: 8),
+                SeriesMembership(seriesID: 4000, name: "Unsized"),
+            ], "Rows without a series or a series name are left out")
+        XCTAssertEqual(book.seriesID, 1018, "The featured series still names the book's series")
+
+        // The iPhone companion decodes the same keys from the iCloud archive.
+        let shared = #"""
+            {"seriesID": 1018, "name": "Discworld", "position": 8, "featured": true,
+             "compilation": false, "size": 41}
+            """#
+        XCTAssertEqual(
+            try JSONDecoder().decode(SeriesMembership.self, from: Data(shared.utf8)),
+            book.seriesMemberships?.first)
+        let older = try JSONDecoder()
+            .decode(Book.self, from: Data(#"{"id": 1, "title": "T", "author": "A"}"#.utf8))
+        XCTAssertNil(older.seriesMemberships)
+    }
+
     func testHotTakesSortByGapFromCommunityRating() {
         let books = [
             Book(id: 1, title: "Agree", author: "A", rating: 4, communityRating: 4.1),
