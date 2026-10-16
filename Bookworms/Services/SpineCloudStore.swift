@@ -84,30 +84,6 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     }
 }
 
-extension SpineDesignV1 {
-    /// The design in an allowed upright face, as the iPhone companion reads saved designs
-    /// (`withAllowedFont` there).
-    ///
-    /// When the family or PostScript name is blocked (`SpineFontPolicy.allows(_:)`), the family
-    /// becomes Bebas Neue when either name is Impact, stays when it is allowed, and otherwise
-    /// becomes `SpineFontPolicy.uprightFamily(for:)`. The PostScript name and instance weight
-    /// clear, so the face is chosen by family and `weight`.
-    var withAllowedFont: SpineDesignV1 {
-        let names = [fontFamily, fontPostScriptName].compactMap { $0 }
-        guard !names.allSatisfy(SpineFontPolicy.allows) else { return self }
-        var design = self
-        design.fontFamily =
-            names.contains { $0.lowercased().contains("impact") }
-            ? SpineFontPolicy.impactReplacementFamily
-            : fontFamily.flatMap {
-                SpineFontPolicy.allows($0) ? $0 : SpineFontPolicy.uprightFamily(for: $0)
-            }
-        design.fontPostScriptName = nil
-        design.instanceWeight = nil
-        return design
-    }
-}
-
 /// The reader's choice of cover for one book in a companion app. Views try it before the book's
 /// default covers. Choosing the default cover deletes the record.
 struct CoverChoiceV1: Codable, Equatable, Sendable {
@@ -223,8 +199,7 @@ extension SeriesLookV1 {
             foregroundHex: style.foreground.hex, accentHex: style.foreground.hex,
             typeface: face.map(BookWallLocalSpine.typeface(ofGenreFace:)) ?? "sans", weight: 700,
             uppercase: style.typography.uppercase,
-            fontFamily: face == SpineFontPolicy.impactReplacement
-                ? SpineFontPolicy.impactReplacementFamily : nil,
+            fontFamily: face == SpineFontPolicy.impactReplacement ? "Bebas Neue" : nil,
             fontPostScriptName: face)
     }
 }
