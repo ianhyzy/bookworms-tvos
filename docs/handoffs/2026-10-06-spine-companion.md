@@ -7,7 +7,7 @@ The Bookworms iPhone and Mac companion designs book spines from Hardcover covers
 | Piece | Location | State |
 | --- | --- | --- |
 | iPhone and Mac companion | `~/Developer/BookwormsApps/ios`, private GitHub repository `ianhyzy/bookworms-ios` | One target builds both the iPhone and Mac apps. It designs spines with Private Cloud Compute by default (generator `ios-pcc-v2`). Its designs add the optional `fontFamily`, `fontPostScriptName`, `instanceWeight`, and `provenance` fields. |
-| tvOS integration | `~/Developer/BookwormsApps/tvos`, private GitHub repository `ianhyzy/bookworms-tvos` | `SpineCloudStore`, worklist publication, design and cover-choice fetch and caches, [Book Wall companion designs](../BOOK_WALL.md#companion-designs) behind `BookPresentation.showsCompanionSpines`, and companion cover choices in every view behind `showsCompanionCovers`. |
+| tvOS integration | `~/Developer/BookwormsApps/tvos`, private GitHub repository `ianhyzy/bookworms-tvos` | `SpineCloudStore`, worklist publication, design, cover-choice, series-link, and series-look fetch and caches, series-look creation, [Book Wall companion designs](../BOOK_WALL.md#companion-designs) and [series looks](../BOOK_WALL.md#series-links-and-looks) behind `BookPresentation.showsCompanionSpines`, and companion cover choices in every view behind `showsCompanionCovers`. |
 | Retired Mac app (**Bookworms Spines**) | `~/Developer/BookwormsApps/macos`, archived repository `ianhyzy/bookworms-macos` | Make no changes there. The Apple TV still accepts its existing `mac-foundation-models-v2` designs as ordinary valid designs. |
 
 ## How the companion works
@@ -18,12 +18,13 @@ The Bookworms iPhone and Mac companion designs book spines from Hardcover covers
 4. The companion subscribes to worklist changes. It reads book metadata from the matching account snapshot in `library-v1`, downloads each cover over HTTPS, and designs it; see the iOS app's README for the steps. It writes one `SpineDesignV1` record per book: background, foreground, and accent colors (`#RRGGBB`), a typeface (`serif`, `sans`, `rounded`, or `monospaced`), a weight (400–700), an uppercase flag, a work-item hash of the book metadata, a cover-content hash, a generator version, and, when one fits, a Google Fonts family and instance.
 5. The TV validates designs in bounded batches (matching account, book, and work-item hash; foreground contrast at least 4.5:1; optional font fields bounded as on the iPhone) and caches them in `Caches/Bookworms/spine-designs-v1.json`, separate from the retained API-key design store. It reads designs at launch, on activation, and after each cloud sync, then publishes them to Book Wall, which downloads each design's Google Fonts face during preparation.
 6. The TV shows the latest valid design for each book, whichever app made it. The iPhone keeps a design whose work-item and cover hashes still match and whose generator is `ios-pcc-v2`, and keeps a design whose colors the reader chose until the reader chooses another cover. It redesigns any other design, including a legacy Mac design.
+7. Each book carries every Hardcover series it belongs to (`seriesMemberships`) in `library-v1`. The TV reads the companion's `SeriesLinkV1` records with the designs, then the `SeriesLookV1` records of the snapshot's look groups. It creates a missing look with a create-only save, from a group member's companion design or, for a group of two or more books without one, from Book Wall's cover-sampled look (origin `tvos-local-v1`). Whichever device saves a group's look first decides it. Book Wall draws the look on every member whose link doesn't keep its own look; see [series links and looks](../BOOK_WALL.md#series-links-and-looks).
 
 The JSON contract lives in `ios/Bookworms/Models/CloudContract.swift` and `Bookworms/Services/SpineCloudStore.swift`. Keep them compatible; both pin the same digests.
 
 ## Contract comparison
 
-Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 2001 as a number). Record types `SpineWorklistV1` and `SpineDesignV1`, the `payload` data field, the container ID, the worklist record name, the design record name (`spine-design-v1-` + SHA-256 of `accountID:bookID`), and the work-item hash (SHA-256 of account ID, book ID, title, author, detail cover URL, cover URL, joined by newlines) are identical, and both test suites pin the same digests. The contrast formula is the same WCAG relative-luminance ratio. The TV checks the optional font fields as the iPhone does. The table lists where the validators differ.
+Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 2001 as a number). Record types `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`, the `payload` data field, the container ID, the worklist record name, the design record name (`spine-design-v1-` + SHA-256 of `accountID:bookID`), the cover-choice and series-link record names (`cover-choice-v1-` and `series-link-v1-` + SHA-256 of `accountID:bookID`), the series-look record name (`series-look-v1-` + SHA-256 of `accountID:seriesID:group`, where the group is the Discworld group or nothing, `|`, and the folded first author, such as `City Watch|terrypratchett`), the create-only series-look save, and the work-item hash (SHA-256 of account ID, book ID, title, author, detail cover URL, cover URL, joined by newlines) are identical, and both test suites pin the same digests. The contrast formula is the same WCAG relative-luminance ratio. The TV checks the optional font fields as the iPhone does. The table lists where the validators differ.
 
 | Item | tvOS | iPhone | Effect |
 | --- | --- | --- | --- |
@@ -34,15 +35,17 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 | Color hex case | `#` + 6 uppercase hex digits | Same | None; the iPhone emits uppercase. |
 | `generatorVersion` | Any non-blank string | Any non-blank string; redesigns a design with the generator's colors unless it is `ios-pcc-v2` | None on the TV, which shows designs from any generator. |
 | Archive size the iPhone reads | No bound on the TV | At most 50 MB | A very large archive stops the iPhone; the TV does not warn. |
-| Extra `Book` fields | Encoded in `library-v1` | Ignored unless `CloudBook` declares them, such as `seriesName` | None. |
+| `SeriesLookV1` account ID and origin | No account ID bound; the origin must be one line | Account ID at most 512 characters; the origin may contain a line break | None in practice; both apps write short, one-line values. |
+| Extra `Book` fields | Encoded in `library-v1` | Ignored unless `CloudBook` declares them, such as `seriesName` and `seriesMemberships` | None. |
 
 ## Remaining steps
 
 1. **Signed end-to-end check**: a signed iPhone or Mac and the Apple TV on one iCloud account. Confirm the worklist lists every book, a companion design reaches the TV cache with its font fields, and Book Wall shows it while other views show covers. See [testing](../TESTING.md).
 2. **Privacy policy**: Book Wall now requests Google Fonts faces. Update the published policy and the [policy text](../RELEASING.md#apple-tv-privacy-policy-text) before uploading a candidate with `showsCompanionSpines` on.
-3. **Deploy `SpineWorklistV1`, `SpineDesignV1`, and `CoverChoiceV1`** (each with a `payload` Bytes field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
-4. **Design refresh cadence**: the TV refetches every design record on launch, activation, and after each cloud sync. A new design for a current-year book rebuilds Book Wall, even while it is on screen. Consider a `SpineDesignV1` subscription with silent push, as the iPhone uses for the worklist.
+3. **Deploy `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`** (each with a `payload` Bytes field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
+4. **Design refresh cadence**: the TV refetches every design, cover-choice, series-link, and series-look record on launch, activation, and after each cloud sync. A new design or series look for a current-year book rebuilds Book Wall, even while it is on screen. Consider subscriptions with silent push, as the iPhone uses for the worklist.
 5. **Validator alignment**: decide whether the TV should adopt the iPhone's lowercase-only `coverHash` and the account ID length bound.
+6. **Live Hardcover check**: confirm that Hardcover accepts the library query's `compilation`, `books_count`, and `primary_books_count` fields. A rejected field fails the whole library query.
 
 ## Commands
 

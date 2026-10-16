@@ -57,7 +57,7 @@ The verifier checks display names, the arm64 requirement, the CloudKit push enti
 
 Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. The production schema contains `LibraryArchive` with its `archive` asset.
 
-The companions add `SpineWorklistV1`, `SpineDesignV1`, and `CoverChoiceV1`, each with a `payload` Bytes field. Deploy all three record types to production before uploading a candidate that uses them. Confirm that a signed companion writes a design and a signed Apple TV reads and caches it from the same private container.
+The companion records add `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`, each with a `payload` Bytes field. The Apple TV writes `SeriesLookV1` records as well as reading them. Deploy all five record types to production before uploading a candidate that uses them. Confirm that a signed companion writes a design and a signed Apple TV reads and caches it from the same private container, and that a series look saved on one device is the look the other draws.
 
 After an authorized upload:
 
