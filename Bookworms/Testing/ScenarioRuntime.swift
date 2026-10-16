@@ -203,6 +203,9 @@
                     ? ScenarioFixtures.designs(accountID: accountID, books: books) : [:]
             }
             dependencies.fetchCoverChoices = { _, _ in [:] }
+            dependencies.fetchSeriesLinks = { _, _ in [:] }
+            dependencies.fetchSeriesLooks = { _, _ in [:] }
+            dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
             dependencies.readTopShelf = { [] }
             dependencies.writeTopShelf = { _ in }

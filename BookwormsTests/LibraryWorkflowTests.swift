@@ -923,6 +923,58 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(model.spineDesigns.isEmpty)
     }
 
+    func testSeriesLooksDrawForMembersAndAMissingLookCopiesTheEarliestDesign() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let books = (1...3)
+            .map { id in
+                var book = fixture.book(id)
+                book.seriesID = 7
+                book.seriesPosition = Double(id)
+                return book
+            }
+        try fixture.save([fixture.snapshot(.hardcover, books: books)])
+        func design(_ id: Int, hex: String, day: Double) -> SpineDesignV1 {
+            SpineDesignV1(
+                version: 1, accountID: fixture.hardcoverAccountID, bookID: id,
+                workItemHash: SpineCloudIdentity.workItemHash(
+                    accountID: fixture.hardcoverAccountID, book: books[id - 1]),
+                coverHash: String(repeating: "a", count: 64), generatorVersion: "ios-pcc-v2",
+                generatedAt: Date(timeIntervalSince1970: day * 86_400), backgroundHex: hex,
+                foregroundHex: "#FFFFFF", accentHex: "#FFFFFF", typeface: "serif",
+                weight: 700, uppercase: false)
+        }
+        let designs = [1: design(1, hex: "#102030", day: 2), 2: design(2, hex: "#203040", day: 1)]
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        dependencies.fetchSpineDesigns = { _, _ in designs }
+        var requestedKeys: [SeriesLookKey] = []
+        dependencies.fetchSeriesLooks = { _, keys in
+            requestedKeys = keys
+            return [:]
+        }
+        var created: [SeriesLookV1] = []
+        dependencies.createSeriesLook = { look in
+            created.append(look)
+            return look
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+
+        let key = SeriesLookKey(seriesID: 7, group: "|fictionalauthor")
+        XCTAssertEqual(requestedKeys, [key])
+        XCTAssertEqual(created.map(\.sourceBookID), [2], "The earliest design decides the look")
+        XCTAssertEqual(created.first?.createdAt, fixture.time)
+        XCTAssertEqual(
+            (1...3).map { model.drawnDesigns[$0]?.backgroundHex },
+            Array(repeating: "#203040", count: 3))
+        XCTAssertTrue(model.seriesSources.isEmpty, "Books with a look borrow no other design")
+    }
+
     func testCloudWorklistUsesCompleteHardcoverSnapshotAndClearsWhenDisabled() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -1333,6 +1385,12 @@ private final class LibraryWorkflowFixture {
         dependencies.publishSpineWorklist = { _ in }
         dependencies.fetchSpineDesigns = { _, _ in [:] }
         dependencies.fetchCoverChoices = { _, _ in [:] }
+        dependencies.fetchSeriesLinks = { _, _ in [:] }
+        dependencies.fetchSeriesLooks = { _, _ in [:] }
+        dependencies.createSeriesLook = { _ in
+            XCTFail("Unexpected series look")
+            throw URLError(.unsupportedURL)
+        }
         dependencies.sleep = { _ in
             XCTFail("Unexpected scheduled work")
             throw CancellationError()

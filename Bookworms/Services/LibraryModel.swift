@@ -43,29 +43,56 @@ final class LibraryModel {
     /// with (`SeriesDesigns.sources`); a source maps to itself. Prepared with the library, never
     /// on focus or remote input.
     private(set) var seriesSources: [Int: Book] = [:]
+    /// The design Book Wall draws each book in, by ID: its look group's series look, else its
+    /// own companion design. Prepared with `seriesSources`.
+    private(set) var drawnDesigns: [Int: SpineDesignV1] = [:]
 
-    /// `SeriesDesigns.sources` over `books`, judging each book's design by the face Book Wall
-    /// draws it in (`BookWallLocalSpine.typography(for:design:)`): its companion design from
-    /// `designs`, with a blocked face already replaced by its upright stand-in, or its genre
-    /// face. So a design saved in Impact or Pacifico leads its series, as on the iPhone, which
-    /// remaps designs before it picks sources. Whether a source's face can letter each book is
-    /// checked later, once, where a spine is prepared.
-    nonisolated static func seriesSources(
-        of books: [Book], designs: [Int: SpineDesignV1] = [:]
-    ) -> [Int: Book] {
-        let byID = Dictionary(books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let fonts = byID.mapValues { book in
+    /// What Book Wall draws `books` with, by book ID.
+    ///
+    /// A book whose look group (`SeriesDesigns.lookKey(of:link:)`, with `links`) has a series
+    /// look in `looks` draws the look as its design, unless its link keeps its own look. Every
+    /// other book draws its companion design from `designs`, if any, and `sources` gives the
+    /// books that draw another book's design instead: `SeriesDesigns.sources` over the books of
+    /// groups without a look, judging each book's design by the face Book Wall draws it in
+    /// (`BookWallLocalSpine.typography(for:design:)`). That face is its companion design's,
+    /// with a blocked face already replaced by its upright stand-in, or its genre face, so a
+    /// design saved in Impact or Pacifico leads its series, as on the iPhone. Whether a source's
+    /// face can letter each book is checked later, once, where a spine is prepared.
+    nonisolated static func seriesDrawing(
+        of books: [Book], designs: [Int: SpineDesignV1] = [:], links: [Int: SeriesLinkV1] = [:],
+        looks: [SeriesLookKey: SeriesLookV1] = [:]
+    ) -> (sources: [Int: Book], designs: [Int: SpineDesignV1]) {
+        var drawn = designs
+        var ranked: [Int: Book] = [:]
+        for book in books {
+            let link = links[book.id]
+            if link?.ownLook == true { continue }
+            if let key = SeriesDesigns.lookKey(of: book, link: link), let look = looks[key] {
+                drawn[book.id] = look.design(for: book)
+            } else if ranked[book.id] == nil {
+                ranked[book.id] = book
+            }
+        }
+        let fonts = ranked.mapValues { book in
             let typography = BookWallLocalSpine.typography(for: book, design: designs[book.id])
             return typography.fontName ?? typography.typeface
         }
-        return SeriesDesigns.sources(books: Array(byID.values), fonts: fonts)
-            .compactMapValues { byID[$0] }
+        let sources =
+            SeriesDesigns.sources(
+                books: Array(ranked.values), fonts: fonts, links: links
+            )
+            .compactMapValues { ranked[$0] }
+        return (sources, drawn)
     }
 
     private func refreshSeriesSources() {
-        let sources = Self.seriesSources(
-            of: allBooks, designs: BookPresentation.showsCompanionSpines ? spineDesigns : [:])
-        if sources != seriesSources { seriesSources = sources }
+        let drawing =
+            BookPresentation.showsCompanionSpines
+            ? Self.seriesDrawing(
+                of: allBooks, designs: spineDesigns, links: seriesLinks, looks: seriesLooks)
+            : Self.seriesDrawing(of: allBooks, links: seriesLinks)
+        if drawing.sources != seriesSources { seriesSources = drawing.sources }
+        if drawing.designs != drawnDesigns { drawnDesigns = drawing.designs }
     }
 
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
@@ -143,6 +170,11 @@ final class LibraryModel {
     /// Validated companion cover choices for the active Hardcover snapshot, keyed by book ID.
     /// `rebuildLibrary` applies them to displayed books.
     @ObservationIgnored private var coverChoices: [Int: CoverChoiceV1] = [:]
+    /// Validated companion series links for the active Hardcover snapshot, keyed by book ID.
+    /// Look groups read them when the library is rebuilt (`refreshSeriesSources`).
+    @ObservationIgnored private var seriesLinks: [Int: SeriesLinkV1] = [:]
+    /// Validated series looks of the active Hardcover snapshot's look groups.
+    @ObservationIgnored private var seriesLooks: [SeriesLookKey: SeriesLookV1] = [:]
     private(set) var presentationRevision = 0
     private(set) var artworkRevision = 0
     private(set) var savedAIKeyAvailable = false
@@ -342,9 +374,12 @@ final class LibraryModel {
             if iCloudEnabled {
                 queueCloudSync()
             } else {
-                // Companion designs and covers apply only with iCloud storage on. The on-disk
-                // caches stay, so turning iCloud back on restores them.
+                // Companion designs, covers, and series looks apply only with iCloud storage
+                // on. The on-disk caches stay, so turning iCloud back on restores them.
                 spineDesigns = [:]
+                seriesLinks = [:]
+                seriesLooks = [:]
+                refreshSeriesSources()
                 if !coverChoices.isEmpty {
                     coverChoices = [:]
                     rebuildLibrary()
@@ -1040,16 +1075,18 @@ final class LibraryModel {
             + sourceSnapshots.filter {
                 $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
             }
-        allBooks = LibraryMerge.books(from: enabled)
+        // Assigned once: each assignment prepares series designs again, with `seriesLinks`.
+        var merged = LibraryMerge.books(from: enabled)
         if BookPresentation.showsCompanionCovers, let accountID = hardcover?.accountID,
             !coverChoices.isEmpty
         {
-            for index in allBooks.indices where allBooks[index].isHardcoverBook {
-                if let choice = coverChoices[allBooks[index].id], choice.accountID == accountID {
-                    allBooks[index].chosenCoverURL = choice.coverURL
+            for index in merged.indices where merged[index].isHardcoverBook {
+                if let choice = coverChoices[merged[index].id], choice.accountID == accountID {
+                    merged[index].chosenCoverURL = choice.coverURL
                 }
             }
         }
+        allBooks = merged
         seriesByID = Dictionary(
             (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         updateBrowsingCovers()
@@ -1249,9 +1286,10 @@ final class LibraryModel {
         }
     }
 
-    /// Reads companion designs and cover choices for the active Hardcover snapshot into their
-    /// local caches. One task runs per account and sync date; a newer selection cancels an older
-    /// read.
+    /// Reads companion designs, cover choices, series links, and series looks for the active
+    /// Hardcover snapshot into their local caches, then creates missing series looks
+    /// (`createMissingSeriesLooks`). One task runs per account and sync date; a newer selection
+    /// cancels an older one.
     private func queueSpineDesignRefresh() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         guard iCloudEnabled, hardcoverEnabled, let accountID = activeHardcoverAccountID,
@@ -1266,37 +1304,122 @@ final class LibraryModel {
         if spineDesigns.values.contains(where: { $0.accountID != accountID }) {
             spineDesigns = [:]
         }
+        if seriesLinks.values.contains(where: { $0.accountID != accountID })
+            || seriesLooks.values.contains(where: { $0.accountID != accountID })
+        {
+            seriesLinks = [:]
+            seriesLooks = [:]
+            refreshSeriesSources()
+        }
         let requestID = UUID()
         spineDesignTaskIdentity = (accountID, snapshot.syncedAt, requestID)
         spineDesignTask = Task { [weak self] in
             guard let self else { return }
-            let designs = try? await dependencies.fetchSpineDesigns(accountID, snapshot.books)
-            let choices = try? await dependencies.fetchCoverChoices(accountID, snapshot.books)
+            let books = snapshot.books
+            let designs = try? await dependencies.fetchSpineDesigns(accountID, books)
+            let choices = try? await dependencies.fetchCoverChoices(accountID, books)
+            let links = try? await dependencies.fetchSeriesLinks(accountID, books)
+            let keys = Set(
+                books.compactMap {
+                    SeriesDesigns.lookKey(of: $0, link: (links ?? seriesLinks)[$0.id])
+                })
+            let looks = try? await dependencies.fetchSeriesLooks(accountID, keys.sorted())
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
-            // A failed or cancelled read keeps the designs and covers already shown.
+            // A failed or cancelled read keeps the records already shown.
             if let designs, designs != spineDesigns { spineDesigns = designs }
+            var rebuild = false
             if let choices, choices != coverChoices {
                 coverChoices = choices
-                rebuildLibrary()
+                rebuild = true
             }
+            if let links, links != seriesLinks {
+                seriesLinks = links
+                rebuild = true
+            }
+            if let looks, looks != seriesLooks {
+                seriesLooks = looks
+                if !rebuild { refreshSeriesSources() }
+            }
+            if rebuild { rebuildLibrary() }
+            await createMissingSeriesLooks(of: books, accountID: accountID, requestID: requestID)
+            guard spineDesignTaskIdentity?.requestID == requestID else { return }
             spineDesignTask = nil
             spineDesignTaskIdentity = nil
         }
     }
 
-    /// Clears the companion design and cover-choice caches once Hardcover is disabled or
-    /// disconnected.
+    /// Saves a series look for each look group of `books` that has none, so other devices draw
+    /// the group alike. Saving never replaces a look another device saved first; that look is
+    /// kept instead.
+    ///
+    /// A group with a usable companion design copies the design that
+    /// `SeriesDesigns.lookDesign(of:designs:)` picks. A group of two or more books without one
+    /// takes Book Wall's cover-sampled look of its best-ranked book, whose cover must already be
+    /// cached. The first failed save stops the pass until the next read.
+    private func createMissingSeriesLooks(of books: [Book], accountID: String, requestID: UUID)
+        async
+    {
+        var groups: [SeriesLookKey: [Book]] = [:]
+        for book in books {
+            if let key = SeriesDesigns.lookKey(of: book, link: seriesLinks[book.id]),
+                seriesLooks[key] == nil
+            {
+                groups[key, default: []].append(book)
+            }
+        }
+        guard !groups.isEmpty else { return }
+        let shown = Dictionary(
+            allBooks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let rasterizer = BookWallRasterizer()
+        var created: [SeriesLookKey: SeriesLookV1] = [:]
+        for (key, members) in groups.sorted(by: { $0.key < $1.key }) {
+            var look: SeriesLookV1?
+            if let design = SeriesDesigns.lookDesign(of: members, designs: spineDesigns) {
+                look = SeriesLookV1(key: key, design: design, createdAt: dependencies.now())
+            } else if members.count >= 2,
+                let lead = members.min(by: {
+                    SeriesDesigns.ranksBefore($0, $1, links: seriesLinks)
+                })
+            {
+                // The displayed book carries the reader's chosen cover, which Book Wall samples.
+                let book = shown[lead.id] ?? lead
+                guard
+                    let cover = try? await ArtworkStore.shared.detailImage(
+                        for: book, maximumPixelSize: 400, allowsNetwork: false)
+                else { continue }
+                let style = await rasterizer.style(for: book, cover: cover, design: nil)
+                look = SeriesLookV1(
+                    key: key, localStyle: style, book: book, accountID: accountID,
+                    createdAt: dependencies.now())
+            }
+            guard spineDesignTaskIdentity?.requestID == requestID else { return }
+            guard let look, look.isValid(accountID: accountID, key: key) else { continue }
+            guard let saved = try? await dependencies.createSeriesLook(look) else { break }
+            created[key] = saved
+        }
+        guard spineDesignTaskIdentity?.requestID == requestID, !created.isEmpty else { return }
+        seriesLooks.merge(created) { current, _ in current }
+        refreshSeriesSources()
+    }
+
+    /// Clears the companion design, cover-choice, series-link, and series-look caches once
+    /// Hardcover is disabled or disconnected.
     private func queueSpineCachePrune() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         spineDesignTask?.cancel()
         spineDesigns = [:]
         coverChoices = [:]
+        seriesLinks = [:]
+        seriesLooks = [:]
+        refreshSeriesSources()
         let requestID = UUID()
         spineDesignTaskIdentity = ("", .distantPast, requestID)
         spineDesignTask = Task { [weak self] in
             guard let self else { return }
             _ = try? await dependencies.fetchSpineDesigns("", [])
             _ = try? await dependencies.fetchCoverChoices("", [])
+            _ = try? await dependencies.fetchSeriesLinks("", [])
+            _ = try? await dependencies.fetchSeriesLooks("", [])
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
             spineDesignTask = nil
             spineDesignTaskIdentity = nil
@@ -1308,7 +1431,7 @@ final class LibraryModel {
         await cloudTask?.value
     }
 
-    /// Waits for the current companion design and cover-choice read.
+    /// Waits for the current companion record read and series-look creation.
     func waitForCompanionRecords() async {
         await spineDesignTask?.value
     }

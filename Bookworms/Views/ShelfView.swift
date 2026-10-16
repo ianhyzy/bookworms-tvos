@@ -77,7 +77,7 @@ struct ShelfView: View {
         var designs: [Int: SpineDesignV1] = [:]
         if BookPresentation.showsCompanionSpines {
             for book in books + sources.values {
-                designs[book.id] = library.spineDesigns[book.id]
+                designs[book.id] = library.drawnDesigns[book.id]
             }
         }
         return BookWallPreparationKey(

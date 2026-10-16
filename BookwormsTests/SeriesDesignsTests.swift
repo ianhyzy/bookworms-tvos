@@ -15,12 +15,13 @@ final class SeriesDesignsTests: XCTestCase {
         return book
     }
 
-    func testBooksMatchOnTheSameSeriesAndAnySharedAuthor() {
+    func testBooksMatchOnTheSameSeriesAndFirstAuthor() {
         let carl = book(1)
         XCTAssertTrue(SeriesDesigns.matches(carl, book(2, author: "matt dinnimán")))
-        XCTAssertTrue(
+        XCTAssertTrue(SeriesDesigns.matches(carl, book(3, author: "Matt Dinniman, Jeff Hays")))
+        XCTAssertFalse(
             SeriesDesigns.matches(carl, book(3, author: "Jeff Hays, Matt Dinniman")),
-            "Any one shared author is enough")
+            "Only the first author counts, so a look group has one key")
         XCTAssertTrue(SeriesDesigns.matches(carl, book(4, author: "Matt  Dinniman.")))
         XCTAssertFalse(SeriesDesigns.matches(carl, book(5, author: "Someone Else")))
         XCTAssertFalse(SeriesDesigns.matches(carl, book(6, series: 8)))
@@ -42,6 +43,180 @@ final class SeriesDesignsTests: XCTestCase {
         // A book no group names keeps its own design.
         let maurice = discworld(7, "The Amazing Maurice and His Educated Rodents")
         XCTAssertFalse(SeriesDesigns.matches(maurice, discworld(8, "The Amazing Maurice")))
+    }
+
+    private func link(
+        _ bookID: Int, series: Int? = nil, standsAlone: Bool = false, ownLook: Bool = false
+    ) -> SeriesLinkV1 {
+        SeriesLinkV1(
+            accountID: "account", bookID: bookID, linkedSeriesID: series,
+            standsAlone: standsAlone, ownLook: ownLook, chosenAt: Date(timeIntervalSince1970: 0))
+    }
+
+    func testStyleSeriesFollowsTheLinkElseTheShortestSeries() throws {
+        var guards = book(1, series: 1018, position: 8, author: "Terry Pratchett")
+        guards.seriesMemberships = [
+            SeriesMembership(
+                seriesID: 1018, name: "Discworld", position: 8, featured: true, size: 41),
+            SeriesMembership(seriesID: 2001, name: "City Watch", position: 1, size: 8),
+            SeriesMembership(
+                seriesID: 3000, name: "Omnibus", position: 2, compilation: true, size: 2),
+            SeriesMembership(seriesID: 4000, name: "One book", position: 1, size: 1),
+            SeriesMembership(seriesID: 5000, name: "Unsized", position: 1),
+        ]
+        func style(_ link: SeriesLinkV1?) -> String? {
+            SeriesDesigns.styleSeries(of: guards, link: link)
+                .map { "\($0.id)@\($0.position.map(String.init(describing:)) ?? "nil")" }
+        }
+        XCTAssertEqual(style(nil), "2001@1.0", "The fewest books win; a compilation sorts last")
+        XCTAssertEqual(style(link(1, series: 1018)), "1018@8.0")
+        XCTAssertEqual(style(link(1, series: 9999)), "9999@nil", "A link names any series")
+        XCTAssertNil(style(link(1, standsAlone: true)))
+        XCTAssertEqual(style(link(1, ownLook: true)), "2001@1.0")
+
+        // Unknown and one-book sizes sort last, then a featured series, then the lower ID.
+        guards.seriesMemberships = [
+            SeriesMembership(seriesID: 5000, name: "Unsized"),
+            SeriesMembership(seriesID: 4000, name: "One book", size: 1),
+        ]
+        XCTAssertEqual(style(nil), "4000@nil")
+        guards.seriesMemberships?
+            .append(
+                SeriesMembership(seriesID: 6000, name: "Featured", featured: true, size: 1))
+        XCTAssertEqual(style(nil), "6000@nil")
+        guards.seriesMemberships = []
+        XCTAssertNil(style(nil), "A book in no series has no style series")
+        guards.seriesMemberships = nil
+        XCTAssertEqual(style(nil), "1018@8.0", "Books saved before memberships use seriesID")
+    }
+
+    func testLookKeysSplitDiscworldGroupsAndFirstAuthors() {
+        func discworld(_ id: Int, _ title: String) -> Book {
+            book(id, series: 1018, author: "Terry Pratchett, Stephen Baxter", title: title)
+        }
+        XCTAssertEqual(
+            SeriesDesigns.lookKey(of: discworld(1, "Guards! Guards!"), link: nil),
+            SeriesLookKey(seriesID: 1018, group: "City Watch|terrypratchett"))
+        XCTAssertNil(
+            SeriesDesigns.lookKey(of: discworld(2, "The Amazing Maurice"), link: nil),
+            "A Discworld book in no group draws its own design")
+        XCTAssertEqual(
+            SeriesDesigns.lookKey(of: book(3), link: nil),
+            SeriesLookKey(seriesID: 7, group: "|mattdinniman"))
+        XCTAssertEqual(
+            SeriesDesigns.lookKey(of: book(4, author: ""), link: nil)?.group, "|")
+        XCTAssertNil(SeriesDesigns.lookKey(of: book(5), link: link(5, standsAlone: true)))
+        XCTAssertNil(SeriesDesigns.lookKey(of: book(6, series: nil), link: nil))
+        XCTAssertEqual(
+            SeriesDesigns.lookKey(of: book(7), link: link(7, series: 9))?.seriesID, 9)
+    }
+
+    func testSourcesGroupByStyleSeriesAndRankByItsPosition() {
+        // Both books feature Discworld, but City Watch is their shortest series.
+        func cityWatch(_ id: Int, featuredPosition: Double, position: Double) -> Book {
+            var book = book(
+                id, series: 1018, position: featuredPosition, author: "Terry Pratchett",
+                title: "Unlisted \(id)")
+            book.seriesMemberships = [
+                SeriesMembership(
+                    seriesID: 1018, name: "Discworld", position: featuredPosition,
+                    featured: true, size: 41),
+                SeriesMembership(seriesID: 2001, name: "City Watch", position: position, size: 8),
+            ]
+            return book
+        }
+        let books = [
+            cityWatch(1, featuredPosition: 1, position: 2),
+            cityWatch(2, featuredPosition: 9, position: 1),
+            cityWatch(3, featuredPosition: 5, position: 3),
+        ]
+        let fonts = Dictionary(uniqueKeysWithValues: books.map { ($0.id, "Georgia-Bold") })
+        XCTAssertEqual(
+            SeriesDesigns.sources(books: books, fonts: fonts), [1: 2, 2: 2, 3: 2],
+            "Book 2 is first in City Watch")
+        XCTAssertEqual(
+            SeriesDesigns.sources(
+                books: books, fonts: fonts, links: [2: link(2, standsAlone: true)]),
+            [1: 1, 3: 1])
+    }
+
+    func testANewLookCopiesTheEarliestUsableOriginalDesign() {
+        func design(_ id: Int, day: Double, family: String = "Oswald", reuse: Bool = false)
+            -> SpineDesignV1
+        {
+            SpineDesignV1(
+                version: 1, accountID: "account", bookID: id,
+                workItemHash: String(repeating: "a", count: 64),
+                coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
+                generatedAt: Date(timeIntervalSince1970: day * 86_400), backgroundHex: "#1F3A5A",
+                foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "sans", weight: 700,
+                uppercase: false, fontFamily: family, fontPostScriptName: "Oswald-Bold",
+                provenance: reuse ? "series-reuse:9" : nil)
+        }
+        let members = (1...4).map { book($0) }
+        let designs = [
+            1: design(1, day: 1, reuse: true), 2: design(2, day: 3),
+            3: design(3, day: 2), 4: design(4, day: 0, family: "Dancing Script"),
+        ]
+        XCTAssertEqual(SeriesDesigns.lookDesign(of: members, designs: designs)?.bookID, 3)
+        XCTAssertEqual(
+            SeriesDesigns.lookDesign(of: members, designs: [1: designs[1]!, 4: designs[4]!])?
+                .bookID, 1, "Reuse copies count only when no member has an original")
+        XCTAssertNil(SeriesDesigns.lookDesign(of: members, designs: [4: designs[4]!]))
+    }
+
+    func testBooksOfAGroupWithALookDrawTheLookUnlessTheyKeepTheirOwn() throws {
+        let books = [book(1, position: 1), book(2, position: 2), book(3, position: 3)]
+        let own = companionDesign(3, family: "Oswald", postScriptName: "Oswald-Bold")
+        let look = SeriesLookV1(
+            accountID: "account", seriesID: 7, group: "|mattdinniman", sourceBookID: 2,
+            origin: "ios-pcc-v2", createdAt: Date(timeIntervalSince1970: 1_000),
+            backgroundHex: "#102030", foregroundHex: "#F0E0D0", accentHex: "#C0A060",
+            typeface: "serif", weight: 600, uppercase: false, fontFamily: "EB Garamond",
+            fontPostScriptName: "EBGaramond-SemiBold", instanceWeight: 600)
+        let drawing = LibraryModel.seriesDrawing(
+            of: books, designs: [3: own], links: [3: link(3, ownLook: true)],
+            looks: [look.key: look])
+        XCTAssertTrue(drawing.sources.isEmpty, "A group with a look lends no book's design")
+        let first = try XCTUnwrap(drawing.designs[1])
+        XCTAssertEqual(first.bookID, 1)
+        XCTAssertEqual(first.backgroundHex, "#102030")
+        XCTAssertEqual(first.fontPostScriptName, "EBGaramond-SemiBold")
+        XCTAssertEqual(first.generatorVersion, "ios-pcc-v2")
+        XCTAssertEqual(drawing.designs[2]?.backgroundHex, "#102030")
+        XCTAssertEqual(drawing.designs[3], own, "A book that keeps its own look draws its design")
+
+        let without = LibraryModel.seriesDrawing(of: books, designs: [3: own])
+        XCTAssertEqual(without.sources[2]?.id, 1, "Without a look, the best-ranked book lends")
+    }
+
+    func testBookWallsLocalLookBecomesAPortableSeriesLook() {
+        let key = SeriesLookKey(seriesID: 7, group: "|mattdinniman")
+        func local(_ face: String) -> SeriesLookV1 {
+            let style = BookWallLocalSpine.Style(
+                background: StyleColor(red: 0, green: 0.2, blue: 0.4),
+                foreground: StyleColor(red: 1, green: 1, blue: 1),
+                typography: .init(fontName: face))
+            return SeriesLookV1(
+                key: key, localStyle: style, book: book(4), accountID: "account",
+                createdAt: Date(timeIntervalSince1970: 1_000))
+        }
+        let georgia = local("Georgia-Bold")
+        XCTAssertTrue(georgia.isValid(accountID: "account", key: key))
+        XCTAssertEqual(georgia.origin, "tvos-local-v1")
+        XCTAssertEqual(georgia.sourceBookID, 4)
+        XCTAssertEqual(georgia.backgroundHex, "#003366")
+        XCTAssertEqual(georgia.accentHex, georgia.foregroundHex)
+        XCTAssertEqual(georgia.typeface, "serif")
+        XCTAssertEqual(georgia.weight, 700)
+        XCTAssertFalse(georgia.uppercase)
+        XCTAssertEqual(georgia.fontPostScriptName, "Georgia-Bold")
+        XCTAssertNil(georgia.fontFamily)
+        XCTAssertNil(georgia.instanceWeight)
+        XCTAssertEqual(local("ArialRoundedMTBold").typeface, "rounded")
+        XCTAssertEqual(local("CourierNewPS-BoldMT").typeface, "monospaced")
+        XCTAssertEqual(local("Futura-Bold").typeface, "sans")
+        XCTAssertEqual(local(SpineFontPolicy.impactReplacement).fontFamily, "Bebas Neue")
     }
 
     private func companionDesign(_ bookID: Int, family: String?, postScriptName: String?)
@@ -90,17 +265,24 @@ final class SeriesDesignsTests: XCTestCase {
 
     func testSeriesSourcesJudgeCompanionDesignsByTheirFace() {
         let books = [book(1, position: 1), book(2, position: 2), book(3, position: 3)]
-        let allowed = LibraryModel.seriesSources(
-            of: books,
-            designs: [1: companionDesign(1, family: "Oswald", postScriptName: "Oswald-Bold")])
+        let allowed =
+            LibraryModel.seriesDrawing(
+                of: books,
+                designs: [1: companionDesign(1, family: "Oswald", postScriptName: "Oswald-Bold")]
+            )
+            .sources
         XCTAssertEqual(allowed[2]?.id, 1)
         // A design saved in a blocked face draws in its upright stand-in, which leads the
         // series, as on the iPhone.
         for (family, name) in [
             ("Pacifico", "Pacifico-Regular"), ("Impact", "Impact"), ("Lora", "Lora-BoldIt"),
         ] {
-            let remapped = LibraryModel.seriesSources(
-                of: books, designs: [1: companionDesign(1, family: family, postScriptName: name)])
+            let remapped =
+                LibraryModel.seriesDrawing(
+                    of: books,
+                    designs: [1: companionDesign(1, family: family, postScriptName: name)]
+                )
+                .sources
             XCTAssertEqual(remapped[2]?.id, 1, name)
             XCTAssertEqual(remapped[3]?.id, 1, name)
         }
@@ -144,15 +326,15 @@ final class SeriesDesignsTests: XCTestCase {
             SeriesDesigns.sources(books: books, fonts: fonts) { book, _ in book.id != 3 }[3], nil,
             "A book the source's font can't letter keeps its own design")
 
-        let library = LibraryModel.seriesSources(of: books)
+        let library = LibraryModel.seriesDrawing(of: books).sources
         XCTAssertEqual(library[3]?.id, 1, "Book Wall fonts are never blocked")
         XCTAssertEqual(library[1]?.id, 1)
         XCTAssertNil(library[4])
     }
 
     func testSourcesLendOnlyOwnDesignsInAnyBookOrder() {
-        // Book 2 shares an author with books 1 and 3, which share none. Book 2 draws book 1's
-        // design; book 3 may not draw the design book 2 borrowed, so it draws its own.
+        // Books 1 and 2 share a first author; book 3's first author is book 2's second. Book 2
+        // draws book 1's design, and book 3 draws its own.
         let books = [
             book(1, position: 1, author: "Ann Author"),
             book(2, position: 2, author: "Ann Author, Co Writer"),

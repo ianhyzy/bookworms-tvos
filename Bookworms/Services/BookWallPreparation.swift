@@ -14,8 +14,8 @@ struct BookWallPreparedWall {
     let books: [Book]
     /// The series design sources the wall was prepared for (`LibraryModel.seriesSources`).
     let sources: [Int: Book]
-    /// Companion designs the spines were drawn from, keyed by book ID, for wall books and
-    /// their series sources.
+    /// Designs the spines were drawn from (`LibraryModel.drawnDesigns`), keyed by book ID, for
+    /// wall books and their series sources: companion designs and series looks.
     let designs: [Int: SpineDesignV1]
     /// The source each book's spine draws with: its series source, when that source's face can
     /// letter the book. Other books draw their own.
@@ -48,9 +48,10 @@ final class BookWallPreparation {
         prepared?.books == books && prepared?.sources == sources && prepared?.designs == designs
     }
 
-    /// Prepares `books`, each drawn in its companion design from `designs` when it has one,
-    /// or from its cover. A book with a series source in `sources` (`LibraryModel.seriesSources`)
-    /// draws in the source's design when the source's face can letter it, checked here once.
+    /// Prepares `books`, each drawn in its design from `designs` (a companion design or its
+    /// series look) when it has one, or from its cover. A book with a series source in `sources`
+    /// (`LibraryModel.seriesSources`) draws in the source's design when the source's face can
+    /// letter it, checked here once.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:]
     ) async {
