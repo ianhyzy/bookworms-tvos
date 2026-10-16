@@ -55,7 +55,7 @@ The verifier checks display names, the arm64 requirement, the CloudKit push enti
 
 ## App Store submission
 
-Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. The production schema contains `LibraryArchive` with its `archive` asset.
+Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. When the [Apple TV privacy policy text](#apple-tv-privacy-policy-text) has changed, publish the same wording and effective date at ian.gay/bookworms-privacy-policy, and paste the text into the **Apple TV Privacy Policy** field in App Store Connect. The production schema contains `LibraryArchive` with its `archive` asset.
 
 The companion records add `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`, each with a `payload` Bytes field. The Apple TV writes `SeriesLookV1` records as well as reading them. Deploy all five record types to production before uploading a candidate that uses them. Confirm that a signed companion writes a design and a signed Apple TV reads and caches it from the same private container, and that a series look saved on one device is the look the other draws.
 
@@ -122,7 +122,7 @@ Paste this text into the **Apple TV Privacy Policy** field. Update it with the p
 ```text
 Bookworms privacy policy
 
-Effective October 1, 2026. Contact: bookworms@ian.gay
+Effective October 16, 2026. Contact: bookworms@ian.gay
 Web version: ian.gay/bookworms-privacy-policy
 
 Summary
