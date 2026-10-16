@@ -76,12 +76,16 @@ final class SeriesDesignsTests: XCTestCase {
             of: books,
             designs: [1: companionDesign(1, family: "Oswald", postScriptName: "Oswald-Bold")])
         XCTAssertEqual(allowed[2]?.id, 1)
-        // A source whose design is in a blocked face cannot lead the series.
-        let blocked = LibraryModel.seriesSources(
-            of: books,
-            designs: [1: companionDesign(1, family: "Pacifico", postScriptName: "Pacifico-Regular")]
-        )
-        XCTAssertEqual(blocked[3]?.id, 2)
+        // A design saved in a blocked face draws in its upright stand-in, which leads the
+        // series, as on the iPhone.
+        for (family, name) in [
+            ("Pacifico", "Pacifico-Regular"), ("Impact", "Impact"), ("Lora", "Lora-BoldIt"),
+        ] {
+            let remapped = LibraryModel.seriesSources(
+                of: books, designs: [1: companionDesign(1, family: family, postScriptName: name)])
+            XCTAssertEqual(remapped[2]?.id, 1, name)
+            XCTAssertEqual(remapped[3]?.id, 1, name)
+        }
     }
 
     func testSourcesRankByPositionThenFinishThenID() {

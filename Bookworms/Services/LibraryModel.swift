@@ -44,16 +44,19 @@ final class LibraryModel {
     /// on focus or remote input.
     private(set) var seriesSources: [Int: Book] = [:]
 
-    /// `SeriesDesigns.sources` over `books`, judging each book's design by its Book Wall font:
-    /// its companion design's family from `designs`, or its genre face. Whether a source's face
-    /// can letter each book is checked later, once, where a spine is prepared.
+    /// `SeriesDesigns.sources` over `books`, judging each book's design by the face Book Wall
+    /// draws it in (`BookWallLocalSpine.typography(for:design:)`): its companion design from
+    /// `designs`, with a blocked face already replaced by its upright stand-in, or its genre
+    /// face. So a design saved in Impact or Pacifico leads its series, as on the iPhone, which
+    /// remaps designs before it picks sources. Whether a source's face can letter each book is
+    /// checked later, once, where a spine is prepared.
     nonisolated static func seriesSources(
         of books: [Book], designs: [Int: SpineDesignV1] = [:]
     ) -> [Int: Book] {
         let byID = Dictionary(books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let fonts = byID.mapValues { book in
-            designs[book.id].map { $0.fontPostScriptName ?? $0.fontFamily ?? $0.typeface }
-                ?? BookWallLocalSpine.fontName(for: book)
+            let typography = BookWallLocalSpine.typography(for: book, design: designs[book.id])
+            return typography.fontName ?? typography.typeface
         }
         return SeriesDesigns.sources(books: Array(byID.values), fonts: fonts)
             .compactMapValues { byID[$0] }
