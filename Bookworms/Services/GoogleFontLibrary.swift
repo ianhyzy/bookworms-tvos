@@ -191,14 +191,27 @@ actor GoogleFontLibrary {
 
     /// Returns the upright face of `family` nearest `weight` among the faces this process can
     /// draw, including fonts registered after a download, or `nil` when it has none.
+    ///
+    /// Spine layout asks for a face at many sizes, so each family and weight is matched once and
+    /// kept until a font registers (`registeredFaces`).
     static func registeredFace(family: String, nearest weight: Int) -> CTFont? {
+        let key = "\(family):\(weight)"
+        if let cached = registeredFacesLock.withLock({ registeredFaces[key] }) { return cached }
         let query = CTFontDescriptorCreateWithAttributes(
             [kCTFontFamilyNameAttribute: family] as CFDictionary)
         // The family is mandatory, so a missing family matches nothing rather than a fallback.
         let mandatory = Set([kCTFontFamilyNameAttribute as String]) as CFSet
         let faces = CTFontDescriptorCreateMatchingFontDescriptors(query, mandatory)
-        return uprightFace(in: faces as? [CTFontDescriptor] ?? [], nearest: weight)
+        let face = uprightFace(in: faces as? [CTFontDescriptor] ?? [], nearest: weight)
+        registeredFacesLock.withLock { registeredFaces[key] = face }
+        return face
     }
+
+    /// `registeredFace(family:nearest:)` results, including misses, by family and weight. Cleared
+    /// when a font registers, which can add a nearer face. Core Text fonts are immutable, so
+    /// threads can share them; `registeredFacesLock` guards the dictionary.
+    nonisolated(unsafe) private static var registeredFaces: [String: CTFont?] = [:]
+    private static let registeredFacesLock = NSLock()
 
     /// Returns the CSS weight (100...900) nearest a face's Core Text weight trait.
     ///
@@ -245,6 +258,7 @@ actor GoogleFontLibrary {
             throw AIError.unavailableFont
         }
         registered.insert(font.filePath)
+        Self.registeredFacesLock.withLock { Self.registeredFaces.removeAll() }
     }
 
     private func fetch(_ url: URL) async throws -> Data {
