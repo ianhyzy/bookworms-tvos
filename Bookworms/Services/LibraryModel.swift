@@ -815,10 +815,12 @@ final class LibraryModel {
         let revision = sourceRevision
         // Another device may have saved a fresh snapshot of the same account, so a due automatic
         // check reads iCloud first. Each source's gate is checked again afterward, and only the
-        // sources still due are fetched.
+        // sources still due are fetched. A source without a saved credential can't fetch, so it
+        // doesn't hold `isLoading` through the read; the cached flags avoid a Keychain read.
         let pullsCloud =
             !manual && iCloudEnabled && !cloudSyncSuppressedForWelcome
-            && ((hardcoverEnabled && isDue(.hardcover)) || (cwaEnabled && isDue(.cwa)))
+            && ((hardcoverEnabled && hardcoverConnected && isDue(.hardcover))
+                || (cwaEnabled && hasCWAPassword && isDue(.cwa)))
         if pullsCloud {
             if cloudTask == nil { queueCloudSync(delay: .zero) }
             await waitForCloudSync(atMost: .seconds(10))

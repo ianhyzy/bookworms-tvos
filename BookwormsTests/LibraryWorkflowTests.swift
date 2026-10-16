@@ -1401,12 +1401,76 @@ final class LibraryWorkflowTests: XCTestCase {
             // The 10-second limit on the read never elapses; the model cancels it.
             if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
         }
-        dependencies.syncCloud = { _ in CloudLibraryArchive(sources: [remote]) }
+        var reads = 0
+        dependencies.syncCloud = { _ in
+            reads += 1
+            return CloudLibraryArchive(sources: [remote])
+        }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
+        await model.waitForCloudSync()
         XCTAssertEqual(model.books.map(\.id), [2])
         XCTAssertEqual(
             fixture.defaults.object(forKey: "syncSuccess.hardcover") as? Date, remote.syncedAt)
+        XCTAssertEqual(reads, 1, "The read before the fetch replaces the read after the check")
+    }
+
+    func testICloudReadBeforeAFetchRechecksEachSource() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.set(true, forKey: "cwaEnabled")
+        fixture.secrets["cwa-password"] = "fictional-password"
+        try fixture.save([
+            fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401),
+            fixture.snapshot(.cwa, books: [fixture.book(4)], age: 86_401),
+        ])
+        // iCloud holds a fresh Hardcover copy, so only CWA is still due. The fixture fails any
+        // Hardcover request.
+        let remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 3_600)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+        }
+        var reads = 0
+        dependencies.syncCloud = { archive in
+            reads += 1
+            return reads == 1 ? CloudLibraryArchive(sources: [remote]) : archive
+        }
+        var cwaFetches = 0
+        dependencies.fetchCWA = { _, _ in
+            cwaFetches += 1
+            return [fixture.book(5)]
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(cwaFetches, 1)
+        XCTAssertEqual(Set(model.books.map(\.id)), [2, 5])
+    }
+
+    func testACredentialFreeRestoreDoesNotWaitForICloudOnActivation() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.secrets = [:]
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        let read = ControlledLibraryResponse<CloudLibraryArchive>("iCloud read started")
+        var dependencies = fixture.dependencies()
+        var waits: [Duration] = []
+        dependencies.sleep = { waits.append($0) }
+        dependencies.syncCloud = { _ in try await read.value() }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await fulfillment(of: [read.started], timeout: 5)
+        // No source can fetch, so activation doesn't hold `isLoading` through the read.
+        await model.becameActive()
+        XCTAssertFalse(waits.contains(.seconds(10)))
+        XCTAssertFalse(model.isLoading)
+
+        read.resolve(CloudLibraryArchive())
+        await model.waitForCloudSync()
+        XCTAssertEqual(model.books.map(\.id), [1])
     }
 
     func testStaleICloudSnapshotLeadsToOneFetchAndAnUpload() async throws {
