@@ -44,7 +44,7 @@ struct SpineView: View {
                 Spacer().frame(height: 12)
                 HStack(spacing: textLength * 0.03) {
                     VStack(spacing: 4) {
-                        Text(title)
+                        spineTitle(title)
                             .font(
                                 SpineTextMetrics.font(
                                     name: style.fontName, size: typography.titleSize)
@@ -91,5 +91,13 @@ struct SpineView: View {
         }
         .scaleEffect(isFocused && !reduceMotion ? 1.045 : 1, anchor: .bottom)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
+    }
+
+    /// The title, with House of Leaves' "house" in blue on this cloth. The spine's own text
+    /// renderer draws it, so the blue has no glow; the blue passes without one.
+    private func spineTitle(_ title: String) -> Text {
+        guard HouseOfLeaves.isNovel(book) else { return Text(verbatim: title) }
+        let lettering = HouseOfLeaves.lettering(on: style.background, ink: style.foreground)
+        return HouseOfLeaves.text(title, blue: lettering.blue.color)
     }
 }

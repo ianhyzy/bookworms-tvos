@@ -39,6 +39,8 @@ The app checks the book's ranked genre tags and uses the first recognized catego
 
 Unrecognized or missing genres use Avenir Next Demi Bold. The selected face applies to both the title and author. The renderer measures words and draws each fitted line, then sizes the texture to the visible spine plane so letters keep their proportions. The title stays at or above 56 texture pixels and the author at or above 48. Below a 5% top margin, the title takes 58% of the spine's thickness and the author the next 32% (`titleTop`, `titleShare`, `authorShare`). Each grows to the largest size that fits its area, so thick spines get large lettering. The book's dimensions account for the words and line count before the spine texture is drawn.
 
+For *House of Leaves*, the spine and shelf label letter each "house" in its blue (`HouseOfLeaves.attributed`), fitted to the spine color or the shelf's wood.
+
 ## Cover palette and contrast
 
 The app reduces the selected cover to a 32 × 32 RGB sample and groups colors into coarse color bins. The most common bin supplies the spine color. A contrasting sampled color supplies the text when it reaches at least **4.5:1** against the spine; otherwise the app chooses whichever of black or white gives stronger contrast. A second contrasting cover color supplies the decorative lines when available; they draw at 40% opacity so the lettering leads. The title and author use the same full-opacity text color, so both meet the same contrast threshold. When cover pixels are unavailable, the app uses the existing deterministic local background and a contrast-safe text color.

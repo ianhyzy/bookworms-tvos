@@ -148,6 +148,9 @@ final class YearInReviewTests: XCTestCase {
                 ViewPreferences.self, from: JSONEncoder().encode(saved))
         reloaded.validate()
         XCTAssertEqual(reloaded.orderedViews, [.shelf, .following, .friendsPicks])
-        XCTAssertFalse(reloaded.ambientOrderedViews.contains(.yearInReview))
+        XCTAssertTrue(
+            reloaded.ambientOrderedViews.contains(.yearInReview),
+            "Ambient mode includes Year in Review whether or not the sidebar shows it")
+        XCTAssertFalse(reloaded.ambientOrderedViews.contains(.bookWall))
     }
 }

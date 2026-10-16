@@ -155,7 +155,7 @@ private actor BookWallRasterizer {
                 image: $0, slot: slot, edgeColor: style.background.uiColor)
         }
         let label = BookWallShelfLabel.make(
-            "\(slot.book.title) · \(slot.book.author)", style: fontStyle)
+            "\(slot.book.title) · \(slot.book.author)", book: slot.book, style: fontStyle)
         let spine = BookWallSpineTexture.make(for: slot, style: style)
             .flatMap {
                 BookWallSpineTexture.filled($0, background: style.background.uiColor)

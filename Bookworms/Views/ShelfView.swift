@@ -332,7 +332,7 @@ struct ShelfView: View {
             ) {
                 AmbientView(
                     controller: ambient, library: library, social: social,
-                    preferences: coordinator.preferences
+                    preferences: coordinator.preferences, reviewYear: coordinator.reviewYear
                 )
                 .appTypography()
                 #if DEBUG && targetEnvironment(simulator)
@@ -1279,7 +1279,7 @@ struct BookCaption: View {
                     .accessibilityLabel(book.formatLabel ?? "")
                 }
                 HStack(spacing: 10) {
-                    Text(book.title).lineLimit(1)
+                    BookText(book.title, of: book).lineLimit(1)
                     // Fixed so a long title truncates before the status does.
                     if book.isReading == true {
                         Text("(Currently Reading)").fixedSize()

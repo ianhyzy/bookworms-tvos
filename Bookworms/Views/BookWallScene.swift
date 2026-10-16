@@ -1621,7 +1621,7 @@ final class BookWallScene {
         let half = layout.totalWidth / 2
         let depth = layout.slots.map(\.coverWidth).max() ?? 0.8
         let shelfSize = SIMD3<Float>(half * 2 + 1.4, Self.shelfThickness, depth + 0.55)
-        let shelfColor = UIColor(red: 0.32, green: 0.21, blue: 0.14, alpha: 1)
+        let shelfColor = BookWallShelfLabel.wood.uiColor
         let shelfMaterial: any RealityKit.Material
         if PerformanceDiagnostics.isolates("wall-unlit-shelf") {
             // This constant tint isolates shading cost; it is not a fitted lighting bake.
@@ -2217,9 +2217,13 @@ enum BookWallShelfLabel {
     static let maximumWidth: Float = 12
     private static let pixelsPerUnit: CGFloat = 128
     /// Warm gilt, like lettering stamped into a wooden shelf.
-    private static let gilt = UIColor(red: 0.95, green: 0.86, blue: 0.66, alpha: 1)
+    private static let giltColor = StyleColor(red: 0.95, green: 0.86, blue: 0.66)
+    private static let gilt = giltColor.uiColor
+    /// The shelf's wood, which the label is lettered on.
+    static let wood = StyleColor(red: 0.32, green: 0.21, blue: 0.14)
 
-    static func make(_ text: String, style: AppFontStyle) -> CGImage? {
+    /// Letters `text`, which names `book` when it has one, in gilt.
+    static func make(_ text: String, book: Book? = nil, style: AppFontStyle) -> CGImage? {
         let pixelHeight = (CGFloat(height) * pixelsPerUnit).rounded()
         let font = style.uiFont(size: pixelHeight * 0.62)
         let paragraph = NSMutableParagraphStyle()
@@ -2243,7 +2247,11 @@ enum BookWallShelfLabel {
                     .draw(
                         in: rect.offsetBy(dx: 0, dy: -1),
                         withAttributes: attributes(UIColor(white: 0, alpha: 0.55)))
-                (text as NSString).draw(in: rect, withAttributes: attributes(gilt))
+                HouseOfLeaves.attributed(
+                    text, of: book, attributes: attributes(gilt),
+                    lettering: HouseOfLeaves.lettering(on: wood, ink: giltColor)
+                )
+                .draw(in: rect)
             }
             .cgImage
     }
@@ -2286,8 +2294,8 @@ enum BookWallSpineTexture {
                 x: inset * 1.6, y: size.height * BookWallLayout.titleTop,
                 width: size.width - inset * 3.2, height: size.height * BookWallLayout.titleShare)
             drawText(
-                book.title, descriptor: descriptor, color: style.foreground.uiColor,
-                in: titleBounds,
+                book.title, of: book, style: style,
+                descriptor: descriptor, in: titleBounds,
                 maximumSize: Int(size.height),
                 minimumSize: Int(BookWallLayout.minimumTitleFontSize))
             let authorBounds = CGRect(
@@ -2295,8 +2303,8 @@ enum BookWallSpineTexture {
                 y: size.height * (BookWallLayout.titleTop + BookWallLayout.titleShare),
                 width: size.width - inset * 3.2, height: size.height * BookWallLayout.authorShare)
             drawText(
-                book.author, descriptor: descriptor, color: style.foreground.uiColor,
-                in: authorBounds,
+                book.author, of: book, style: style,
+                descriptor: descriptor, in: authorBounds,
                 maximumSize: Int(size.height * BookWallLayout.authorShare),
                 minimumSize: Int(BookWallLayout.minimumAuthorFontSize))
         }
@@ -2324,9 +2332,11 @@ enum BookWallSpineTexture {
         return image.cgImage
     }
 
+    /// Draws `text` in the largest size from `minimumSize` to `maximumSize` that fits `bounds`,
+    /// wrapping words onto more lines as needed, so thick spines letter larger.
     private static func drawText(
-        _ text: String, descriptor: UIFontDescriptor, color: UIColor, in bounds: CGRect,
-        maximumSize: Int, minimumSize: Int
+        _ text: String, of book: Book, style: BookWallLocalSpine.Style,
+        descriptor: UIFontDescriptor, in bounds: CGRect, maximumSize: Int, minimumSize: Int
     ) {
         let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !words.isEmpty else { return }
@@ -2353,12 +2363,15 @@ enum BookWallSpineTexture {
         }
         let firstY = bounds.midY - CGFloat(chosenLines.count) * chosenFont.lineHeight / 2
         for (index, line) in chosenLines.enumerated() {
-            (line as NSString)
-                .draw(
-                    at: CGPoint(
-                        x: bounds.midX - lineWidth(line, font: chosenFont) / 2,
-                        y: firstY + CGFloat(index) * chosenFont.lineHeight),
-                    withAttributes: [.font: chosenFont, .foregroundColor: color])
+            HouseOfLeaves.attributed(
+                line, of: book,
+                attributes: [.font: chosenFont, .foregroundColor: style.foreground.uiColor],
+                lettering: HouseOfLeaves.lettering(on: style.background, ink: style.foreground)
+            )
+            .draw(
+                at: CGPoint(
+                    x: bounds.midX - lineWidth(line, font: chosenFont) / 2,
+                    y: firstY + CGFloat(index) * chosenFont.lineHeight))
         }
     }
 

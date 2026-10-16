@@ -293,7 +293,7 @@ actor HardcoverClient {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
                 id last_read_date rating status_id
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
-                  book_series { featured position series { id } }
+                  book_series { featured position series { id name } }
                   editions(where: {image_id: {_is_null: false},
                       _or: [{language_id: {_is_null: true}}, {language: {code2: {_eq: $language}}}]},
                     order_by: {users_count: desc}, limit: 5) {
@@ -641,6 +641,7 @@ actor HardcoverClient {
                 format: edition?.readingFormat?.format,
                 seriesID: membership?.series?.id,
                 seriesPosition: membership?.position,
+                seriesName: membership?.series?.name,
                 genres: source.genres,
                 communityRating: source.rating, ratingsCount: source.ratingsCount,
                 ratingDistribution: source.validRatingDistribution,
@@ -846,5 +847,8 @@ struct SeriesMembership: Decodable, Sendable {
     let featured: Bool?
     let position: Double?
     let series: SeriesIdentity?
-    struct SeriesIdentity: Decodable, Sendable { let id: Int }
+    struct SeriesIdentity: Decodable, Sendable {
+        let id: Int
+        let name: String?
+    }
 }

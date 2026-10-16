@@ -21,7 +21,7 @@ Missing social access leaves My Shelf available and places recovery instructions
 
 ## Ambient mode
 
-Select **Ambient** in the sidebar, then **Start ambient mode**. Stopping playback returns to that page. Ordinary inactivity does not disable Apple TV's screensaver or sleep behavior. Ambient playback rotates enabled views with usable content; it skips setup and empty screens.
+Select **Ambient** in the sidebar, then **Start ambient mode**. Stopping playback returns to that page. Ordinary inactivity does not disable Apple TV's screensaver or sleep behavior. Ambient playback rotates enabled views with usable content; it skips setup and empty screens. Year in Review appears as a static summary of the chosen year's statistics in large type above a cover shelf, read from the statistics prepared with the library; it needs no focus and adds no per-frame work. Book Wall's interactive 3D scene is not offered.
 
 Choose timing on the **Ambient** page; see [ambient options](../VIEWS.md#other-displays).
 

@@ -240,16 +240,22 @@ final class SocialNavigationTests: XCTestCase {
         let app = RemoteNavigation.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
         RemoteNavigation.selectView("Ambient", in: app)
+        let review = app.descendants(matching: .any)["ambient-view-yearInReview"].firstMatch
         let following = app.descendants(matching: .any)["ambient-view-following"].firstMatch
         let comparison = app.descendants(matching: .any)["ambient-view-comparison"].firstMatch
         let shared = app.descendants(matching: .any)["ambient-view-shared"].firstMatch
         let picks = app.descendants(matching: .any)["ambient-view-friendsPicks"].firstMatch
         let start = app.buttons["start-ambient"]
         XCTAssertTrue(following.waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            app.descendants(matching: .any)["ambient-view-bookWall"].exists,
+            "Book Wall is not offered in ambient mode")
+        XCTAssertLessThan(review.frame.minY, following.frame.minY)
         XCTAssertLessThan(following.frame.minY, comparison.frame.minY)
         XCTAssertLessThan(comparison.frame.minY, shared.frame.minY)
         XCTAssertLessThan(shared.frame.minY, picks.frame.minY)
-        RemoteNavigation.moveFocus(to: following, in: app)
+        RemoteNavigation.moveFocus(to: review, in: app)
+        RemoteNavigation.press(.down, in: app, expecting: following)
         RemoteNavigation.press(.down, in: app, expecting: comparison)
         RemoteNavigation.press(.down, in: app, expecting: shared)
         RemoteNavigation.press(.down, in: app, expecting: picks)

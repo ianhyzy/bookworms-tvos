@@ -272,7 +272,7 @@ struct YearInReviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).appFont(size: 24).foregroundStyle(.secondary)
             HStack(spacing: 0) {
-                Text(book.spineTitle).lineLimit(1)
+                BookText(book.spineTitle, of: book).lineLimit(1)
                 Text(" · \(detail)").fixedSize()
             }
             .appFont(size: 28, weight: .medium)

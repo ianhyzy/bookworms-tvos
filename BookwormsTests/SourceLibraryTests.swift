@@ -184,6 +184,37 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(SeriesInfo.positionLabel(2.5), "#2.5")
     }
 
+    func testLibraryRowsCarrySeriesNamesIntoTheCloudArchive() throws {
+        let json = #"""
+            [{"id": 100, "status_id": 3, "last_read_date": "2026-03-01",
+              "book": {"id": 11, "title": "The Tainted Cup",
+                "cached_contributors": [{"author": {"name": "Robert Jackson Bennett"}}],
+                "book_series": [
+                  {"featured": false, "position": 9, "series": {"id": 8, "name": "Omnibus"}},
+                  {"featured": true, "position": 1,
+                    "series": {"id": 7, "name": "Ana and Din Mysteries"}}]}}]
+            """#
+        let rows = try JSONDecoder().decode([UserBook].self, from: Data(json.utf8))
+        let book = try XCTUnwrap(HardcoverClient.normalize(rows).first)
+        XCTAssertEqual(book.seriesID, 7, "The featured series wins")
+        XCTAssertEqual(book.seriesName, "Ana and Din Mysteries")
+        XCTAssertEqual(book.seriesPosition, 1)
+
+        // The iPhone decodes the archive's books with this key (`CloudBook.seriesName`).
+        let archive = CloudLibraryArchive(sources: [
+            SourceSnapshot(
+                source: .hardcover, accountID: "1", books: [book], syncedAt: .distantPast)
+        ])
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(archive))
+        let sources = try XCTUnwrap((encoded as? [String: Any])?["sources"] as? [[String: Any]])
+        let books = try XCTUnwrap(sources.first?["books"] as? [[String: Any]])
+        XCTAssertEqual(books.first?["seriesName"] as? String, "Ana and Din Mysteries")
+
+        let older = try JSONDecoder()
+            .decode(Book.self, from: Data(#"{"id": 1, "title": "T", "author": "A"}"#.utf8))
+        XCTAssertNil(older.seriesName, "Books saved before series names decode without one")
+    }
+
     func testHotTakesSortByGapFromCommunityRating() {
         let books = [
             Book(id: 1, title: "Agree", author: "A", rating: 4, communityRating: 4.1),
