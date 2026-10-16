@@ -160,19 +160,16 @@ enum SeriesDesigns {
         SpineFontPolicy.allows(fontName)
     }
 
-    /// Returns whether a new series look may copy `design`: never a blocked family, such as
-    /// Impact or a slanted script, as the iPhone companion's `isUsableSource(_:)` rules.
-    static func isUsableSource(_ design: SpineDesignV1) -> Bool {
-        design.fontFamily.map(SpineFontPolicy.allows) ?? true
-    }
-
     /// The saved design a new look for a group copies: the earliest `generatedAt` among the
-    /// `members`' usable original designs, else among their usable `series-reuse` copies, with
-    /// the lower book ID breaking a tie. `nil` when no member has a usable design.
+    /// `members`' original designs, else among their `series-reuse` copies, with the lower book
+    /// ID breaking a tie. `nil` when no member has a design.
+    ///
+    /// Each design counts in its allowed upright face (`SpineDesignV1.withAllowedFont`), which
+    /// the look copies, as on the iPhone: a design saved in Pacifico leads in Permanent Marker.
     static func lookDesign(of members: [Book], designs: [Int: SpineDesignV1]) -> SpineDesignV1? {
-        let usable = members.compactMap { designs[$0.id] }.filter(isUsableSource)
-        let originals = usable.filter { $0.provenance?.contains("series-reuse") != true }
-        return (originals.isEmpty ? usable : originals)
+        let saved = members.compactMap { designs[$0.id]?.withAllowedFont }
+        let originals = saved.filter { $0.provenance?.contains("series-reuse") != true }
+        return (originals.isEmpty ? saved : originals)
             .min { ($0.generatedAt, $0.bookID) < ($1.generatedAt, $1.bookID) }
     }
 

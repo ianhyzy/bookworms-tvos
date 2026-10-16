@@ -1358,7 +1358,7 @@ final class LibraryModel {
     /// the group alike. Saving never replaces a look another device saved first; that look is
     /// kept instead. Books whose link keeps their own look don't count toward a group.
     ///
-    /// A group with a usable companion design copies the design that
+    /// A group with a companion design copies the design that
     /// `SeriesDesigns.lookDesign(of:designs:)` picks. A group of two or more books without one
     /// takes Book Wall's cover-sampled look of its best-ranked book, whose cover must already be
     /// cached. The first failed save stops the pass until the next read.

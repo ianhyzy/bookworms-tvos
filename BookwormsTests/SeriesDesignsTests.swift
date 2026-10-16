@@ -140,7 +140,7 @@ final class SeriesDesignsTests: XCTestCase {
             [1: 1, 3: 1])
     }
 
-    func testANewLookCopiesTheEarliestUsableOriginalDesign() {
+    func testANewLookCopiesTheEarliestOriginalDesignInItsUprightFace() {
         func design(_ id: Int, day: Double, family: String = "Oswald", reuse: Bool = false)
             -> SpineDesignV1
         {
@@ -158,11 +158,42 @@ final class SeriesDesignsTests: XCTestCase {
             1: design(1, day: 1, reuse: true), 2: design(2, day: 3),
             3: design(3, day: 2), 4: design(4, day: 0, family: "Dancing Script"),
         ]
-        XCTAssertEqual(SeriesDesigns.lookDesign(of: members, designs: designs)?.bookID, 3)
+        // As on the iPhone, a design in a blocked face counts in its upright stand-in.
+        let script = SeriesDesigns.lookDesign(of: members, designs: designs)
+        XCTAssertEqual(script?.bookID, 4)
+        XCTAssertEqual(script?.fontFamily, "Kalam")
+        XCTAssertNil(script?.fontPostScriptName)
         XCTAssertEqual(
-            SeriesDesigns.lookDesign(of: members, designs: [1: designs[1]!, 4: designs[4]!])?
-                .bookID, 1, "Reuse copies count only when no member has an original")
-        XCTAssertNil(SeriesDesigns.lookDesign(of: members, designs: [4: designs[4]!]))
+            SeriesDesigns.lookDesign(
+                of: members, designs: [1: designs[1]!, 2: designs[2]!, 3: designs[3]!])?
+                .bookID, 3)
+        XCTAssertEqual(
+            SeriesDesigns.lookDesign(of: members, designs: [1: designs[1]!])?.bookID, 1,
+            "Reuse copies count only when no member has an original")
+        XCTAssertNil(SeriesDesigns.lookDesign(of: members, designs: [:]))
+    }
+
+    func testDesignsInBlockedFacesMapToTheIPhonesUprightFamilies() {
+        func allowed(_ family: String?, _ name: String?) -> SpineDesignV1 {
+            var design = companionDesign(1, family: family, postScriptName: name)
+            design.instanceWeight = 700
+            return design.withAllowedFont
+        }
+        let kept = allowed("EB Garamond", "EBGaramond-Bold")
+        XCTAssertEqual(kept.fontPostScriptName, "EBGaramond-Bold")
+        XCTAssertEqual(kept.instanceWeight, 700)
+        for (family, name, shown) in [
+            ("Pacifico", "Pacifico-Regular", "Permanent Marker"), ("Bangers", nil, "Bungee"),
+            ("Lora Italic", "Lora-Italic", "Lora"), ("Lora", "Lora-BoldIt", "Lora"),
+            ("Impact", "Impact", "Bebas Neue"), (nil, "Impact", "Bebas Neue"),
+        ] as [(String?, String?, String)] {
+            let design = allowed(family, name)
+            XCTAssertEqual(design.fontFamily, shown, name ?? family ?? "")
+            XCTAssertNil(design.fontPostScriptName)
+            XCTAssertNil(design.instanceWeight)
+        }
+        XCTAssertNil(allowed("Oblique", nil).fontFamily, "No upright family remains")
+        XCTAssertNil(allowed(nil, "Lora-BoldIt").fontFamily)
     }
 
     func testBooksOfAGroupWithALookDrawTheLookUnlessTheyKeepTheirOwn() throws {

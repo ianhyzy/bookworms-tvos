@@ -57,6 +57,29 @@ enum SpineFontPolicy {
         allows(name) ? nil : standInFamilies[allowedFontName(name)]
     }
 
+    /// Returns the allowed upright Google Fonts family that a saved design in the blocked
+    /// `family` shows in, as the iPhone companion's `SpineFamily.uprightReplacement(for:)`
+    /// does, or `nil` for the design's system typeface.
+    ///
+    /// | Saved family | Shown as |
+    /// | --- | --- |
+    /// | Impact, in any spelling | Bebas Neue |
+    /// | A slanted family in `slantedReplacements`, such as Pacifico | Its stand-in family |
+    /// | An italic, oblique, or slanted variant, such as "Lora Italic" | Its upright family |
+    /// | Anything else blocked | `nil` |
+    static func uprightFamily(for family: String) -> String? {
+        if family.lowercased().contains("impact") { return impactReplacementFamily }
+        let upright = family.split(whereSeparator: \.isWhitespace)
+            .filter { !["italic", "oblique", "slanted"].contains($0.lowercased()) }
+            .joined(separator: " ")
+        guard !upright.isEmpty else { return nil }
+        if allows(upright) { return upright }
+        return standInFamily(for: upright)
+    }
+
+    /// The Google Fonts family of `impactReplacement`.
+    static let impactReplacementFamily = "Bebas Neue"
+
     /// The Book Wall's general-fiction face, for a blocked name with no closer upright face.
     static let uprightFallback = "AvenirNext-DemiBold"
 
