@@ -522,9 +522,7 @@ final class LibraryModel {
             ]
             _ = try? await saveSources()
         }
-        for snapshot in sourceSnapshots {
-            schedule.seed(snapshot.source, date: snapshot.syncedAt)
-        }
+        seedSchedule()
         if let savedToken = dependencies.readCredential("hardcover-token") {
             hardcoverConnected = (try? HardcoverToken(savedToken)) != nil
             if !hardcoverConnected {
@@ -1056,6 +1054,21 @@ final class LibraryModel {
         dependencies.defaults.set(id, forKey: "activeHardcoverAccountID")
     }
 
+    /// Seeds each source's sync schedule from the snapshot its active account uses. Seeding from
+    /// every snapshot let an older one of another account, such as the legacy `"hardcover"`
+    /// placeholder that merges never remove, set the last success and make the source look due
+    /// again five minutes after each attempt.
+    private func seedSchedule() {
+        if let snapshot = activeHardcoverSnapshot() {
+            schedule.seed(.hardcover, date: snapshot.syncedAt)
+        }
+        if let snapshot = sourceSnapshots.first(where: {
+            $0.source == .cwa && $0.accountID == cwaConfiguration.identity
+        }) {
+            schedule.seed(.cwa, date: snapshot.syncedAt)
+        }
+    }
+
     private func activeHardcoverSnapshot() -> SourceSnapshot? {
         let snapshots = sourceSnapshots.filter { $0.source == .hardcover }
         if let activeHardcoverAccountID {
@@ -1237,9 +1250,7 @@ final class LibraryModel {
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return
                     }
-                    for snapshot in sourceSnapshots {
-                        schedule.seed(snapshot.source, date: snapshot.syncedAt)
-                    }
+                    seedSchedule()
                     rebuildLibrary()
                     // Publish from the archive this sync uploaded so the Mac can match its sync
                     // date. A snapshot installed since then sets `cloudPending`, so the next
