@@ -20,8 +20,10 @@ struct SeriesLookKey: Hashable, Comparable, Sendable {
 ///
 /// A look group (`SeriesLookKey`) draws its synced series look (`SeriesLookV1`) when one exists.
 /// Without one, each book draws the design of the group's best-ranked book that can lend it
-/// (`sources(books:fonts:links:canLetter:)`). Alignment happens when the app draws, not when it
-/// saves: each book keeps its own saved style, so changing these rules changes no saved data.
+/// (`sources(books:fonts:links:canLetter:)`). Each book keeps its own saved style either way.
+/// The look key names the look's record (`SeriesLookV1`), so keep `styleSeries`, `lookKey`, and
+/// `subseries` in step with the iPhone companion: keys that differ between the apps give one
+/// group two looks, and a changed rule leaves earlier looks unused.
 enum SeriesDesigns {
     /// The series whose look `book` draws: its link, else its shortest series.
     ///
