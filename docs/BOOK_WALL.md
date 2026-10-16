@@ -68,7 +68,7 @@ After each read in which CloudKit answered for every design and link, `LibraryMo
 - A group of two or more books without a usable design copies Book Wall's local look of its best-ranked book, with origin `tvos-local-v1`, but only after a read in which CloudKit also answered for every cover choice, because the look samples the reader's chosen cover. That book's displayed cover must already be cached; the Apple TV never downloads one for this. The look takes the colors sampled from the cover, with the accent equal to the text color, the genre face's PostScript name and nearest typeface (`BookWallLocalSpine.typeface(ofGenreFace:)`), weight 700, and the local title case. Only Bebas Neue gets a font family, because it is the one genre face the iPhone can download from Google Fonts.
 - A one-book group without a usable design gets no look.
 
-Saving never replaces a look (`SpineCloudStore.createSeriesLook(_:)`). When another device saved the group's look first, the Apple TV keeps that look instead. A failed save stops the pass until the next read. The looks apply together once the pass ends.
+Saving never replaces a look (`SpineCloudStore.createSeriesLook(_:)`). When another device saved the group's look first, the Apple TV keeps that look instead. Each group's save is tried on its own: a failed save leaves that group without a look until the next read and doesn't stop the others. The looks apply together once the pass ends.
 
 ## Cover palette and contrast
 

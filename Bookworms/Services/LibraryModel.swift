@@ -1366,7 +1366,8 @@ final class LibraryModel {
     /// `SeriesDesigns.lookDesign(of:designs:)` picks. When `samplesCovers` is set, because
     /// CloudKit answered for every cover choice, a group of two or more books without one takes
     /// Book Wall's cover-sampled look of its best-ranked book, whose cover must already be
-    /// cached. The first failed save stops the pass until the next read.
+    /// cached. Each save is tried on its own; a failed one leaves its group without a look until
+    /// the next read.
     private func createMissingSeriesLooks(
         of books: [Book], accountID: String, samplesCovers: Bool, requestID: UUID
     ) async {
@@ -1405,7 +1406,7 @@ final class LibraryModel {
             }
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
             guard let look, look.isValid(accountID: accountID, key: key) else { continue }
-            guard let saved = try? await dependencies.createSeriesLook(look) else { break }
+            guard let saved = try? await dependencies.createSeriesLook(look) else { continue }
             created[key] = saved
         }
         guard spineDesignTaskIdentity?.requestID == requestID, !created.isEmpty else { return }

@@ -1025,6 +1025,50 @@ final class LibraryWorkflowTests: XCTestCase {
         }
     }
 
+    func testAFailedLookSaveDoesNotStopTheOtherGroups() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        // Books 1 and 2 are in series 7, books 3 and 4 in series 8.
+        let books = (1...4)
+            .map { id in
+                var book = fixture.book(id)
+                book.seriesID = id <= 2 ? 7 : 8
+                book.seriesPosition = Double(id)
+                return book
+            }
+        try fixture.save([fixture.snapshot(.hardcover, books: books)])
+        func design(_ id: Int) -> SpineDesignV1 {
+            SpineDesignV1(
+                version: 1, accountID: fixture.hardcoverAccountID, bookID: id,
+                workItemHash: SpineCloudIdentity.workItemHash(
+                    accountID: fixture.hardcoverAccountID, book: books[id - 1]),
+                coverHash: String(repeating: "a", count: 64), generatorVersion: "ios-pcc-v2",
+                generatedAt: Date(timeIntervalSince1970: 86_400), backgroundHex: "#102030",
+                foregroundHex: "#FFFFFF", accentHex: "#FFFFFF", typeface: "serif",
+                weight: 700, uppercase: false)
+        }
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        dependencies.fetchSpineDesigns = { _, _ in ([1: design(1), 3: design(3)], true) }
+        var attempted: [Int] = []
+        dependencies.createSeriesLook = { look in
+            attempted.append(look.seriesID)
+            if look.seriesID == 7 { throw CloudStorageError.temporarilyUnavailable }
+            return look
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+
+        XCTAssertEqual(attempted, [7, 8], "Each group's save is tried")
+        XCTAssertNil(model.lookDesigns[1], "A failed save leaves its group without a look")
+        XCTAssertEqual(model.lookDesigns[3]?.bookID, 3)
+        XCTAssertEqual(model.lookDesigns[4]?.bookID, 4)
+    }
+
     func testCloudWorklistUsesCompleteHardcoverSnapshotAndClearsWhenDisabled() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
