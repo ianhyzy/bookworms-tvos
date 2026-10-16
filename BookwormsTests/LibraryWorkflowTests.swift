@@ -902,11 +902,13 @@ final class LibraryWorkflowTests: XCTestCase {
             return ([:], true)
         }
         dependencies.fetchCoverChoices = { accountID, _ in
-            [
-                1: CoverChoiceV1(
-                    version: 1, accountID: accountID, bookID: 1, coverURL: chosen,
-                    chosenAt: fixture.time)
-            ]
+            (
+                [
+                    1: CoverChoiceV1(
+                        version: 1, accountID: accountID, bookID: 1, coverURL: chosen,
+                        chosenAt: fixture.time)
+                ], true
+            )
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -1432,7 +1434,7 @@ private final class LibraryWorkflowFixture {
         dependencies.readSpineWorklist = { nil }
         dependencies.publishSpineWorklist = { _ in }
         dependencies.fetchSpineDesigns = { _, _ in ([:], true) }
-        dependencies.fetchCoverChoices = { _, _ in [:] }
+        dependencies.fetchCoverChoices = { _, _ in ([:], true) }
         dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
         dependencies.fetchSeriesLooks = { _, _ in [:] }
         dependencies.createSeriesLook = { _ in

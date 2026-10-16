@@ -438,13 +438,14 @@ actor SpineCloudStore {
             .designs(cacheURL: cacheURL), accountID: accountID, subjects: Self.byID(books))
     }
 
-    /// Reads the active books' companion cover choices. See `records(_:accountID:subjects:)`.
-    func coverChoices(accountID: String, books: [Book]) async throws -> [Int: CoverChoiceV1] {
+    /// Reads the active books' companion cover choices, and whether CloudKit answered for every
+    /// book. See `records(_:accountID:subjects:)`.
+    func coverChoices(accountID: String, books: [Book]) async throws
+        -> (values: [Int: CoverChoiceV1], isComplete: Bool)
+    {
         try await records(
             .coverChoices(cacheURL: coverChoiceCacheURL), accountID: accountID,
-            subjects: Self.byID(books)
-        )
-        .values
+            subjects: Self.byID(books))
     }
 
     /// Reads the active books' companion series links, and whether CloudKit answered for every

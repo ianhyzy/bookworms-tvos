@@ -204,7 +204,7 @@
                     ? ScenarioFixtures.designs(accountID: accountID, books: books) : [:]
                 return (designs, true)
             }
-            dependencies.fetchCoverChoices = { _, _ in [:] }
+            dependencies.fetchCoverChoices = { _, _ in ([:], true) }
             dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
             dependencies.fetchSeriesLooks = { _, _ in [:] }
             dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }

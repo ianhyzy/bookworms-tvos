@@ -1292,8 +1292,9 @@ final class LibraryModel {
 
     /// Reads companion designs, cover choices, series links, and series looks for the active
     /// Hardcover snapshot into their local caches, then creates missing series looks
-    /// (`createMissingSeriesLooks`) when CloudKit answered for every design and link. One task
-    /// runs per account and sync date; a newer selection cancels an older one.
+    /// (`createMissingSeriesLooks`) when CloudKit answered for every design and link. Looks
+    /// sampled from covers also wait for a complete cover-choice read. One task runs per account
+    /// and sync date; a newer selection cancels an older one.
     private func queueSpineDesignRefresh() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         guard iCloudEnabled, hardcoverEnabled, let accountID = activeHardcoverAccountID,
@@ -1332,8 +1333,8 @@ final class LibraryModel {
             // A failed or cancelled read keeps the records already shown.
             if let designs, designs.values != spineDesigns { spineDesigns = designs.values }
             var rebuild = false
-            if let choices, choices != coverChoices {
-                coverChoices = choices
+            if let choices, choices.values != coverChoices {
+                coverChoices = choices.values
                 rebuild = true
             }
             if let links, links.values != seriesLinks {
@@ -1348,7 +1349,8 @@ final class LibraryModel {
             // A design or link missing from a partial read could decide a look for good.
             if designs?.isComplete == true, links?.isComplete == true {
                 await createMissingSeriesLooks(
-                    of: books, accountID: accountID, requestID: requestID)
+                    of: books, accountID: accountID,
+                    samplesCovers: choices?.isComplete == true, requestID: requestID)
             }
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
             spineDesignTask = nil
@@ -1361,12 +1363,13 @@ final class LibraryModel {
     /// kept instead. Books whose link keeps their own look don't count toward a group.
     ///
     /// A group with a usable companion design copies the design that
-    /// `SeriesDesigns.lookDesign(of:designs:)` picks. A group of two or more books without one
-    /// takes Book Wall's cover-sampled look of its best-ranked book, whose cover must already be
+    /// `SeriesDesigns.lookDesign(of:designs:)` picks. When `samplesCovers` is set, because
+    /// CloudKit answered for every cover choice, a group of two or more books without one takes
+    /// Book Wall's cover-sampled look of its best-ranked book, whose cover must already be
     /// cached. The first failed save stops the pass until the next read.
-    private func createMissingSeriesLooks(of books: [Book], accountID: String, requestID: UUID)
-        async
-    {
+    private func createMissingSeriesLooks(
+        of books: [Book], accountID: String, samplesCovers: Bool, requestID: UUID
+    ) async {
         var groups: [SeriesLookKey: [Book]] = [:]
         for book in books where seriesLinks[book.id]?.ownLook != true {
             if let key = SeriesDesigns.lookKey(of: book, link: seriesLinks[book.id]),
@@ -1384,7 +1387,7 @@ final class LibraryModel {
             var look: SeriesLookV1?
             if let design = SeriesDesigns.lookDesign(of: members, designs: spineDesigns) {
                 look = SeriesLookV1(key: key, design: design, createdAt: dependencies.now())
-            } else if members.count >= 2,
+            } else if samplesCovers, members.count >= 2,
                 let lead = members.min(by: {
                     SeriesDesigns.ranksBefore($0, $1, links: seriesLinks)
                 })

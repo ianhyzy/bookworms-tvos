@@ -167,17 +167,19 @@ final class SpineCloudTests: XCTestCase {
         try await database.put(design(for: book))
         let store = SpineCloudStore(database: database, cacheURL: cacheURL)
         let fetched = try await store.coverChoices(accountID: "42", books: [book])
-        XCTAssertEqual(fetched[7], choice)
+        XCTAssertEqual(fetched.values[7], choice)
+        XCTAssertTrue(fetched.isComplete)
         let designs = try await store.designs(accountID: "42", books: [book]).values
         XCTAssertEqual(designs.count, 1, "Designs and choices keep separate caches")
 
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
         let retained = try await offline.coverChoices(accountID: "42", books: [book])
-        XCTAssertEqual(retained[7], choice)
+        XCTAssertEqual(retained.values[7], choice)
+        XCTAssertFalse(retained.isComplete, "A cached choice is not a complete read")
 
         await database.deleteCoverChoice(accountID: "42", bookID: 7)
-        let cleared = try await store.coverChoices(accountID: "42", books: [book])
+        let cleared = try await store.coverChoices(accountID: "42", books: [book]).values
         XCTAssertTrue(cleared.isEmpty)
         let cache = try JSONDecoder()
             .decode(
