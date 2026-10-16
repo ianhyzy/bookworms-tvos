@@ -1,7 +1,8 @@
 # Bookworms for Apple TV
-*e-reading doesn't have to be antisocial*
 
 Bookworms for Apple TV is a beautiful app that helps make e-reading more social IRL.
+
+[View on the App Store](https://apps.apple.com/us/app/bookworms-ebook-display/id6813137450)
 
 Bookworms displays your digital library and reading activity on the big screen. In leiu of a bookshelf guests can snoop the spines of, they can look at your TV when it's not in use.
 
