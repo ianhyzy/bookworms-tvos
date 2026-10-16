@@ -1107,6 +1107,12 @@ final class LibraryModel {
         generationTask = Task { [weak self] in
             guard let self else { return }
             let generator = AIStyleGenerator()
+            let seriesIDs = Dictionary(
+                allBooks.compactMap { book in book.seriesID.map { (book.id, $0) } },
+                uniquingKeysWith: { first, _ in first })
+            // A stored design can seed its series unless this run is about to replace it.
+            let selectedIDs = Set(selected.map(\.id))
+            var producedIDs = Set<Int>()
             var completed = 0
             var failures: [String] = []
             defer {
@@ -1131,8 +1137,29 @@ final class LibraryModel {
                         throw AIError.missingCover
                     }
                     let cover = try await ArtworkStore.shared.data(for: url)
-                    let record = try await generator.generate(
-                        book: book, cover: cover, configuration: configuration, key: key)
+                    let seriesSource = book.seriesID.flatMap { seriesID in
+                        aiRecords.values
+                            .filter { record in
+                                record.bookID != book.id && seriesIDs[record.bookID] == seriesID
+                                    && (producedIDs.contains(record.bookID)
+                                        || !selectedIDs.contains(record.bookID))
+                            }
+                            .max { $0.generatedAt < $1.generatedAt }
+                    }
+                    let record: AIStyleRecord
+                    if let seriesSource,
+                        let reused = seriesSource.reused(
+                            for: book,
+                            sourceTitle: self.book(withID: seriesSource.bookID)?.title
+                                ?? "book \(seriesSource.bookID)",
+                            coverHash: AIStyleGenerator.coverHash(cover))
+                    {
+                        record = reused
+                    } else {
+                        record = try await generator.generate(
+                            book: book, cover: cover, configuration: configuration, key: key,
+                            seriesName: series(for: book)?.name)
+                    }
                     try Task.checkCancellation()
                     var updated = aiRecords
                     updated[book.id] = record
@@ -1144,6 +1171,7 @@ final class LibraryModel {
                     try dependencies.styleStore.save(
                         updated, cloudBacked: cloudBacked && iCloudEnabled)
                     aiRecords = updated
+                    producedIDs.insert(book.id)
                     styles[book.id] = record.style
                     presentationRevision += 1
                     completed += 1

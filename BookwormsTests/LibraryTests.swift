@@ -1,3 +1,4 @@
+import CoreText
 import ImageIO
 import TVServices
 import XCTest
@@ -164,6 +165,13 @@ final class LibraryTests: XCTestCase {
             case .google:
                 XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), "test-key")
                 XCTAssertNotNil(body["contents"])
+                let generation = try XCTUnwrap(body["generationConfig"] as? [String: Any])
+                for parameter in ["temperature", "topP", "topK"] {
+                    XCTAssertNil(generation[parameter])
+                }
+                XCTAssertEqual(
+                    (generation["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String,
+                    "low")
             case .anthropic:
                 XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
                 XCTAssertNotNil(body["messages"])
@@ -207,9 +215,67 @@ final class LibraryTests: XCTestCase {
                 try AIStyleGenerator.responseText(Data("{}".utf8), provider: provider))
         }
         XCTAssertThrowsError(try StyleColor(hex: "not-a-color"))
-        let background = try StyleColor(hex: "#777777")
-        XCTAssertGreaterThanOrEqual(
-            try StyleColor(hex: "#777777").readable(on: background).contrast(with: background), 4.5)
+    }
+
+    func testSpineContrastMeasuresAPCAAndNudgesTheBackground() throws {
+        let black = StyleColor(red: 0, green: 0, blue: 0)
+        let white = StyleColor(red: 1, green: 1, blue: 1)
+        XCTAssertEqual(SpineContrast.apca(text: black, background: white), 106.04, accuracy: 0.1)
+        XCTAssertEqual(SpineContrast.apca(text: white, background: black), -107.88, accuracy: 0.1)
+        XCTAssertEqual(SpineContrast.wcag(black, white), 21, accuracy: 0.01)
+
+        let orange = try StyleColor(hex: "#E04020")
+        let lab = SpineContrast.lab(orange)
+        let roundTrip = SpineContrast.color(lab)
+        XCTAssertEqual(roundTrip.red, orange.red, accuracy: 0.0001)
+        XCTAssertEqual(roundTrip.blue, orange.blue, accuracy: 0.0001)
+
+        // Black is already at its limit, so only the background can move.
+        let resolved = SpineContrast.resolve(foreground: black, background: orange, minimumLc: 75)
+        XCTAssertLessThan(abs(resolved.lcBefore), 75)
+        XCTAssertGreaterThanOrEqual(abs(resolved.lcAfter), 75)
+        XCTAssertEqual(resolved.nudged, .background)
+        XCTAssertEqual(resolved.foreground, black)
+        XCTAssertNotEqual(resolved.background, orange)
+        XCTAssertEqual(
+            abs(SpineContrast.apca(text: resolved.foreground, background: resolved.background)),
+            abs(resolved.lcAfter), accuracy: 0.0001)
+
+        // Light ink stays light; once it is white, the cloth darkens instead of turning pale.
+        let lightInk = SpineContrast.resolve(foreground: white, background: orange, minimumLc: 75)
+        XCTAssertEqual(lightInk.foreground, white)
+        XCTAssertEqual(lightInk.nudged, .background)
+        XCTAssertLessThan(SpineContrast.lab(lightInk.background).l, lab.l)
+        XCTAssertGreaterThanOrEqual(abs(lightInk.lcAfter), 75)
+
+        let readable = SpineContrast.resolve(foreground: black, background: white, minimumLc: 75)
+        XCTAssertNil(readable.nudged)
+        XCTAssertEqual(readable.background, white)
+    }
+
+    func testFontInstanceSelectionSnapsToTheClosestNamedWeight() {
+        // Synthetic descriptors stand in for a variable font's named instances; the selection
+        // reads only each descriptor's name and weight trait.
+        let instances = [
+            ("Fixture-Light", -0.23), ("Fixture-Regular", 0.0), ("Fixture-Black", 0.8),
+        ]
+        .map { name, trait in
+            CTFontDescriptorCreateWithAttributes(
+                [
+                    kCTFontNameAttribute: name,
+                    kCTFontTraitsAttribute: [kCTFontWeightTrait: trait],
+                ] as CFDictionary)
+        }
+        let cases: [(requested: Int, name: String, weight: Int)] = [
+            (300, "Fixture-Light", 300), (500, "Fixture-Regular", 400),
+            (700, "Fixture-Black", 900), (100, "Fixture-Light", 300),
+        ]
+        for (requested, name, weight) in cases {
+            let selected = GoogleFontLibrary.closestInstance(in: instances, to: requested)
+            XCTAssertEqual(selected?.postScriptName, name, "requested \(requested)")
+            XCTAssertEqual(selected?.weight, weight, "requested \(requested)")
+        }
+        XCTAssertNil(GoogleFontLibrary.closestInstance(in: [], to: 400))
     }
 
     func testReadingSummaryShowsFormatAndDate() {

@@ -54,21 +54,4 @@ extension StyleColor {
             red: Double((number >> 16) & 255) / 255, green: Double((number >> 8) & 255) / 255,
             blue: Double(number & 255) / 255)
     }
-
-    func readable(on background: StyleColor) -> StyleColor {
-        if contrast(with: background) >= 4.5 { return self }
-        let white = StyleColor(red: 1, green: 1, blue: 1)
-        let black = StyleColor(red: 0, green: 0, blue: 0)
-        let target =
-            background.contrast(with: white) >= background.contrast(with: black) ? white : black
-        for step in 1...10 {
-            let blend = Double(step) / 10
-            let candidate = StyleColor(
-                red: red * (1 - blend) + target.red * blend,
-                green: green * (1 - blend) + target.green * blend,
-                blue: blue * (1 - blend) + target.blue * blend)
-            if candidate.contrast(with: background) >= 4.5 { return candidate }
-        }
-        return target
-    }
 }

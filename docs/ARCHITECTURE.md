@@ -15,7 +15,7 @@ Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the s
 | `BookWallPreparation`, `BookWallRasterizer` | Prepare the current-year layout, local spine/cover textures, and reusable hardcover entities before presentation. |
 | `BookWallScene`, `BookWallHardcoverMesh` | Construct shared hardcover models; own physics, camera geometry, synchronized camera/book motion, baked backdrops, shadow planes, and point and directional lighting. |
 | `BookWallRenderHost`, `BookWallRendererHost` | Render the shared wall through RealityRenderer with explicit Metal texture dimensions. See the [renderer host](BOOK_WALL.md#renderer-host). |
-| `AIStyleGenerator`, `GoogleFontLibrary` | Match covers against the full font catalog and download licensed font candidates. |
+| `AIStyleGenerator`, `GoogleFontLibrary`, `SpineContrast` | Ask the provider for four ranked Google Fonts families by name, verify each against the cached catalog, its license, an upright file, and glyph coverage for the spine title and author, and re-ask with rejected names. Select the named instance nearest the requested weight and adjust colors to APCA Lc 75, which can change the background. Books in a series reuse an existing design from the same series without a request. |
 | `AutomaticSpineGeneration`, `AIStyleStore` | Select missing designs, record attempt cooldowns, and retain completed designs. |
 | `CloudLibraryStore`, `SourceLibraryStore` | Merge cloud archives and persist source snapshots and sync schedules. |
 | `TopShelfSnapshot`, `ContentProvider` | Share public cover metadata with the Home Screen extension and open book details through validated links. |

@@ -13,6 +13,25 @@ struct DownloadedFont: Codable, Sendable {
     let postScriptName: String
     let filePath: String
     let licensePath: String
+    /// The CSS weight (100...900) of the selected instance. Records saved before weight snapping
+    /// decode as `nil`.
+    var weight: Int?
+
+    /// Whether the selected instance has a glyph for every non-whitespace character in `text`.
+    func covers(_ text: String) -> Bool {
+        let characters = Array(text.filter { !$0.isWhitespace }.utf16)
+        guard !characters.isEmpty else { return true }
+        guard
+            let descriptors = CTFontManagerCreateFontDescriptorsFromURL(
+                URL(filePath: filePath) as CFURL) as? [CTFontDescriptor],
+            let descriptor = descriptors.first(where: {
+                CTFontDescriptorCopyAttribute($0, kCTFontNameAttribute) as? String == postScriptName
+            }) ?? descriptors.first
+        else { return false }
+        let font = CTFontCreateWithFontDescriptor(descriptor, 32, nil)
+        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+        return CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count)
+    }
 }
 
 actor GoogleFontLibrary {
@@ -80,7 +99,7 @@ actor GoogleFontLibrary {
         return DownloadedFont(
             family: stored.family, postScriptName: stored.postScriptName,
             filePath: directory.appending(path: "font.ttf").path,
-            licensePath: directory.appending(path: "LICENSE.txt").path)
+            licensePath: directory.appending(path: "LICENSE.txt").path, weight: stored.weight)
     }
 
     func download(family: String, weight: Int = 400) async throws -> DownloadedFont {
@@ -144,15 +163,48 @@ actor GoogleFontLibrary {
         guard
             let descriptors = CTFontManagerCreateFontDescriptorsFromURL(file as CFURL)
                 as? [CTFontDescriptor],
-            let descriptor = descriptors.first
+            let instance = Self.closestInstance(in: descriptors, to: weight)
         else { throw AIError.unavailableFont }
-        let ctFont = CTFontCreateWithFontDescriptor(descriptor, 32, nil)
         let font = DownloadedFont(
-            family: family, postScriptName: CTFontCopyPostScriptName(ctFont) as String,
-            filePath: file.path, licensePath: licenseFile.path)
+            family: family, postScriptName: instance.postScriptName, filePath: file.path,
+            licensePath: licenseFile.path, weight: instance.weight)
         try register(font)
         try JSONEncoder().encode(font).write(to: manifestURL, options: .atomic)
         return font
+    }
+
+    /// Core Text weight traits that Google font files report for CSS weights 100...900, read
+    /// from their OS/2 weight class and variable-font instances. The scale is not linear and
+    /// differs from the `UIFont.Weight` constants of Apple's system fonts, so a named instance
+    /// snaps to the nearest entry.
+    private static let weightTraits: [(weight: Int, trait: Double)] = [
+        (100, -0.6), (200, -0.4), (300, -0.23), (400, 0), (500, 0.2), (600, 0.3), (700, 0.4),
+        (800, 0.6), (900, 0.8),
+    ]
+
+    /// Picks the instance whose weight is closest to `weight`.
+    ///
+    /// A static file yields one descriptor; a variable file yields one per named instance. Ties
+    /// keep file order, which lists default-width instances first.
+    /// - Returns: The instance's PostScript name and CSS weight, or `nil` without a named
+    ///   descriptor.
+    static func closestInstance(in descriptors: [CTFontDescriptor], to weight: Int) -> (
+        postScriptName: String, weight: Int
+    )? {
+        descriptors.compactMap { descriptor -> (postScriptName: String, weight: Int)? in
+            guard
+                let name = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute)
+                    as? String
+            else { return nil }
+            let traits =
+                CTFontDescriptorCopyAttribute(descriptor, kCTFontTraitsAttribute)
+                as? [CFString: Any]
+            let trait = (traits?[kCTFontWeightTrait] as? Double) ?? 0
+            let snapped =
+                weightTraits.min { abs($0.trait - trait) < abs($1.trait - trait) }?.weight ?? 400
+            return (name, snapped)
+        }
+        .min { abs($0.weight - weight) < abs($1.weight - weight) }
     }
 
     func restore(_ font: DownloadedFont, weight: Int) async throws -> DownloadedFont {
