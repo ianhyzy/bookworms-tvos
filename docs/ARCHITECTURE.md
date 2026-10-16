@@ -26,7 +26,7 @@ Source code is in [Bookworms](../Bookworms), [BookwormsTopShelf](../BookwormsTop
 ## Data flow
 
 1. Load settings and cached source snapshots, clamping displayed collections to their configured limits.
-2. Refresh enabled sources and social datasets when due or explicitly requested. Missing caches recover independently of daily freshness; failed requests use a short backoff.
+2. Refresh enabled sources and social datasets when due or explicitly requested. With iCloud storage on, a due automatic library check reads the cloud archive first, for up to 10 seconds, and fetches only the sources still due. Missing caches recover independently of daily freshness; failed requests use a short backoff.
 3. Merge source metadata and compute the selected shelves and shared-book intersections.
 4. Prepare covers and feed avatars for enabled bounded collections using existing cover URLs. Book Wall preparation starts from the loaded current-year snapshot; opening the wall waits if its textures and models are not ready. Share source downloads and persist one reusable image per URL.
 5. Mount library views. Paging, details, and ambient playback read caches without network calls; selecting the details rating histogram fetches community reviews.
