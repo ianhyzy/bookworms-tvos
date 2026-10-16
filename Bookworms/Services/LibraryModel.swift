@@ -541,7 +541,8 @@ final class LibraryModel {
                 cloudStatus = "iCloud storage waits until setup finishes."
             } else {
                 queueSpineDesignRefresh()
-                queueCloudSync()
+                // A due refresh below waits for this read, so it starts at once.
+                queueCloudSync(delay: .zero)
             }
         } else {
             cloudStatus = "iCloud storage is off."
@@ -812,22 +813,26 @@ final class LibraryModel {
             queueAutomaticGeneration()
         }
         let revision = sourceRevision
+        // Another device may have saved a fresh snapshot of the same account, so a due automatic
+        // check reads iCloud first. Each source's gate is checked again afterward, and only the
+        // sources still due are fetched.
+        let pullsCloud =
+            !manual && iCloudEnabled && !cloudSyncSuppressedForWelcome
+            && ((hardcoverEnabled && isDue(.hardcover)) || (cwaEnabled && isDue(.cwa)))
+        if pullsCloud {
+            if cloudTask == nil { queueCloudSync(delay: .zero) }
+            await waitForCloudSync(atMost: .seconds(10))
+            guard revision == sourceRevision, !Task.isCancelled else { return }
+        }
         var failures: [String] = []
-        if hardcoverEnabled,
-            manual
-                || schedule
-                    .isDue(
-                        .hardcover, now: dependencies.now(),
-                        hasSnapshot: activeHardcoverSnapshot() != nil
-                            && activeHardcoverAccountID != nil),
+        if hardcoverEnabled, manual || isDue(.hardcover),
             let token = dependencies.readCredential("hardcover-token")
         {
             do {
                 try schedule
                     .begin(
                         .hardcover, now: dependencies.now(), manual: manual,
-                        hasSnapshot: activeHardcoverSnapshot() != nil
-                            && activeHardcoverAccountID != nil)
+                        hasSnapshot: hasActiveSnapshot(.hardcover))
                 let result = try await dependencies.fetchHardcover(
                     token, activeHardcoverSnapshot())
                 guard revision == sourceRevision, !Task.isCancelled else { return }
@@ -844,23 +849,14 @@ final class LibraryModel {
                 }
             }
         }
-        if cwaEnabled,
-            manual
-                || schedule
-                    .isDue(
-                        .cwa, now: dependencies.now(),
-                        hasSnapshot: sourceSnapshots.contains {
-                            $0.source == .cwa && $0.accountID == cwaConfiguration.identity
-                        }),
+        if cwaEnabled, manual || isDue(.cwa),
             let password = dependencies.readCredential("cwa-password")
         {
             do {
                 try schedule
                     .begin(
                         .cwa, now: dependencies.now(), manual: manual,
-                        hasSnapshot: sourceSnapshots.contains {
-                            $0.source == .cwa && $0.accountID == cwaConfiguration.identity
-                        })
+                        hasSnapshot: hasActiveSnapshot(.cwa))
                 let configuration = cwaConfiguration
                 let result = try await dependencies.fetchCWA(configuration, password)
                 // A response belongs to the configuration captured before suspension.
@@ -875,7 +871,27 @@ final class LibraryModel {
         if !failures.isEmpty {
             message = failures.joined(separator: "\n")
         }
-        queueCloudSync()
+        // Each refresh reads iCloud once, which also retries an upload that failed. An installed
+        // snapshot queues its own upload.
+        if !pullsCloud { queueCloudSync() }
+    }
+
+    /// Whether `source` has a snapshot of its active account. Without one, the daily gate ignores
+    /// the last success.
+    private func hasActiveSnapshot(_ source: LibrarySource) -> Bool {
+        switch source {
+        case .hardcover:
+            activeHardcoverSnapshot() != nil && activeHardcoverAccountID != nil
+        case .cwa:
+            sourceSnapshots.contains {
+                $0.source == .cwa && $0.accountID == cwaConfiguration.identity
+            }
+        }
+    }
+
+    /// Whether an automatic check of `source` is due.
+    private func isDue(_ source: LibrarySource) -> Bool {
+        schedule.isDue(source, now: dependencies.now(), hasSnapshot: hasActiveSnapshot(source))
     }
 
     func connectCWA(_ configuration: CWAConfiguration, password: String) async -> Bool {
@@ -1183,7 +1199,9 @@ final class LibraryModel {
             "Your iCloud account changed. Turn iCloud Storage on to sync this library with the current account."
     }
 
-    func queueCloudSync() {
+    /// Queues a cloud sync, which uploads local snapshots and merges the archive's newer ones.
+    /// `delay` batches the changes that follow one another; a sync already queued keeps its own.
+    func queueCloudSync(delay: Duration = .seconds(2)) {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         guard hasStarted, iCloudEnabled, !isSample, !cloudSyncSuppressedForWelcome else { return }
         cloudPending = true
@@ -1192,7 +1210,9 @@ final class LibraryModel {
         cloudTask = Task { [weak self] in
             guard let self else { return }
             defer { if revision == cloudRevision { cloudTask = nil } }
-            do { try await dependencies.sleep(.seconds(2)) } catch { return }
+            if delay > .zero {
+                do { try await dependencies.sleep(delay) } catch { return }
+            }
             while cloudPending && iCloudEnabled && revision == cloudRevision && !Task.isCancelled {
                 cloudPending = false
                 cloudStatus = "Syncing with iCloud…"
@@ -1460,6 +1480,24 @@ final class LibraryModel {
     /// Waits for the currently queued cloud operation without scheduling another upload.
     func waitForCloudSync() async {
         await cloudTask?.value
+    }
+
+    /// Waits for the currently queued cloud operation for at most `limit`. A sync that takes
+    /// longer keeps running; only the wait ends.
+    private func waitForCloudSync(atMost limit: Duration) async {
+        guard let task = cloudTask else { return }
+        let (ended, end) = AsyncStream.makeStream(of: Void.self)
+        let sleep = dependencies.sleep
+        let timer = Task {
+            try? await sleep(limit)
+            end.finish()
+        }
+        Task {
+            await task.value
+            end.finish()
+        }
+        for await _ in ended {}
+        timer.cancel()
     }
 
     /// Waits for the current companion record read and series-look creation.

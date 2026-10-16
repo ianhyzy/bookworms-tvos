@@ -1360,7 +1360,6 @@ final class LibraryWorkflowTests: XCTestCase {
     func testCloudDebounceCanBeReleasedWithoutRealTimeAndCancelsWhenDisabled() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
-        fixture.defaults.set(true, forKey: "iCloudEnabled")
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         let delay = ControlledLibraryResponse<Void>("Cloud debounce scheduled")
         var dependencies = fixture.dependencies()
@@ -1370,6 +1369,8 @@ final class LibraryWorkflowTests: XCTestCase {
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
+        // Turning storage on queues a debounced sync; the launch sync starts without one.
+        model.iCloudEnabled = true
         await fulfillment(of: [delay.started], timeout: 5)
         let waiting = expectation(description: "Waiting for scheduled cloud sync")
         let completed = expectation(description: "Cancelled cloud sync returned")
@@ -1385,6 +1386,96 @@ final class LibraryWorkflowTests: XCTestCase {
         await work.value
         XCTAssertTrue(model.cloudStatus.contains("storage is off"))
         XCTAssertEqual(model.books.map(\.id), [1])
+    }
+
+    func testFreshICloudSnapshotOfTheActiveAccountSkipsTheDueFetch() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        // Another device synced the account an hour ago. The fixture fails any Hardcover
+        // request, so the due check must end with the iCloud read.
+        let remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 3_600)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            // The 10-second limit on the read never elapses; the model cancels it.
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+        }
+        dependencies.syncCloud = { _ in CloudLibraryArchive(sources: [remote]) }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertEqual(
+            fixture.defaults.object(forKey: "syncSuccess.hardcover") as? Date, remote.syncedAt)
+    }
+
+    func testStaleICloudSnapshotLeadsToOneFetchAndAnUpload() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 100_000)])
+        // Another device's copy is newer than this one's, but 25 hours old.
+        let remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 90_000)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+        }
+        var uploads: [CloudLibraryArchive] = []
+        dependencies.syncCloud = { archive in
+            uploads.append(archive)
+            return uploads.count == 1 ? CloudLibraryArchive(sources: [remote]) : archive
+        }
+        var previous: [SourceSnapshot?] = []
+        dependencies.fetchHardcover = { _, snapshot in
+            previous.append(snapshot)
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(3)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            previous.map { $0?.books.map(\.id) }, [[2]],
+            "One fetch, which keeps the covers of the newest copy")
+        XCTAssertEqual(uploads.count, 2, "The read, then the fetched snapshot's upload")
+        XCTAssertEqual(uploads.last?.sources.map { $0.books.map(\.id) }, [[3]])
+        XCTAssertEqual(model.books.map(\.id), [3])
+    }
+
+    func testAnUnansweredICloudReadDelaysTheDueFetchByTenSecondsAtMost() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        let read = ControlledLibraryResponse<CloudLibraryArchive>("iCloud read started")
+        var dependencies = fixture.dependencies()
+        // Each wait elapses at once, so the read's 10-second limit passes before it answers.
+        var waits: [Duration] = []
+        dependencies.sleep = { waits.append($0) }
+        var archives: [CloudLibraryArchive] = []
+        dependencies.syncCloud = { archive in
+            archives.append(archive)
+            return archives.count == 1 ? try await read.value() : archive
+        }
+        var fetches = 0
+        dependencies.fetchHardcover = { _, _ in
+            fetches += 1
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertEqual(waits, [.seconds(10)])
+        XCTAssertEqual(fetches, 1)
+        XCTAssertEqual(model.books.map(\.id), [2])
+
+        // The read keeps running, and the fetched snapshot still reaches iCloud.
+        await fulfillment(of: [read.started], timeout: 5)
+        read.resolve(CloudLibraryArchive())
+        await model.waitForCloudSync()
+        XCTAssertEqual(archives.last?.sources.map { $0.books.map(\.id) }, [[2]])
+        XCTAssertTrue(model.cloudStatus.contains("Saved to iCloud"))
+        XCTAssertEqual(model.books.map(\.id), [2])
     }
 
     func testBrowsingAndAmbientStateDoNotReadSecretsOrStartBackgroundServices() async throws {
