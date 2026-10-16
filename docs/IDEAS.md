@@ -87,7 +87,7 @@ Show the cover blank the first time the details page opens. The title fades when
 
 #### The Raw Shark Texts (Steven Hall)
 
-A shark made of typed letters swims slowly through the description, like the book's flip-book sequence. Reduce Motion shows a still frame.
+A shark made of typed letters sits still in the description, like a frame of the book's flip-book sequence. When the reader turns the effect on, it swims slowly through the text; Reduce Motion keeps it still.
 
 #### Dungeon Crawler Carl (Matt Dinniman)
 
@@ -95,7 +95,7 @@ Show a snarky achievement banner, in the dungeon AI's voice, when the reader ope
 
 #### Murderbot Diaries (Martha Wells)
 
-Add a SecUnit status line to the details page, for example the number of *Sanctuary Moon* episodes watched while reading.
+Add a SecUnit status line to the details page, for example how many *Sanctuary Moon* episodes the reader could have watched instead, estimated from the book's page count.
 
 #### Discworld (Terry Pratchett)
 
