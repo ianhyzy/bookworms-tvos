@@ -597,9 +597,9 @@ final class LibraryModel {
                 guard !Task.isCancelled, let self else { return }
                 // A completed download must not replace a newer generated choice.
                 guard aiRecords[record.bookID]?.generatedAt == record.generatedAt else { continue }
-                // A blocked family, such as Bangers, restores as its upright stand-in.
-                // `GoogleFontLibrary.restore` maps the family on every restore, so the saved
-                // record keeps its original name.
+                // A blocked family, such as Bangers, restores as its upright stand-in. Only the
+                // in-memory record changes here; `GoogleFontLibrary.restore` maps the family on
+                // every restore, so a stored record in the blocked family restores the same way.
                 var updated = record
                 updated.font = font
                 updated.style.fontName = font.postScriptName
