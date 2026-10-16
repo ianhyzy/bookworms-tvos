@@ -246,31 +246,38 @@ extension BookWallPreparation {
     /// downloadable stand-in.
     ///
     /// A blocked family is never downloaded. A slanted one, such as Dancing Script, loads its
-    /// upright stand-in (`SpineFontPolicy.standInFamilies`) at weight 400, because the stand-in
-    /// is named for its Regular face. An italic face of an allowed family loads the family's
-    /// upright face, which `SpineFontPolicy.allowedFontName(_:)` names.
+    /// upright stand-in (`SpineFontPolicy.standInFamily(for:)`) at the design's weight, as the
+    /// iPhone companion does. An italic face of an allowed family loads the family's upright
+    /// face, which `SpineFontPolicy.allowedFontName(_:)` names.
     nonisolated static func fontRequest(for design: SpineDesignV1) -> (family: String, weight: Int)?
     {
         guard let name = design.fontPostScriptName else { return nil }
         if let family = design.fontFamily, SpineFontPolicy.allows(family) {
             return (family, design.instanceWeight ?? design.weight)
         }
-        let standIn = SpineFontPolicy.standInFamilies[SpineFontPolicy.allowedFontName(name)]
-        return standIn.map { ($0, 400) }
+        return SpineFontPolicy.standInFamily(for: name).map { ($0, design.weight) }
     }
 
     /// Downloads and registers each design's Google Fonts face once per family and weight.
     /// A book whose face does not load uses the system face for its design's typeface and
     /// weight. A network failure stops further downloads until the next preparation, so an
     /// unreachable host delays the wall by at most one request timeout.
+    ///
+    /// A face counts as registered only at the requested weight: a stand-in family's face of
+    /// that weight, or the design's own face by name. A registered Kalam Regular, for example,
+    /// does not stand in for Kalam Bold.
     fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
         var requested = Set<String>()
         for design in designs {
-            guard let name = design.fontPostScriptName,
-                UIFont(name: SpineFontPolicy.allowedFontName(name), size: 12) == nil,
-                let request = fontRequest(for: design)
+            guard let name = design.fontPostScriptName, let request = fontRequest(for: design)
             else { continue }
             let (family, weight) = request
+            let registered =
+                SpineFontPolicy.standInFamily(for: name) == nil
+                ? UIFont(name: SpineFontPolicy.allowedFontName(name), size: 12) != nil
+                : GoogleFontLibrary.registeredFace(family: family, nearest: weight)
+                    .map(GoogleFontLibrary.cssWeight) == weight
+            guard !registered else { continue }
             guard requested.insert("\(family):\(weight)").inserted else { continue }
             guard !Task.isCancelled else { return }
             do {

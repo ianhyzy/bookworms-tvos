@@ -41,13 +41,21 @@ enum SpineFontPolicy {
         "homemadeapple": "Caveat-Regular", "rocksalt": "PermanentMarker-Regular",
     ]
 
-    /// The Google Fonts family of each upright stand-in in `slantedReplacements`, by PostScript
-    /// name, so Book Wall can download the stand-in for a design in a blocked family. Each
-    /// stand-in is its family's Regular, weight 400, face.
+    /// The Google Fonts family of each upright stand-in in `slantedReplacements`, by the
+    /// PostScript name of its Regular face. Book Wall downloads and draws the family at the
+    /// design's weight (`standInFamily(for:)`) and falls back to the Regular face.
     static let standInFamilies = [
         "Bungee-Regular": "Bungee", "ChangaOne": "Changa One", "Kalam-Regular": "Kalam",
         "PermanentMarker-Regular": "Permanent Marker", "Caveat-Regular": "Caveat",
     ]
+
+    /// Returns the Google Fonts family of the upright stand-in for `name`, a family or
+    /// PostScript name that slants by design, such as Kalam for "Dancing Script" or
+    /// "DancingScript-Bold". Returns `nil` for an allowed name and for a blocked name without a
+    /// downloadable stand-in, such as Impact, whose replacement ships with tvOS.
+    static func standInFamily(for name: String) -> String? {
+        allows(name) ? nil : standInFamilies[allowedFontName(name)]
+    }
 
     /// The Book Wall's general-fiction face, for a blocked name with no closer upright face.
     static let uprightFallback = "AvenirNext-DemiBold"

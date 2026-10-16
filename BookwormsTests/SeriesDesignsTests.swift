@@ -219,15 +219,15 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(local(SpineFontPolicy.impactReplacement).fontFamily, "Bebas Neue")
     }
 
-    private func companionDesign(_ bookID: Int, family: String?, postScriptName: String?)
-        -> SpineDesignV1
-    {
+    private func companionDesign(
+        _ bookID: Int, family: String?, postScriptName: String?, weight: Int = 700
+    ) -> SpineDesignV1 {
         SpineDesignV1(
             version: 1, accountID: "account", bookID: bookID,
             workItemHash: String(repeating: "a", count: 64),
             coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
             generatedAt: Date(timeIntervalSince1970: 1_000_000), backgroundHex: "#1F3A5A",
-            foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+            foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: weight,
             uppercase: true, fontFamily: family, fontPostScriptName: postScriptName)
     }
 
@@ -238,25 +238,35 @@ final class SeriesDesignsTests: XCTestCase {
         }
         XCTAssertEqual(typography("EB Garamond", "EBGaramond-Bold").fontName, "EBGaramond-Bold")
         XCTAssertEqual(typography("Impact", "Impact").fontName, SpineFontPolicy.impactReplacement)
-        // A slanted script or an italic shows in an upright stand-in.
-        XCTAssertEqual(typography("Dancing Script", "DancingScript-Bold").fontName, "Kalam-Regular")
+        // A slanted script shows in its stand-in family at the design's weight, else in the
+        // stand-in's Regular face. An italic shows in its upright face.
+        let script = typography("Dancing Script", "DancingScript-Bold")
+        XCTAssertEqual(script.standInFamily, "Kalam")
+        XCTAssertEqual(script.weight, 700)
+        XCTAssertEqual(script.fontName, "Kalam-Regular")
         XCTAssertEqual(typography("Lora", "Lora-BoldIt").fontName, "Lora-Bold")
+        for (family, name) in [("EB Garamond", "EBGaramond-Bold"), ("Lora", "Lora-BoldIt")] {
+            XCTAssertNil(typography(family, name).standInFamily, name)
+        }
+        XCTAssertNil(typography("Impact", "Impact").standInFamily, "Bebas Neue ships with tvOS")
         XCTAssertEqual(typography("Lora", "Lora-Bold").typeface, "serif")
         XCTAssertTrue(typography("Lora", "Lora-Bold").uppercase)
     }
 
     func testCompanionDesignsDownloadTheFaceTheyDrawIn() {
-        func request(_ family: String, _ name: String) -> String? {
+        func request(_ family: String?, _ name: String, weight: Int = 700) -> String? {
             BookWallPreparation.fontRequest(
-                for: companionDesign(1, family: family, postScriptName: name)
+                for: companionDesign(1, family: family, postScriptName: name, weight: weight)
             )
             .map { "\($0.family):\($0.weight)" }
         }
         XCTAssertEqual(request("EB Garamond", "EBGaramond-Bold"), "EB Garamond:700")
         XCTAssertEqual(request("Lora", "Lora-BoldIt"), "Lora:700")
-        // A slanted family downloads its stand-in's Regular face, never itself.
-        XCTAssertEqual(request("Dancing Script", "DancingScript-Bold"), "Kalam:400")
-        XCTAssertEqual(request("Bangers", "Bangers-Regular"), "Bungee:400")
+        // A slanted family downloads its stand-in at the design's weight, never itself.
+        XCTAssertEqual(request("Dancing Script", "DancingScript-Bold"), "Kalam:700")
+        XCTAssertEqual(request("Dancing Script", "DancingScript-Bold", weight: 500), "Kalam:500")
+        XCTAssertEqual(request("Bangers", "Bangers-Regular"), "Bungee:700")
+        XCTAssertEqual(request(nil, "Pacifico-Regular", weight: 600), "Permanent Marker:600")
         XCTAssertNil(request("Impact", "Impact"), "Bebas Neue ships with tvOS")
         for standIn in Set(SpineFontPolicy.slantedReplacements.values) {
             XCTAssertNotNil(SpineFontPolicy.standInFamilies[standIn], standIn)
