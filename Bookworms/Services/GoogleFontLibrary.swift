@@ -196,20 +196,24 @@ actor GoogleFontLibrary {
     /// kept until a font registers (`registeredFaces`).
     static func registeredFace(family: String, nearest weight: Int) -> CTFont? {
         let key = "\(family):\(weight)"
-        if let cached = registeredFacesLock.withLock({ registeredFaces[key] }) { return cached }
-        let query = CTFontDescriptorCreateWithAttributes(
-            [kCTFontFamilyNameAttribute: family] as CFDictionary)
-        // The family is mandatory, so a missing family matches nothing rather than a fallback.
-        let mandatory = Set([kCTFontFamilyNameAttribute as String]) as CFSet
-        let faces = CTFontDescriptorCreateMatchingFontDescriptors(query, mandatory)
-        let face = uprightFace(in: faces as? [CTFontDescriptor] ?? [], nearest: weight)
-        registeredFacesLock.withLock { registeredFaces[key] = face }
-        return face
+        // The match runs under the lock, so one that began before a font registered can't be
+        // cached after `register(_:)` clears the cache.
+        return registeredFacesLock.withLock {
+            if let cached = registeredFaces[key] { return cached }
+            let query = CTFontDescriptorCreateWithAttributes(
+                [kCTFontFamilyNameAttribute: family] as CFDictionary)
+            // The family is mandatory, so a missing family matches nothing rather than a fallback.
+            let mandatory = Set([kCTFontFamilyNameAttribute as String]) as CFSet
+            let faces = CTFontDescriptorCreateMatchingFontDescriptors(query, mandatory)
+            let face = uprightFace(in: faces as? [CTFontDescriptor] ?? [], nearest: weight)
+            registeredFaces[key] = face
+            return face
+        }
     }
 
     /// `registeredFace(family:nearest:)` results, including misses, by family and weight. Cleared
     /// when a font registers, which can add a nearer face. Core Text fonts are immutable, so
-    /// threads can share them; `registeredFacesLock` guards the dictionary.
+    /// threads can share them; `registeredFacesLock` guards the dictionary and each match.
     nonisolated(unsafe) private static var registeredFaces: [String: CTFont?] = [:]
     private static let registeredFacesLock = NSLock()
 
