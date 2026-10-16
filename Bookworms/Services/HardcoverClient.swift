@@ -291,7 +291,7 @@ actor HardcoverClient {
         case library = """
             query ShelfLibrary($user: Int!, $offset: Int!, $language: String!) {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
-                id last_read_date rating status_id
+                id last_read_date rating status_id review
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
                   book_series { featured position compilation series { id name books_count primary_books_count } }
                   editions(where: {image_id: {_is_null: false},
@@ -615,6 +615,29 @@ actor HardcoverClient {
         return fraction.isFinite ? min(1, max(0, fraction)) : nil
     }
 
+    /// Turns a review into plain text: HTML tags and Markdown markers are removed, entities are
+    /// decoded, and paragraphs stay separated by one blank line. Returns `nil` for empty text.
+    ///
+    /// A port of the iPhone app's `HardcoverClient.plainText(from:)`. Either app can upload the
+    /// shared iCloud snapshot, so both must store the same text.
+    static func plainText(from markup: String?) -> String? {
+        guard var text = markup else { return nil }
+        text = text.replacing(/(?i)<br\s*\/?>|<\/li>/, with: "\n")
+            .replacing(/(?i)<\/(p|div|blockquote|h[1-6])>/, with: "\n\n")
+            // Only tag-shaped text goes, so "I <3 it" keeps its heart.
+            .replacing(/<\/?[a-zA-Z][^>]*>/, with: "")
+            .replacing(/(?m)^ {0,3}(?:#{1,6} +|> ?)/, with: "")
+        // Inline Markdown parsing drops emphasis and link markup and decodes HTML entities.
+        if let parsed = try? AttributedString(
+            markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        {
+            text = String(parsed.characters)
+        }
+        text = text.replacing(/[ \t]*\n[ \t]*\n\s*/, with: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     static func normalize(_ rows: [UserBook]) -> [Book] {
         var unique: [Int: Book] = [:]
         for row in rows {
@@ -637,7 +660,8 @@ actor HardcoverClient {
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,
-                description: source.description, coverURL: covers.alternate,
+                description: source.description, review: Self.plainText(from: row.review),
+                coverURL: covers.alternate,
                 pages: edition?.pages ?? source.pages,
                 finished: read?.finishedAt ?? row.lastReadDate, rating: row.rating,
                 format: edition?.readingFormat?.format,
@@ -708,6 +732,8 @@ struct UserBook: Decodable, Sendable {
     let statusID: Int?
     let lastReadDate: String?
     let rating: Double?
+    /// The reader's review, which may hold Markdown or HTML.
+    var review: String? = nil
     let book: SourceBook
     let edition: Edition?
     let userBookReads: [ReadEvent]?
@@ -718,6 +744,7 @@ struct UserBook: Decodable, Sendable {
         case statusID = "status_id"
         case lastReadDate = "last_read_date"
         case rating
+        case review
         case book
         case edition
         case userBookReads = "user_book_reads"
