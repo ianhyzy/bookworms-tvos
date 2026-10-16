@@ -56,11 +56,10 @@ final class BookWallPreparation {
     }
 
     /// Prepares `books`, each drawn in its series look from `looks`, else its companion design
-    /// from `designs`, else from its cover. A look draws on a book unless the look's face loaded
-    /// and lacks a glyph of the book's title and author, in capitals when the look draws in
-    /// capitals; that book keeps its companion design, as on the iPhone. A book with a series
-    /// source in `sources` (`LibraryModel.seriesSources`) draws in the source's design when the
-    /// source's face can letter it. Both checks run here, once.
+    /// from `designs`, else from its cover. A look draws on a book unless the look's face can't
+    /// letter it (`canLetter(_:in:)`); that book keeps its companion design, as on the iPhone. A
+    /// book with a series source in `sources` (`LibraryModel.seriesSources`) draws in the
+    /// source's design unless the source's face can't letter it. Both checks run here, once.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
         looks: [Int: SpineDesignV1] = [:]
@@ -93,9 +92,7 @@ final class BookWallPreparation {
         var typographies: [Int: BookWallLocalSpine.Typography] = [:]
         for book in books {
             if let source = sources[book.id], source.id != book.id,
-                SeriesDesigns.canLetter(
-                    book, font: typography(of: source).font(size: 12) as CTFont,
-                    uppercase: typography(of: source).uppercase)
+                Self.canLetter(book, in: typography(of: source))
             {
                 drawsWith[book.id] = source
                 typographies[book.id] = typography(of: source)
@@ -238,27 +235,28 @@ final class BookWallPreparation {
 
 extension BookWallPreparation {
     /// The design each book draws, by book ID: its series look from `looks`, unless the look's
-    /// face is registered and lacks a glyph of the book's title and author, in capitals when the
-    /// look draws in capitals; else its companion design from `designs`.
-    ///
-    /// A look whose face isn't registered passes, since the spine letters in the system face, so
-    /// register the faces (`loadFonts(for:)`) before calling this.
+    /// face can't letter the book (`canLetter(_:in:)`); else its companion design from `designs`.
+    /// Register the faces (`loadFonts(for:)`) before calling this.
     static func drawnDesigns(
         of books: [Book], designs: [Int: SpineDesignV1], looks: [Int: SpineDesignV1]
     ) -> [Int: SpineDesignV1] {
         var drawn = designs
         for book in books {
-            guard let look = looks[book.id] else { continue }
-            let typography = BookWallLocalSpine.typography(for: book, design: look)
-            if let face = typography.loadedFont(size: 12),
-                !SeriesDesigns.canLetter(
-                    book, font: face as CTFont, uppercase: typography.uppercase)
-            {
-                continue
-            }
+            guard let look = looks[book.id],
+                canLetter(book, in: BookWallLocalSpine.typography(for: book, design: look))
+            else { continue }
             drawn[book.id] = look
         }
         return drawn
+    }
+
+    /// Whether a spine in `typography` can letter `book`: false only when its face is registered
+    /// (`BookWallLocalSpine.Typography.loadedFont(size:)`) and lacks a glyph of the book's title
+    /// and author, in capitals when `typography` draws in capitals. A face that isn't registered
+    /// passes, since the spine letters in the system face, as the iPhone companion's check does.
+    static func canLetter(_ book: Book, in typography: BookWallLocalSpine.Typography) -> Bool {
+        guard let face = typography.loadedFont(size: 12) else { return true }
+        return SeriesDesigns.canLetter(book, font: face as CTFont, uppercase: typography.uppercase)
     }
 
     /// The style `book` draws with when `drawsWith` gives it a series source: the source's,

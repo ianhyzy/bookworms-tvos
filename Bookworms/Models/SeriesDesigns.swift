@@ -137,20 +137,26 @@ enum SeriesDesigns {
     }
 
     /// Returns whether `lhs` ranks before `rhs` in a look group: the lower position in its style
-    /// series (`styleSeries(of:link:)`), then the earlier finish, then the lower book ID. A
-    /// missing position or finish ranks last, so reading the first book or a prequel later moves
-    /// the group to its design.
+    /// series (`styleSeries(of:link:)`), then the earlier finish date, then the lower book ID. A
+    /// missing position ranks last, as does a finish that is missing or doesn't parse, so reading
+    /// the first book or a prequel later moves the group to its design.
     static func ranksBefore(_ lhs: Book, _ rhs: Book, links: [Int: SeriesLinkV1] = [:]) -> Bool {
         rank(lhs, link: links[lhs.id]) < rank(rhs, link: links[rhs.id])
     }
 
-    private static func rank(_ book: Book, link: SeriesLinkV1?) -> (Double, String, Int) {
-        (styleSeries(of: book, link: link)?.position ?? .infinity, finish(book), book.id)
+    private static func rank(_ book: Book, link: SeriesLinkV1?) -> (Double, Date, Int) {
+        (
+            styleSeries(of: book, link: link)?.position ?? .infinity,
+            finishedDate(of: book) ?? .distantFuture, book.id
+        )
     }
 
-    /// The finish date, `yyyy-MM-dd`, which sorts as text; a book without one sorts last.
-    private static func finish(_ book: Book) -> String {
-        book.finished.map { String($0.prefix(10)) } ?? "~"
+    /// The finish date, parsed from the first 10 characters of `finished` (`yyyy-MM-dd`) at noon
+    /// UTC, as the iPhone companion's `CloudBook.finishedDate` does. `nil` when the finish is
+    /// missing or doesn't parse, so such a book ranks as unfinished.
+    private static func finishedDate(of book: Book) -> Date? {
+        guard let finished = book.finished, finished.count >= 10 else { return nil }
+        return try? Date(String(finished.prefix(10)) + "T12:00:00Z", strategy: .iso8601)
     }
 
     /// Returns whether another book may draw with a design in `fontName`: never a name
@@ -230,15 +236,6 @@ enum SeriesDesigns {
     static func lettering(of book: Book, uppercase: Bool = false) -> String {
         let text = book.title + " " + book.author
         return uppercase ? text.uppercased() : text
-    }
-
-    /// Whether the font named `fontName` has a glyph for every letter `book`'s spine draws.
-    /// Preparation checks this once per book; a font that is not installed letters nothing.
-    static func canLetter(_ book: Book, fontName: String, uppercase: Bool = false) -> Bool {
-        let font = CTFontCreateWithName(fontName as CFString, 12, nil)
-        // CoreText substitutes a default face for a missing name; that face does not count.
-        guard (CTFontCopyPostScriptName(font) as String) == fontName else { return false }
-        return canLetter(book, font: font, uppercase: uppercase)
     }
 
     /// Whether `font` has a glyph for every letter `book`'s spine draws, in capitals when

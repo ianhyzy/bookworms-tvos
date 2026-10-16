@@ -330,6 +330,10 @@ final class SeriesDesignsTests: XCTestCase {
             SeriesDesigns.ranksBefore(
                 book(9, position: 2, finished: "2026-01-01"), book(1, position: 2)),
             "A missing finish ranks last")
+        XCTAssertTrue(
+            SeriesDesigns.ranksBefore(
+                book(1, position: 2), book(9, position: 2, finished: "unknown date")),
+            "A finish that doesn't parse ranks as missing")
         XCTAssertTrue(SeriesDesigns.ranksBefore(book(1, position: 2), book(9, position: 2)))
     }
 
@@ -377,19 +381,22 @@ final class SeriesDesignsTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testAFontWithoutTheLettersGlyphsCannotLetterABook() {
+        func canLetter(_ book: Book, _ fontName: String) -> Bool {
+            BookWallPreparation.canLetter(
+                book, in: BookWallLocalSpine.Typography(fontName: fontName))
+        }
+        XCTAssertTrue(canLetter(book(1, title: "Carl's Doomsday"), "Georgia-Bold"))
+        XCTAssertFalse(canLetter(book(2, title: "ダンジョン"), "Georgia-Bold"))
         XCTAssertTrue(
-            SeriesDesigns.canLetter(book(1, title: "Carl's Doomsday"), fontName: "Georgia-Bold"))
-        XCTAssertFalse(
-            SeriesDesigns.canLetter(book(2, title: "ダンジョン"), fontName: "Georgia-Bold"))
-        XCTAssertFalse(
-            SeriesDesigns.canLetter(book(3), fontName: "NoSuchFont-Bold"),
-            "A missing font letters nothing")
+            canLetter(book(3, title: "ダンジョン"), "NoSuchFont-Bold"),
+            "A face that isn't loaded letters in the system face")
         XCTAssertTrue(
-            SeriesDesigns.canLetter(book(4, title: "Cafe\u{301}"), fontName: "Georgia-Bold"),
+            canLetter(book(4, title: "Cafe\u{301}"), "Georgia-Bold"),
             "Decomposed accents are checked in precomposed form")
         XCTAssertTrue(
-            SeriesDesigns.canLetter(book(5, author: "", title: ""), fontName: "Georgia-Bold"),
+            canLetter(book(5, author: "", title: ""), "Georgia-Bold"),
             "A spine with nothing to letter passes")
         XCTAssertEqual(
             SeriesDesigns.lettering(of: book(4, title: "Straße"), uppercase: true),
