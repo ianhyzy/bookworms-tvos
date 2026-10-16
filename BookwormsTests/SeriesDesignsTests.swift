@@ -176,6 +176,12 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(
             SeriesDesigns.lookDesign(of: renamed, designs: designs)?.bookID, 2,
             "A design made before the book changed doesn't count")
+        var unnamed = designs[3]!
+        unnamed.fontFamily = nil
+        unnamed.fontPostScriptName = "Pacifico-Regular"
+        XCTAssertFalse(
+            SeriesDesigns.isUsableSource(unnamed),
+            "A design that names a blocked face only by PostScript name can't start a look")
     }
 
     func testBooksOfAGroupWithALookDrawTheLookUnlessTheyKeepTheirOwn() throws {

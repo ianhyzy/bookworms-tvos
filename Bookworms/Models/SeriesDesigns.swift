@@ -162,10 +162,12 @@ enum SeriesDesigns {
         SpineFontPolicy.allows(fontName)
     }
 
-    /// Returns whether a new series look may copy `design`: never a blocked family, such as
-    /// Impact or a slanted script, as the iPhone companion's `isUsableSource(_:)` rules.
+    /// Returns whether a new series look may copy `design`: never one whose family or PostScript
+    /// name is blocked, such as Impact or a slanted script, as the iPhone companion's
+    /// `isUsableSource(_:)` rules.
     static func isUsableSource(_ design: SpineDesignV1) -> Bool {
-        design.fontFamily.map(SpineFontPolicy.allows) ?? true
+        (design.fontFamily.map(SpineFontPolicy.allows) ?? true)
+            && (design.fontPostScriptName.map(SpineFontPolicy.allows) ?? true)
     }
 
     /// The saved design a new look for a group copies, as stored: the earliest `generatedAt`
