@@ -170,11 +170,10 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     var key: SeriesLookKey { SeriesLookKey(seriesID: seriesID, group: group) }
 
     func isValid(accountID: String, key: SeriesLookKey) -> Bool {
-        version == 1 && self.accountID == accountID && !accountID.isEmpty && self.key == key
-            && group.count <= 200 && sourceBookID > 0
-            && createdAt.timeIntervalSince1970.isFinite
-            && (editedAt?.timeIntervalSince1970.isFinite ?? true)
-            && SpineDesignV1.isShortLine(origin)
+        version == 1 && self.accountID == accountID && !accountID.isEmpty
+            && accountID.count <= 512 && self.key == key && seriesID > 0 && group.count <= 200
+            && sourceBookID > 0 && createdAt.timeIntervalSince1970.isFinite
+            && (editedAt?.timeIntervalSince1970.isFinite ?? true) && origin.count <= 80
             && !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && design(bookID: sourceBookID, workItemHash: "").isValidLook
     }

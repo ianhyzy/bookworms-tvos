@@ -421,6 +421,25 @@ final class SpineCloudTests: XCTestCase {
             foregroundHex: blank.foregroundHex, accentHex: blank.accentHex, typeface: "serif",
             weight: 700, uppercase: false)
         XCTAssertFalse(blank.isValid(accountID: "42", key: cityWatch), "An origin is required")
+        let unnumbered = SeriesLookKey(seriesID: 0, group: cityWatch.group)
+        XCTAssertFalse(look(unnumbered).isValid(accountID: "42", key: unnumbered))
+        func custom(accountID: String, origin: String) -> SeriesLookV1 {
+            SeriesLookV1(
+                accountID: accountID, seriesID: 1018, group: cityWatch.group, sourceBookID: 123,
+                origin: origin, createdAt: blank.createdAt, backgroundHex: "#1A2B3C",
+                foregroundHex: "#F0E0D0", accentHex: "#C0A060", typeface: "serif", weight: 700,
+                uppercase: false)
+        }
+        let longAccount = String(repeating: "4", count: 513)
+        XCTAssertFalse(
+            custom(accountID: longAccount, origin: "ios-pcc-v2")
+                .isValid(accountID: longAccount, key: cityWatch))
+        XCTAssertTrue(
+            custom(accountID: "42", origin: "two\nlines").isValid(accountID: "42", key: cityWatch),
+            "As on the iPhone, an origin may span lines")
+        XCTAssertFalse(
+            custom(accountID: "42", origin: String(repeating: "o", count: 81))
+                .isValid(accountID: "42", key: cityWatch))
     }
 
     func testSeriesLinkPayloadDecodesAndValidatesItsBook() throws {

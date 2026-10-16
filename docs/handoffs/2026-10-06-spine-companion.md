@@ -35,7 +35,6 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 | Color hex case | `#` + 6 uppercase hex digits | Same | None; the iPhone emits uppercase. |
 | `generatorVersion` | Any non-blank string | Any non-blank string; redesigns a design with the generator's colors unless it is `ios-pcc-v2` | None on the TV, which shows designs from any generator. |
 | Archive size the iPhone reads | No bound on the TV | At most 50 MB | A very large archive stops the iPhone; the TV does not warn. |
-| `SeriesLookV1` account ID and origin | No account ID bound; the origin must be one line | Account ID at most 512 characters; the origin may contain a line break | None in practice; both apps write short, one-line values. |
 | Extra `Book` fields | Encoded in `library-v1` | Ignored unless `CloudBook` declares them, such as `seriesName` and `seriesMemberships` | None. |
 
 ## Remaining steps
