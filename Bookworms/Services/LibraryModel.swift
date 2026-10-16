@@ -596,6 +596,8 @@ final class LibraryModel {
                 guard !Task.isCancelled, let self else { return }
                 // A completed download must not replace a newer generated choice.
                 guard aiRecords[record.bookID]?.generatedAt == record.generatedAt else { continue }
+                // A blocked family, such as Bangers, restores as its upright stand-in. Keeping
+                // the stand-in in the record and its style restores it directly next time.
                 var updated = record
                 updated.font = font
                 updated.style.fontName = font.postScriptName

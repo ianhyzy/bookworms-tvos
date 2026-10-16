@@ -219,8 +219,12 @@ actor GoogleFontLibrary {
         return weight > 500 ? lhs > rhs : lhs < rhs
     }
 
+    /// Downloads a saved record's font again at `weight`. A family the type rules block, such as
+    /// Bangers, downloads its upright stand-in (`SpineFontPolicy.standInFamily(for:)`), such as
+    /// Bungee, instead.
     func restore(_ font: DownloadedFont, weight: Int) async throws -> DownloadedFont {
-        return try await download(family: font.family, weight: weight)
+        try await download(
+            family: SpineFontPolicy.standInFamily(for: font.family) ?? font.family, weight: weight)
     }
 
     private func register(_ font: DownloadedFont) throws {
