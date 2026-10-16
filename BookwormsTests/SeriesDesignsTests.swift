@@ -166,6 +166,11 @@ final class SeriesDesignsTests: XCTestCase {
             SeriesDesigns.lookDesign(of: members, designs: [1: designs[1]!, 4: designs[4]!])?
                 .bookID, 1, "Reuse copies count only when no member has an original")
         XCTAssertNil(SeriesDesigns.lookDesign(of: members, designs: [4: designs[4]!]))
+        var tagged = designs[2]!
+        tagged.provenance = "generated-colors:1A2B3C,F4E9D0,C08040 series-reuse:9"
+        XCTAssertTrue(tagged.isSeriesReuse, "Any provenance token can mark a reuse copy")
+        tagged.provenance = "no-series-reuse:9"
+        XCTAssertFalse(tagged.isSeriesReuse, "Only a token that starts with the tag counts")
         var renamed = members
         renamed[2].title = "Renamed"
         XCTAssertEqual(

@@ -182,7 +182,7 @@ enum SeriesDesigns {
             else { return nil }
             return design
         }
-        let originals = usable.filter { $0.provenance?.contains("series-reuse") != true }
+        let originals = usable.filter { !$0.isSeriesReuse }
         return (originals.isEmpty ? usable : originals)
             .min { ($0.generatedAt, $0.bookID) < ($1.generatedAt, $1.bookID) }
     }
@@ -248,5 +248,12 @@ enum SeriesDesigns {
                 .map(String.init).joined().utf16)
         var glyphs = [CGGlyph](repeating: 0, count: characters.count)
         return CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count)
+    }
+}
+
+extension SpineDesignV1 {
+    /// Whether the design copies another book's (`provenance` "series-reuse:<bookID>").
+    var isSeriesReuse: Bool {
+        provenance?.split(separator: " ").contains { $0.hasPrefix("series-reuse:") } == true
     }
 }
