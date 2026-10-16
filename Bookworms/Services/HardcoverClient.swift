@@ -632,6 +632,7 @@ actor HardcoverClient {
                 editionIsInLanguage: edition?.isInLanguage(Self.coverLanguage) ?? true)
             let membership = source.bookSeries?
                 .sorted { ($0.featured ?? false) && !($1.featured ?? false) }.first
+            let seriesName = membership?.series?.name?.trimmingCharacters(in: .whitespaces)
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,
@@ -641,7 +642,7 @@ actor HardcoverClient {
                 format: edition?.readingFormat?.format,
                 seriesID: membership?.series?.id,
                 seriesPosition: membership?.position,
-                seriesName: membership?.series?.name,
+                seriesName: seriesName?.isEmpty == false ? seriesName : nil,
                 genres: source.genres,
                 communityRating: source.rating, ratingsCount: source.ratingsCount,
                 ratingDistribution: source.validRatingDistribution,
