@@ -215,6 +215,50 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertNil(older.seriesName, "Books saved before series names decode without one")
     }
 
+    func testReaderReviewIsPlainTextAndSurvivesTheCloudArchive() throws {
+        let json = #"""
+            [{"id": 100, "status_id": 3, "review": "<p>A <em>quiet</em> triumph.</p><p>Again.</p>",
+              "book": {"id": 11, "title": "The Tainted Cup"}}]
+            """#
+        let rows = try JSONDecoder().decode([UserBook].self, from: Data(json.utf8))
+        let book = try XCTUnwrap(HardcoverClient.normalize(rows).first)
+        XCTAssertEqual(book.review, "A quiet triumph.\n\nAgain.")
+
+        // The iPhone decodes the archive's books with this key (`CloudBook.review`).
+        let archive = CloudLibraryArchive(sources: [
+            SourceSnapshot(
+                source: .hardcover, accountID: "1", books: [book], syncedAt: .distantPast)
+        ])
+        let decoded = try JSONDecoder()
+            .decode(CloudLibraryArchive.self, from: JSONEncoder().encode(archive))
+        XCTAssertEqual(decoded.sources.first?.books.first?.review, "A quiet triumph.\n\nAgain.")
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(archive))
+        let sources = try XCTUnwrap((encoded as? [String: Any])?["sources"] as? [[String: Any]])
+        let books = try XCTUnwrap(sources.first?["books"] as? [[String: Any]])
+        XCTAssertEqual(books.first?["review"] as? String, "A quiet triumph.\n\nAgain.")
+    }
+
+    /// The iPhone app's cases for `plainText(from:)`, so both apps store the same review text.
+    func testReviewTextBecomesPlainTextAsOnTheIPhone() {
+        let plain = HardcoverClient.plainText(from:)
+        XCTAssertNil(plain(nil))
+        XCTAssertNil(plain(" \n<p></p> "))
+        XCTAssertEqual(
+            plain("<p>A <em>quiet</em> triumph &amp; a joy.</p><p>Would reread.</p>"),
+            "A quiet triumph & a joy.\n\nWould reread.")
+        XCTAssertEqual(
+            plain("Line one<br/>Line two<BR>Line three"), "Line one\nLine two\nLine three")
+        XCTAssertEqual(
+            plain(
+                "# Verdict\n\n**Loved it.** Read [the sequel](https://example.com) next.\n> Five stars, _easily_."
+            ),
+            "Verdict\n\nLoved it. Read the sequel next.\nFive stars, easily.")
+        XCTAssertEqual(
+            plain("Tea &amp; toast &#8212; I <3 it, 5 * 3 > 2 and snake_case stays. #bookclub"),
+            "Tea & toast — I <3 it, 5 * 3 > 2 and snake_case stays. #bookclub")
+        XCTAssertEqual(plain("First.\n \n\n\nSecond."), "First.\n\nSecond.")
+    }
+
     func testLibraryRowsKeepEveryNamedSeriesMembership() throws {
         let json = #"""
             [{"id": 100, "status_id": 3,
@@ -365,5 +409,19 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(
             merged.sources.first(where: { $0.source == .hardcover })?.books.count,
             SampleLibrary.books.count)
+    }
+
+    func testCloudMergeKeepsStoredSeriesWhenANewerSnapshotHasNone() {
+        let now = Date()
+        let stored = SourceSnapshot(
+            source: .hardcover, accountID: "one", books: [], syncedAt: now,
+            series: [SampleLibrary.series])
+        let newer = SourceSnapshot(
+            source: .hardcover, accountID: "one", books: SampleLibrary.books,
+            syncedAt: now.addingTimeInterval(1))
+        let merged = CloudLibraryArchive(sources: [stored])
+            .merging(CloudLibraryArchive(sources: [newer]))
+        XCTAssertEqual(merged.sources.first?.books.count, SampleLibrary.books.count)
+        XCTAssertEqual(merged.sources.first?.series?.map(\.id), [SampleLibrary.series.id])
     }
 }

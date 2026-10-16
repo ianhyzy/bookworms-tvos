@@ -21,9 +21,9 @@ The extension does not call `UserDefaults` or read file timestamps. Do not copy 
 | AI providers | No requests while generation is disabled | Retained implementation only; saved keys and designs remain stored. |
 | Google Fonts and font hosting | Font family names from companion designs and series looks, requested during Book Wall preparation | Download the faces that Book Wall companion designs and series looks name, or their upright stand-ins. The retained AI spine path makes no requests while generated spines are disabled. |
 | Artwork hosts | Cover and avatar URL requests, including covers chosen in the iPhone companion | Display and analyze cover artwork. |
-| Private CloudKit database | Source snapshots, saved legacy designs, a Hardcover account worklist, companion-generated spine designs, companion cover choices and series links, and series looks that the Apple TV or a companion saves, only when the user turns on iCloud storage (off by default) | Restore the library and exchange design work with the iPhone and Mac companions. |
+| Private CloudKit database | Source snapshots, which include your own Hardcover reviews, saved legacy designs, a Hardcover account worklist, companion-generated spine designs, companion cover choices and series links, and series looks that the Apple TV or a companion saves, only when the user turns on iCloud storage (off by default) | Restore the library, share it with your other Apple devices, and exchange design work with the iPhone and Mac companions. |
 
-Network recipients can observe connection metadata such as an IP address. The app has no advertising or analytics SDK. The local request ledger does not upload diagnostics. Cloud archives and spine records exclude credentials but include the Hardcover account ID, book IDs, and reading metadata. Spine records contain colors, typography choices, and hashes, not cover image bytes. Disabling or disconnecting Hardcover schedules deletion of the local companion design cache. Turning off iCloud does not delete cloud records.
+Network recipients can observe connection metadata such as an IP address. The app has no advertising or analytics SDK. The local request ledger does not upload diagnostics. Cloud archives and spine records exclude credentials but include the Hardcover account ID, book IDs, and reading metadata, including your own reviews. Spine records contain colors, typography choices, and hashes, not cover image bytes. Disabling or disconnecting Hardcover schedules deletion of the local companion design cache. Turning off iCloud does not delete cloud records.
 
 ## Collection disclosures
 
@@ -41,4 +41,4 @@ python3 scripts/verify-release-archive.py PATH_TO_ARCHIVE
 
 The script checks embedded manifests, signature validity, entitlements, versions, deployment target, assets, and extension packaging. It does not contact App Store Connect or validate provider retention policies.
 
-Social snapshots contain reader profiles, activities, ratings, and reviews in the local cache only. They are not included in the private CloudKit archive. Ambient playback uses saved metadata and does not initiate source sync or AI generation.
+Social snapshots contain reader profiles, activities, ratings, and reviews in the local cache only. They are not included in the private CloudKit archive; only your own reviews travel there, in the library snapshot. Ambient playback uses saved metadata and does not initiate source sync or AI generation.

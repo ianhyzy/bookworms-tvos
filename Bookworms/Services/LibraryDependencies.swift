@@ -14,8 +14,10 @@ struct LibraryDependencies {
         try CredentialStore.save($0, account: $1)
     }
     var removeCredential: (String) -> Void = { CredentialStore.remove(account: $0) }
-    var fetchHardcover: @MainActor (String) async throws -> HardcoverLibrary = {
-        try await HardcoverClient.shared.fetchLibrary(token: $0)
+    /// Fetches the library for a token. The snapshot is the newest one saved for the account the
+    /// caller expects, whose covers stay fixed when the token's account matches it.
+    var fetchHardcover: @MainActor (String, SourceSnapshot?) async throws -> HardcoverLibrary = {
+        try await HardcoverClient.shared.fetchLibrary(token: $0, previous: $1)
     }
     var validateHardcover: @MainActor (String) async throws -> String = {
         try await HardcoverClient.shared.validateToken($0)

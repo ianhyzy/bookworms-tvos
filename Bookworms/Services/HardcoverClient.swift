@@ -291,7 +291,7 @@ actor HardcoverClient {
         case library = """
             query ShelfLibrary($user: Int!, $offset: Int!, $language: String!) {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
-                id last_read_date rating status_id
+                id last_read_date rating status_id review
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
                   book_series { featured position compilation series { id name books_count primary_books_count } }
                   editions(where: {image_id: {_is_null: false},
@@ -453,11 +453,21 @@ actor HardcoverClient {
     }
 
     /// Returns the authenticated account with its complete library so saved books keep provenance.
-    func fetchLibrary(token: String) async throws -> HardcoverLibrary {
+    ///
+    /// `previous` is the newest saved snapshot the caller knows for the account. Its books keep
+    /// their covers (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`) only
+    /// when its account is the authenticated one; a snapshot of another account is ignored.
+    func fetchLibrary(token: String, previous: SourceSnapshot? = nil) async throws
+        -> HardcoverLibrary
+    {
         let account: Account = try await request(.account, variables: [:], token: token)
         guard account.me.count == 1, let user = account.me.first else {
             throw HardcoverError.invalidToken
         }
+        let accountID = String(user.id)
+        let previousBooks = Dictionary(
+            (previous?.accountID == accountID ? previous?.books ?? [] : []).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
         var rows: [UserBook] = []
         for offset in stride(from: 0, to: 10000, by: 100) {
             try Task.checkCancellation()
@@ -467,10 +477,10 @@ actor HardcoverClient {
                 token: token)
             rows += result.userBooks
             if result.userBooks.count < 100 {
-                let books = Self.normalize(rows)
+                let books = Self.normalize(rows, previous: previousBooks)
                 // Series are an enhancement: a failure keeps the library sync complete.
                 let series = try? await fetchSeries(Set(books.compactMap(\.seriesID)), token: token)
-                return HardcoverLibrary(accountID: String(user.id), books: books, series: series)
+                return HardcoverLibrary(accountID: accountID, books: books, series: series)
             }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
             try await Task.sleep(for: .seconds(1.1))
@@ -550,21 +560,54 @@ actor HardcoverClient {
             ?? "en"
     }
 
+    /// The reported height, in pixels, below which a saved cover counts as low quality and may be
+    /// replaced by a sharper one.
+    static let lowQualityCoverHeight = 1000
+
     /// The preferred cover and a fallback for when it fails to download.
+    ///
+    /// `previous` holds the covers the book had in the account's last sync. They stay fixed, so
+    /// spine designs and cached images keep matching even when the reader's edition changes,
+    /// unless an upgrade applies: this sync's candidates include the previous preferred cover
+    /// with a reported height below `lowQualityCoverHeight`, and the new choice reports a height
+    /// of at least that. A cover without a reported height is never replaced and never replaces
+    /// another. Without `previous`, or without a previous preferred cover, the new choice is used.
+    static func coverURLs(
+        edition: CoverImage?, book: CoverImage?, otherEditions: [CoverImage] = [],
+        editionIsInLanguage: Bool = true, previous: (preferred: URL?, alternate: URL?)? = nil
+    ) -> (preferred: URL?, alternate: URL?) {
+        let choice = bestCoverURLs(
+            edition: edition, book: book, otherEditions: otherEditions,
+            editionIsInLanguage: editionIsInLanguage)
+        guard let previous, let kept = previous.preferred else { return choice }
+        let candidates = [edition, book].compactMap(\.self) + otherEditions
+        func height(_ url: URL?) -> Int? {
+            candidates.filter { url != nil && $0.url == url }.compactMap(\.height).max()
+        }
+        if let old = height(kept), old < lowQualityCoverHeight,
+            let new = height(choice.preferred), new >= lowQualityCoverHeight
+        {
+            return choice
+        }
+        return previous
+    }
+
+    /// The best covers among this sync's candidates.
     ///
     /// Candidates are the reader's edition, the book's default image, and `otherEditions`, the
     /// book's most-read editions. The reader's edition wins unless another is clearly better; a
     /// square audiobook image, for example, loses to any portrait cover. When no candidate is a
     /// portrait-shaped cover, the largest square image of at least 300 pixels is used rather than
     /// no cover.
-    static func coverURLs(
-        edition: CoverImage?, book: CoverImage?, otherEditions: [CoverImage] = [],
-        editionIsInLanguage: Bool = true
+    private static func bestCoverURLs(
+        edition: CoverImage?, book: CoverImage?, otherEditions: [CoverImage],
+        editionIsInLanguage: Bool
     ) -> (preferred: URL?, alternate: URL?) {
         // A reader's edition in another language loses its preference and is used only when no
         // other image can serve as a cover.
         if !editionIsInLanguage, edition != nil {
-            let choice = coverURLs(edition: nil, book: book, otherEditions: otherEditions)
+            let choice = bestCoverURLs(
+                edition: nil, book: book, otherEditions: otherEditions, editionIsInLanguage: true)
             if choice.preferred != nil { return choice }
         }
         var seen = Set<URL>()
@@ -615,7 +658,33 @@ actor HardcoverClient {
         return fraction.isFinite ? min(1, max(0, fraction)) : nil
     }
 
-    static func normalize(_ rows: [UserBook]) -> [Book] {
+    /// Turns a review into plain text: HTML tags and Markdown markers are removed, entities are
+    /// decoded, and paragraphs stay separated by one blank line. Returns `nil` for empty text.
+    ///
+    /// A port of the iPhone app's `HardcoverClient.plainText(from:)`. Either app can upload the
+    /// shared iCloud snapshot, so both must store the same text.
+    static func plainText(from markup: String?) -> String? {
+        guard var text = markup else { return nil }
+        text = text.replacing(/(?i)<br\s*\/?>|<\/li>/, with: "\n")
+            .replacing(/(?i)<\/(p|div|blockquote|h[1-6])>/, with: "\n\n")
+            // Only tag-shaped text goes, so "I <3 it" keeps its heart.
+            .replacing(/<\/?[a-zA-Z][^>]*>/, with: "")
+            .replacing(/(?m)^ {0,3}(?:#{1,6} +|> ?)/, with: "")
+        // Inline Markdown parsing drops emphasis and link markup and decodes HTML entities.
+        if let parsed = try? AttributedString(
+            markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        {
+            text = String(parsed.characters)
+        }
+        text = text.replacing(/[ \t]*\n[ \t]*\n\s*/, with: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    /// Turns library rows into books, one per Hardcover book. `previous` holds the account's
+    /// books from its last sync, by ID, whose covers stay fixed unless an upgrade applies
+    /// (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`).
+    static func normalize(_ rows: [UserBook], previous: [Int: Book] = [:]) -> [Book] {
         var unique: [Int: Book] = [:]
         for row in rows {
             let source = row.book
@@ -629,7 +698,8 @@ actor HardcoverClient {
             let covers = Self.coverURLs(
                 edition: edition?.image, book: source.image,
                 otherEditions: (source.editions ?? []).compactMap(\.image),
-                editionIsInLanguage: edition?.isInLanguage(Self.coverLanguage) ?? true)
+                editionIsInLanguage: edition?.isInLanguage(Self.coverLanguage) ?? true,
+                previous: previous[source.id].map { ($0.detailCoverURL, $0.coverURL) })
             let membership = source.bookSeries?
                 .sorted { ($0.featured ?? false) && !($1.featured ?? false) }.first
             let seriesName = membership?.series?.name?
@@ -637,7 +707,8 @@ actor HardcoverClient {
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,
-                description: source.description, coverURL: covers.alternate,
+                description: source.description, review: Self.plainText(from: row.review),
+                coverURL: covers.alternate,
                 pages: edition?.pages ?? source.pages,
                 finished: read?.finishedAt ?? row.lastReadDate, rating: row.rating,
                 format: edition?.readingFormat?.format,
@@ -708,6 +779,8 @@ struct UserBook: Decodable, Sendable {
     let statusID: Int?
     let lastReadDate: String?
     let rating: Double?
+    /// The reader's review, which may hold Markdown or HTML.
+    var review: String? = nil
     let book: SourceBook
     let edition: Edition?
     let userBookReads: [ReadEvent]?
@@ -718,6 +791,7 @@ struct UserBook: Decodable, Sendable {
         case statusID = "status_id"
         case lastReadDate = "last_read_date"
         case rating
+        case review
         case book
         case edition
         case userBookReads = "user_book_reads"

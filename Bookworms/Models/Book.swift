@@ -5,6 +5,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var title: String
     var author: String
     var description: String?
+    /// The reader's own Hardcover review as plain text (`HardcoverClient.plainText(from:)`), the
+    /// form the iPhone stores. It travels with the book in the iCloud archive.
+    var review: String? = nil
     var coverURL: URL?
     var pages: Int?
     var finished: String?
