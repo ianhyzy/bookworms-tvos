@@ -132,7 +132,9 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     /// "tvos-local-v1" for Book Wall's cover-sampled look.
     let origin: String
     let createdAt: Date
-    /// When a companion app last edited the look's colors or type.
+    /// When a companion app last edited the look's colors or type. A look copied from a design
+    /// whose colors the reader chose counts as edited at `createdAt`, so no companion upgrade
+    /// replaces those colors.
     var editedAt: Date? = nil
     let backgroundHex: String
     let foregroundHex: String
@@ -184,11 +186,14 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
 }
 
 extension SeriesLookV1 {
-    /// A look for `key` copied from `design`, a group member's saved design.
+    /// A look for `key` copied from `design`, a group member's saved design. A design the reader
+    /// recolored (`hasReaderColors`) gives the look the reader's colors, so the look counts as
+    /// edited at `createdAt`, as the iPhone's look does.
     init(key: SeriesLookKey, design: SpineDesignV1, createdAt: Date) {
         self.init(
             accountID: design.accountID, seriesID: key.seriesID, group: key.group,
             sourceBookID: design.bookID, origin: design.generatorVersion, createdAt: createdAt,
+            editedAt: design.hasReaderColors ? createdAt : nil,
             backgroundHex: design.backgroundHex, foregroundHex: design.foregroundHex,
             accentHex: design.accentHex, typeface: design.typeface, weight: design.weight,
             uppercase: design.uppercase, fontFamily: design.fontFamily,
