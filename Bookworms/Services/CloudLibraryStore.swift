@@ -13,6 +13,9 @@ struct CloudLibraryArchive: Codable, Sendable {
                 $0.source == source.source && $0.accountID == source.accountID
             }) {
                 if source.syncedAt > merged.sources[index].syncedAt {
+                    // A writer that predates series leaves them out; keep the stored ones.
+                    var source = source
+                    source.series = source.series ?? merged.sources[index].series
                     merged.sources[index] = source
                 }
             } else {

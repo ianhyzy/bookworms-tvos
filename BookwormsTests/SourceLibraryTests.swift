@@ -410,4 +410,18 @@ final class SourceLibraryTests: XCTestCase {
             merged.sources.first(where: { $0.source == .hardcover })?.books.count,
             SampleLibrary.books.count)
     }
+
+    func testCloudMergeKeepsStoredSeriesWhenANewerSnapshotHasNone() {
+        let now = Date()
+        let stored = SourceSnapshot(
+            source: .hardcover, accountID: "one", books: [], syncedAt: now,
+            series: [SampleLibrary.series])
+        let newer = SourceSnapshot(
+            source: .hardcover, accountID: "one", books: SampleLibrary.books,
+            syncedAt: now.addingTimeInterval(1))
+        let merged = CloudLibraryArchive(sources: [stored])
+            .merging(CloudLibraryArchive(sources: [newer]))
+        XCTAssertEqual(merged.sources.first?.books.count, SampleLibrary.books.count)
+        XCTAssertEqual(merged.sources.first?.series?.map(\.id), [SampleLibrary.series.id])
+    }
 }
