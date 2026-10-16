@@ -239,6 +239,26 @@ extension BookWallPreparation {
         return style
     }
 
+    /// The Google Fonts family and weight to download for the face `design` draws in
+    /// (`BookWallLocalSpine.typography(for:design:)`), or `nil` for a design without a family
+    /// or PostScript name, or one whose blocked face has no downloadable stand-in.
+    ///
+    /// A blocked family is never downloaded. A slanted one, such as Dancing Script, loads its
+    /// upright stand-in (`SpineFontPolicy.standInFamilies`) at weight 400, because the stand-in
+    /// is named for its Regular face. An italic face of an allowed family loads the family's
+    /// upright face, which `SpineFontPolicy.allowedFontName(_:)` names.
+    nonisolated static func fontRequest(for design: SpineDesignV1) -> (family: String, weight: Int)?
+    {
+        guard let family = design.fontFamily, let name = design.fontPostScriptName else {
+            return nil
+        }
+        if SpineFontPolicy.allows(family) {
+            return (family, design.instanceWeight ?? design.weight)
+        }
+        let standIn = SpineFontPolicy.standInFamilies[SpineFontPolicy.allowedFontName(name)]
+        return standIn.map { ($0, 400) }
+    }
+
     /// Downloads and registers each design's Google Fonts face once per family and weight.
     /// A book whose face does not load uses the system face for its design's typeface and
     /// weight. A network failure stops further downloads until the next preparation, so an
@@ -246,13 +266,11 @@ extension BookWallPreparation {
     fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
         var requested = Set<String>()
         for design in designs {
-            // A blocked family is never downloaded; an italic face of an allowed family loads
-            // the family's upright face, which `SpineFontPolicy.allowedFontName(_:)` names.
-            guard let family = design.fontFamily, let name = design.fontPostScriptName,
-                SpineFontPolicy.allows(family),
-                UIFont(name: SpineFontPolicy.allowedFontName(name), size: 12) == nil
+            guard let name = design.fontPostScriptName,
+                UIFont(name: SpineFontPolicy.allowedFontName(name), size: 12) == nil,
+                let request = fontRequest(for: design)
             else { continue }
-            let weight = design.instanceWeight ?? design.weight
+            let (family, weight) = request
             guard requested.insert("\(family):\(weight)").inserted else { continue }
             guard !Task.isCancelled else { return }
             do {
