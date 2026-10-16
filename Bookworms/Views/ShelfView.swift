@@ -64,21 +64,35 @@ struct ShelfView: View {
         for book in wallBooks { sources[book.id] = library.seriesSources[book.id] }
         return sources
     }
+    private var isWallReady: Bool {
+        let key = wallPreparationKey
+        return bookWallPreparation.isReady(
+            for: key.books, sources: key.sources, designs: key.designs)
+    }
     private var wallPreparationKey: BookWallPreparationKey {
-        BookWallPreparationKey(
+        let books = wallBooks
+        let sources = wallSources
+        // Only the wall's books and their series sources, so designs for other books do not
+        // rebuild it.
+        var designs: [Int: SpineDesignV1] = [:]
+        if BookPresentation.showsCompanionSpines {
+            for book in books + sources.values {
+                designs[book.id] = library.spineDesigns[book.id]
+            }
+        }
+        return BookWallPreparationKey(
             loaded: library.hasLoadedLibrarySnapshot,
             enabled: coordinator.preferences.orderedViews.contains(.bookWall),
-            books: wallBooks, sources: wallSources, retry: bookWallPreparationRetry)
+            books: books, sources: sources, designs: designs, retry: bookWallPreparationRetry)
     }
     private var waitsForBookWall: Binding<Bool> {
         Binding(
             get: {
                 coordinator.current == .bookWall
-                    && !bookWallPreparation.isReady(for: wallBooks, sources: wallSources)
+                    && !isWallReady
             },
             set: { presented in
-                if !presented && !bookWallPreparation.isReady(for: wallBooks, sources: wallSources)
-                {
+                if !presented && !isWallReady {
                     showView(.shelf)
                 }
             })
@@ -243,7 +257,8 @@ struct ShelfView: View {
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
-                await bookWallPreparation.prepare(key.books, sources: key.sources)
+                await bookWallPreparation.prepare(
+                    key.books, sources: key.sources, designs: key.designs)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
@@ -423,6 +438,7 @@ struct ShelfView: View {
         let enabled: Bool
         let books: [Book]
         let sources: [Int: Book]
+        let designs: [Int: SpineDesignV1]
         let retry: Int
     }
 
@@ -696,7 +712,7 @@ struct ShelfView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if view == .bookWall {
                         if let prepared = bookWallPreparation.prepared,
-                            bookWallPreparation.isReady(for: wallBooks, sources: wallSources)
+                            isWallReady
                         {
                             BookWallView(
                                 library: library, coordinator: coordinator, scene: bookWallScene,

@@ -227,6 +227,11 @@ struct BookWallView: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("book-wall-fall-probe")
+                    Text(String(prepared.designs.count))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-design-probe")
                 #endif
             }
         }

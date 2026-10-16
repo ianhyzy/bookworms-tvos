@@ -22,6 +22,7 @@
 		1D5974D6AE395AACF8D8B0B8 /* Book.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C32CAF5A0AD0A522E9DD714 /* Book.swift */; };
 		25B9BF7D8405453F0E0E5E52 /* DevicePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457F99A087A59612227CE930 /* DevicePerformanceTests.swift */; };
 		2B9A2B8C5BBC0DDAE0E2B693 /* BookWallPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4664FDF12F4575226EFE2BF2 /* BookWallPreparation.swift */; };
+		2ED03233E12475270EEF7484 /* SpineCloudTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1D0D759ED5785357BDCED0 /* SpineCloudTests.swift */; };
 		306C728C1F502D5BD78048A8 /* SocialLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1945BE7927079EC026064DC4 /* SocialLibraryModel.swift */; };
 		38F2866C7B5E1981CD5A3B09 /* ShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FD194803F9CA77D000C719 /* ShelfView.swift */; };
 		3FEBDDE6E6B85FD6E4C9C9C1 /* RemoteNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2131B44006285208B88BBF3 /* RemoteNavigation.swift */; };
@@ -76,6 +77,7 @@
 		AB942298E6A58FF7E7F13631 /* APIUsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD248044777361FA581C524A /* APIUsageStore.swift */; };
 		AC49499F99D8B42982E5EA10 /* HardcoverToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90CB4771D70E516A54D3C45 /* HardcoverToken.swift */; };
 		B3E07E04B17EEF8485ACE61A /* SocialClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE96ACA925111A491EAFE88 /* SocialClientTests.swift */; };
+		B55622DB808DA825DA899D7F /* SpineCloudStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54B01951606EB4530AE6332 /* SpineCloudStore.swift */; };
 		B65835EF8ACAC43FF63A97C9 /* DeviceSocialTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E8006052475E2C3592494A9 /* DeviceSocialTests.swift */; };
 		B6BC68C77530158559E842B2 /* ViewPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA3CAD4B6586D3BE16280C5 /* ViewPreferences.swift */; };
 		B9A3FDB428325E4177D5D2C3 /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BF19DB5592C0E525C57103 /* AppAppearance.swift */; };
@@ -231,6 +233,7 @@
 		92396CFC2CBBDAD171DF93C3 /* BookwormsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookwormsApp.swift; sourceTree = "<group>"; };
 		94B1956FAC9D419811DBCFFF /* LibrarySources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySources.swift; sourceTree = "<group>"; };
 		95DEB8D10A67DCDA713D3A92 /* ContentProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentProvider.swift; sourceTree = "<group>"; };
+		9B1D0D759ED5785357BDCED0 /* SpineCloudTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpineCloudTests.swift; sourceTree = "<group>"; };
 		9E4F9C68A621C9C74C178E69 /* LibraryDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryDependencies.swift; sourceTree = "<group>"; };
 		9EE78F6DE60A7553881460E4 /* SourceLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceLibraryTests.swift; sourceTree = "<group>"; };
 		A121B74A9E2DC7DFEDB9B7B2 /* LibraryWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryWorkflowTests.swift; sourceTree = "<group>"; };
@@ -256,6 +259,7 @@
 		C179DF4162B44730E39DA89F /* BookPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookPresentation.swift; sourceTree = "<group>"; };
 		C2547F66E0C15CE3CACD73A2 /* BookwormsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BookwormsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3D8C0A0CFE62A46F3D01D8E /* TopShelfDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopShelfDeviceTests.swift; sourceTree = "<group>"; };
+		C54B01951606EB4530AE6332 /* SpineCloudStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpineCloudStore.swift; sourceTree = "<group>"; };
 		CC34FD199CA961B6D74B8BE9 /* BookWallAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallAvailability.swift; sourceTree = "<group>"; };
 		CC4BF493AB759B12F8241CA9 /* OfflinePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflinePolicyTests.swift; sourceTree = "<group>"; };
 		CD668078F977B1B998C07D6D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -311,6 +315,7 @@
 				1BE96ACA925111A491EAFE88 /* SocialClientTests.swift */,
 				4A3AFD124F7D3384645C649F /* SocialFeatureTests.swift */,
 				9EE78F6DE60A7553881460E4 /* SourceLibraryTests.swift */,
+				9B1D0D759ED5785357BDCED0 /* SpineCloudTests.swift */,
 				23666682D55073EE34B09E16 /* UserFacingErrorTests.swift */,
 				559924D669C21AB31B068E06 /* YearInReviewTests.swift */,
 			);
@@ -343,6 +348,7 @@
 				1945BE7927079EC026064DC4 /* SocialLibraryModel.swift */,
 				10B6346E6E420EB9EFA795E0 /* SourceLibraryStore.swift */,
 				06E4189770AB6C94FAED8949 /* SpineAuthorLayout.swift */,
+				C54B01951606EB4530AE6332 /* SpineCloudStore.swift */,
 				F9506F46014E55734BFE9C2F /* SpineFontProfile.swift */,
 				8C4BB9A02FA73549E988BF4E /* SpineTextMetrics.swift */,
 				4B0692971600BAF0457C2A78 /* TopShelfPoster.swift */,
@@ -717,6 +723,7 @@
 				B3E07E04B17EEF8485ACE61A /* SocialClientTests.swift in Sources */,
 				8654E0E4DE4175A89D11DFF5 /* SocialFeatureTests.swift in Sources */,
 				62FA4146C6008EC33944DCB3 /* SourceLibraryTests.swift in Sources */,
+				2ED03233E12475270EEF7484 /* SpineCloudTests.swift in Sources */,
 				464DFC7BBD8A6DD8DA39157D /* UserFacingErrorTests.swift in Sources */,
 				88B2526C94C0FB46260C3AF7 /* YearInReviewTests.swift in Sources */,
 			);
@@ -784,6 +791,7 @@
 				12CA76C2DDD6826AB3213A1E /* SourceLibraryStore.swift in Sources */,
 				0F3E2E723CC5B94A6EF7477B /* SpineAuthorLayout.swift in Sources */,
 				4ADB14840760C75D1EDD129D /* SpineAuthorText.swift in Sources */,
+				B55622DB808DA825DA899D7F /* SpineCloudStore.swift in Sources */,
 				E41CBAB1CDFCF30D41AB73BA /* SpineFontProfile.swift in Sources */,
 				08954C8A4F9F85B0BAFB8752 /* SpineStyle.swift in Sources */,
 				DCFD7DACE59B019353630D32 /* SpineTextMetrics.swift in Sources */,

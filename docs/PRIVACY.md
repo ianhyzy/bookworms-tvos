@@ -19,11 +19,11 @@ The extension does not call `UserDefaults` or read file timestamps. Do not copy 
 | Hardcover | PAT in the authorization header; fixed read queries, book IDs, and selected reader IDs | Fetch account, library, edition, followed-reader, block-list, activity, rating, and review data. |
 | Configured CWA server | Local username/password through HTTPS Basic authentication; catalog and cover requests | Fetch owned books and protected covers. Hidden in Settings while `BookPresentation.offersCWA` is false. |
 | AI providers | No requests while generation is disabled | Retained implementation only; saved keys and designs remain stored. |
-| Google Fonts and font hosting | No requests while generated spines are disabled | Retained implementation for spine fonts only. |
-| Artwork hosts | Cover and avatar URL requests | Display and analyze cover artwork. |
-| Private CloudKit database | Source snapshots and saved design records, only when the user turns on iCloud storage (off by default) | Restore and merge the user's library and designs. |
+| Google Fonts and font hosting | Font family names from companion designs, requested during Book Wall preparation | Download the faces that Book Wall companion designs name. The retained AI spine path makes no requests while generated spines are disabled. |
+| Artwork hosts | Cover and avatar URL requests, including covers chosen in the iPhone companion | Display and analyze cover artwork. |
+| Private CloudKit database | Source snapshots, saved legacy designs, a Hardcover account worklist, companion-generated spine designs, and companion cover choices, only when the user turns on iCloud storage (off by default) | Restore the library and exchange design work with the iPhone and Mac companions. |
 
-Network recipients can observe connection metadata such as an IP address. The app has no advertising or analytics SDK. The local request ledger does not upload diagnostics. Cloud archives exclude credentials but include source identities and reading metadata. Turning off iCloud does not delete its archive.
+Network recipients can observe connection metadata such as an IP address. The app has no advertising or analytics SDK. The local request ledger does not upload diagnostics. Cloud archives and spine records exclude credentials but include the Hardcover account ID, book IDs, and reading metadata. Spine records contain colors, typography choices, and hashes, not cover image bytes. Disabling or disconnecting Hardcover schedules deletion of the local companion design cache. Turning off iCloud does not delete cloud records.
 
 ## Collection disclosures
 

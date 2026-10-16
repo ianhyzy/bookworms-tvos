@@ -160,6 +160,11 @@ enum SeriesDesigns {
         let font = CTFontCreateWithName(fontName as CFString, 12, nil)
         // CoreText substitutes a default face for a missing name; that face does not count.
         guard (CTFontCopyPostScriptName(font) as String) == fontName else { return false }
+        return canLetter(book, font: font)
+    }
+
+    /// Whether `font` has a glyph for every letter `book`'s spine draws.
+    static func canLetter(_ book: Book, font: CTFont) -> Bool {
         let characters = Array(
             lettering(of: book).unicodeScalars.filter { !$0.properties.isWhitespace }
                 .map(String.init).joined().utf16)

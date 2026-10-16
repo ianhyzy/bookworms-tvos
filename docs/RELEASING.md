@@ -57,6 +57,8 @@ The verifier checks display names, the arm64 requirement, the CloudKit push enti
 
 Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. The production schema contains `LibraryArchive` with its `archive` asset.
 
+The companions add `SpineWorklistV1`, `SpineDesignV1`, and `CoverChoiceV1`, each with a `payload` Bytes field. Deploy all three record types to production before uploading a candidate that uses them. Confirm that a signed companion writes a design and a signed Apple TV reads and caches it from the same private container.
+
 After an authorized upload:
 
 1. Wait for Apple to finish processing the build.
@@ -154,7 +156,7 @@ Changes
 Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new effective date.
 ```
 
-Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
+Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, and no AI or font requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. Companion spines (`BookPresentation.showsCompanionSpines`) request Google Fonts faces during Book Wall preparation; update both texts before uploading a candidate with that switch on. iCloud storage is opt-in.
 
 ## Verify the release candidate
 

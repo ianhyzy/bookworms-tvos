@@ -30,20 +30,29 @@ enum SpineFontPolicy {
     /// Google Fonts serves it, so every Bookworms app uses the same replacement.
     static let impactReplacement = "BebasNeue"
 
-    /// Upright stand-ins, keyed by lowercased family, for Google Fonts families that slant by
-    /// design without declaring it: the allowed display family nearest in weight and role.
-    static let slantedReplacements = ["bangers": "Bungee-Regular", "shrikhand": "ChangaOne"]
+    /// Upright stand-ins, keyed by lowercased family without spaces, for Google Fonts families
+    /// that slant by design without declaring it: the allowed display or hand-drawn family
+    /// nearest in weight and role, as the iPhone companion maps them.
+    static let slantedReplacements = [
+        "bangers": "Bungee-Regular", "shrikhand": "ChangaOne",
+        "dancingscript": "Kalam-Regular", "pacifico": "PermanentMarker-Regular",
+        "satisfy": "Caveat-Regular", "greatvibes": "Caveat-Regular",
+        "lobster": "PermanentMarker-Regular", "courgette": "Kalam-Regular",
+        "homemadeapple": "Caveat-Regular", "rocksalt": "PermanentMarker-Regular",
+    ]
 
     /// The Book Wall's general-fiction face, for a blocked name with no closer upright face.
     static let uprightFallback = "AvenirNext-DemiBold"
 
-    /// Returns whether a family or PostScript name, in any case, is allowed.
+    /// Returns whether a family or PostScript name, in any case and with or without spaces, is
+    /// allowed.
     ///
     /// Blocks Impact, italic, oblique, and slanted names, a PostScript style that ends in "It"
-    /// (such as "Lora-BoldIt"), and Bangers and Shrikhand, which slant without declaring it.
+    /// (such as "Lora-BoldIt"), and the families in `slantedReplacements`, which slant without
+    /// declaring it.
     static func allows(_ name: String) -> Bool {
-        let lowered = name.lowercased()
-        let blocked = ["impact", "italic", "oblique", "slanted", "bangers", "shrikhand"]
+        let lowered = name.lowercased().filter { !$0.isWhitespace }
+        let blocked = ["impact", "italic", "oblique", "slanted"] + slantedReplacements.keys
         let postScriptStyle = name.split(separator: "-").dropFirst().last
         return !blocked.contains { lowered.contains($0) }
             && postScriptStyle?.hasSuffix("It") != true
@@ -56,6 +65,7 @@ enum SpineFontPolicy {
     /// | Impact, in any spelling | `BebasNeue` |
     /// | `Bangers-Regular` | `Bungee-Regular` |
     /// | `Shrikhand-Regular` | `ChangaOne` |
+    /// | A slanted script, such as `DancingScript-Bold` | An upright hand-drawn face |
     /// | An italic face, such as `Lora-BoldItalic` or `Lora-It` | `Lora-Bold`, `Lora-Regular` |
     /// | Anything else blocked | `AvenirNext-DemiBold` |
     ///

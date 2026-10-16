@@ -2330,15 +2330,13 @@ enum BookWallSpineTexture {
             let inset: CGFloat = max(18, face.width * 0.045)
             let left: CGFloat = origin.x + inset * 1.6
             let textWidth: CGFloat = face.width - inset * 3.2
-            let descriptor =
-                UIFont(name: style.fontName, size: 40)?.fontDescriptor
-                ?? UIFont.systemFont(ofSize: 40, weight: .semibold).fontDescriptor
+            let descriptor = style.typography.font(size: 40).fontDescriptor
             let titleTop: CGFloat = origin.y + face.height * BookWallLayout.titleTop
             let titleBounds = CGRect(
                 x: left, y: titleTop, width: textWidth,
                 height: face.height * BookWallLayout.titleShare)
             drawText(
-                book.title, of: book, style: style,
+                style.typography.title(for: book), of: book, style: style,
                 descriptor: descriptor, in: titleBounds,
                 maximumSize: Int(face.height),
                 minimumSize: Int(BookWallLayout.minimumTitleFontSize))

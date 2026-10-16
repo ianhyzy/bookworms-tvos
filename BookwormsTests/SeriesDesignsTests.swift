@@ -44,6 +44,46 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertFalse(SeriesDesigns.matches(maurice, discworld(8, "The Amazing Maurice")))
     }
 
+    private func companionDesign(_ bookID: Int, family: String?, postScriptName: String?)
+        -> SpineDesignV1
+    {
+        SpineDesignV1(
+            version: 1, accountID: "account", bookID: bookID,
+            workItemHash: String(repeating: "a", count: 64),
+            coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
+            generatedAt: Date(timeIntervalSince1970: 1_000_000), backgroundHex: "#1F3A5A",
+            foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+            uppercase: true, fontFamily: family, fontPostScriptName: postScriptName)
+    }
+
+    func testCompanionDesignsLetterOnlyInAllowedUprightFaces() {
+        func typography(_ family: String, _ name: String) -> BookWallLocalSpine.Typography {
+            BookWallLocalSpine.typography(
+                for: book(1), design: companionDesign(1, family: family, postScriptName: name))
+        }
+        XCTAssertEqual(typography("EB Garamond", "EBGaramond-Bold").fontName, "EBGaramond-Bold")
+        XCTAssertEqual(typography("Impact", "Impact").fontName, SpineFontPolicy.impactReplacement)
+        // A slanted script or an italic shows in an upright stand-in.
+        XCTAssertEqual(typography("Dancing Script", "DancingScript-Bold").fontName, "Kalam-Regular")
+        XCTAssertEqual(typography("Lora", "Lora-BoldIt").fontName, "Lora-Bold")
+        XCTAssertEqual(typography("Lora", "Lora-Bold").typeface, "serif")
+        XCTAssertTrue(typography("Lora", "Lora-Bold").uppercase)
+    }
+
+    func testSeriesSourcesJudgeCompanionDesignsByTheirFace() {
+        let books = [book(1, position: 1), book(2, position: 2), book(3, position: 3)]
+        let allowed = LibraryModel.seriesSources(
+            of: books,
+            designs: [1: companionDesign(1, family: "Oswald", postScriptName: "Oswald-Bold")])
+        XCTAssertEqual(allowed[2]?.id, 1)
+        // A source whose design is in a blocked face cannot lead the series.
+        let blocked = LibraryModel.seriesSources(
+            of: books,
+            designs: [1: companionDesign(1, family: "Pacifico", postScriptName: "Pacifico-Regular")]
+        )
+        XCTAssertEqual(blocked[3]?.id, 2)
+    }
+
     func testSourcesRankByPositionThenFinishThenID() {
         XCTAssertTrue(SeriesDesigns.ranksBefore(book(9, position: 1), book(1, position: 2)))
         XCTAssertTrue(
@@ -136,10 +176,11 @@ final class SeriesDesignsTests: XCTestCase {
         let member = book(2, position: 2, title: "The Gate of the Feral Gods")
         let rasterizer = BookWallRasterizer()
         let design = await rasterizer.style(
-            for: source, cover: try cover(.red, edge: .red))
+            for: source, cover: try cover(.red, edge: .red), design: nil)
         let slot = try XCTUnwrap(BookWallLayout(books: [member]).slots.first)
         let images = await rasterizer.render(
-            slot: slot, cover: try cover(.blue, edge: .green), design: design, fontStyle: .serif)
+            slot: slot, cover: try cover(.blue, edge: .green), source: design, design: nil,
+            fontStyle: .serif)
         XCTAssertEqual(images.style, design, "The book wears its source's colors and font")
         let spine = try XCTUnwrap(images.spine)
         let cloth = try pixel(spine, x: spine.width / 30, y: spine.height / 2)
