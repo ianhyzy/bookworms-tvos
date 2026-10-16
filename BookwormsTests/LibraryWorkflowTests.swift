@@ -43,6 +43,23 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.cloudStatus, "iCloud storage waits until setup finishes.")
     }
 
+    func testAnOlderSnapshotOfAnotherAccountDoesNotMakeHardcoverDue() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "hasCompletedWelcome")
+        let placeholder = SourceSnapshot(
+            source: .hardcover, accountID: "hardcover", books: [fixture.book(2)],
+            syncedAt: fixture.time.addingTimeInterval(-30 * 86_400))
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)]), placeholder])
+        // The fixture fails any Hardcover request, so the start must not find the source due.
+        let model = LibraryModel(dependencies: fixture.dependencies())
+
+        await model.start()
+        XCTAssertEqual(
+            fixture.defaults.object(forKey: "syncSuccess.hardcover") as? Date, fixture.time,
+            "The active account's snapshot, not the older placeholder, sets the last success")
+    }
+
     func testHardcoverSetupResetRetainsCWAArtworkDesignsAndDisplaySettings() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
