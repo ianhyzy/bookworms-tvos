@@ -6,7 +6,6 @@ enum BookWallLocalSpine {
     struct Style: Equatable, Sendable {
         let background: StyleColor
         let foreground: StyleColor
-        let accent: StyleColor
         let fontName: String
     }
 
@@ -29,15 +28,49 @@ enum BookWallLocalSpine {
                 $0.color.contrast(with: background) >= 4.5
             }?
             .color ?? safeText
-        let accent =
-            ranked.dropFirst()
-            .first {
-                $0.color.contrast(with: background) >= 2.0
-            }?
-            .color ?? foreground
         return Style(
-            background: background, foreground: foreground, accent: accent,
-            fontName: fontName(for: book))
+            background: background, foreground: foreground, fontName: fontName(for: book))
+    }
+
+    /// The colors down a cover's spine-side edge, head to tail, for the fold of the cover onto
+    /// the spine and the front board's joint.
+    ///
+    /// Averages the art 2 to 4 percent in from the left edge, past the frame lines that scans
+    /// often carry at the very edge, in 48 rows, and softens them along the height, as the
+    /// iPhone companion's `CoverEdge` does. It redraws the cover once at 50 by 48 pixels; an
+    /// unreadable image gives no colors.
+    static func edgeColors(of image: CGImage) -> [StyleColor] {
+        let (width, rows) = (50, 48)
+        var pixels = [UInt8](repeating: 0, count: width * rows * 4)
+        let drew = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                let context = CGContext(
+                    data: buffer.baseAddress, width: width, height: rows, bitsPerComponent: 8,
+                    bytesPerRow: width * 4, space: space,
+                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+            else { return false }
+            context.interpolationQuality = .high
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: rows))
+            return true
+        }
+        guard drew else { return [] }
+        // The bitmap's first row is the image's top, the head.
+        let column = (0..<rows)
+            .map { row in
+                let offset = (row * width + 1) * 4
+                return SIMD3(
+                    Double(pixels[offset]), Double(pixels[offset + 1]), Double(pixels[offset + 2]))
+            }
+        let weights: [Double] = [1, 4, 6, 4, 1]
+        return (0..<rows)
+            .map { row in
+                var sum = SIMD3<Double>.zero
+                for (index, weight) in weights.enumerated() {
+                    sum += column[min(rows - 1, max(0, row + index - 2))] * weight
+                }
+                let color = sum / 16 / 255
+                return StyleColor(red: color.x, green: color.y, blue: color.z)
+            }
     }
 
     /// Uses the first recognized ranked genre, falling back to a general-fiction face.
@@ -56,7 +89,7 @@ enum BookWallLocalSpine {
                 return "DINCondensed-Bold"
             }
             if genre.contains("horror") || genre.contains("gothic") {
-                return "Impact"
+                return SpineFontPolicy.impactReplacement
             }
             if genre.contains("romance") || genre.contains("love story") {
                 return "Avenir-Heavy"

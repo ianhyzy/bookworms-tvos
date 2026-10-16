@@ -142,7 +142,7 @@ final class BookWallPreparation {
 private actor BookWallRasterizer {
     struct Images: Sendable {
         let style: BookWallLocalSpine.Style
-        /// Lettering and lines over the spine color.
+        /// The lettered cloth spine with the cover's fold.
         let spine: CGImage?
         let cover: CGImage?
         let label: CGImage?
@@ -150,15 +150,17 @@ private actor BookWallRasterizer {
 
     func render(slot: BookWallLayout.Slot, cover: CGImage?, fontStyle: AppFontStyle) -> Images {
         let style = BookWallLocalSpine.style(for: slot.book, cover: cover)
+        let edge = cover.map(BookWallLocalSpine.edgeColors(of:)) ?? []
         let board = cover.flatMap {
             BookWallCoverTexture.make(
-                image: $0, slot: slot, edgeColor: style.background.uiColor)
+                image: $0, slot: slot, cloth: style.background, edgeColors: edge)
         }
         let label = BookWallShelfLabel.make(
             "\(slot.book.title) · \(slot.book.author)", book: slot.book, style: fontStyle)
         let spine = BookWallSpineTexture.make(for: slot, style: style)
             .flatMap {
-                BookWallSpineTexture.filled($0, background: style.background.uiColor)
+                BookWallSpineTexture.filled(
+                    $0, book: slot.book, cloth: style.background, edgeColors: edge)
             }
         return Images(style: style, spine: spine, cover: board, label: label)
     }

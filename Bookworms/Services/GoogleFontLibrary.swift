@@ -83,7 +83,10 @@ actor GoogleFontLibrary {
             licensePath: directory.appending(path: "LICENSE.txt").path)
     }
 
+    /// Downloads and registers `family`. Throws `AIError.invalidFont` for a blocked family, such
+    /// as Impact, before reading the cache or the network.
     func download(family: String, weight: Int = 400) async throws -> DownloadedFont {
+        guard SpineFontPolicy.allows(family) else { throw AIError.invalidFont }
         if let font = cached(family: family, weight: weight) {
             if (try? register(font)) != nil { return font }
         }
@@ -144,15 +147,20 @@ actor GoogleFontLibrary {
         guard
             let descriptors = CTFontManagerCreateFontDescriptorsFromURL(file as CFURL)
                 as? [CTFontDescriptor],
-            let descriptor = descriptors.first
+            let ctFont = Self.uprightFont(in: descriptors)
         else { throw AIError.unavailableFont }
-        let ctFont = CTFontCreateWithFontDescriptor(descriptor, 32, nil)
         let font = DownloadedFont(
             family: family, postScriptName: CTFontCopyPostScriptName(ctFont) as String,
             filePath: file.path, licensePath: licenseFile.path)
         try register(font)
         try JSONEncoder().encode(font).write(to: manifestURL, options: .atomic)
         return font
+    }
+
+    /// The first face in a font file that has neither the italic trait nor a slant.
+    static func uprightFont(in descriptors: [CTFontDescriptor]) -> CTFont? {
+        descriptors.lazy.map { CTFontCreateWithFontDescriptor($0, 32, nil) }
+            .first(where: SpineFontPolicy.isUpright)
     }
 
     func restore(_ font: DownloadedFont, weight: Int) async throws -> DownloadedFont {

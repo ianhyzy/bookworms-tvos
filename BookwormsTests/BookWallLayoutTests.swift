@@ -136,7 +136,7 @@ final class BookWallLayoutTests: XCTestCase {
         let image = try XCTUnwrap(BookWallSpineTexture.make(for: slot, style: style))
         XCTAssertEqual(
             CGFloat(image.width) / CGFloat(image.height),
-            CGFloat(slot.spineFaceWidth) / CGFloat(slot.spineFaceHeight), accuracy: 0.03)
+            CGFloat(slot.spineWallWidth) / CGFloat(slot.spineWallHeight), accuracy: 0.03)
     }
 
     func testDeviceGateStartsAtAppleTV4KSecondGeneration() {

@@ -1,3 +1,4 @@
+import CoreText
 import Foundation
 import SwiftUI
 
@@ -20,9 +21,76 @@ struct StyleColor: Codable, Hashable, Sendable {
     static func seed(_ id: Int) -> UInt64 { UInt64(bitPattern: Int64(id)) &* 2_654_435_761 }
 }
 
+/// The owner's standing type rules: no spine ever uses Impact, which tvOS ships as a web font,
+/// or an italic, oblique, or slanted face.
+enum SpineFontPolicy {
+    /// The PostScript name that replaces Impact.
+    ///
+    /// Bebas Neue is a heavy condensed sans in Impact's role. tvOS ships it as a system font, and
+    /// Google Fonts serves it, so every Bookworms app uses the same replacement.
+    static let impactReplacement = "BebasNeue"
+
+    /// Upright stand-ins, keyed by lowercased family, for Google Fonts families that slant by
+    /// design without declaring it: the allowed display family nearest in weight and role.
+    static let slantedReplacements = ["bangers": "Bungee-Regular", "shrikhand": "ChangaOne"]
+
+    /// The Book Wall's general-fiction face, for a blocked name with no closer upright face.
+    static let uprightFallback = "AvenirNext-DemiBold"
+
+    /// Returns whether a family or PostScript name, in any case, is allowed.
+    ///
+    /// Blocks Impact, italic, oblique, and slanted names, a PostScript style that ends in "It"
+    /// (such as "Lora-BoldIt"), and Bangers and Shrikhand, which slant without declaring it.
+    static func allows(_ name: String) -> Bool {
+        let lowered = name.lowercased()
+        let blocked = ["impact", "italic", "oblique", "slanted", "bangers", "shrikhand"]
+        let postScriptStyle = name.split(separator: "-").dropFirst().last
+        return !blocked.contains { lowered.contains($0) }
+            && postScriptStyle?.hasSuffix("It") != true
+    }
+
+    /// Returns `name`, or the allowed upright PostScript name a saved style shows instead.
+    ///
+    /// | Saved name | Shown as |
+    /// | --- | --- |
+    /// | Impact, in any spelling | `BebasNeue` |
+    /// | `Bangers-Regular` | `Bungee-Regular` |
+    /// | `Shrikhand-Regular` | `ChangaOne` |
+    /// | An italic face, such as `Lora-BoldItalic` or `Lora-It` | `Lora-Bold`, `Lora-Regular` |
+    /// | Anything else blocked | `AvenirNext-DemiBold` |
+    ///
+    /// An upright name that is not installed falls back to the system font, which is upright.
+    static func allowedFontName(_ name: String) -> String {
+        guard !allows(name) else { return name }
+        if name.lowercased().contains("impact") { return impactReplacement }
+        let slantWords = ["Italic", "Oblique", "Slanted"]
+        let parts = name.split(separator: "-", maxSplits: 1)
+        let family = (parts.first ?? "").split(whereSeparator: \.isWhitespace)
+            .filter { word in !slantWords.contains { $0.lowercased() == word.lowercased() } }
+            .joined()
+        if let mapped = slantedReplacements[family.lowercased()] { return mapped }
+        var style = parts.count > 1 ? String(parts[1]) : ""
+        for word in slantWords {
+            style = style.replacingOccurrences(of: word, with: "", options: .caseInsensitive)
+        }
+        if style.hasSuffix("It") { style.removeLast(2) }
+        let upright = family + "-" + (style.isEmpty ? "Regular" : style)
+        return !family.isEmpty && allows(upright) ? upright : uprightFallback
+    }
+
+    /// Returns whether a loaded face is upright: it has neither the italic trait nor a slant.
+    static func isUpright(_ font: CTFont) -> Bool {
+        let traits = CTFontCopyTraits(font) as? [CFString: Any]
+        let slant = (traits?[kCTFontSlantTrait] as? NSNumber)?.doubleValue ?? 0
+        return !CTFontGetSymbolicTraits(font).contains(.traitItalic) && abs(slant) < 0.01
+    }
+}
+
 struct SpineStyle: Codable, Hashable, Sendable {
     var background: StyleColor
     var foreground: StyleColor
+    /// A PostScript name. A saved style that names a blocked face, such as Impact or an italic,
+    /// decodes as `SpineFontPolicy.allowedFontName(_:)`.
     var fontName: String
     var uppercase: Bool
     var recognizedTitle: Bool
@@ -41,6 +109,21 @@ struct SpineStyle: Codable, Hashable, Sendable {
             background: palettes[Int(seed % UInt64(palettes.count))], foreground: .paper,
             fontName: seed.isMultiple(of: 2) ? "Georgia-Bold" : "AvenirNextCondensed-DemiBold",
             uppercase: false, recognizedTitle: false, provenance: "Local fallback")
+    }
+}
+
+extension SpineStyle {
+    /// Decodes a saved, cached, or iCloud style, replacing a blocked font before any view
+    /// renders it.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        background = try container.decode(StyleColor.self, forKey: .background)
+        foreground = try container.decode(StyleColor.self, forKey: .foreground)
+        fontName = SpineFontPolicy.allowedFontName(
+            try container.decode(String.self, forKey: .fontName))
+        uppercase = try container.decode(Bool.self, forKey: .uppercase)
+        recognizedTitle = try container.decode(Bool.self, forKey: .recognizedTitle)
+        provenance = try container.decode(String.self, forKey: .provenance)
     }
 }
 
