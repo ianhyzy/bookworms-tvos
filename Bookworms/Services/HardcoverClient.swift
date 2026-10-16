@@ -632,7 +632,8 @@ actor HardcoverClient {
                 editionIsInLanguage: edition?.isInLanguage(Self.coverLanguage) ?? true)
             let membership = source.bookSeries?
                 .sorted { ($0.featured ?? false) && !($1.featured ?? false) }.first
-            let seriesName = membership?.series?.name?.trimmingCharacters(in: .whitespaces)
+            let seriesName = membership?.series?.name?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             let book = Book(
                 id: source.id, title: source.title ?? "Untitled",
                 author: author.isEmpty ? "Unknown author" : author,

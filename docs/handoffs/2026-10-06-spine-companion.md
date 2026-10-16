@@ -30,7 +30,7 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 | `SpineWorklistV1.accountID` length | No bound | At most 512 characters | None in practice; Hardcover IDs are short. |
 | Worklist payload size | No bound | At most 5 MB | None in practice. |
 | `coverHash` format | 64 hex digits, either case | 64 lowercase hex digits | None; the iPhone writes lowercase. The TV is looser. |
-| `workItemHash` format | Must equal the TV's own lowercase SHA-256 | 64 lowercase hex digits | The TV check is stricter and binds the design to the book. After a metadata edit, the TV shows the local spine until the iPhone redesigns the book, while the iPhone keeps showing the old design. |
+| `workItemHash` format | Must equal the TV's own lowercase SHA-256 | 64 lowercase hex digits | The TV check is stricter and binds the design to the book. After a metadata edit, the TV shows the local spine and the iPhone keeps showing the old design until the iPhone's next generation run saves a new one: a redesign, or a recolored spine saved again under the new hash. |
 | Color hex case | `#` + 6 uppercase hex digits | Same | None; the iPhone emits uppercase. |
 | `generatorVersion` | Any non-blank string | Any non-blank string; redesigns a design with the generator's colors unless it is `ios-pcc-v2` | None on the TV, which shows designs from any generator. |
 | Archive size the iPhone reads | No bound on the TV | At most 50 MB | A very large archive stops the iPhone; the TV does not warn. |

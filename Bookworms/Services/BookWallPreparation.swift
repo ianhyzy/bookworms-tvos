@@ -240,8 +240,9 @@ extension BookWallPreparation {
     }
 
     /// The Google Fonts family and weight to download for the face `design` draws in
-    /// (`BookWallLocalSpine.typography(for:design:)`), or `nil` for a design without a family
-    /// or PostScript name, or one whose blocked face has no downloadable stand-in.
+    /// (`BookWallLocalSpine.typography(for:design:)`), or `nil` for a design without a PostScript
+    /// name, one without a family whose face isn't blocked, or one whose blocked face has no
+    /// downloadable stand-in.
     ///
     /// A blocked family is never downloaded. A slanted one, such as Dancing Script, loads its
     /// upright stand-in (`SpineFontPolicy.standInFamilies`) at weight 400, because the stand-in
@@ -249,10 +250,8 @@ extension BookWallPreparation {
     /// upright face, which `SpineFontPolicy.allowedFontName(_:)` names.
     nonisolated static func fontRequest(for design: SpineDesignV1) -> (family: String, weight: Int)?
     {
-        guard let family = design.fontFamily, let name = design.fontPostScriptName else {
-            return nil
-        }
-        if SpineFontPolicy.allows(family) {
+        guard let name = design.fontPostScriptName else { return nil }
+        if let family = design.fontFamily, SpineFontPolicy.allows(family) {
             return (family, design.instanceWeight ?? design.weight)
         }
         let standIn = SpineFontPolicy.standInFamilies[SpineFontPolicy.allowedFontName(name)]
