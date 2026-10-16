@@ -49,12 +49,17 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     var provenance: String? = nil
 
     func isValid(accountID: String, book: Book) -> Bool {
-        guard version == 1, self.accountID == accountID, bookID == book.id,
-            workItemHash == SpineCloudIdentity.workItemHash(accountID: accountID, book: book),
-            coverHash.count == 64, coverHash.allSatisfy({ $0.isASCIIHexDigit }),
-            !generatorVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            generatedAt.timeIntervalSince1970.isFinite,
-            ["serif", "sans", "rounded", "monospaced"].contains(typeface),
+        version == 1 && self.accountID == accountID && bookID == book.id
+            && workItemHash == SpineCloudIdentity.workItemHash(accountID: accountID, book: book)
+            && coverHash.count == 64 && coverHash.allSatisfy({ $0.isASCIIHexDigit })
+            && !generatorVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && generatedAt.timeIntervalSince1970.isFinite && isValidLook
+    }
+
+    /// Whether the colors and type can be drawn: known typeface and weights, short font names,
+    /// `#RRGGBB` colors, and text contrast of at least 4.5:1. Series looks follow the same rules.
+    var isValidLook: Bool {
+        guard ["serif", "sans", "rounded", "monospaced"].contains(typeface),
             [400, 500, 600, 700].contains(weight),
             instanceWeight.map({ (100...900).contains($0) && $0.isMultiple(of: 100) }) ?? true,
             [fontFamily, fontPostScriptName, provenance].allSatisfy(Self.isShortLine),
@@ -65,7 +70,8 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
         return foreground.contrast(with: background) >= 4.5
     }
 
-    private static func isShortLine(_ value: String?) -> Bool {
+    /// Whether `value` is absent or one line of 1 to 80 characters.
+    static func isShortLine(_ value: String?) -> Bool {
         guard let value else { return true }
         return (1...80).contains(value.count) && !value.contains(where: \.isNewline)
     }
@@ -108,6 +114,118 @@ struct CoverChoiceV1: Codable, Equatable, Sendable {
     }
 }
 
+/// The look a group of series books draws (`SeriesLookKey`), synced so every device draws the
+/// same one. The first device to save a group's look decides it; creating one never replaces
+/// another (`SpineCloudStore.createSeriesLook(_:)`).
+struct SeriesLookV1: Codable, Equatable, Sendable {
+    var version = 1
+    let accountID: String
+    let seriesID: Int
+    let group: String
+    /// The book whose design or cover the look was made from.
+    let sourceBookID: Int
+    /// What made the look: the iPhone or Mac generator version of the design it copies, or
+    /// "tvos-local-v1" for Book Wall's cover-sampled look.
+    let origin: String
+    let createdAt: Date
+    /// When a companion app last edited the look's colors or type.
+    var editedAt: Date? = nil
+    let backgroundHex: String
+    let foregroundHex: String
+    let accentHex: String
+    let typeface: String
+    let weight: Int
+    let uppercase: Bool
+    var fontFamily: String? = nil
+    var fontPostScriptName: String? = nil
+    var instanceWeight: Int? = nil
+
+    /// The origin of a look made from Book Wall's cover-sampled style.
+    static let localOrigin = "tvos-local-v1"
+
+    var key: SeriesLookKey { SeriesLookKey(seriesID: seriesID, group: group) }
+
+    func isValid(accountID: String, key: SeriesLookKey) -> Bool {
+        version == 1 && self.accountID == accountID && !accountID.isEmpty && self.key == key
+            && group.count <= 200 && sourceBookID > 0
+            && createdAt.timeIntervalSince1970.isFinite
+            && (editedAt?.timeIntervalSince1970.isFinite ?? true)
+            && SpineDesignV1.isShortLine(origin)
+            && !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && design(bookID: sourceBookID, workItemHash: "").isValidLook
+    }
+
+    /// The look as `book`'s design, so Book Wall draws it like a companion design. The cover
+    /// hash is a placeholder; Book Wall never reads it.
+    func design(for book: Book) -> SpineDesignV1 {
+        design(
+            bookID: book.id,
+            workItemHash: SpineCloudIdentity.workItemHash(accountID: accountID, book: book))
+    }
+
+    private func design(bookID: Int, workItemHash: String) -> SpineDesignV1 {
+        SpineDesignV1(
+            version: 1, accountID: accountID, bookID: bookID, workItemHash: workItemHash,
+            coverHash: String(repeating: "0", count: 64), generatorVersion: origin,
+            generatedAt: editedAt ?? createdAt, backgroundHex: backgroundHex,
+            foregroundHex: foregroundHex, accentHex: accentHex, typeface: typeface,
+            weight: weight, uppercase: uppercase, fontFamily: fontFamily,
+            fontPostScriptName: fontPostScriptName, instanceWeight: instanceWeight)
+    }
+}
+
+extension SeriesLookV1 {
+    /// A look for `key` copied from `design`, a group member's saved design.
+    init(key: SeriesLookKey, design: SpineDesignV1, createdAt: Date) {
+        self.init(
+            accountID: design.accountID, seriesID: key.seriesID, group: key.group,
+            sourceBookID: design.bookID, origin: design.generatorVersion, createdAt: createdAt,
+            backgroundHex: design.backgroundHex, foregroundHex: design.foregroundHex,
+            accentHex: design.accentHex, typeface: design.typeface, weight: design.weight,
+            uppercase: design.uppercase, fontFamily: design.fontFamily,
+            fontPostScriptName: design.fontPostScriptName, instanceWeight: design.instanceWeight)
+    }
+
+    /// A look for `key` from Book Wall's cover-sampled `style` of `book`, the group's
+    /// best-ranked member. The genre face becomes the look's PostScript name, with its closest
+    /// portable typeface; only Bebas Neue is a Google Fonts family the iPhone can download.
+    init(
+        key: SeriesLookKey, localStyle style: BookWallLocalSpine.Style, book: Book,
+        accountID: String, createdAt: Date
+    ) {
+        let face = style.typography.fontName
+        self.init(
+            accountID: accountID, seriesID: key.seriesID, group: key.group, sourceBookID: book.id,
+            origin: Self.localOrigin, createdAt: createdAt, backgroundHex: style.background.hex,
+            foregroundHex: style.foreground.hex, accentHex: style.foreground.hex,
+            typeface: face.map(BookWallLocalSpine.typeface(ofGenreFace:)) ?? "sans", weight: 700,
+            uppercase: style.typography.uppercase,
+            fontFamily: face == SpineFontPolicy.impactReplacement ? "Bebas Neue" : nil,
+            fontPostScriptName: face)
+    }
+}
+
+/// The reader's series choice for one book in a companion app: a series to draw its look from,
+/// no series, or its own look instead of its series'. Choosing the default deletes the record.
+struct SeriesLinkV1: Codable, Equatable, Sendable {
+    var version = 1
+    let accountID: String
+    let bookID: Int
+    /// The series whose look the book draws, in place of its shortest series.
+    var linkedSeriesID: Int? = nil
+    /// Whether the book draws as if it belonged to no series.
+    var standsAlone = false
+    /// Whether the book draws its own design instead of its series' look.
+    var ownLook = false
+    let chosenAt: Date
+
+    func isValid(accountID: String, book: Book) -> Bool {
+        version == 1 && self.accountID == accountID && accountID.count <= 512 && bookID > 0
+            && bookID == book.id && (linkedSeriesID.map { $0 > 0 } ?? true)
+            && chosenAt.timeIntervalSince1970.isFinite
+    }
+}
+
 extension Character {
     fileprivate var isASCIIHexDigit: Bool {
         isASCIIUppercaseHexDigit || ("0"..."9").contains(self) || ("a"..."f").contains(self)
@@ -126,6 +244,15 @@ enum SpineCloudIdentity {
 
     static func coverChoiceRecordID(accountID: String, bookID: Int) -> CKRecord.ID {
         CKRecord.ID(recordName: "cover-choice-v1-" + sha256("\(accountID):\(bookID)"))
+    }
+
+    static func seriesLinkRecordID(accountID: String, bookID: Int) -> CKRecord.ID {
+        CKRecord.ID(recordName: "series-link-v1-" + sha256("\(accountID):\(bookID)"))
+    }
+
+    static func seriesLookRecordID(accountID: String, key: SeriesLookKey) -> CKRecord.ID {
+        CKRecord.ID(
+            recordName: "series-look-v1-" + sha256("\(accountID):\(key.seriesID):\(key.group)"))
     }
 
     static func workItemHash(accountID: String, book: Book) -> String {
@@ -184,6 +311,8 @@ actor SpineCloudStore {
     private let suppliedDatabase: (any SpineCloudDatabase)?
     private let cacheURL: URL
     private let coverChoiceCacheURL: URL
+    private let seriesLinkCacheURL: URL
+    private let seriesLookCacheURL: URL
     /// The latest read per record type. A later account selection owns that type's cache even
     /// if an older CloudKit read resumes.
     private var cacheGenerations: [String: UInt64] = [:]
@@ -210,16 +339,19 @@ actor SpineCloudStore {
         }
     #endif
 
-    /// Creates a store whose design cache is `cacheURL`. The cover-choice cache,
-    /// `cover-choices-v1.json`, sits in the same directory.
+    /// Creates a store whose design cache is `cacheURL`. The cover-choice, series-link, and
+    /// series-look caches, `cover-choices-v1.json`, `series-links-v1.json`, and
+    /// `series-looks-v1.json`, sit in the same directory.
     init(
         database: (any SpineCloudDatabase)? = nil,
         cacheURL: URL = URL.cachesDirectory.appending(path: "Bookworms/spine-designs-v1.json")
     ) {
         suppliedDatabase = database
         self.cacheURL = cacheURL
-        coverChoiceCacheURL = cacheURL.deletingLastPathComponent()
-            .appending(path: "cover-choices-v1.json")
+        let directory = cacheURL.deletingLastPathComponent()
+        coverChoiceCacheURL = directory.appending(path: "cover-choices-v1.json")
+        seriesLinkCacheURL = directory.appending(path: "series-links-v1.json")
+        seriesLookCacheURL = directory.appending(path: "series-looks-v1.json")
     }
 
     private func database() throws -> any SpineCloudDatabase {
@@ -297,24 +429,83 @@ actor SpineCloudStore {
         throw CloudStorageError.conflict
     }
 
-    /// Reads the active books' companion designs. See `records(_:accountID:books:)`.
+    /// Reads the active books' companion designs. See `records(_:accountID:subjects:)`.
     func designs(accountID: String, books: [Book]) async throws -> [Int: SpineDesignV1] {
-        try await records(.designs(cacheURL: cacheURL), accountID: accountID, books: books)
+        try await records(
+            .designs(cacheURL: cacheURL), accountID: accountID, subjects: Self.byID(books))
     }
 
-    /// Reads the active books' companion cover choices. See `records(_:accountID:books:)`.
+    /// Reads the active books' companion cover choices. See `records(_:accountID:subjects:)`.
     func coverChoices(accountID: String, books: [Book]) async throws -> [Int: CoverChoiceV1] {
         try await records(
-            .coverChoices(cacheURL: coverChoiceCacheURL), accountID: accountID, books: books)
+            .coverChoices(cacheURL: coverChoiceCacheURL), accountID: accountID,
+            subjects: Self.byID(books))
     }
 
-    /// Reads one record per book in bounded batches and keeps a separate validated disk cache.
+    /// Reads the active books' companion series links. See `records(_:accountID:subjects:)`.
+    func seriesLinks(accountID: String, books: [Book]) async throws -> [Int: SeriesLinkV1] {
+        try await records(
+            .seriesLinks(cacheURL: seriesLinkCacheURL), accountID: accountID,
+            subjects: Self.byID(books))
+    }
+
+    /// Reads the series looks of the active books' look groups. See
+    /// `records(_:accountID:subjects:)`.
+    func seriesLooks(accountID: String, keys: [SeriesLookKey]) async throws
+        -> [SeriesLookKey: SeriesLookV1]
+    {
+        try await records(
+            .seriesLooks(cacheURL: seriesLookCacheURL), accountID: accountID,
+            subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    /// Saves `look` as its group's look unless another device saved one first, and returns the
+    /// look that decides the group: `look`, or the existing one. Never replaces a saved look.
+    ///
+    /// Throws when CloudKit is unavailable, the save fails, or the existing look is invalid.
+    func createSeriesLook(_ look: SeriesLookV1) async throws -> SeriesLookV1 {
+        guard look.isValid(accountID: look.accountID, key: look.key) else {
+            throw CloudStorageError.incomplete
+        }
+        let database = try await availableDatabase()
+        let id = SpineCloudIdentity.seriesLookRecordID(accountID: look.accountID, key: look.key)
+        let record = CKRecord(recordType: "SeriesLookV1", recordID: id)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        record["payload"] = try encoder.encode(look) as NSData
+        var saved = look
+        do {
+            // A new record without a change tag fails when the record already exists.
+            try await database.save(record)
+        } catch let error as CKError where error.code == .serverRecordChanged {
+            let existing = try await database.record(for: id)
+            guard existing.recordType == "SeriesLookV1",
+                let payload = existing["payload"] as? Data,
+                let value = try? JSONDecoder().decode(SeriesLookV1.self, from: payload),
+                value.isValid(accountID: look.accountID, key: look.key)
+            else { throw CloudStorageError.incomplete }
+            saved = value
+        }
+        let kind = CompanionRecordKind.seriesLooks(cacheURL: seriesLookCacheURL)
+        var cache = loadCache(kind)
+        cache[id.recordName] = saved
+        try? saveCache(cache, to: kind, generation: cacheGenerations[kind.recordType, default: 0])
+        return saved
+    }
+
+    private static func byID(_ books: [Book]) -> [Int: Book] {
+        Dictionary(books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Reads one record per subject, such as a book, in bounded batches and keeps a separate
+    /// validated disk cache.
     ///
     /// Returns cached records when CloudKit is unavailable. A missing or invalid current record
     /// evicts the cached one, and an empty `accountID` clears the cache.
-    private func records<Value: Codable & Sendable>(
-        _ kind: CompanionRecordKind<Value>, accountID: String, books: [Book]
-    ) async throws -> [Int: Value] {
+    private func records<Key: Comparable & Hashable, Subject, Value: Codable & Sendable>(
+        _ kind: CompanionRecordKind<Key, Subject, Value>, accountID: String,
+        subjects selected: [Key: Subject]
+    ) async throws -> [Key: Value] {
         let generation = (cacheGenerations[kind.recordType] ?? 0) &+ 1
         cacheGenerations[kind.recordType] = generation
         guard !accountID.isEmpty else {
@@ -322,8 +513,6 @@ actor SpineCloudStore {
             try saveCache([String: Value](), to: kind, generation: generation)
             return [:]
         }
-        let selected = Dictionary(
-            books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         #if DEBUG
             var status = ReadStatus(phase: "loading_cache", requestedCount: selected.count)
             writeReadStatus(status, name: kind.statusName)
@@ -332,18 +521,18 @@ actor SpineCloudStore {
             selected.keys.map {
                 kind.recordID(accountID, $0).recordName
             })
-        let bookIDByRecordName = Dictionary(
+        let keyByRecordName = Dictionary(
             uniqueKeysWithValues: selected.keys.map {
                 (kind.recordID(accountID, $0).recordName, $0)
             })
         var cache = loadCache(kind).filter { selectedRecordNames.contains($0.key) }
-        var accepted: [Int: Value] = [:]
-        for book in selected.values {
-            let key = kind.recordID(accountID, book.id).recordName
-            if let value = cache[key], kind.isValid(value, accountID, book) {
-                accepted[book.id] = value
+        var accepted: [Key: Value] = [:]
+        for (key, subject) in selected {
+            let name = kind.recordID(accountID, key).recordName
+            if let value = cache[name], kind.isValid(value, accountID, subject) {
+                accepted[key] = value
             } else {
-                cache.removeValue(forKey: key)
+                cache.removeValue(forKey: name)
             }
         }
         #if DEBUG
@@ -426,8 +615,8 @@ actor SpineCloudStore {
                     #if DEBUG
                         status.unknownCount += 1
                     #endif
-                    if let bookID = bookIDByRecordName[id.recordName] {
-                        accepted.removeValue(forKey: bookID)
+                    if let key = keyByRecordName[id.recordName] {
+                        accepted.removeValue(forKey: key)
                     }
                     cache.removeValue(forKey: id.recordName)
                     continue
@@ -442,20 +631,20 @@ actor SpineCloudStore {
                     guard record.recordType == kind.recordType,
                         let payload = record["payload"] as? Data,
                         let value = try? JSONDecoder().decode(Value.self, from: payload),
-                        let book = selected[kind.bookID(value)],
-                        id == kind.recordID(accountID, book.id),
-                        kind.isValid(value, accountID, book)
+                        let subject = selected[kind.key(value)],
+                        id == kind.recordID(accountID, kind.key(value)),
+                        kind.isValid(value, accountID, subject)
                     else {
                         #if DEBUG
                             status.invalidCount += 1
                         #endif
-                        if let bookID = bookIDByRecordName[id.recordName] {
-                            accepted.removeValue(forKey: bookID)
+                        if let key = keyByRecordName[id.recordName] {
+                            accepted.removeValue(forKey: key)
                         }
                         cache.removeValue(forKey: id.recordName)
                         continue
                     }
-                    accepted[book.id] = value
+                    accepted[kind.key(value)] = value
                     cache[id.recordName] = value
                 }
             }
@@ -482,8 +671,8 @@ actor SpineCloudStore {
         return accepted
     }
 
-    private func checkCurrentGeneration<Value>(
-        _ generation: UInt64, of kind: CompanionRecordKind<Value>
+    private func checkCurrentGeneration<Key, Subject, Value>(
+        _ generation: UInt64, of kind: CompanionRecordKind<Key, Subject, Value>
     ) throws {
         try Task.checkCancellation()
         guard generation == cacheGenerations[kind.recordType] else { throw CancellationError() }
@@ -496,15 +685,18 @@ actor SpineCloudStore {
         }
     #endif
 
-    private func loadCache<Value>(_ kind: CompanionRecordKind<Value>) -> [String: Value] {
+    private func loadCache<Key, Subject, Value>(_ kind: CompanionRecordKind<Key, Subject, Value>)
+        -> [String: Value]
+    {
         guard let data = try? Data(contentsOf: kind.cacheURL) else { return [:] }
         return (try? JSONDecoder().decode([String: Value].self, from: data)) ?? [:]
     }
 
-    private func saveCache<Value>(
-        _ cache: [String: Value], to kind: CompanionRecordKind<Value>, generation: UInt64
+    private func saveCache<Key, Subject, Value>(
+        _ cache: [String: Value], to kind: CompanionRecordKind<Key, Subject, Value>,
+        generation: UInt64
     ) throws {
-        guard generation == cacheGenerations[kind.recordType] else { return }
+        guard generation == cacheGenerations[kind.recordType, default: 0] else { return }
         try FileManager.default.createDirectory(
             at: kind.cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
@@ -513,34 +705,55 @@ actor SpineCloudStore {
     }
 }
 
-/// One companion record type: its CloudKit names, local cache, and validation. Each book has at
-/// most one record, named from the account and book IDs.
-private struct CompanionRecordKind<Value: Codable & Sendable> {
+/// One companion record type: its CloudKit names, local cache, and validation. Each subject,
+/// such as a book, has at most one record, named from the account and the subject's key.
+private struct CompanionRecordKind<Key, Subject, Value: Codable & Sendable> {
     let recordType: String
     let cacheURL: URL
     /// The DEBUG read-status file name, beside the cache.
     let statusName: String
-    let recordID: (_ accountID: String, _ bookID: Int) -> CKRecord.ID
-    let bookID: (Value) -> Int
-    let isValid: (Value, _ accountID: String, Book) -> Bool
+    let recordID: (_ accountID: String, Key) -> CKRecord.ID
+    let key: (Value) -> Key
+    let isValid: (Value, _ accountID: String, Subject) -> Bool
 }
 
-extension CompanionRecordKind where Value == SpineDesignV1 {
+extension CompanionRecordKind where Key == Int, Subject == Book, Value == SpineDesignV1 {
     static func designs(cacheURL: URL) -> Self {
         Self(
             recordType: "SpineDesignV1", cacheURL: cacheURL,
             statusName: "spine-design-read-status.json",
-            recordID: SpineCloudIdentity.designRecordID, bookID: \.bookID,
+            recordID: SpineCloudIdentity.designRecordID, key: \.bookID,
             isValid: { $0.isValid(accountID: $1, book: $2) })
     }
 }
 
-extension CompanionRecordKind where Value == CoverChoiceV1 {
+extension CompanionRecordKind where Key == Int, Subject == Book, Value == CoverChoiceV1 {
     static func coverChoices(cacheURL: URL) -> Self {
         Self(
             recordType: "CoverChoiceV1", cacheURL: cacheURL,
             statusName: "cover-choice-read-status.json",
-            recordID: SpineCloudIdentity.coverChoiceRecordID, bookID: \.bookID,
+            recordID: SpineCloudIdentity.coverChoiceRecordID, key: \.bookID,
             isValid: { $0.isValid(accountID: $1, book: $2) })
+    }
+}
+
+extension CompanionRecordKind where Key == Int, Subject == Book, Value == SeriesLinkV1 {
+    static func seriesLinks(cacheURL: URL) -> Self {
+        Self(
+            recordType: "SeriesLinkV1", cacheURL: cacheURL,
+            statusName: "series-link-read-status.json",
+            recordID: SpineCloudIdentity.seriesLinkRecordID, key: \.bookID,
+            isValid: { $0.isValid(accountID: $1, book: $2) })
+    }
+}
+
+extension CompanionRecordKind
+where Key == SeriesLookKey, Subject == SeriesLookKey, Value == SeriesLookV1 {
+    static func seriesLooks(cacheURL: URL) -> Self {
+        Self(
+            recordType: "SeriesLookV1", cacheURL: cacheURL,
+            statusName: "series-look-read-status.json",
+            recordID: SpineCloudIdentity.seriesLookRecordID, key: \.key,
+            isValid: { $0.isValid(accountID: $1, key: $2) })
     }
 }

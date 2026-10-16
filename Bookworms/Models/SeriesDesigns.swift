@@ -1,28 +1,70 @@
 import CoreText
 import Foundation
 
-/// Decides which books in a series draw with another book's spine design, so a series looks
-/// alike on the shelf: the same font and colors, with only the title, author, and thickness
-/// changing. The rules and names match the iPhone companion's `SeriesDesigns`.
+/// The books that share one series look: the same style series and Discworld group
+/// (`SeriesDesigns.subseries`), and the same first author.
+struct SeriesLookKey: Hashable, Comparable, Sendable {
+    let seriesID: Int
+    /// The Discworld group, or "", then "|" and the first author's `SeriesDesigns.authors(of:)`
+    /// key, such as "City Watch|terrypratchett".
+    let group: String
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        (lhs.seriesID, lhs.group) < (rhs.seriesID, rhs.group)
+    }
+}
+
+/// Decides which books in a series draw with one spine look, so a series looks alike on the
+/// shelf: the same font and colors, with only the title, author, and thickness changing. The
+/// rules and names match the iPhone companion's `SeriesDesigns`.
 ///
-/// Alignment happens when the app draws, not when it saves: each book keeps its own saved style,
-/// so changing these rules changes no saved data.
+/// A look group (`SeriesLookKey`) draws its synced series look (`SeriesLookV1`) when one exists.
+/// Without one, each book draws the design of the group's best-ranked book that can lend it
+/// (`sources(books:fonts:links:canLetter:)`). Alignment happens when the app draws, not when it
+/// saves: each book keeps its own saved style, so changing these rules changes no saved data.
 enum SeriesDesigns {
-    /// Returns whether `book` and `other` share a series design: the same series and at least
-    /// one shared author.
+    /// The series whose look `book` draws: its link, else its shortest series.
     ///
-    /// This is the whole membership rule; everything else in the app calls it. To let every
-    /// book in a series match whoever wrote it, return `true` after the series check instead of
-    /// comparing authors. Each `Book` stores one series, the featured one from Hardcover, so a
-    /// book in several series matches only through that one.
-    static func matches(_ book: Book, _ other: Book) -> Bool {
-        guard let series = book.seriesID, series == other.seriesID else { return false }
-        if let groups = subseries[series] {
-            // A book in no group, or a group of its own, keeps its own design.
-            guard let group = groups[titleKey(book.title)], group == groups[titleKey(other.title)]
-            else { return false }
+    /// A link that stands alone gives `nil`, and a link to a series gives that series with the
+    /// book's position from the matching membership. Otherwise the book's shortest membership
+    /// wins: a compilation, such as an omnibus, last; then the fewest books, with an unknown or
+    /// one-book size last; then a featured series; then the lower series ID. A book saved before
+    /// memberships were fetched uses its featured `seriesID`.
+    static func styleSeries(of book: Book, link: SeriesLinkV1?) -> (id: Int, position: Double?)? {
+        if let link {
+            if link.standsAlone { return nil }
+            if let id = link.linkedSeriesID {
+                return (id, book.seriesMemberships?.first { $0.seriesID == id }?.position)
+            }
         }
-        return !authors(of: book).isDisjoint(with: authors(of: other))
+        guard let memberships = book.seriesMemberships else {
+            return book.seriesID.map { ($0, book.seriesPosition) }
+        }
+        func order(_ series: SeriesMembership) -> (Int, Int, Int, Int) {
+            let size = series.size.flatMap { $0 >= 2 ? $0 : nil } ?? .max
+            return (series.compilation ? 1 : 0, size, series.featured ? 0 : 1, series.seriesID)
+        }
+        return memberships.min { order($0) < order($1) }.map { ($0.seriesID, $0.position) }
+    }
+
+    /// The look group `book` belongs to, or `nil` when it draws its own design: a book with no
+    /// style series, or a book of a series with groups (`subseries`) that no group names.
+    static func lookKey(of book: Book, link: SeriesLinkV1?) -> SeriesLookKey? {
+        guard let series = styleSeries(of: book, link: link)?.id else { return nil }
+        var subseries = ""
+        if let groups = Self.subseries[series] {
+            guard let group = groups[titleKey(book.title)] else { return nil }
+            subseries = group
+        }
+        return SeriesLookKey(
+            seriesID: series, group: subseries + "|" + (authors(of: book).first ?? ""))
+    }
+
+    /// Returns whether `book` and `other` share a series look: the same look group
+    /// (`lookKey(of:link:)`) without links.
+    static func matches(_ book: Book, _ other: Book) -> Bool {
+        guard let key = lookKey(of: book, link: nil) else { return false }
+        return key == lookKey(of: other, link: nil)
     }
 
     /// Groups within long series that Hardcover does not record, keyed by Hardcover series ID
@@ -80,25 +122,28 @@ enum SeriesDesigns {
             .split(separator: " ").joined(separator: " ")
     }
 
-    /// The book's authors, compared without case, diacritics, spaces, or punctuation. Libraries
-    /// join several authors with ", ".
-    static func authors(of book: Book) -> Set<String> {
-        Set(
-            book.author.components(separatedBy: ", ")
-                .map {
-                    String(
-                        $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-                            .filter { $0.isLetter || $0.isNumber })
-                }
-                .filter { !$0.isEmpty })
+    /// The book's authors in order, compared without case, diacritics, spaces, or punctuation.
+    /// Libraries join several authors with ", ".
+    static func authors(of book: Book) -> [String] {
+        book.author.components(separatedBy: ", ")
+            .map {
+                String(
+                    $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                        .filter { $0.isLetter || $0.isNumber })
+            }
+            .filter { !$0.isEmpty }
     }
 
-    /// Returns whether `lhs` ranks before `rhs` as a series' design source: the lower series
-    /// position, then the earlier finish, then the lower book ID. A missing position or finish
-    /// ranks last, so reading the first book or a prequel later moves the series to its design.
-    static func ranksBefore(_ lhs: Book, _ rhs: Book) -> Bool {
-        (lhs.seriesPosition ?? .infinity, finish(lhs), lhs.id)
-            < (rhs.seriesPosition ?? .infinity, finish(rhs), rhs.id)
+    /// Returns whether `lhs` ranks before `rhs` in a look group: the lower position in its style
+    /// series (`styleSeries(of:link:)`), then the earlier finish, then the lower book ID. A
+    /// missing position or finish ranks last, so reading the first book or a prequel later moves
+    /// the group to its design.
+    static func ranksBefore(_ lhs: Book, _ rhs: Book, links: [Int: SeriesLinkV1] = [:]) -> Bool {
+        rank(lhs, link: links[lhs.id]) < rank(rhs, link: links[rhs.id])
+    }
+
+    private static func rank(_ book: Book, link: SeriesLinkV1?) -> (Double, String, Int) {
+        (styleSeries(of: book, link: link)?.position ?? .infinity, finish(book), book.id)
     }
 
     /// The finish date, `yyyy-MM-dd`, which sorts as text; a book without one sorts last.
@@ -115,28 +160,46 @@ enum SeriesDesigns {
         SpineFontPolicy.allows(fontName)
     }
 
+    /// Returns whether a new series look may copy `design`: never a blocked family, such as
+    /// Impact or a slanted script, as the iPhone companion's `isUsableSource(_:)` rules.
+    static func isUsableSource(_ design: SpineDesignV1) -> Bool {
+        design.fontFamily.map(SpineFontPolicy.allows) ?? true
+    }
+
+    /// The saved design a new look for a group copies: the earliest `generatedAt` among the
+    /// `members`' usable original designs, else among their usable `series-reuse` copies, with
+    /// the lower book ID breaking a tie. `nil` when no member has a usable design.
+    static func lookDesign(of members: [Book], designs: [Int: SpineDesignV1]) -> SpineDesignV1? {
+        let usable = members.compactMap { designs[$0.id] }.filter(isUsableSource)
+        let originals = usable.filter { $0.provenance?.contains("series-reuse") != true }
+        return (originals.isEmpty ? usable : originals)
+            .min { ($0.generatedAt, $0.bookID) < ($1.generatedAt, $1.bookID) }
+    }
+
     /// Maps each book that draws another book's spine design to that book, its source; a
     /// source maps to itself, and a book that draws its own design and lends it to no one is
     /// absent.
     ///
-    /// Only a root lends its design: a book that draws its own. Each series is decided in
-    /// `ranksBefore` order. A book takes the best-ranked earlier root that matches it, whose
-    /// font, from `fonts`, is usable, and whose font can letter it (`canLetter`); otherwise it is
-    /// a root itself. Matching isn't transitive, since book 2 can share an author with books 1
-    /// and 3 that share none, so this keeps a book from drawing a design another book borrowed:
-    /// book 3 then draws its own. The result doesn't depend on the order of `books`.
+    /// Each look group (`lookKey(of:link:)`, with `links`) is decided in `ranksBefore` order. A
+    /// book takes the best-ranked earlier root whose font, from `fonts`, is usable and can letter
+    /// it (`canLetter`); otherwise it is a root itself. Only a root lends its design, so no book
+    /// draws a design another book borrowed. The result doesn't depend on the order of `books`.
     static func sources(
-        books: [Book], fonts: [Int: String],
+        books: [Book], fonts: [Int: String], links: [Int: SeriesLinkV1] = [:],
         canLetter: (Book, String) -> Bool = { _, _ in true }
     ) -> [Int: Int] {
         var sources: [Int: Int] = [:]
-        let series = Dictionary(grouping: books.filter { $0.seriesID != nil }, by: \.seriesID)
-        for books in series.values {
+        var groups: [SeriesLookKey: [Book]] = [:]
+        for book in books {
+            if let key = lookKey(of: book, link: links[book.id]) {
+                groups[key, default: []].append(book)
+            }
+        }
+        for books in groups.values {
             var roots: [Book] = []
-            for book in books.sorted(by: ranksBefore) {
+            for book in books.sorted(by: { ranksBefore($0, $1, links: links) }) {
                 if let root = roots.first(where: { root in
-                    guard matches(book, root), let font = fonts[root.id], isUsableSource(font)
-                    else { return false }
+                    guard let font = fonts[root.id], isUsableSource(font) else { return false }
                     return canLetter(book, font)
                 }) {
                     sources[book.id] = root.id

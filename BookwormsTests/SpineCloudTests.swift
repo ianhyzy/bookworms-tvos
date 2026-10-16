@@ -341,6 +341,147 @@ final class SpineCloudTests: XCTestCase {
         }
     }
 
+    private let cityWatch = SeriesLookKey(seriesID: 1018, group: "City Watch|terrypratchett")
+
+    private func look(
+        _ key: SeriesLookKey? = nil, backgroundHex: String = "#1A2B3C", weight: Int = 700
+    ) -> SeriesLookV1 {
+        let key = key ?? cityWatch
+        return SeriesLookV1(
+            accountID: "42", seriesID: key.seriesID, group: key.group, sourceBookID: 123,
+            origin: "ios-pcc-v2", createdAt: Date(timeIntervalSince1970: 1_780_000_000),
+            backgroundHex: backgroundHex, foregroundHex: "#F0E0D0", accentHex: "#C0A060",
+            typeface: "serif", weight: weight, uppercase: false, fontFamily: "EB Garamond",
+            fontPostScriptName: "EBGaramond-Bold", instanceWeight: 700)
+    }
+
+    func testSeriesRecordNamesMatchIPhoneContract() {
+        XCTAssertEqual(
+            SpineCloudIdentity.seriesLookRecordID(accountID: "42", key: cityWatch).recordName,
+            "series-look-v1-f6b8bd60e3d149603964e4149bb554dfad824022ea2eb99f8ca02e5708be48b1")
+        XCTAssertEqual(
+            SpineCloudIdentity.seriesLookRecordID(
+                accountID: "reader-1", key: SeriesLookKey(seriesID: 2001, group: "|mattdinniman")
+            )
+            .recordName,
+            "series-look-v1-6e2279d0948162ceac3aa23fc9b1358452aa321064eb41d5e87182e41e94a104")
+        XCTAssertEqual(
+            SpineCloudIdentity.seriesLinkRecordID(accountID: "42", bookID: 7).recordName,
+            "series-link-v1-755dac3729029e2e2976249c4e03b160c699ef71f296c346e22183dc23503c33")
+    }
+
+    func testSeriesLookPayloadDecodesAndFollowsTheDesignLookRules() throws {
+        let json = #"""
+            {"version": 1, "accountID": "42", "seriesID": 1018,
+             "group": "City Watch|terrypratchett", "sourceBookID": 123, "origin": "ios-pcc-v2",
+             "createdAt": 801000000, "backgroundHex": "#1A2B3C", "foregroundHex": "#F0E0D0",
+             "accentHex": "#C0A060", "typeface": "serif", "weight": 700, "uppercase": false,
+             "fontFamily": "EB Garamond", "fontPostScriptName": "EBGaramond-Bold",
+             "instanceWeight": 700}
+            """#
+        let decoded = try JSONDecoder().decode(SeriesLookV1.self, from: Data(json.utf8))
+        XCTAssertTrue(decoded.isValid(accountID: "42", key: cityWatch))
+        XCTAssertNil(decoded.editedAt)
+        XCTAssertEqual(
+            try JSONDecoder().decode(SeriesLookV1.self, from: JSONEncoder().encode(decoded)),
+            decoded)
+
+        XCTAssertFalse(look().isValid(accountID: "other", key: cityWatch))
+        XCTAssertFalse(
+            look().isValid(accountID: "42", key: SeriesLookKey(seriesID: 1018, group: "|")))
+        XCTAssertFalse(look(weight: 650).isValid(accountID: "42", key: cityWatch))
+        XCTAssertFalse(
+            look(backgroundHex: "#E0D0C0").isValid(accountID: "42", key: cityWatch),
+            "Text needs 4.5:1 contrast")
+        XCTAssertFalse(
+            look(backgroundHex: "#1a2b3c").isValid(accountID: "42", key: cityWatch))
+        let long = SeriesLookKey(seriesID: 1018, group: String(repeating: "a", count: 201))
+        XCTAssertFalse(look(long).isValid(accountID: "42", key: long))
+        var blank = look()
+        blank = SeriesLookV1(
+            accountID: "42", seriesID: 1018, group: cityWatch.group, sourceBookID: 123,
+            origin: " ", createdAt: blank.createdAt, backgroundHex: blank.backgroundHex,
+            foregroundHex: blank.foregroundHex, accentHex: blank.accentHex, typeface: "serif",
+            weight: 700, uppercase: false)
+        XCTAssertFalse(blank.isValid(accountID: "42", key: cityWatch), "An origin is required")
+    }
+
+    func testSeriesLinkPayloadDecodesAndValidatesItsBook() throws {
+        let json = #"""
+            {"version": 1, "accountID": "42", "bookID": 7, "linkedSeriesID": 2001,
+             "standsAlone": false, "ownLook": true, "chosenAt": 801000000}
+            """#
+        let link = try JSONDecoder().decode(SeriesLinkV1.self, from: Data(json.utf8))
+        XCTAssertEqual(link.linkedSeriesID, 2001)
+        XCTAssertTrue(link.ownLook)
+        XCTAssertTrue(link.isValid(accountID: "42", book: book()))
+        XCTAssertFalse(link.isValid(accountID: "42", book: book(id: 8)))
+        XCTAssertFalse(link.isValid(accountID: "other", book: book()))
+        let unlinked = try JSONDecoder()
+            .decode(
+                SeriesLinkV1.self,
+                from: Data(
+                    #"{"version": 1, "accountID": "42", "bookID": 7, "standsAlone": true, "ownLook": false, "chosenAt": 0}"#
+                        .utf8))
+        XCTAssertNil(unlinked.linkedSeriesID)
+        XCTAssertTrue(unlinked.isValid(accountID: "42", book: book()))
+    }
+
+    func testSeriesLinksAndLooksCacheForOfflineReads() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let link = SeriesLinkV1(
+            accountID: "42", bookID: 7, standsAlone: true,
+            chosenAt: Date(timeIntervalSince1970: 1_780_000_000))
+        let database = FakeSpineDatabase()
+        try await database.put(link)
+        try await database.put(look())
+        let online = SpineCloudStore(database: database, cacheURL: cacheURL)
+        let links = try await online.seriesLinks(accountID: "42", books: [book()])
+        let looks = try await online.seriesLooks(accountID: "42", keys: [cityWatch])
+        XCTAssertEqual(links, [7: link])
+        XCTAssertEqual(looks, [cityWatch: look()])
+
+        let offline = SpineCloudStore(
+            database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
+        let cachedLinks = try await offline.seriesLinks(accountID: "42", books: [book()])
+        let cachedLooks = try await offline.seriesLooks(accountID: "42", keys: [cityWatch])
+        XCTAssertEqual(cachedLinks, [7: link])
+        XCTAssertEqual(cachedLooks, [cityWatch: look()])
+        let cleared = try await offline.seriesLooks(accountID: "", keys: [])
+        XCTAssertTrue(cleared.isEmpty)
+        let afterClear = try await offline.seriesLooks(accountID: "42", keys: [cityWatch])
+        XCTAssertTrue(afterClear.isEmpty, "An empty account clears the look cache")
+    }
+
+    func testCreatingASeriesLookKeepsTheLookSavedFirst() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = FakeSpineDatabase()
+        let store = SpineCloudStore(database: database, cacheURL: cacheURL)
+        let first = try await store.createSeriesLook(look())
+        XCTAssertEqual(first, look())
+        let offline = SpineCloudStore(
+            database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
+        let cached = try await offline.seriesLooks(accountID: "42", keys: [cityWatch])
+        XCTAssertEqual(cached[cityWatch], look(), "A created look is cached for offline reads")
+
+        // Another device's later look loses to the saved one, which is never replaced.
+        let later = SpineCloudStore(database: database, cacheURL: cacheURL)
+        let kept = try await later.createSeriesLook(look(backgroundHex: "#000000"))
+        XCTAssertEqual(kept, look())
+        let saveCount = await database.saveCount()
+        XCTAssertEqual(saveCount, 1)
+        let read = try await later.seriesLooks(accountID: "42", keys: [cityWatch])
+        XCTAssertEqual(read[cityWatch]?.backgroundHex, "#1A2B3C")
+        do {
+            _ = try await offline.createSeriesLook(look())
+            XCTFail("Creating a look needs iCloud")
+        } catch CloudStorageError.unavailable {}
+    }
+
     func testWorklistPublishesFixedDataRecordWithoutReupload() async throws {
         let database = FakeSpineDatabase()
         let store = SpineCloudStore(database: database)
@@ -389,6 +530,8 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
     private var holdNext = false
     private var heldBatch: CheckedContinuation<Void, Never>?
     private var holdObserver: CheckedContinuation<Void, Never>?
+    /// Records this database returned, which `save(_:)` may change.
+    private var served: [CKRecord] = []
 
     init(status: CKAccountStatus = .available) { self.status = status }
 
@@ -409,6 +552,22 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
             SpineCloudIdentity.coverChoiceRecordID(accountID: accountID, bookID: bookID).recordName
         payloads[name] = nil
         recordTypes[name] = nil
+    }
+
+    func put(_ link: SeriesLinkV1) throws {
+        let name =
+            SpineCloudIdentity.seriesLinkRecordID(accountID: link.accountID, bookID: link.bookID)
+            .recordName
+        payloads[name] = try JSONEncoder().encode(link)
+        recordTypes[name] = "SeriesLinkV1"
+    }
+
+    func put(_ look: SeriesLookV1) throws {
+        let name =
+            SpineCloudIdentity.seriesLookRecordID(accountID: look.accountID, key: look.key)
+            .recordName
+        payloads[name] = try JSONEncoder().encode(look)
+        recordTypes[name] = "SeriesLookV1"
     }
 
     func put(_ design: SpineDesignV1) throws {
@@ -448,6 +607,7 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
         else { throw CKError(.unknownItem) }
         let record = CKRecord(recordType: type, recordID: id)
         record["payload"] = payload as NSData
+        served.append(record)
         return record
     }
 
@@ -469,9 +629,13 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
             })
     }
 
+    /// Saves like `.ifServerRecordUnchanged`: a new record cannot replace a saved one.
     func save(_ record: CKRecord) throws {
         guard let payload = record["payload"] as? Data else {
             throw CloudStorageError.incomplete
+        }
+        if payloads[record.recordID.recordName] != nil, !served.contains(where: { $0 === record }) {
+            throw CKError(.serverRecordChanged)
         }
         payloads[record.recordID.recordName] = payload
         recordTypes[record.recordID.recordName] = record.recordType

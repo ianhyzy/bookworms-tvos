@@ -156,6 +156,12 @@ extension StyleColor {
             blue: Double(number & 255) / 255)
     }
 
+    /// The color as `#RRGGBB` in uppercase, as companion designs store colors.
+    var hex: String {
+        func byte(_ channel: Double) -> Int { Int((min(1, max(0, channel)) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
+    }
+
     func readable(on background: StyleColor) -> StyleColor {
         if contrast(with: background) >= 4.5 { return self }
         let white = StyleColor(red: 1, green: 1, blue: 1)

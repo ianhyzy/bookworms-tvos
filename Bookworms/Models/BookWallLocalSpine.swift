@@ -171,6 +171,17 @@ enum BookWallLocalSpine {
         return "AvenirNext-DemiBold"
     }
 
+    /// The portable typeface nearest a genre face from `fontName(for:)`: "serif", "sans",
+    /// "rounded", or "monospaced".
+    static func typeface(ofGenreFace name: String) -> String {
+        switch name {
+        case "Georgia-Bold", "TimesNewRomanPS-BoldMT": "serif"
+        case "ArialRoundedMTBold": "rounded"
+        case "CourierNewPS-BoldMT": "monospaced"
+        default: "sans"
+        }
+    }
+
     private struct RankedColor {
         let color: StyleColor
     }

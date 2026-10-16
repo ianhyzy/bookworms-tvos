@@ -47,6 +47,16 @@ struct LibraryDependencies {
     var fetchCoverChoices: @MainActor (String, [Book]) async throws -> [Int: CoverChoiceV1] = {
         try await SpineCloudStore.shared.coverChoices(accountID: $0, books: $1)
     }
+    var fetchSeriesLinks: @MainActor (String, [Book]) async throws -> [Int: SeriesLinkV1] = {
+        try await SpineCloudStore.shared.seriesLinks(accountID: $0, books: $1)
+    }
+    var fetchSeriesLooks:
+        @MainActor (String, [SeriesLookKey]) async throws -> [SeriesLookKey: SeriesLookV1] = {
+            try await SpineCloudStore.shared.seriesLooks(accountID: $0, keys: $1)
+        }
+    var createSeriesLook: @MainActor (SeriesLookV1) async throws -> SeriesLookV1 = {
+        try await SpineCloudStore.shared.createSeriesLook($0)
+    }
     var now: () -> Date = { Date() }
     var sleep: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     var readTopShelf: () -> [TopShelfBook] = { TopShelfSnapshot.read() }
