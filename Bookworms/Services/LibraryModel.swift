@@ -754,7 +754,14 @@ final class LibraryModel {
                     .hardcover, now: dependencies.now(), manual: accountChanged,
                     hasSnapshot: hasSnapshot)
             hardcoverConnectionPhase = .downloadingLibrary
-            let result = try await dependencies.fetchHardcover(token)
+            // The validated account's own newest snapshot keeps its covers; the active account
+            // may be another one.
+            let previous =
+                sourceSnapshots.filter {
+                    $0.source == .hardcover && $0.accountID == accountID
+                }
+                .max { $0.syncedAt < $1.syncedAt }
+            let result = try await dependencies.fetchHardcover(token, previous)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
             guard result.accountID == accountID else { throw HardcoverError.invalidToken }
             try saveHardcoverCredential(token)
@@ -821,7 +828,8 @@ final class LibraryModel {
                         .hardcover, now: dependencies.now(), manual: manual,
                         hasSnapshot: activeHardcoverSnapshot() != nil
                             && activeHardcoverAccountID != nil)
-                let result = try await dependencies.fetchHardcover(token)
+                let result = try await dependencies.fetchHardcover(
+                    token, activeHardcoverSnapshot())
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 await install(
                     result.books, source: .hardcover, accountID: result.accountID,

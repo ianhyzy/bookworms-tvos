@@ -268,7 +268,7 @@ final class LibraryWorkflowTests: XCTestCase {
         let download = ControlledLibraryResponse<HardcoverLibrary>("Library download started")
         var dependencies = fixture.dependencies()
         dependencies.validateHardcover = { _ in try await validation.value() }
-        dependencies.fetchHardcover = { _ in try await download.value() }
+        dependencies.fetchHardcover = { _, _ in try await download.value() }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         let connection = Task { await model.connect("hc_pat_fictional_original") }
@@ -308,7 +308,7 @@ final class LibraryWorkflowTests: XCTestCase {
         fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
         var dependencies = fixture.dependencies()
         dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
-        dependencies.fetchHardcover = { _ in throw URLError(.notConnectedToInternet) }
+        dependencies.fetchHardcover = { _, _ in throw URLError(.notConnectedToInternet) }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         let connected = await model.connect("hc_pat_fictional_original")
@@ -329,7 +329,7 @@ final class LibraryWorkflowTests: XCTestCase {
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86401)])
         var dependencies = fixture.dependencies()
         var fetches = 0
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             fetches += 1
             throw URLError(.notConnectedToInternet)
         }
@@ -361,7 +361,7 @@ final class LibraryWorkflowTests: XCTestCase {
             fixture.snapshot(.cwa, books: [fixture.book(2)], age: 86401),
         ])
         var dependencies = fixture.dependencies()
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: [fixture.book(3)])
         }
         dependencies.fetchCWA = { _, _ in throw SourceError.forbidden }
@@ -394,7 +394,7 @@ final class LibraryWorkflowTests: XCTestCase {
             ])
         var dependencies = fixture.dependencies()
         var seriesFetchFails = false
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             HardcoverLibrary(
                 accountID: fixture.hardcoverAccountID, books: [book],
                 series: seriesFetchFails ? nil : [series])
@@ -431,7 +431,7 @@ final class LibraryWorkflowTests: XCTestCase {
         fixture.defaults.set(2, forKey: "bookCount")
         var dependencies = fixture.dependencies()
         var library = [covered(1, author: "Filtered author"), covered(2)]
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: library)
         }
         let published = OSAllocatedUnfairLock<[Set<Int>]>(initialState: [])
@@ -503,7 +503,7 @@ final class LibraryWorkflowTests: XCTestCase {
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         var dependencies = fixture.dependencies()
         var rejects = true
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             if rejects { throw HardcoverError.invalidToken }
             return HardcoverLibrary(
                 accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
@@ -730,7 +730,7 @@ final class LibraryWorkflowTests: XCTestCase {
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         var dependencies = fixture.dependencies()
         var fetches = 0
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             fetches += 1
             return HardcoverLibrary(
                 accountID: fixture.hardcoverAccountID, books: [fixture.book(fetches + 1)])
@@ -794,7 +794,7 @@ final class LibraryWorkflowTests: XCTestCase {
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         let response = ControlledLibraryResponse<HardcoverLibrary>("Hardcover request started")
         var dependencies = fixture.dependencies()
-        dependencies.fetchHardcover = { _ in try await response.value() }
+        dependencies.fetchHardcover = { _, _ in try await response.value() }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         let completed = expectation(description: "Refresh returned")
@@ -820,7 +820,7 @@ final class LibraryWorkflowTests: XCTestCase {
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         let response = ControlledLibraryResponse<HardcoverLibrary>("Request started")
         var dependencies = fixture.dependencies()
-        dependencies.fetchHardcover = { _ in try await response.value() }
+        dependencies.fetchHardcover = { _, _ in try await response.value() }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         let completed = expectation(description: "Cancelled refresh returned")
@@ -1232,7 +1232,7 @@ final class LibraryWorkflowTests: XCTestCase {
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: [fixture.book(9)])
         }
         var model: LibraryModel!
@@ -1264,7 +1264,7 @@ final class LibraryWorkflowTests: XCTestCase {
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
         dependencies.syncCloud = { $0 }
-        dependencies.fetchHardcover = { _ in throw HardcoverError.invalidToken }
+        dependencies.fetchHardcover = { _, _ in throw HardcoverError.invalidToken }
         var published: [SpineWorklistV1] = []
         dependencies.publishSpineWorklist = { published.append($0) }
         let model = LibraryModel(dependencies: dependencies)
@@ -1292,7 +1292,7 @@ final class LibraryWorkflowTests: XCTestCase {
         var dependencies = fixture.dependencies()
         dependencies.validateHardcover = { _ in "other-account" }
         var fetches = 0
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             fetches += 1
             return HardcoverLibrary(accountID: "other-account", books: [fixture.book(3)])
         }
@@ -1476,7 +1476,7 @@ private final class LibraryWorkflowFixture {
         dependencies.removeCredential = { self.secrets.removeValue(forKey: $0) }
         dependencies.readTopShelf = { [] }
         dependencies.writeTopShelf = { _ in }
-        dependencies.fetchHardcover = { _ in
+        dependencies.fetchHardcover = { _, _ in
             XCTFail("Unexpected Hardcover request")
             throw URLError(.unsupportedURL)
         }

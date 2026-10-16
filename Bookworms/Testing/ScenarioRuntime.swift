@@ -173,9 +173,9 @@
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [ScenarioURLProtocol.self]
             let client = HardcoverClient(session: URLSession(configuration: configuration))
-            dependencies.fetchHardcover = { [self] token in
+            dependencies.fetchHardcover = { [self] token, previous in
                 sourceCalls += 1
-                return try await client.fetchLibrary(token: token)
+                return try await client.fetchLibrary(token: token, previous: previous)
             }
             dependencies.validateHardcover = { token in try await client.validateToken(token) }
             dependencies.requestHardcoverDeviceAuth = { try await client.requestDeviceAuth() }

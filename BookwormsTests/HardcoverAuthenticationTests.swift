@@ -105,6 +105,26 @@ final class HardcoverAuthenticationTests: XCTestCase {
         } catch HardcoverError.rejected {} catch { XCTFail("Unexpected error: \(error)") }
     }
 
+    func testSavedCoversStayOnlyForTheAuthenticatedAccount() async throws {
+        // The stub's account is 1, and its only book reports a 1500-pixel cover.
+        let saved = Book(
+            id: 5, title: "Covered", author: "Unknown author",
+            coverURL: URL(string: "https://example.com/saved-alternate"),
+            detailCoverURL: URL(string: "https://example.com/saved"))
+        func snapshot(_ accountID: String) -> SourceSnapshot {
+            SourceSnapshot(
+                source: .hardcover, accountID: accountID, books: [saved], syncedAt: .distantPast)
+        }
+        let same = try await client().fetchLibrary(token: "hc_pat_covers", previous: snapshot("1"))
+        XCTAssertEqual(same.books.first?.detailCoverURL, saved.detailCoverURL)
+        XCTAssertEqual(same.books.first?.coverURL, saved.coverURL)
+        let other = try await client()
+            .fetchLibrary(token: "hc_pat_covers", previous: snapshot("2"))
+        XCTAssertEqual(
+            other.books.first?.detailCoverURL, URL(string: "https://example.com/current"),
+            "Another account's snapshot never fixes covers")
+    }
+
     func testMissingScopeIsNotReportedAsExpired() async {
         do {
             _ = try await client().fetchBooks(token: "hc_pat_scope")
@@ -304,6 +324,10 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             status = 200
             // The account and library decoders each consume their own response field.
             body = #"{"data":{"me":[{"id":1}],"user_books":[]}}"#
+        case "Bearer hc_pat_covers":
+            status = 200
+            body =
+                #"{"data":{"me":[{"id":1}],"user_books":[{"id":1,"book":{"id":5,"title":"Covered","image":{"url":"https://example.com/current","width":1000,"height":1500}}}]}}"#
         case "Bearer hc_pat_scope":
             status = 403
             body = #"{"error":"insufficient_scope","scope":"read:library"}"#

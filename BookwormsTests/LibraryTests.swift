@@ -292,6 +292,48 @@ final class LibraryTests: XCTestCase {
             "It still beats no cover")
     }
 
+    func testSavedCoversStayUnlessALowQualityCoverHasASharpReplacement() {
+        func cover(_ name: String, height: Int? = nil) -> CoverImage {
+            CoverImage(
+                url: URL(string: "https://example.com/\(name)"),
+                width: height.map { $0 * 2 / 3 }, height: height)
+        }
+        let low = cover("low", height: 600)
+        let sharp = cover("sharp", height: 1500)
+        let fair = cover("fair", height: 900)
+        let unsized = cover("unsized")
+        let thumbnail = cover("thumbnail", height: 197)
+        let saved = (preferred: low.url, alternate: URL(string: "https://example.com/saved"))
+        func choice(_ images: [CoverImage], previous: (preferred: URL?, alternate: URL?)?)
+            -> (preferred: URL?, alternate: URL?)
+        {
+            HardcoverClient.coverURLs(
+                edition: nil, book: images.first, otherEditions: Array(images.dropFirst()),
+                previous: previous)
+        }
+
+        XCTAssertEqual(
+            choice([sharp], previous: nil).preferred, sharp.url, "A new book takes the new cover")
+        XCTAssertEqual(
+            choice([sharp], previous: (nil, saved.alternate)).preferred, sharp.url,
+            "A book without a saved cover takes the new cover")
+        let kept = choice([sharp], previous: saved)
+        XCTAssertEqual(kept.preferred, low.url, "A saved cover missing from the sync stays")
+        XCTAssertEqual(kept.alternate, saved.alternate)
+        XCTAssertEqual(
+            choice([low, sharp], previous: saved).preferred, sharp.url,
+            "A low-quality cover upgrades to one at least 1000 pixels tall")
+        XCTAssertEqual(
+            choice([low, fair], previous: saved).preferred, low.url,
+            "A cover under 1000 pixels is no upgrade")
+        XCTAssertEqual(
+            choice([thumbnail, unsized], previous: (thumbnail.url, nil)).preferred,
+            thumbnail.url, "A cover without a reported height is never an upgrade")
+        XCTAssertEqual(
+            choice([unsized, sharp], previous: (unsized.url, nil)).preferred, unsized.url,
+            "A saved cover without a reported height is never replaced")
+    }
+
     func testGenresAndCommunityRatingsRemainSeparateFromPersonalScore() throws {
         let json =
             #"[{"id":1,"rating":5,"book":{"id":10,"title":"Test","rating":3.7,"ratings_count":20,"ratings_distribution":[{"rating":3.5,"count":12},{"rating":4,"count":8}],"cached_tags":{"Genre":[{"tag":"Fiction","count":10},{"tag":"Fantasy","count":5}]}}}]"#
