@@ -434,9 +434,9 @@ final class SpineCloudTests: XCTestCase {
         XCTAssertFalse(
             custom(accountID: longAccount, origin: "ios-pcc-v2")
                 .isValid(accountID: longAccount, key: cityWatch))
-        XCTAssertTrue(
+        XCTAssertFalse(
             custom(accountID: "42", origin: "two\nlines").isValid(accountID: "42", key: cityWatch),
-            "As on the iPhone, an origin may span lines")
+            "An origin is one line")
         XCTAssertFalse(
             custom(accountID: "42", origin: String(repeating: "o", count: 81))
                 .isValid(accountID: "42", key: cityWatch))
