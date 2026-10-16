@@ -45,7 +45,9 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     /// The weight of the `fontPostScriptName` instance (100...900), which can differ from
     /// `weight` when the family lacks that weight.
     var instanceWeight: Int? = nil
-    /// How the design was made when not by a model request, such as "series-reuse:12".
+    /// How the design was made, in space-separated tokens such as "model:apple/on-device" or
+    /// "series-reuse:12". The model token names the companion's model tier; Private Cloud
+    /// Compute's designs record none. The Apple TV doesn't read the tier.
     var provenance: String? = nil
 
     func isValid(accountID: String, book: Book) -> Bool {
@@ -141,9 +143,10 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     var fontFamily: String? = nil
     var fontPostScriptName: String? = nil
     var instanceWeight: Int? = nil
-    /// The `provenance` of the design the look copies, which tells a companion app the model
-    /// tier that made it. Book Wall's cover-sampled looks record none; their `origin` marks
-    /// them.
+    /// The model token of the design the look copies (`SpineDesignV1.modelToken`), which tells
+    /// a companion app the model tier that made it. A look copies no other `provenance` token.
+    /// Private Cloud Compute's looks and Book Wall's cover-sampled looks record none; the
+    /// latter's `origin` marks them.
     var provenance: String? = nil
 
     /// The origin of a look made from Book Wall's cover-sampled style.
@@ -190,7 +193,7 @@ extension SeriesLookV1 {
             accentHex: design.accentHex, typeface: design.typeface, weight: design.weight,
             uppercase: design.uppercase, fontFamily: design.fontFamily,
             fontPostScriptName: design.fontPostScriptName, instanceWeight: design.instanceWeight,
-            provenance: design.provenance)
+            provenance: design.modelToken)
     }
 
     /// A look for `key` from Book Wall's cover-sampled `style` of `book`, the group's

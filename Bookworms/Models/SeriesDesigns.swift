@@ -255,4 +255,10 @@ extension SpineDesignV1 {
     var isSeriesReuse: Bool {
         provenance?.split(separator: " ").contains { $0.hasPrefix("series-reuse:") } == true
     }
+
+    /// The first `model:` token of `provenance`, which names the companion's model tier, such
+    /// as "model:apple/on-device". Private Cloud Compute's designs have none.
+    var modelToken: String? {
+        provenance?.split(separator: " ").first { $0.hasPrefix("model:") }.map(String.init)
+    }
 }

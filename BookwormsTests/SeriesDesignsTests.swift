@@ -174,6 +174,21 @@ final class SeriesDesignsTests: XCTestCase {
                 createdAt: Date(timeIntervalSince1970: 1_000)
             )
             .provenance, "model:apple/on-device", "A look keeps its design's model tier")
+        onDevice.provenance =
+            "series-reuse:9 model:apple/on-device generated-colors:1A2B3C,F4E9D0,C08040"
+        XCTAssertEqual(
+            SeriesLookV1(
+                key: SeriesLookKey(seriesID: 7, group: "|mattdinniman"), design: onDevice,
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+            .provenance, "model:apple/on-device", "A look copies only the model token")
+        onDevice.provenance = "generated-colors:1A2B3C,F4E9D0,C08040"
+        XCTAssertNil(
+            SeriesLookV1(
+                key: SeriesLookKey(seriesID: 7, group: "|mattdinniman"), design: onDevice,
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+            .provenance, "A recolored Private Cloud Compute design gives a look no provenance")
         var tagged = designs[2]!
         tagged.provenance = "generated-colors:1A2B3C,F4E9D0,C08040 series-reuse:9"
         XCTAssertTrue(tagged.isSeriesReuse, "Any provenance token can mark a reuse copy")
