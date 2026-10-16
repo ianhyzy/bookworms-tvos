@@ -14,9 +14,14 @@ struct BookWallPreparedWall {
     let books: [Book]
     /// The series design sources the wall was prepared for (`LibraryModel.seriesSources`).
     let sources: [Int: Book]
-    /// Designs the spines were drawn from (`LibraryModel.drawnDesigns`), keyed by book ID, for
-    /// wall books and their series sources: companion designs and series looks.
+    /// The companion designs the wall was prepared for (`LibraryModel.spineDesigns`), keyed by
+    /// book ID, for wall books and their series sources.
     let designs: [Int: SpineDesignV1]
+    /// The series looks the wall was prepared for (`LibraryModel.lookDesigns`), keyed by book ID.
+    let looks: [Int: SpineDesignV1]
+    /// The design each spine was drawn from, by book ID: its series look when the look's face
+    /// can letter the book, else its companion design.
+    let drawn: [Int: SpineDesignV1]
     /// The source each book's spine draws with: its series source, when that source's face can
     /// letter the book. Other books draw their own.
     let drawsWith: [Int: Book]
@@ -42,24 +47,28 @@ final class BookWallPreparation {
     private var missingCovers: [Book] = []
     private let rasterizer = BookWallRasterizer()
 
-    func isReady(for books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1])
-        -> Bool
-    {
+    func isReady(
+        for books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
+        looks: [Int: SpineDesignV1]
+    ) -> Bool {
         prepared?.books == books && prepared?.sources == sources && prepared?.designs == designs
+            && prepared?.looks == looks
     }
 
-    /// Prepares `books`, each drawn in its design from `designs` (a companion design or its
-    /// series look) when it has one, or from its cover. A book with a series source in `sources`
-    /// (`LibraryModel.seriesSources`) draws in the source's design when the source's face can
-    /// letter it, checked here once.
+    /// Prepares `books`, each drawn in its series look from `looks`, else its companion design
+    /// from `designs`, else from its cover. A look draws only on a book its face can letter;
+    /// another book keeps its companion design, as on the iPhone. A book with a series source
+    /// in `sources` (`LibraryModel.seriesSources`) draws in the source's design when the
+    /// source's face can letter it. Both checks run here, once.
     func prepare(
-        _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:]
+        _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
+        looks: [Int: SpineDesignV1] = [:]
     ) async {
         let fontStyle =
             AppFontStyle(rawValue: UserDefaults.standard.string(forKey: "fontStyle") ?? "")
             ?? .serif
         if let prepared, prepared.books == books, prepared.sources == sources,
-            prepared.designs == designs
+            prepared.designs == designs, prepared.looks == looks
         {
             // A cancelled preparation may have left covers to retry.
             await retryMissingCovers(in: prepared, fontStyle: fontStyle)
@@ -71,12 +80,18 @@ final class BookWallPreparation {
         completedCount = 0
         totalCount = books.count
 
-        // Glyph checks and layout measure lettering, so each design's face must be registered
-        // first.
-        await Self.loadFonts(for: designs.values)
+        // Glyph checks and layout measure lettering, so each face must be registered first,
+        // including the companion design a book keeps when its look's face can't letter it.
+        await Self.loadFonts(for: Array(designs.values) + looks.values)
         guard !Task.isCancelled else { return }
+        var drawn = designs
+        for book in books {
+            guard let look = looks[book.id] else { continue }
+            let face = BookWallLocalSpine.typography(for: book, design: look).font(size: 12)
+            if SeriesDesigns.canLetter(book, font: face as CTFont) { drawn[book.id] = look }
+        }
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
-            BookWallLocalSpine.typography(for: book, design: designs[book.id])
+            BookWallLocalSpine.typography(for: book, design: drawn[book.id])
         }
         var drawsWith: [Int: Book] = [:]
         var typographies: [Int: BookWallLocalSpine.Typography] = [:]
@@ -86,7 +101,7 @@ final class BookWallPreparation {
             {
                 drawsWith[book.id] = source
                 typographies[book.id] = typography(of: source)
-            } else if designs[book.id] != nil {
+            } else if drawn[book.id] != nil {
                 typographies[book.id] = typography(of: book)
             }
         }
@@ -125,9 +140,9 @@ final class BookWallPreparation {
             guard !Task.isCancelled else { return }
             if cover == nil, !slot.book.coverURLs.isEmpty { missing.append(slot.book) }
             let source = await sourceStyle(
-                for: slot.book, drawsWith: drawsWith, designs: designs, cache: &styles)
+                for: slot.book, drawsWith: drawsWith, designs: drawn, cache: &styles)
             let images = await rasterizer.render(
-                slot: slot, cover: cover, source: source, design: designs[slot.book.id],
+                slot: slot, cover: cover, source: source, design: drawn[slot.book.id],
                 fontStyle: fontStyle)
             guard !Task.isCancelled else { return }
             guard let spineImage = images.spine,
@@ -161,8 +176,8 @@ final class BookWallPreparation {
             hint = await BookWallShelfLabel.prepare(image)
         }
         let wall = BookWallPreparedWall(
-            books: books, sources: sources, designs: designs, drawsWith: drawsWith,
-            layout: layout, bodies: bodies, labels: labels, hint: hint)
+            books: books, sources: sources, designs: designs, looks: looks, drawn: drawn,
+            drawsWith: drawsWith, layout: layout, bodies: bodies, labels: labels, hint: hint)
         prepared = wall
         missingCovers = missing
         await retryMissingCovers(in: wall, fontStyle: fontStyle)
@@ -202,9 +217,9 @@ final class BookWallPreparation {
                     for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             else { continue }
             let source = await sourceStyle(
-                for: slot.book, drawsWith: wall.drawsWith, designs: wall.designs, cache: &styles)
+                for: slot.book, drawsWith: wall.drawsWith, designs: wall.drawn, cache: &styles)
             let images = await rasterizer.render(
-                slot: slot, cover: cover, source: source, design: wall.designs[slot.book.id],
+                slot: slot, cover: cover, source: source, design: wall.drawn[slot.book.id],
                 fontStyle: fontStyle)
             guard let spineImage = images.spine, let coverImage = images.cover,
                 let spine = try? await TextureResource.generate(

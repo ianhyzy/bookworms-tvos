@@ -43,26 +43,27 @@ final class LibraryModel {
     /// with (`SeriesDesigns.sources`); a source maps to itself. Prepared with the library, never
     /// on focus or remote input.
     private(set) var seriesSources: [Int: Book] = [:]
-    /// The design Book Wall draws each book in, by ID: its look group's series look, else its
-    /// own companion design. Prepared with `seriesSources`.
-    private(set) var drawnDesigns: [Int: SpineDesignV1] = [:]
+    /// The series look each book draws as its design, by ID, in place of its companion design
+    /// (`spineDesigns`). Prepared with `seriesSources`.
+    private(set) var lookDesigns: [Int: SpineDesignV1] = [:]
 
     /// What Book Wall draws `books` with, by book ID.
     ///
     /// A book whose look group (`SeriesDesigns.lookKey(of:link:)`, with `links`) has a series
-    /// look in `looks` draws the look as its design, unless its link keeps its own look. Every
-    /// other book draws its companion design from `designs`, if any, and `sources` gives the
-    /// books that draw another book's design instead: `SeriesDesigns.sources` over the books of
-    /// groups without a look, judging each book's design by the face Book Wall draws it in
-    /// (`BookWallLocalSpine.typography(for:design:)`). That face is its companion design's,
-    /// with a blocked face already replaced by its upright stand-in, or its genre face, so a
-    /// design saved in Impact or Pacifico leads its series, as on the iPhone. Whether a source's
-    /// face can letter each book is checked later, once, where a spine is prepared.
+    /// look in `looks` draws the look as its design (`looks` in the result), unless its link
+    /// keeps its own look. Every other book draws its companion design from `designs`, if any,
+    /// and `sources` gives the books that draw another book's design instead:
+    /// `SeriesDesigns.sources` over the books of groups without a look, judging each book's
+    /// design by the face Book Wall draws it in (`BookWallLocalSpine.typography(for:design:)`).
+    /// That face is its companion design's, with a blocked face already replaced by its upright
+    /// stand-in, or its genre face, so a design saved in Impact or Pacifico leads its series, as
+    /// on the iPhone. Whether a look's or source's face can letter each book is checked later,
+    /// once, where a spine is prepared.
     nonisolated static func seriesDrawing(
         of books: [Book], designs: [Int: SpineDesignV1] = [:], links: [Int: SeriesLinkV1] = [:],
         looks: [SeriesLookKey: SeriesLookV1] = [:]
-    ) -> (sources: [Int: Book], designs: [Int: SpineDesignV1]) {
-        var drawn = designs
+    ) -> (sources: [Int: Book], looks: [Int: SpineDesignV1]) {
+        var drawn: [Int: SpineDesignV1] = [:]
         var ranked: [Int: Book] = [:]
         for book in books {
             let link = links[book.id]
@@ -92,7 +93,7 @@ final class LibraryModel {
                 of: allBooks, designs: spineDesigns, links: seriesLinks, looks: seriesLooks)
             : Self.seriesDrawing(of: allBooks, links: seriesLinks)
         if drawing.sources != seriesSources { seriesSources = drawing.sources }
-        if drawing.designs != drawnDesigns { drawnDesigns = drawing.designs }
+        if drawing.looks != lookDesigns { lookDesigns = drawing.looks }
     }
 
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.

@@ -209,13 +209,13 @@ final class SeriesDesignsTests: XCTestCase {
             of: books, designs: [3: own], links: [3: link(3, ownLook: true)],
             looks: [look.key: look])
         XCTAssertTrue(drawing.sources.isEmpty, "A group with a look lends no book's design")
-        let first = try XCTUnwrap(drawing.designs[1])
+        let first = try XCTUnwrap(drawing.looks[1])
         XCTAssertEqual(first.bookID, 1)
         XCTAssertEqual(first.backgroundHex, "#102030")
         XCTAssertEqual(first.fontPostScriptName, "EBGaramond-SemiBold")
         XCTAssertEqual(first.generatorVersion, "ios-pcc-v2")
-        XCTAssertEqual(drawing.designs[2]?.backgroundHex, "#102030")
-        XCTAssertEqual(drawing.designs[3], own, "A book that keeps its own look draws its design")
+        XCTAssertEqual(drawing.looks[2]?.backgroundHex, "#102030")
+        XCTAssertNil(drawing.looks[3], "A book that keeps its own look draws its design")
 
         let without = LibraryModel.seriesDrawing(of: books, designs: [3: own])
         XCTAssertEqual(without.sources[2]?.id, 1, "Without a look, the best-ranked book lends")

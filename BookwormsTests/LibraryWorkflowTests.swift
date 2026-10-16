@@ -970,7 +970,7 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(created.map(\.sourceBookID), [2], "The earliest design decides the look")
         XCTAssertEqual(created.first?.createdAt, fixture.time)
         XCTAssertEqual(
-            (1...3).map { model.drawnDesigns[$0]?.backgroundHex },
+            (1...3).map { model.lookDesigns[$0]?.backgroundHex },
             Array(repeating: "#203040", count: 3))
         XCTAssertTrue(model.seriesSources.isEmpty, "Books with a look borrow no other design")
     }
