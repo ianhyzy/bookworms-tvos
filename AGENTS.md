@@ -18,7 +18,7 @@ This repository contains **Bookworms - eBook Display**, a Swift 6 and SwiftUI ap
 | Social data and comparisons | [SocialLibraryModel.swift](Bookworms/Services/SocialLibraryModel.swift), [SocialPresentation.swift](Bookworms/Models/SocialPresentation.swift) |
 | Cover caching and appearance | [ArtworkStore.swift](Bookworms/Services/ArtworkStore.swift), [CoverView.swift](Bookworms/Views/CoverView.swift) |
 | Snapshots and iCloud | [SourceLibraryStore.swift](Bookworms/Services/SourceLibraryStore.swift), [CloudLibraryStore.swift](Bookworms/Services/CloudLibraryStore.swift) |
-| iPhone and Mac companion records (spine designs, cover choices) | [SpineCloudStore.swift](Bookworms/Services/SpineCloudStore.swift), [Book Wall companion designs](docs/BOOK_WALL.md#companion-designs), [handoff](docs/handoffs/2026-10-06-spine-companion.md) |
+| iPhone and Mac companion records (spine designs, cover choices, `SeriesLookV1` series looks, `SeriesLinkV1` series links) | [SpineCloudStore.swift](Bookworms/Services/SpineCloudStore.swift), [Book Wall companion designs](docs/BOOK_WALL.md#companion-designs), [series links and looks](docs/BOOK_WALL.md#series-links-and-looks), [handoff](docs/handoffs/2026-10-06-spine-companion.md) |
 | Home Screen extension | [ContentProvider.swift](BookwormsTopShelf/ContentProvider.swift), [TopShelfSnapshot.swift](Shared/TopShelfSnapshot.swift) |
 | Targets and build settings | [project.yml](project.yml) |
 
@@ -47,7 +47,7 @@ Maintain [VIEWS.md](VIEWS.md) for tvOS view options and [DATASOURCES.md](DATASOU
 - Keep the CWA source hidden in Settings (`BookPresentation.offersCWA`) while preserving its client, configuration, credentials, and tests.
 - Keep the empty-shelf photos hidden (`BookPresentation.showsShelfPhotos`) while preserving `ShelfPhoto`, its assets, and its layout.
 - Keep generated-spine views, AI provider settings, generation entry points, and spine font restoration disabled. Preserve retained implementations, designs, and credentials. The feature switches live in [BookPresentation.swift](Bookworms/Models/BookPresentation.swift).
-- Book Wall draws a book's spine from its companion `SpineDesignV1` record while `BookPresentation.showsCompanionSpines` is on; books without a valid design keep their local spines. Download companion fonts during Book Wall preparation, never while browsing.
+- While `BookPresentation.showsCompanionSpines` is on, Book Wall draws a book in its group's `SeriesLookV1` series look, else in its series source's or its own companion `SpineDesignV1` design, else in its local spine. Download companion fonts during Book Wall preparation, never while browsing.
 - Show a companion `CoverChoiceV1` cover before a Hardcover book's default covers while `BookPresentation.showsCompanionCovers` is on. Set it only on displayed books (`Book.chosenCoverURL`); never write it into source snapshots or companion work-item hashes.
 - Use shared cover components for consistent focus effects across sizes and views. Respect Reduce Motion. On shelves, stand covers on `ShelfBoard` and pass `standsOnShelf: true` to `CoverView`. Keep shelf effects subtle and static: fade prebuilt shadows with opacity instead of animating a blur radius.
 - Leave out readers the user blocked on Hardcover wherever the app shows other readers' content, including future views, settings, and pickers. `HardcoverSocialClient.blockedReaders(owner:token:)` supplies the list; `following(owner:token:)` and `reviews(book:token:)` apply it. If the list fails to load, fail the request rather than show unfiltered content.

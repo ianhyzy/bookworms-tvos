@@ -1,3 +1,4 @@
+import CoreText
 import Foundation
 import UIKit
 
@@ -14,14 +15,19 @@ enum BookWallLocalSpine {
     struct Typography: Equatable, Sendable {
         /// A PostScript name, used when the face is registered in this process.
         let fontName: String?
+        /// The Google Fonts family of an upright stand-in for a blocked face, drawn in its
+        /// registered face nearest `weight` before `fontName`, the stand-in's Regular face.
+        var standInFamily: String?
         /// The system face for a missing `fontName`: "serif", "sans", "rounded", or "monospaced".
         var typeface = "sans"
-        /// The system face's weight, from 400 to 700.
+        /// The stand-in's or the system face's weight, from 400 to 700.
         var weight = 600
         var uppercase = false
 
+        /// The stand-in's registered face nearest `weight`, else `fontName`, else the system
+        /// face for `typeface` and `weight`.
         func font(size: CGFloat) -> UIFont {
-            if let fontName, let font = UIFont(name: fontName, size: size) { return font }
+            if let font = loadedFont(size: size) { return font }
             let system = UIFont.systemFont(
                 ofSize: size,
                 weight: weight >= 700
@@ -37,19 +43,32 @@ enum BookWallLocalSpine {
                 .map { UIFont(descriptor: $0, size: size) } ?? system
         }
 
+        /// The stand-in's registered face nearest `weight`, else `fontName`, or `nil` when
+        /// neither is registered and the spine draws in the system face.
+        func loadedFont(size: CGFloat) -> UIFont? {
+            if let standInFamily,
+                let face = GoogleFontLibrary.registeredFace(family: standInFamily, nearest: weight)
+            {
+                return CTFontCreateCopyWithAttributes(face, size, nil, nil) as UIFont
+            }
+            return fontName.flatMap { UIFont(name: $0, size: size) }
+        }
+
         func title(for book: Book) -> String { uppercase ? book.title.uppercased() : book.title }
     }
 
     /// The companion design's face, or the genre face without one. A design in a face the type
-    /// rules block shows in `SpineFontPolicy.allowedFontName(_:)`'s upright stand-in, such as
-    /// Bebas Neue for Impact, or in the design's system typeface when that face is not
-    /// installed.
+    /// rules block shows in `SpineFontPolicy.allowedFontName(_:)`'s upright replacement, such
+    /// as Bebas Neue for Impact. A face that slants by design shows in its stand-in family
+    /// (`SpineFontPolicy.standInFamily(for:)`) at the design's weight, such as Kalam Bold for
+    /// Dancing Script Bold. A face that is not installed shows in the design's system typeface.
     static func typography(for book: Book, design: SpineDesignV1?) -> Typography {
         guard let design else { return Typography(fontName: fontName(for: book)) }
         let fontName = design.fontPostScriptName.map(SpineFontPolicy.allowedFontName)
         return Typography(
-            fontName: fontName, typeface: design.typeface, weight: design.weight,
-            uppercase: design.uppercase)
+            fontName: fontName,
+            standInFamily: design.fontPostScriptName.flatMap(SpineFontPolicy.standInFamily),
+            typeface: design.typeface, weight: design.weight, uppercase: design.uppercase)
     }
 
     /// Uses the companion design's colors and type when one exists; otherwise samples the cover.
@@ -169,6 +188,17 @@ enum BookWallLocalSpine {
             }
         }
         return "AvenirNext-DemiBold"
+    }
+
+    /// The portable typeface nearest a genre face from `fontName(for:)`: "serif", "sans",
+    /// "rounded", or "monospaced".
+    static func typeface(ofGenreFace name: String) -> String {
+        switch name {
+        case "Georgia-Bold", "TimesNewRomanPS-BoldMT": "serif"
+        case "ArialRoundedMTBold": "rounded"
+        case "CourierNewPS-BoldMT": "monospaced"
+        default: "sans"
+        }
     }
 
     private struct RankedColor {

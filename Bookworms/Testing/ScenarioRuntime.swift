@@ -199,10 +199,15 @@
             dependencies.readSpineWorklist = { nil }
             dependencies.publishSpineWorklist = { _ in }
             dependencies.fetchSpineDesigns = { accountID, books in
-                ProcessInfo.processInfo.arguments.contains("--test-companion-designs")
+                let designs =
+                    ProcessInfo.processInfo.arguments.contains("--test-companion-designs")
                     ? ScenarioFixtures.designs(accountID: accountID, books: books) : [:]
+                return (designs, true)
             }
-            dependencies.fetchCoverChoices = { _, _ in [:] }
+            dependencies.fetchCoverChoices = { _, _ in ([:], true) }
+            dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
+            dependencies.fetchSeriesLooks = { _, _ in [:] }
+            dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
             dependencies.readTopShelf = { [] }
             dependencies.writeTopShelf = { _ in }

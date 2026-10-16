@@ -871,7 +871,7 @@ final class LibraryWorkflowTests: XCTestCase {
             XCTAssertEqual(accountID, fixture.hardcoverAccountID)
             requestedIDs = books.map(\.id).sorted()
             cacheRead.fulfill()
-            return [:]
+            return ([:], true)
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -899,14 +899,16 @@ final class LibraryWorkflowTests: XCTestCase {
         var designBooks: [Book] = []
         dependencies.fetchSpineDesigns = { _, books in
             designBooks = books
-            return [:]
+            return ([:], true)
         }
         dependencies.fetchCoverChoices = { accountID, _ in
-            [
-                1: CoverChoiceV1(
-                    version: 1, accountID: accountID, bookID: 1, coverURL: chosen,
-                    chosenAt: fixture.time)
-            ]
+            (
+                [
+                    1: CoverChoiceV1(
+                        version: 1, accountID: accountID, bookID: 1, coverURL: chosen,
+                        chosenAt: fixture.time)
+                ], true
+            )
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -921,6 +923,150 @@ final class LibraryWorkflowTests: XCTestCase {
         model.iCloudEnabled = false
         XCTAssertEqual(model.books.first { $0.id == 1 }?.coverURLs, [detail, catalog])
         XCTAssertTrue(model.spineDesigns.isEmpty)
+    }
+
+    func testSeriesLooksDrawForMembersAndAMissingLookCopiesTheEarliestDesign() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let books = (1...3)
+            .map { id in
+                var book = fixture.book(id)
+                book.seriesID = 7
+                book.seriesPosition = Double(id)
+                return book
+            }
+        try fixture.save([fixture.snapshot(.hardcover, books: books)])
+        func design(_ id: Int, hex: String, day: Double) -> SpineDesignV1 {
+            SpineDesignV1(
+                version: 1, accountID: fixture.hardcoverAccountID, bookID: id,
+                workItemHash: SpineCloudIdentity.workItemHash(
+                    accountID: fixture.hardcoverAccountID, book: books[id - 1]),
+                coverHash: String(repeating: "a", count: 64), generatorVersion: "ios-pcc-v2",
+                generatedAt: Date(timeIntervalSince1970: day * 86_400), backgroundHex: hex,
+                foregroundHex: "#FFFFFF", accentHex: "#FFFFFF", typeface: "serif",
+                weight: 700, uppercase: false)
+        }
+        let designs = [1: design(1, hex: "#102030", day: 2), 2: design(2, hex: "#203040", day: 1)]
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        dependencies.fetchSpineDesigns = { _, _ in (designs, true) }
+        var requestedKeys: [SeriesLookKey] = []
+        dependencies.fetchSeriesLooks = { _, keys in
+            requestedKeys = keys
+            return [:]
+        }
+        var created: [SeriesLookV1] = []
+        dependencies.createSeriesLook = { look in
+            created.append(look)
+            return look
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+
+        let key = SeriesLookKey(seriesID: 7, group: "|fictionalauthor")
+        XCTAssertEqual(requestedKeys, [key])
+        XCTAssertEqual(created.map(\.sourceBookID), [2], "The earliest design decides the look")
+        XCTAssertEqual(created.first?.createdAt, fixture.time)
+        XCTAssertEqual(
+            (1...3).map { model.lookDesigns[$0]?.backgroundHex },
+            Array(repeating: "#203040", count: 3))
+        XCTAssertTrue(model.seriesSources.isEmpty, "Books with a look borrow no other design")
+    }
+
+    func testMissingLooksSkipBooksThatKeepTheirOwnLookAndWaitForACompleteRead() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let books = (1...3)
+            .map { id in
+                var book = fixture.book(id)
+                book.seriesID = 7
+                book.seriesPosition = Double(id)
+                return book
+            }
+        try fixture.save([fixture.snapshot(.hardcover, books: books)])
+        func design(_ id: Int, day: Double) -> SpineDesignV1 {
+            SpineDesignV1(
+                version: 1, accountID: fixture.hardcoverAccountID, bookID: id,
+                workItemHash: SpineCloudIdentity.workItemHash(
+                    accountID: fixture.hardcoverAccountID, book: books[id - 1]),
+                coverHash: String(repeating: "a", count: 64), generatorVersion: "ios-pcc-v2",
+                generatedAt: Date(timeIntervalSince1970: day * 86_400), backgroundHex: "#102030",
+                foregroundHex: "#FFFFFF", accentHex: "#FFFFFF", typeface: "serif",
+                weight: 700, uppercase: false)
+        }
+        // Book 1 keeps its own look, so its earlier design must not become the group's.
+        let designs = [1: design(1, day: 1), 2: design(2, day: 2)]
+        let link = SeriesLinkV1(
+            accountID: fixture.hardcoverAccountID, bookID: 1, ownLook: true,
+            chosenAt: fixture.time)
+        for isComplete in [false, true] {
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+            dependencies.fetchSpineDesigns = { _, _ in (designs, isComplete) }
+            dependencies.fetchSeriesLinks = { _, _ in ([1: link], true) }
+            var created: [SeriesLookV1] = []
+            dependencies.createSeriesLook = { look in
+                created.append(look)
+                return look
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            XCTAssertEqual(
+                created.map(\.sourceBookID), isComplete ? [2] : [],
+                "Only a complete read creates looks")
+        }
+    }
+
+    func testAFailedLookSaveDoesNotStopTheOtherGroups() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        // Books 1 and 2 are in series 7, books 3 and 4 in series 8.
+        let books = (1...4)
+            .map { id in
+                var book = fixture.book(id)
+                book.seriesID = id <= 2 ? 7 : 8
+                book.seriesPosition = Double(id)
+                return book
+            }
+        try fixture.save([fixture.snapshot(.hardcover, books: books)])
+        func design(_ id: Int) -> SpineDesignV1 {
+            SpineDesignV1(
+                version: 1, accountID: fixture.hardcoverAccountID, bookID: id,
+                workItemHash: SpineCloudIdentity.workItemHash(
+                    accountID: fixture.hardcoverAccountID, book: books[id - 1]),
+                coverHash: String(repeating: "a", count: 64), generatorVersion: "ios-pcc-v2",
+                generatedAt: Date(timeIntervalSince1970: 86_400), backgroundHex: "#102030",
+                foregroundHex: "#FFFFFF", accentHex: "#FFFFFF", typeface: "serif",
+                weight: 700, uppercase: false)
+        }
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        dependencies.fetchSpineDesigns = { _, _ in ([1: design(1), 3: design(3)], true) }
+        var attempted: [Int] = []
+        dependencies.createSeriesLook = { look in
+            attempted.append(look.seriesID)
+            if look.seriesID == 7 { throw CloudStorageError.temporarilyUnavailable }
+            return look
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+
+        XCTAssertEqual(attempted, [7, 8], "Each group's save is tried")
+        XCTAssertNil(model.lookDesigns[1], "A failed save leaves its group without a look")
+        XCTAssertEqual(model.lookDesigns[3]?.bookID, 3)
+        XCTAssertEqual(model.lookDesigns[4]?.bookID, 4)
     }
 
     func testCloudWorklistUsesCompleteHardcoverSnapshotAndClearsWhenDisabled() async throws {
@@ -950,7 +1096,7 @@ final class LibraryWorkflowTests: XCTestCase {
                     didFulfillCachePrune = true
                     cachePrune.fulfill()
                 }
-                return [:]
+                return ([:], true)
             }
             XCTAssertEqual(accountID, fixture.hardcoverAccountID)
             requestedDesignIDs = books.map(\.id).sorted()
@@ -959,7 +1105,7 @@ final class LibraryWorkflowTests: XCTestCase {
                 didFulfillDesignFetch = true
                 designFetch.fulfill()
             }
-            return [:]
+            return ([:], true)
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -1331,8 +1477,14 @@ private final class LibraryWorkflowFixture {
         }
         dependencies.readSpineWorklist = { nil }
         dependencies.publishSpineWorklist = { _ in }
-        dependencies.fetchSpineDesigns = { _, _ in [:] }
-        dependencies.fetchCoverChoices = { _, _ in [:] }
+        dependencies.fetchSpineDesigns = { _, _ in ([:], true) }
+        dependencies.fetchCoverChoices = { _, _ in ([:], true) }
+        dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
+        dependencies.fetchSeriesLooks = { _, _ in [:] }
+        dependencies.createSeriesLook = { _ in
+            XCTFail("Unexpected series look")
+            throw URLError(.unsupportedURL)
+        }
         dependencies.sleep = { _ in
             XCTFail("Unexpected scheduled work")
             throw CancellationError()

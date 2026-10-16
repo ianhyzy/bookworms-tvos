@@ -67,7 +67,7 @@ struct ShelfView: View {
     private var isWallReady: Bool {
         let key = wallPreparationKey
         return bookWallPreparation.isReady(
-            for: key.books, sources: key.sources, designs: key.designs)
+            for: key.books, sources: key.sources, designs: key.designs, looks: key.looks)
     }
     private var wallPreparationKey: BookWallPreparationKey {
         let books = wallBooks
@@ -75,15 +75,18 @@ struct ShelfView: View {
         // Only the wall's books and their series sources, so designs for other books do not
         // rebuild it.
         var designs: [Int: SpineDesignV1] = [:]
+        var looks: [Int: SpineDesignV1] = [:]
         if BookPresentation.showsCompanionSpines {
             for book in books + sources.values {
                 designs[book.id] = library.spineDesigns[book.id]
+                looks[book.id] = library.lookDesigns[book.id]
             }
         }
         return BookWallPreparationKey(
             loaded: library.hasLoadedLibrarySnapshot,
             enabled: coordinator.preferences.orderedViews.contains(.bookWall),
-            books: books, sources: sources, designs: designs, retry: bookWallPreparationRetry)
+            books: books, sources: sources, designs: designs, looks: looks,
+            retry: bookWallPreparationRetry)
     }
     private var waitsForBookWall: Binding<Bool> {
         Binding(
@@ -258,7 +261,7 @@ struct ShelfView: View {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
                 await bookWallPreparation.prepare(
-                    key.books, sources: key.sources, designs: key.designs)
+                    key.books, sources: key.sources, designs: key.designs, looks: key.looks)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
@@ -439,6 +442,7 @@ struct ShelfView: View {
         let books: [Book]
         let sources: [Int: Book]
         let designs: [Int: SpineDesignV1]
+        let looks: [Int: SpineDesignV1]
         let retry: Int
     }
 

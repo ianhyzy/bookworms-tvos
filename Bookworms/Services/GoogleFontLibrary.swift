@@ -83,8 +83,9 @@ actor GoogleFontLibrary {
             licensePath: directory.appending(path: "LICENSE.txt").path)
     }
 
-    /// Downloads and registers `family`. Throws `AIError.invalidFont` for a blocked family, such
-    /// as Impact, before reading the cache or the network.
+    /// Downloads and registers `family`, and returns its upright face nearest `weight`. Throws
+    /// `AIError.invalidFont` for a blocked family, such as Impact, before reading the cache or
+    /// the network.
     func download(family: String, weight: Int = 400) async throws -> DownloadedFont {
         guard SpineFontPolicy.allows(family) else { throw AIError.invalidFont }
         if let font = cached(family: family, weight: weight) {
@@ -122,19 +123,11 @@ actor GoogleFontLibrary {
             license.contents.contains("SIL OPEN FONT LICENSE")
                 || license.contents.contains("Apache License")
         else { throw AIError.unavailableFont }
-        let desired =
-            [
-                100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular", 500: "Medium",
-                600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black",
-            ][weight] ?? "Regular"
         let candidates = manifest.fileRefs.filter {
             $0.filename.hasSuffix(".ttf") && !$0.filename.contains("Italic")
         }
-        guard
-            let source = candidates.first(where: { $0.filename.hasSuffix("-\(desired).ttf") })
-                ?? candidates.first(where: {
-                    $0.filename.contains("[") || $0.filename.contains("VariableFont")
-                }) ?? candidates.first,
+        let chosen = Self.fileName(for: weight, in: candidates.map(\.filename))
+        guard let source = candidates.first(where: { $0.filename == chosen }),
             source.url.scheme == "https", source.url.host == "fonts.gstatic.com"
         else { throw AIError.unavailableFont }
         let fontData = try await fetch(source.url)
@@ -147,7 +140,7 @@ actor GoogleFontLibrary {
         guard
             let descriptors = CTFontManagerCreateFontDescriptorsFromURL(file as CFURL)
                 as? [CTFontDescriptor],
-            let ctFont = Self.uprightFont(in: descriptors)
+            let ctFont = Self.uprightFace(in: descriptors, nearest: weight)
         else { throw AIError.unavailableFont }
         let font = DownloadedFont(
             family: family, postScriptName: CTFontCopyPostScriptName(ctFont) as String,
@@ -157,14 +150,81 @@ actor GoogleFontLibrary {
         return font
     }
 
-    /// The first face in a font file that has neither the italic trait nor a slant.
-    static func uprightFont(in descriptors: [CTFontDescriptor]) -> CTFont? {
-        descriptors.lazy.map { CTFontCreateWithFontDescriptor($0, 32, nil) }
-            .first(where: SpineFontPolicy.isUpright)
+    /// Returns the font file to download for `weight` from a family's upright `.ttf` file names,
+    /// as the iPhone companion chooses it: the static file of that weight, else the variable
+    /// file, else the static file of the nearest weight, else the first file.
+    ///
+    /// A static file names its weight as a suffix, such as "Kalam-Bold.ttf". Of two equally
+    /// near static files, a weight above 500 takes the heavier and any other the lighter.
+    static func fileName(for weight: Int, in names: [String]) -> String? {
+        let weights = [
+            "Thin": 100, "ExtraLight": 200, "Light": 300, "Regular": 400, "Medium": 500,
+            "SemiBold": 600, "Bold": 700, "ExtraBold": 800, "Black": 900,
+        ]
+        let nearestStatic =
+            names
+            .compactMap { name -> (name: String, weight: Int)? in
+                guard let style = name.dropLast(".ttf".count).split(separator: "-").last,
+                    let fileWeight = weights[String(style)]
+                else { return nil }
+                return (name, fileWeight)
+            }
+            .min { nearer($0.weight, than: $1.weight, to: weight) }
+        if let nearestStatic, nearestStatic.weight == weight { return nearestStatic.name }
+        let variable = names.first { $0.contains("[") || $0.contains("VariableFont") }
+        return variable ?? nearestStatic?.name ?? names.first
     }
 
+    /// Returns the upright face nearest `weight` in `descriptors`, or `nil` when every face is
+    /// italic or slanted. Of two equally near faces, a weight above 500 takes the heavier and any
+    /// other the lighter; the lower PostScript name breaks a remaining tie.
+    static func uprightFace(in descriptors: [CTFontDescriptor], nearest weight: Int) -> CTFont? {
+        descriptors.map { CTFontCreateWithFontDescriptor($0, 32, nil) }
+            .filter(SpineFontPolicy.isUpright)
+            .min { lhs, rhs in
+                let (left, right) = (cssWeight(of: lhs), cssWeight(of: rhs))
+                guard left == right else { return nearer(left, than: right, to: weight) }
+                return (CTFontCopyPostScriptName(lhs) as String)
+                    < (CTFontCopyPostScriptName(rhs) as String)
+            }
+    }
+
+    /// Returns the upright face of `family` nearest `weight` among the faces this process can
+    /// draw, including fonts registered after a download, or `nil` when it has none.
+    static func registeredFace(family: String, nearest weight: Int) -> CTFont? {
+        let query = CTFontDescriptorCreateWithAttributes(
+            [kCTFontFamilyNameAttribute: family] as CFDictionary)
+        // The family is mandatory, so a missing family matches nothing rather than a fallback.
+        let mandatory = Set([kCTFontFamilyNameAttribute as String]) as CFSet
+        let faces = CTFontDescriptorCreateMatchingFontDescriptors(query, mandatory)
+        return uprightFace(in: faces as? [CTFontDescriptor] ?? [], nearest: weight)
+    }
+
+    /// Returns the CSS weight (100...900) nearest a face's Core Text weight trait.
+    ///
+    /// The table holds the traits Core Text reports for Google Fonts files at each weight, as
+    /// the iPhone companion maps them. They differ from the `UIFont.Weight` constants above 700
+    /// and below 300.
+    static func cssWeight(of font: CTFont) -> Int {
+        let traits = CTFontCopyTraits(font) as? [CFString: Any]
+        let trait = (traits?[kCTFontWeightTrait] as? NSNumber)?.doubleValue ?? 0
+        let table: [Double] = [-0.6, -0.4, -0.23, 0, 0.2, 0.3, 0.4, 0.6, 0.8]
+        let index = table.indices.min { abs(table[$0] - trait) < abs(table[$1] - trait) } ?? 3
+        return (index + 1) * 100
+    }
+
+    private static func nearer(_ lhs: Int, than rhs: Int, to weight: Int) -> Bool {
+        let (left, right) = (abs(lhs - weight), abs(rhs - weight))
+        guard left == right else { return left < right }
+        return weight > 500 ? lhs > rhs : lhs < rhs
+    }
+
+    /// Downloads a saved record's font again at `weight`. A family the type rules block, such as
+    /// Bangers, downloads its upright stand-in (`SpineFontPolicy.standInFamily(for:)`), such as
+    /// Bungee, instead.
     func restore(_ font: DownloadedFont, weight: Int) async throws -> DownloadedFont {
-        return try await download(family: font.family, weight: weight)
+        try await download(
+            family: SpineFontPolicy.standInFamily(for: font.family) ?? font.family, weight: weight)
     }
 
     private func register(_ font: DownloadedFont) throws {

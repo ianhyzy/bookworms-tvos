@@ -17,6 +17,10 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     /// The name of the `seriesID` series. Snapshots saved before series names were fetched
     /// decode it as `nil` until the next sync. The iPhone reads it from the iCloud archive.
     var seriesName: String? = nil
+    /// Every Hardcover series the book belongs to, which decide its series look
+    /// (`SeriesDesigns.styleSeries(of:link:)`). Snapshots saved before memberships were fetched
+    /// decode it as `nil` until the next sync. The iPhone reads it from the iCloud archive.
+    var seriesMemberships: [SeriesMembership]? = nil
     var genres: [String]?
     var communityRating: Double?
     var ratingsCount: Int?
@@ -149,6 +153,22 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         if lhs.finished == rhs.finished { return lhs.id > rhs.id }
         return (lhs.finished ?? "") > (rhs.finished ?? "")
     }
+}
+
+/// One Hardcover series a book belongs to. The iPhone companion decodes the same keys from the
+/// iCloud archive.
+struct SeriesMembership: Codable, Hashable, Sendable {
+    let seriesID: Int
+    let name: String
+    /// The book's position in the series, such as 3, or 2.5 for a companion work.
+    var position: Double? = nil
+    /// Whether Hardcover features this series for the book.
+    var featured = false
+    /// Whether the book collects other books of the series, such as an omnibus.
+    var compilation = false
+    /// The series' number of primary books, or of all its books when Hardcover has no primary
+    /// count.
+    var size: Int? = nil
 }
 
 /// A series and its main books in reading order, fetched during sync so details open offline.

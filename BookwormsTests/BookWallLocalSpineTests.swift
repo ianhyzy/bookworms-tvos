@@ -182,8 +182,80 @@ final class BookWallLocalSpineTests: XCTestCase {
         XCTAssertFalse(SpineFontPolicy.isUpright(italic))
         XCTAssertTrue(SpineFontPolicy.isUpright(upright))
         let descriptors = [italic, upright].map { CTFontCopyFontDescriptor($0) }
-        let chosen = try XCTUnwrap(GoogleFontLibrary.uprightFont(in: descriptors))
+        let chosen = try XCTUnwrap(GoogleFontLibrary.uprightFace(in: descriptors, nearest: 400))
         XCTAssertEqual(CTFontCopyPostScriptName(chosen) as String, "Georgia")
-        XCTAssertNil(GoogleFontLibrary.uprightFont(in: [descriptors[0]]))
+        XCTAssertNil(GoogleFontLibrary.uprightFace(in: [descriptors[0]], nearest: 400))
+    }
+
+    /// The owner's rule for stand-ins: a blocked face shows in its stand-in family at the
+    /// design's weight, and a saved style in a blocked family restores as the stand-in.
+    func testStandInsFollowTheDesignWeight() throws {
+        let families = [
+            "Bangers": "Bungee", "Bangers-Regular": "Bungee", "Shrikhand": "Changa One",
+            "Dancing Script": "Kalam", "DancingScript-Bold": "Kalam", "Great Vibes": "Caveat",
+            "Pacifico-Regular": "Permanent Marker",
+        ]
+        for (name, family) in families {
+            XCTAssertEqual(SpineFontPolicy.standInFamily(for: name), family, name)
+        }
+        for name in ["Bungee", "Kalam-Bold", "Lora", "Lora-BoldItalic", "Impact"] {
+            XCTAssertNil(SpineFontPolicy.standInFamily(for: name), name)
+        }
+
+        // The upright face nearest the weight wins, never an italic of that weight.
+        let avenir = [
+            "AvenirNext-Regular", "AvenirNext-Medium", "AvenirNext-DemiBold", "AvenirNext-Bold",
+            "AvenirNext-BoldItalic",
+        ]
+        .map { CTFontCopyFontDescriptor(CTFontCreateWithName($0 as CFString, 24, nil)) }
+        func nearest(_ weight: Int) -> String? {
+            GoogleFontLibrary.uprightFace(in: avenir, nearest: weight)
+                .map { CTFontCopyPostScriptName($0) as String }
+        }
+        XCTAssertEqual(nearest(600), "AvenirNext-DemiBold")
+        XCTAssertEqual(nearest(700), "AvenirNext-Bold")
+        XCTAssertEqual(nearest(900), "AvenirNext-Bold")
+        XCTAssertEqual(nearest(400), "AvenirNext-Regular")
+
+        // A registered family resolves its face nearest the weight, then the Regular name, then
+        // the system face. Avenir Next, a system family, plays a downloaded stand-in.
+        let registered = try XCTUnwrap(
+            GoogleFontLibrary.registeredFace(family: "Avenir Next", nearest: 700))
+        XCTAssertEqual(CTFontCopyPostScriptName(registered) as String, "AvenirNext-Bold")
+        XCTAssertNil(GoogleFontLibrary.registeredFace(family: "Not A Font Family", nearest: 700))
+        func font(_ family: String, _ name: String?, weight: Int) -> UIFont {
+            BookWallLocalSpine.Typography(fontName: name, standInFamily: family, weight: weight)
+                .font(size: 24)
+        }
+        let standIn = font("Avenir Next", "Georgia-Bold", weight: 600)
+        XCTAssertEqual(standIn.fontName, "AvenirNext-DemiBold")
+        XCTAssertEqual(standIn.pointSize, 24)
+        let regular = font("Not A Font Family", "Georgia-Bold", weight: 600)
+        XCTAssertEqual(regular.fontName, "Georgia-Bold")
+        let system = font("Not A Font Family", "Not-A-Font", weight: 700)
+        XCTAssertEqual(system.familyName, UIFont.systemFont(ofSize: 24, weight: .bold).familyName)
+    }
+
+    func testFontFilesFollowTheRequestedWeight() {
+        let kalam = ["Kalam-Light.ttf", "Kalam-Regular.ttf", "Kalam-Bold.ttf"]
+        XCTAssertEqual(GoogleFontLibrary.fileName(for: 700, in: kalam), "Kalam-Bold.ttf")
+        XCTAssertEqual(GoogleFontLibrary.fileName(for: 600, in: kalam), "Kalam-Bold.ttf")
+        XCTAssertEqual(GoogleFontLibrary.fileName(for: 500, in: kalam), "Kalam-Regular.ttf")
+        // An exact static file beats the variable file, which beats a nearer static file.
+        let caveat = [
+            "Caveat-VariableFont_wght.ttf", "static/Caveat-Regular.ttf",
+            "static/Caveat-SemiBold.ttf",
+        ]
+        XCTAssertEqual(GoogleFontLibrary.fileName(for: 600, in: caveat), caveat[2])
+        XCTAssertEqual(GoogleFontLibrary.fileName(for: 700, in: caveat), caveat[0])
+        // Equally near files resolve heavier above 500 and lighter otherwise.
+        let pair = ["Family-Regular.ttf", "Family-SemiBold.ttf"]
+        XCTAssertEqual(GoogleFontLibrary.fileName(for: 500, in: pair), "Family-Regular.ttf")
+        XCTAssertEqual(GoogleFontLibrary.fileName(for: 500, in: pair.reversed()), pair[0])
+        // A family with one face downloads it at any weight.
+        for single in ["Bungee-Regular.ttf", "ChangaOne.ttf"] {
+            XCTAssertEqual(GoogleFontLibrary.fileName(for: 700, in: [single]), single)
+        }
+        XCTAssertNil(GoogleFontLibrary.fileName(for: 400, in: []))
     }
 }
