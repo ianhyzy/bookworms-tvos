@@ -85,19 +85,7 @@ final class BookWallPreparation {
         // including the companion design a book keeps when its look's face can't letter it.
         await Self.loadFonts(for: Array(designs.values) + looks.values)
         guard !Task.isCancelled else { return }
-        var drawn = designs
-        for book in books {
-            guard let look = looks[book.id] else { continue }
-            let typography = BookWallLocalSpine.typography(for: book, design: look)
-            // A face that didn't load passes: the spine letters in the system face.
-            if let face = typography.loadedFont(size: 12),
-                !SeriesDesigns.canLetter(
-                    book, font: face as CTFont, uppercase: typography.uppercase)
-            {
-                continue
-            }
-            drawn[book.id] = look
-        }
+        let drawn = Self.drawnDesigns(of: books, designs: designs, looks: looks)
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
             BookWallLocalSpine.typography(for: book, design: drawn[book.id])
         }
@@ -249,6 +237,30 @@ final class BookWallPreparation {
 }
 
 extension BookWallPreparation {
+    /// The design each book draws, by book ID: its series look from `looks`, unless the look's
+    /// face is registered and lacks a glyph of the book's title and author, in capitals when the
+    /// look draws in capitals; else its companion design from `designs`.
+    ///
+    /// A look whose face isn't registered passes, since the spine letters in the system face, so
+    /// register the faces (`loadFonts(for:)`) before calling this.
+    static func drawnDesigns(
+        of books: [Book], designs: [Int: SpineDesignV1], looks: [Int: SpineDesignV1]
+    ) -> [Int: SpineDesignV1] {
+        var drawn = designs
+        for book in books {
+            guard let look = looks[book.id] else { continue }
+            let typography = BookWallLocalSpine.typography(for: book, design: look)
+            if let face = typography.loadedFont(size: 12),
+                !SeriesDesigns.canLetter(
+                    book, font: face as CTFont, uppercase: typography.uppercase)
+            {
+                continue
+            }
+            drawn[book.id] = look
+        }
+        return drawn
+    }
+
     /// The style `book` draws with when `drawsWith` gives it a series source: the source's,
     /// from the source's companion design or else its own cover. `nil` for a book that draws
     /// its own.

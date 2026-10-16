@@ -391,6 +391,22 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(SeriesDesigns.lettering(of: book(5, title: "Mort")), "Mort Matt Dinniman")
     }
 
+    @MainActor
+    func testTheWallDrawsALookOnlyOnBooksItsFaceCanLetter() {
+        let latin = book(1, title: "Carl's Doomsday")
+        let japanese = book(2, title: "ダンジョン")
+        let uninstalled = book(3, title: "ダンジョン")
+        let own = companionDesign(2, family: "Oswald", postScriptName: "Oswald-Bold")
+        let look = companionDesign(1, family: nil, postScriptName: "Georgia-Bold")
+        let missing = companionDesign(3, family: nil, postScriptName: "NoSuchFont-Bold")
+        let drawn = BookWallPreparation.drawnDesigns(
+            of: [latin, japanese, uninstalled], designs: [2: own],
+            looks: [1: look, 2: look, 3: missing])
+        XCTAssertEqual(drawn[1], look, "Georgia letters the Latin title")
+        XCTAssertEqual(drawn[2], own, "The Japanese title keeps its companion design")
+        XCTAssertEqual(drawn[3], missing, "A face that isn't installed letters in the system face")
+    }
+
     /// A book drawing with its source's design takes the source's cloth and font, and keeps its
     /// own cover's fold at the front joint.
     @MainActor
