@@ -116,7 +116,9 @@ struct CoverChoiceV1: Codable, Equatable, Sendable {
 
 /// The look a group of series books draws (`SeriesLookKey`), synced so every device draws the
 /// same one. The first device to save a group's look decides it; creating one never replaces
-/// another (`SpineCloudStore.createSeriesLook(_:)`).
+/// another (`SpineCloudStore.createSeriesLook(_:)`). A companion app may later remake a look
+/// that a weaker model tier made (`provenance`, or the `localOrigin`) and the reader never
+/// edited; Book Wall draws the remade look on its next read.
 struct SeriesLookV1: Codable, Equatable, Sendable {
     var version = 1
     let accountID: String
@@ -139,6 +141,10 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     var fontFamily: String? = nil
     var fontPostScriptName: String? = nil
     var instanceWeight: Int? = nil
+    /// The `provenance` of the design the look copies, which tells a companion app the model
+    /// tier that made it. Book Wall's cover-sampled looks record none; their `origin` marks
+    /// them.
+    var provenance: String? = nil
 
     /// The origin of a look made from Book Wall's cover-sampled style.
     static let localOrigin = "tvos-local-v1"
@@ -150,7 +156,7 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
             && accountID.count <= 512 && self.key == key && seriesID > 0 && group.count <= 200
             && sourceBookID > 0 && createdAt.timeIntervalSince1970.isFinite
             && (editedAt?.timeIntervalSince1970.isFinite ?? true)
-            && SpineDesignV1.isShortLine(origin)
+            && SpineDesignV1.isShortLine(origin) && SpineDesignV1.isShortLine(provenance)
             && !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && design(bookID: sourceBookID, workItemHash: "").isValidLook
     }
@@ -183,7 +189,8 @@ extension SeriesLookV1 {
             backgroundHex: design.backgroundHex, foregroundHex: design.foregroundHex,
             accentHex: design.accentHex, typeface: design.typeface, weight: design.weight,
             uppercase: design.uppercase, fontFamily: design.fontFamily,
-            fontPostScriptName: design.fontPostScriptName, instanceWeight: design.instanceWeight)
+            fontPostScriptName: design.fontPostScriptName, instanceWeight: design.instanceWeight,
+            provenance: design.provenance)
     }
 
     /// A look for `key` from Book Wall's cover-sampled `style` of `book`, the group's

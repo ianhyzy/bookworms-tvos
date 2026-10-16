@@ -166,6 +166,14 @@ final class SeriesDesignsTests: XCTestCase {
             SeriesDesigns.lookDesign(of: members, designs: [1: designs[1]!, 4: designs[4]!])?
                 .bookID, 1, "Reuse copies count only when no member has an original")
         XCTAssertNil(SeriesDesigns.lookDesign(of: members, designs: [4: designs[4]!]))
+        var onDevice = designs[3]!
+        onDevice.provenance = "model:apple/on-device"
+        XCTAssertEqual(
+            SeriesLookV1(
+                key: SeriesLookKey(seriesID: 7, group: "|mattdinniman"), design: onDevice,
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+            .provenance, "model:apple/on-device", "A look keeps its design's model tier")
         var tagged = designs[2]!
         tagged.provenance = "generated-colors:1A2B3C,F4E9D0,C08040 series-reuse:9"
         XCTAssertTrue(tagged.isSeriesReuse, "Any provenance token can mark a reuse copy")
@@ -232,6 +240,7 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(georgia.fontPostScriptName, "Georgia-Bold")
         XCTAssertNil(georgia.fontFamily)
         XCTAssertNil(georgia.instanceWeight)
+        XCTAssertNil(georgia.provenance, "The local origin marks the look's tier")
         XCTAssertEqual(local("ArialRoundedMTBold").typeface, "rounded")
         XCTAssertEqual(local("CourierNewPS-BoldMT").typeface, "monospaced")
         XCTAssertEqual(local("Futura-Bold").typeface, "sans")
