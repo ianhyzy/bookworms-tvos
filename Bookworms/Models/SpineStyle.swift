@@ -41,6 +41,14 @@ enum SpineFontPolicy {
         "homemadeapple": "Caveat-Regular", "rocksalt": "PermanentMarker-Regular",
     ]
 
+    /// The Google Fonts family of each upright stand-in in `slantedReplacements`, by PostScript
+    /// name, so Book Wall can download the stand-in for a design in a blocked family. Each
+    /// stand-in is its family's Regular, weight 400, face.
+    static let standInFamilies = [
+        "Bungee-Regular": "Bungee", "ChangaOne": "Changa One", "Kalam-Regular": "Kalam",
+        "PermanentMarker-Regular": "Permanent Marker", "Caveat-Regular": "Caveat",
+    ]
+
     /// The Book Wall's general-fiction face, for a blocked name with no closer upright face.
     static let uprightFallback = "AvenirNext-DemiBold"
 

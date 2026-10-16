@@ -70,18 +70,40 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertTrue(typography("Lora", "Lora-Bold").uppercase)
     }
 
+    func testCompanionDesignsDownloadTheFaceTheyDrawIn() {
+        func request(_ family: String, _ name: String) -> String? {
+            BookWallPreparation.fontRequest(
+                for: companionDesign(1, family: family, postScriptName: name)
+            )
+            .map { "\($0.family):\($0.weight)" }
+        }
+        XCTAssertEqual(request("EB Garamond", "EBGaramond-Bold"), "EB Garamond:700")
+        XCTAssertEqual(request("Lora", "Lora-BoldIt"), "Lora:700")
+        // A slanted family downloads its stand-in's Regular face, never itself.
+        XCTAssertEqual(request("Dancing Script", "DancingScript-Bold"), "Kalam:400")
+        XCTAssertEqual(request("Bangers", "Bangers-Regular"), "Bungee:400")
+        XCTAssertNil(request("Impact", "Impact"), "Bebas Neue ships with tvOS")
+        for standIn in Set(SpineFontPolicy.slantedReplacements.values) {
+            XCTAssertNotNil(SpineFontPolicy.standInFamilies[standIn], standIn)
+        }
+    }
+
     func testSeriesSourcesJudgeCompanionDesignsByTheirFace() {
         let books = [book(1, position: 1), book(2, position: 2), book(3, position: 3)]
         let allowed = LibraryModel.seriesSources(
             of: books,
             designs: [1: companionDesign(1, family: "Oswald", postScriptName: "Oswald-Bold")])
         XCTAssertEqual(allowed[2]?.id, 1)
-        // A source whose design is in a blocked face cannot lead the series.
-        let blocked = LibraryModel.seriesSources(
-            of: books,
-            designs: [1: companionDesign(1, family: "Pacifico", postScriptName: "Pacifico-Regular")]
-        )
-        XCTAssertEqual(blocked[3]?.id, 2)
+        // A design saved in a blocked face draws in its upright stand-in, which leads the
+        // series, as on the iPhone.
+        for (family, name) in [
+            ("Pacifico", "Pacifico-Regular"), ("Impact", "Impact"), ("Lora", "Lora-BoldIt"),
+        ] {
+            let remapped = LibraryModel.seriesSources(
+                of: books, designs: [1: companionDesign(1, family: family, postScriptName: name)])
+            XCTAssertEqual(remapped[2]?.id, 1, name)
+            XCTAssertEqual(remapped[3]?.id, 1, name)
+        }
     }
 
     func testSourcesRankByPositionThenFinishThenID() {
