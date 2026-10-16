@@ -58,20 +58,27 @@ struct ShelfView: View {
         let year = Calendar.current.component(.year, from: .now)
         return library.readingYears.first { $0.year == year }?.books ?? []
     }
+    /// The wall books' series design sources, from those the library prepared.
+    private var wallSources: [Int: Book] {
+        var sources: [Int: Book] = [:]
+        for book in wallBooks { sources[book.id] = library.seriesSources[book.id] }
+        return sources
+    }
     private var wallPreparationKey: BookWallPreparationKey {
         BookWallPreparationKey(
             loaded: library.hasLoadedLibrarySnapshot,
             enabled: coordinator.preferences.orderedViews.contains(.bookWall),
-            books: wallBooks, retry: bookWallPreparationRetry)
+            books: wallBooks, sources: wallSources, retry: bookWallPreparationRetry)
     }
     private var waitsForBookWall: Binding<Bool> {
         Binding(
             get: {
                 coordinator.current == .bookWall
-                    && !bookWallPreparation.isReady(for: wallBooks)
+                    && !bookWallPreparation.isReady(for: wallBooks, sources: wallSources)
             },
             set: { presented in
-                if !presented && !bookWallPreparation.isReady(for: wallBooks) {
+                if !presented && !bookWallPreparation.isReady(for: wallBooks, sources: wallSources)
+                {
                     showView(.shelf)
                 }
             })
@@ -236,7 +243,7 @@ struct ShelfView: View {
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
-                await bookWallPreparation.prepare(key.books)
+                await bookWallPreparation.prepare(key.books, sources: key.sources)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
@@ -415,6 +422,7 @@ struct ShelfView: View {
         let loaded: Bool
         let enabled: Bool
         let books: [Book]
+        let sources: [Int: Book]
         let retry: Int
     }
 
@@ -688,7 +696,7 @@ struct ShelfView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if view == .bookWall {
                         if let prepared = bookWallPreparation.prepared,
-                            prepared.books == wallBooks
+                            bookWallPreparation.isReady(for: wallBooks, sources: wallSources)
                         {
                             BookWallView(
                                 library: library, coordinator: coordinator, scene: bookWallScene,

@@ -1,0 +1,109 @@
+import CoreText
+import Foundation
+
+/// Decides which books in a series draw with another book's spine design, so a series looks
+/// alike on the shelf: the same font and colors, with only the title, author, and thickness
+/// changing. The rules and names match the iPhone companion's `SeriesDesigns`.
+///
+/// Alignment happens when the app draws, not when it saves: each book keeps its own saved style,
+/// so changing these rules changes no saved data.
+enum SeriesDesigns {
+    /// Returns whether `book` and `other` share a series design: the same series and at least
+    /// one shared author.
+    ///
+    /// This is the whole membership rule; everything else in the app calls it. To let every
+    /// book in a series match whoever wrote it, return `true` after the series check instead of
+    /// comparing authors. Each `Book` stores one series, the featured one from Hardcover, so a
+    /// book in several series matches only through that one.
+    static func matches(_ book: Book, _ other: Book) -> Bool {
+        guard let series = book.seriesID, series == other.seriesID else { return false }
+        return !authors(of: book).isDisjoint(with: authors(of: other))
+    }
+
+    /// The book's authors, compared without case, diacritics, spaces, or punctuation. Libraries
+    /// join several authors with ", ".
+    static func authors(of book: Book) -> Set<String> {
+        Set(
+            book.author.components(separatedBy: ", ")
+                .map {
+                    String(
+                        $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                            .filter { $0.isLetter || $0.isNumber })
+                }
+                .filter { !$0.isEmpty })
+    }
+
+    /// Returns whether `lhs` ranks before `rhs` as a series' design source: the lower series
+    /// position, then the earlier finish, then the lower book ID. A missing position or finish
+    /// ranks last, so reading the first book or a prequel later moves the series to its design.
+    static func ranksBefore(_ lhs: Book, _ rhs: Book) -> Bool {
+        (lhs.seriesPosition ?? .infinity, finish(lhs), lhs.id)
+            < (rhs.seriesPosition ?? .infinity, finish(rhs), rhs.id)
+    }
+
+    /// The finish date, `yyyy-MM-dd`, which sorts as text; a book without one sorts last.
+    private static func finish(_ book: Book) -> String {
+        book.finished.map { String($0.prefix(10)) } ?? "~"
+    }
+
+    /// Returns whether another book may draw with a design in `fontName`: never a name
+    /// `SpineFontPolicy.allows(_:)` blocks, such as Impact, an italic, or a slanted face.
+    ///
+    /// The check stands on its own and doesn't rely on saved styles having been remapped to
+    /// allowed faces when they load.
+    static func isUsableSource(_ fontName: String) -> Bool {
+        SpineFontPolicy.allows(fontName)
+    }
+
+    /// Maps each book that draws another book's spine design to that book, its source; a
+    /// source maps to itself, and a book that draws its own design and lends it to no one is
+    /// absent.
+    ///
+    /// Only a root lends its design: a book that draws its own. Each series is decided in
+    /// `ranksBefore` order. A book takes the best-ranked earlier root that matches it, whose
+    /// font, from `fonts`, is usable, and whose font can letter it (`canLetter`); otherwise it is
+    /// a root itself. Matching isn't transitive, since book 2 can share an author with books 1
+    /// and 3 that share none, so this keeps a book from drawing a design another book borrowed:
+    /// book 3 then draws its own. The result doesn't depend on the order of `books`.
+    static func sources(
+        books: [Book], fonts: [Int: String],
+        canLetter: (Book, String) -> Bool = { _, _ in true }
+    ) -> [Int: Int] {
+        var sources: [Int: Int] = [:]
+        let series = Dictionary(grouping: books.filter { $0.seriesID != nil }, by: \.seriesID)
+        for books in series.values {
+            var roots: [Book] = []
+            for book in books.sorted(by: ranksBefore) {
+                if let root = roots.first(where: { root in
+                    guard matches(book, root), let font = fonts[root.id], isUsableSource(font)
+                    else { return false }
+                    return canLetter(book, font)
+                }) {
+                    sources[book.id] = root.id
+                    sources[root.id] = root.id
+                } else {
+                    roots.append(book)
+                }
+            }
+        }
+        return sources
+    }
+
+    /// The text a spine letters for `book`, for glyph checks: its title and author.
+    static func lettering(of book: Book) -> String {
+        book.title + " " + book.author
+    }
+
+    /// Whether the font named `fontName` has a glyph for every letter `book`'s spine draws.
+    /// Preparation checks this once per book; a font that is not installed letters nothing.
+    static func canLetter(_ book: Book, fontName: String) -> Bool {
+        let font = CTFontCreateWithName(fontName as CFString, 12, nil)
+        // CoreText substitutes a default face for a missing name; that face does not count.
+        guard (CTFontCopyPostScriptName(font) as String) == fontName else { return false }
+        let characters = Array(
+            lettering(of: book).unicodeScalars.filter { !$0.properties.isWhitespace }
+                .map(String.init).joined().utf16)
+        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+        return CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count)
+    }
+}
