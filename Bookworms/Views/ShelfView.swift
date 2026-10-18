@@ -588,7 +588,7 @@ struct ShelfView: View {
         guard book.isHardcoverBook, library.hardcoverEnabled, library.hardcoverConnected
         else { return nil }
         return { [library] in
-            guard let token = library.hardcoverTokenForSync() else {
+            guard let token = await library.hardcoverTokenForSync() else {
                 throw HardcoverError.invalidToken
             }
             return try await HardcoverSocialClient().reviews(book: book.id, token: token)

@@ -82,12 +82,44 @@ struct HardcoverDeviceAuth: Equatable, Sendable, Codable {
     }
 }
 
+/// The tokens Hardcover's token endpoint returns for a sign-in or a renewal.
+///
+/// A personal access token has no refresh token or expiry. An OAuth login has both: the access
+/// token lasts `expiresIn` seconds, and the refresh token renews it once (`HardcoverSession`).
+struct HardcoverTokens: Equatable, Sendable, Decodable {
+    var accessToken: String
+    var refreshToken: String? = nil
+    var expiresIn: Int? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case expiresIn = "expires_in"
+    }
+
+    init(accessToken: String, refreshToken: String? = nil, expiresIn: Int? = nil) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresIn = expiresIn
+    }
+
+    /// Decodes a token response. A malformed refresh token or expiry is dropped rather than
+    /// failing a sign-in that already succeeded.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accessToken = try container.decode(String.self, forKey: .accessToken)
+        refreshToken = (try? container.decodeIfPresent(String.self, forKey: .refreshToken))
+            .flatMap { try? HardcoverToken($0).value }
+        expiresIn = (try? container.decodeIfPresent(Int.self, forKey: .expiresIn)).flatMap { $0 }
+    }
+}
+
 enum HardcoverDevicePollResult: Equatable, Sendable {
     case pending
     case slowDown
     case expired
     case accessDenied
-    case success(token: String)
+    case success(HardcoverTokens)
 }
 
 actor HardcoverClient {
@@ -141,26 +173,9 @@ actor HardcoverClient {
     }
 
     func requestDeviceAuth() async throws -> HardcoverDeviceAuth {
-        var request = URLRequest(url: URL(string: "https://hardcover.app/oauth2/device")!)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bookworms/1.0 (read-only tvOS client)", forHTTPHeaderField: "User-Agent")
-
-        var bodyComponents = URLComponents()
-        bodyComponents.queryItems = [
-            URLQueryItem(name: "client_id", value: Self.clientID),
-            URLQueryItem(name: "scope", value: Self.scopes),
-        ]
-        guard let bodyString = bodyComponents.percentEncodedQuery else {
-            throw HardcoverError.rejected
-        }
-        request.httpBody = Data(bodyString.utf8)
-
-        let (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
-        guard let http = response as? HTTPURLResponse else {
-            throw HardcoverError.incomplete
-        }
+        let (data, http) = try await postForm(
+            URL(string: "https://hardcover.app/oauth2/device")!,
+            ["client_id": Self.clientID, "scope": Self.scopes])
         guard http.statusCode == 200 else {
             throw HardcoverError.http(http.statusCode)
         }
@@ -172,42 +187,15 @@ actor HardcoverClient {
     }
 
     func pollDeviceToken(deviceCode: String) async throws -> HardcoverDevicePollResult {
-        var request = URLRequest(url: URL(string: "https://hardcover.app/oauth2/token")!)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bookworms/1.0 (read-only tvOS client)", forHTTPHeaderField: "User-Agent")
+        let (data, http) = try await postForm(
+            Self.tokenURL,
+            [
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": deviceCode,
+                "client_id": Self.clientID,
+            ])
 
-        var bodyComponents = URLComponents()
-        bodyComponents.queryItems = [
-            URLQueryItem(name: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code"),
-            URLQueryItem(name: "device_code", value: deviceCode),
-            URLQueryItem(name: "client_id", value: Self.clientID),
-        ]
-        guard let bodyString = bodyComponents.percentEncodedQuery else {
-            throw HardcoverError.rejected
-        }
-        request.httpBody = Data(bodyString.utf8)
-
-        let (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
-        guard let http = response as? HTTPURLResponse else {
-            throw HardcoverError.incomplete
-        }
-
-        if http.statusCode == 200 {
-            struct TokenResponse: Decodable {
-                let accessToken: String
-                enum CodingKeys: String, CodingKey {
-                    case accessToken = "access_token"
-                }
-            }
-            guard let tokenResponse = try? JSONDecoder().decode(TokenResponse.self, from: data)
-            else {
-                throw HardcoverError.rejected
-            }
-            let token = try HardcoverToken(tokenResponse.accessToken).value
-            return .success(token: token)
-        }
+        if http.statusCode == 200 { return .success(try Self.tokens(from: data)) }
 
         struct ErrorResponse: Decodable {
             let error: String?
@@ -233,7 +221,7 @@ actor HardcoverClient {
     func exchangeAuthorizationCode(
         _ code: String,
         redirectURI: String = HardcoverClient.redirectURI
-    ) async throws -> String {
+    ) async throws -> HardcoverTokens {
         let code = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !code.isEmpty,
             !code.contains(where: { $0.isWhitespace || $0.isNewline }),
@@ -242,28 +230,14 @@ actor HardcoverClient {
             throw HardcoverError.invalidAuthorizationCode
         }
 
-        var request = URLRequest(url: URL(string: "https://hardcover.app/oauth/token")!)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bookworms/1.0 (read-only tvOS client)", forHTTPHeaderField: "User-Agent")
-
-        var bodyComponents = URLComponents()
-        bodyComponents.queryItems = [
-            URLQueryItem(name: "grant_type", value: "authorization_code"),
-            URLQueryItem(name: "client_id", value: Self.clientID),
-            URLQueryItem(name: "code", value: code),
-            URLQueryItem(name: "redirect_uri", value: redirectURI),
-        ]
-        guard let bodyString = bodyComponents.percentEncodedQuery else {
-            throw HardcoverError.invalidAuthorizationCode
-        }
-        request.httpBody = Data(bodyString.utf8)
-
-        let (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
-        guard let http = response as? HTTPURLResponse else {
-            throw HardcoverError.incomplete
-        }
+        let (data, http) = try await postForm(
+            URL(string: "https://hardcover.app/oauth/token")!,
+            [
+                "grant_type": "authorization_code",
+                "client_id": Self.clientID,
+                "code": code,
+                "redirect_uri": redirectURI,
+            ])
 
         if http.statusCode == 400 || http.statusCode == 401 {
             throw HardcoverError.invalidAuthorizationCode
@@ -271,18 +245,62 @@ actor HardcoverClient {
         guard http.statusCode == 200 else {
             throw HardcoverError.http(http.statusCode)
         }
+        return try Self.tokens(from: data)
+    }
 
-        struct TokenResponse: Decodable {
-            let accessToken: String
-            enum CodingKeys: String, CodingKey {
-                case accessToken = "access_token"
-            }
-        }
+    /// Spends `refreshToken` for a new access token and the refresh token that replaces it.
+    ///
+    /// Hardcover accepts each refresh token once and revokes the whole login if one is sent
+    /// twice, so this request never retries: a response lost after Hardcover accepted the token
+    /// can't be recovered by resending it. Only `HardcoverSession` calls it. A rejected token
+    /// throws `HardcoverError.invalidToken`; other failures leave the token unspent or unknown.
+    func refreshTokens(_ refreshToken: String) async throws -> HardcoverTokens {
+        let refreshToken = try HardcoverToken(refreshToken).value
+        // Omitting `scope` keeps the scopes the reader approved.
+        let (data, http) = try await postForm(
+            Self.tokenURL,
+            [
+                "grant_type": "refresh_token",
+                "refresh_token": refreshToken,
+                "client_id": Self.clientID,
+            ])
+        if http.statusCode == 400 || http.statusCode == 401 { throw HardcoverError.invalidToken }
+        guard http.statusCode == 200 else { throw HardcoverError.http(http.statusCode) }
+        return try Self.tokens(from: data)
+    }
 
-        guard let tokenResponse = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+    /// Decodes a successful token response and checks the access token's format.
+    private static func tokens(from data: Data) throws -> HardcoverTokens {
+        guard var tokens = try? JSONDecoder().decode(HardcoverTokens.self, from: data) else {
             throw HardcoverError.rejected
         }
-        return try HardcoverToken(tokenResponse.accessToken).value
+        tokens.accessToken = try HardcoverToken(tokens.accessToken).value
+        return tokens
+    }
+
+    /// The token endpoint for device-code polling and token renewal.
+    static let tokenURL = URL(string: "https://hardcover.app/oauth2/token")!
+
+    /// Posts a form to an OAuth endpoint. Values are encoded with only RFC 3986 unreserved
+    /// characters left literal, so a `+` or `/` in a token reaches Hardcover unchanged.
+    private func postForm(_ url: URL, _ form: KeyValuePairs<String, String>) async throws
+        -> (Data, HTTPURLResponse)
+    {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bookworms/1.0 (read-only tvOS client)", forHTTPHeaderField: "User-Agent")
+        let unreserved = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        request.httpBody = Data(
+            form.map { key, value in
+                key + "=" + (value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? "")
+            }
+            .joined(separator: "&").utf8)
+        let (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
+        guard let http = response as? HTTPURLResponse else { throw HardcoverError.incomplete }
+        return (data, http)
     }
 
     // The client owns its query documents so callers cannot submit mutations.

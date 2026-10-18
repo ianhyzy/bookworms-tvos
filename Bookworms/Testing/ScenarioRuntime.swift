@@ -183,6 +183,7 @@
                 try await client.pollDeviceToken(deviceCode: $0)
             }
             dependencies.exchangeHardcoverCode = { try await client.exchangeAuthorizationCode($0) }
+            dependencies.refreshHardcoverToken = { try await client.refreshTokens($0) }
             if name.hasPrefix("welcome") {
                 // The transport holds the first poll until the test approves; no wall-clock wait
                 // is needed to reach the code screen or control its completion.

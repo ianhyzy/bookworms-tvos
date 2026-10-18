@@ -42,8 +42,8 @@ final class HardcoverAuthenticationTests: XCTestCase {
     }
 
     func testExchangeAuthorizationCodeSuccess() async throws {
-        let token = try await client().exchangeAuthorizationCode("valid_code_123")
-        XCTAssertEqual(token, "hc_pat_success")
+        let tokens = try await client().exchangeAuthorizationCode("valid_code_123")
+        XCTAssertEqual(tokens, HardcoverTokens(accessToken: "hc_pat_success"))
     }
 
     func testExchangeAuthorizationCodeRejectsMalformedCode() async {
@@ -87,7 +87,37 @@ final class HardcoverAuthenticationTests: XCTestCase {
         XCTAssertEqual(denied, .accessDenied)
 
         let success = try await client().pollDeviceToken(deviceCode: "device_success")
-        XCTAssertEqual(success, .success(token: "hc_pat_success"))
+        XCTAssertEqual(
+            success,
+            .success(
+                HardcoverTokens(
+                    accessToken: "hc_at_success", refreshToken: "hc_rt_success",
+                    expiresIn: 604_800)))
+    }
+
+    func testRefreshSpendsTheRefreshTokenForItsReplacement() async throws {
+        // The stub accepts only the percent-encoded `+`, so a token reaches Hardcover unchanged.
+        let tokens = try await client().refreshTokens("hc_rt_fixture+plus")
+        XCTAssertEqual(
+            tokens,
+            HardcoverTokens(
+                accessToken: "hc_at_rotated", refreshToken: "hc_rt_rotated", expiresIn: 604_800))
+    }
+
+    func testRejectedRefreshTokenRequiresReconnection() async {
+        do {
+            _ = try await client().refreshTokens("hc_rt_spent")
+            XCTFail("A spent refresh token must fail.")
+        } catch HardcoverError.invalidToken {
+        } catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testUnavailableTokenEndpointIsNotReportedAsRevoked() async {
+        do {
+            _ = try await client().refreshTokens("hc_rt_unavailable")
+            XCTFail("A server error must fail.")
+        } catch HardcoverError.http(503) {
+        } catch { XCTFail("Unexpected error: \(error)") }
     }
 
     func testReplacementTokenCanBeValidatedWithoutLoadingBooks() async throws {
@@ -209,7 +239,20 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             }
             let bodyString = String(decoding: bodyData, as: UTF8.self)
             let (statusCode, payload): (Int, String) = {
-                if bodyString.contains("device_code=device_pending") {
+                if bodyString.contains("grant_type=refresh_token") {
+                    XCTAssertTrue(bodyString.contains("client_id=\(HardcoverClient.clientID)"))
+                    XCTAssertFalse(bodyString.contains("scope="), "A renewal keeps its scopes")
+                    if bodyString.contains("refresh_token=hc_rt_fixture%2Bplus") {
+                        return (
+                            200,
+                            #"{"access_token":"hc_at_rotated","refresh_token":"hc_rt_rotated","expires_in":604800,"token_type":"Bearer"}"#
+                        )
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_unavailable") {
+                        return (503, #"{"error":"temporarily_unavailable"}"#)
+                    }
+                    return (400, #"{"error":"invalid_grant"}"#)
+                } else if bodyString.contains("device_code=device_pending") {
                     return (400, #"{"error":"authorization_pending"}"#)
                 } else if bodyString.contains("device_code=device_slow_down") {
                     return (400, #"{"error":"slow_down"}"#)
@@ -218,7 +261,10 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
                 } else if bodyString.contains("device_code=device_denied") {
                     return (400, #"{"error":"access_denied"}"#)
                 } else if bodyString.contains("device_code=device_success") {
-                    return (200, #"{"access_token":"hc_pat_success","token_type":"Bearer"}"#)
+                    return (
+                        200,
+                        #"{"access_token":"hc_at_success","refresh_token":"hc_rt_success","expires_in":604800,"token_type":"Bearer"}"#
+                    )
                 } else {
                     return (400, #"{"error":"invalid_grant"}"#)
                 }

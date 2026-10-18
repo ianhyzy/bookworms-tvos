@@ -123,6 +123,7 @@ final class LibraryModel {
     }
     @ObservationIgnored private let dependencies: LibraryDependencies
     @ObservationIgnored private let persistence: LibraryPersistence
+    @ObservationIgnored private let hardcoverSession: HardcoverSession
     @ObservationIgnored private var sourceRevision = 0
     @ObservationIgnored private var sourceSaveRevision = 0
     @ObservationIgnored private var styleSaveRevision = 0
@@ -216,8 +217,10 @@ final class LibraryModel {
         return style
     }
 
-    /// Reads the active Hardcover credential only at an explicit synchronization boundary.
-    func hardcoverTokenForSync() -> String? {
+    /// Reads the active Hardcover credential only at an explicit synchronization boundary,
+    /// renewing it first when it expires soon (`HardcoverSession`). Returns `nil`, and shows
+    /// **Reconnect Hardcover**, when Hardcover rejects the saved refresh token.
+    func hardcoverTokenForSync() async -> String? {
         guard hardcoverEnabled, hardcoverConnected, !isSample else { return nil }
         #if DEBUG && targetEnvironment(simulator)
             // Matches `saveHardcoverCredential`: an unsigned simulator may keep the authorized
@@ -225,11 +228,35 @@ final class LibraryModel {
             if dependencies.allowLaunchOverrides,
                 let token = ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"]
             {
-                return dependencies.readCredential("hardcover-token") ?? token
+                return hardcoverSession.storedAccessToken() ?? token
             }
         #endif
-        return dependencies.readCredential("hardcover-token")
+        do {
+            let token = try await hardcoverSession.accessToken()
+            // A disconnect during the renewal wins.
+            return hardcoverConnected ? token : nil
+        } catch {
+            if hardcoverConnected { hardcoverSessionExpired = true }
+            return nil
+        }
     }
+
+    /// Replaces an access token that Hardcover rejected during social sync, sharing any renewal
+    /// in progress. Shows **Reconnect Hardcover** and rethrows the rejection when the login can't
+    /// be renewed.
+    func renewHardcoverToken(rejected token: String) async throws -> String {
+        do {
+            if let renewed = try await hardcoverSession.renew(rejected: token), renewed != token {
+                return renewed
+            }
+        } catch HardcoverError.invalidToken {}
+        if hardcoverConnected { hardcoverSessionExpired = true }
+        throw HardcoverError.invalidToken
+    }
+
+    /// The Hardcover account of the active snapshot. Social sync keys its cache on it, so a
+    /// renewed token keeps the cached social data.
+    var hardcoverAccountID: String? { activeHardcoverAccountID }
 
     func reloadCredentialAvailability() {
         credentials.reload("cwa-password")
@@ -297,8 +324,10 @@ final class LibraryModel {
     /// Other provider accounts, artwork, saved designs, and display preferences are retained.
     func resetHardcoverSetup() async throws {
         guard !hasStarted else { throw SetupResetError.alreadyStarted }
-        dependencies.removeCredential("hardcover-token")
-        guard dependencies.readCredential("hardcover-token") == nil else {
+        hardcoverSession.remove()
+        guard dependencies.readCredential(HardcoverSession.accessAccount) == nil,
+            dependencies.readCredential(HardcoverSession.refreshAccount) == nil
+        else {
             throw SetupResetError.credentialRemovalFailed
         }
         sourceSaveRevision &+= 1
@@ -424,6 +453,7 @@ final class LibraryModel {
 
     init(dependencies: LibraryDependencies = LibraryDependencies()) {
         self.dependencies = dependencies
+        hardcoverSession = HardcoverSession(dependencies: dependencies)
         persistence = LibraryPersistence(
             sourceStore: dependencies.sourceStore,
             styleCacheURL: dependencies.styleStore.cacheURL,
@@ -523,7 +553,7 @@ final class LibraryModel {
             _ = try? await saveSources()
         }
         seedSchedule()
-        if let savedToken = dependencies.readCredential("hardcover-token") {
+        if let savedToken = hardcoverSession.storedAccessToken() {
             hardcoverConnected = (try? HardcoverToken(savedToken)) != nil
             if !hardcoverConnected {
                 message = HardcoverError.invalidToken.localizedDescription
@@ -649,7 +679,7 @@ final class LibraryModel {
                             self.hardcoverDeviceAuthMessage = "Hardcover authorization was denied."
                             self.hardcoverDeviceAuth = nil
                             return
-                        case .success(let token):
+                        case .success(let tokens):
                             guard !self.isLoading else {
                                 // Approval consumes the code; show a retry instead of a stopped waiter.
                                 self.hardcoverDeviceAuth = nil
@@ -662,7 +692,7 @@ final class LibraryModel {
                             self.isLoading = true
                             defer { self.isLoading = false }
                             _ = await self.connectValidatedToken(
-                                token, revision: self.sourceRevision)
+                                tokens, revision: self.sourceRevision)
                             return
                         }
                     } catch {
@@ -693,18 +723,19 @@ final class LibraryModel {
         isLoading = true
         let revision = sourceRevision
         defer { isLoading = false }
-        let token: String
+        let tokens: HardcoverTokens
         do {
-            token = try await dependencies.exchangeHardcoverCode(rawCode)
+            tokens = try await dependencies.exchangeHardcoverCode(rawCode)
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
             message = readable(error)
             sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
             return false
         }
-        return await connectValidatedToken(token, revision: revision)
+        return await connectValidatedToken(tokens, revision: revision)
     }
 
+    /// Connects with a token that has no refresh token, such as a personal access token.
     func connect(_ rawToken: String) async -> Bool {
         guard !isLoading else { return false }
         let token: String
@@ -715,13 +746,14 @@ final class LibraryModel {
         isLoading = true
         let revision = sourceRevision
         defer { isLoading = false }
-        return await connectValidatedToken(token, revision: revision)
+        return await connectValidatedToken(HardcoverTokens(accessToken: token), revision: revision)
     }
 
-    private func connectValidatedToken(_ token: String, revision: Int) async -> Bool {
+    private func connectValidatedToken(_ tokens: HardcoverTokens, revision: Int) async -> Bool {
         hardcoverConnectionPhase = .validatingAccount
         message = nil
         defer { hardcoverConnectionPhase = nil }
+        let token = tokens.accessToken
         do {
             let accountID = try await dependencies.validateHardcover(token)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
@@ -738,7 +770,7 @@ final class LibraryModel {
                         .hardcover, now: dependencies.now(),
                         hasSnapshot: hasSnapshot)
             {
-                try saveHardcoverCredential(token)
+                try saveHardcoverCredential(tokens)
                 hardcoverConnected = true
                 setActiveHardcoverAccountID(accountID)
                 hardcoverSessionExpired = false
@@ -765,7 +797,7 @@ final class LibraryModel {
             let result = try await dependencies.fetchHardcover(token, previous)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
             guard result.accountID == accountID else { throw HardcoverError.invalidToken }
-            try saveHardcoverCredential(token)
+            try saveHardcoverCredential(tokens)
             hardcoverConnected = true
             hardcoverSessionExpired = false
             connectionRevision += 1
@@ -782,18 +814,18 @@ final class LibraryModel {
         }
     }
 
-    private func saveHardcoverCredential(_ token: String) throws {
+    private func saveHardcoverCredential(_ tokens: HardcoverTokens) throws {
         #if DEBUG && targetEnvironment(simulator)
             if dependencies.allowLaunchOverrides,
                 ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"] != nil
             {
                 // An unsigned simulator can lack Keychain access. The authorized bootstrap
                 // token remains in this process only; the source snapshot is saved separately.
-                try? dependencies.saveCredential(token, "hardcover-token")
+                try? hardcoverSession.save(tokens)
                 return
             }
         #endif
-        try dependencies.saveCredential(token, "hardcover-token")
+        try hardcoverSession.save(tokens)
     }
 
     func refresh(manual: Bool = false) async {
@@ -828,15 +860,25 @@ final class LibraryModel {
         }
         var failures: [String] = []
         if hardcoverEnabled, manual || isDue(.hardcover),
-            let token = dependencies.readCredential("hardcover-token")
+            let savedToken = hardcoverSession.storedAccessToken()
         {
             do {
                 try schedule
                     .begin(
                         .hardcover, now: dependencies.now(), manual: manual,
                         hasSnapshot: hasActiveSnapshot(.hardcover))
-                let result = try await dependencies.fetchHardcover(
-                    token, activeHardcoverSnapshot())
+                let token = try await hardcoverSession.renewedIfExpiring(savedToken)
+                let result: HardcoverLibrary
+                do {
+                    result = try await dependencies.fetchHardcover(token, activeHardcoverSnapshot())
+                } catch HardcoverError.invalidToken {
+                    // Hardcover can reject a token before its stated expiry. Renew it once.
+                    guard let renewed = try await hardcoverSession.renew(rejected: token),
+                        renewed != token
+                    else { throw HardcoverError.invalidToken }
+                    result = try await dependencies.fetchHardcover(
+                        renewed, activeHardcoverSnapshot())
+                }
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 await install(
                     result.books, source: .hardcover, accountID: result.accountID,
@@ -1002,7 +1044,7 @@ final class LibraryModel {
     func disconnect() {
         guard !isLoading else { return }
         cancelShelfWork()
-        dependencies.removeCredential("hardcover-token")
+        hardcoverSession.remove()
         hardcoverConnected = false
         hardcoverSessionExpired = false
         hardcoverEnabled = false
