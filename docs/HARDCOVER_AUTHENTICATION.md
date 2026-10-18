@@ -26,7 +26,7 @@ On a fresh launch without a saved account or library snapshot, a welcome popup o
 Select **Connect Hardcover** in the popup, or open **Settings → Sources → Connect Hardcover**, to use the same sign-in card.
 
 1. Scan the QR code with your phone, or open **hardcover.app/link** in a browser.
-2. Enter the 8-character code shown beside it and select **Authorize**.
+2. Check or enter the 8-character code shown beside it and select **Authorize**.
 3. Your Apple TV checks the account, downloads the library, and saves it automatically after you approve.
 
 The card requests a code as soon as it opens. **New code** replaces an expired code, and **Enter a code instead** shows a text field for an authorization code typed with the remote. A loading card shows account validation, library download, and saving progress. A failed connection returns to the sign-in card with an error and controls to try again.
@@ -39,7 +39,7 @@ In Settings, Back closes the sign-in card. The empty shelf still offers **Choose
 
 While a login works, **Settings → Sources** shows **Disconnect Hardcover** instead of opening the card. When a sync reports the saved login as invalid or expired, the button becomes **Reconnect Hardcover** and **Sync now** is unavailable until you sign in again, unless another source can sync. The saved login stays in Keychain until a new link replaces it or you disconnect.
 
-The bundled QR image points to `https://hardcover.app/link` and is generated offline with Apple Core Image and verified by decoding it with Vision. To regenerate it on macOS, run `swift scripts/generate-hardcover-qr.swift Bookworms/Assets.xcassets/HardcoverTokenQR.imageset/hardcover-token.png`.
+When Hardcover's device-code response includes `verification_uri_complete` on `https://hardcover.app`, the card draws it as a QR code with Core Image, so scanning opens the approval page with the code filled in. Otherwise it shows the bundled QR image, which points to `https://hardcover.app/link`. The bundled image is generated offline with Apple Core Image and verified by decoding it with Vision. To regenerate it on macOS, run `swift scripts/generate-hardcover-qr.swift Bookworms/Assets.xcassets/HardcoverTokenQR.imageset/hardcover-token.png`.
 
 ## Repeat first-launch setup on a development install
 
