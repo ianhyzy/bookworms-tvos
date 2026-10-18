@@ -286,6 +286,11 @@ final class BookWallLocalSpineTests: XCTestCase {
             "static/LeagueGothic_Condensed-Regular.ttf", "static/LeagueGothic-Regular.ttf",
         ]
         XCTAssertEqual(pick(400, league), "static/LeagueGothic-Regular.ttf")
+        // A width variant of the exact weight gives way to a regular-width file.
+        let mixed = ["Family[wght].ttf", "static/Family_Condensed-Bold.ttf"]
+        XCTAssertEqual(pick(700, mixed), "Family[wght].ttf")
+        let staticsOnly = ["static/Family-Regular.ttf", "static/Family_Condensed-SemiBold.ttf"]
+        XCTAssertEqual(pick(600, staticsOnly), "static/Family-Regular.ttf")
         let merriweather = [
             "Merriweather-VariableFont_opsz,wdth,wght.ttf",
             "static/Merriweather_120pt-SemiBold.ttf",
