@@ -12,12 +12,10 @@ struct CloudLibraryArchive: Codable, Sendable {
             if let index = merged.sources.firstIndex(where: {
                 $0.source == source.source && $0.accountID == source.accountID
             }) {
-                if source.syncedAt > merged.sources[index].syncedAt {
-                    // A writer that predates series leaves them out; keep the stored ones.
-                    var source = source
-                    source.series = source.series ?? merged.sources[index].series
-                    merged.sources[index] = source
-                }
+                let stored = merged.sources[index]
+                merged.sources[index] =
+                    source.syncedAt > stored.syncedAt
+                    ? source.keeping(stored) : stored.keeping(source)
             } else {
                 merged.sources.append(source)
             }
@@ -31,6 +29,29 @@ struct CloudLibraryArchive: Codable, Sendable {
             ($0.source.rawValue + $0.accountID) < ($1.source.rawValue + $1.accountID)
         }
         return merged
+    }
+}
+
+extension SourceSnapshot {
+    /// The snapshot with what a writer that predates a field leaves out filled in from `older`,
+    /// a snapshot of the same account: its series, and each book's `finishedDates` when the
+    /// book's newest finish there is still `finished`. Otherwise such a book shows one read
+    /// until the next Hardcover sync.
+    fileprivate func keeping(_ older: SourceSnapshot) -> SourceSnapshot {
+        var snapshot = self
+        snapshot.series = series ?? older.series
+        let reads = Dictionary(
+            older.books.compactMap { book in book.finishedDates.map { (book.id, $0) } },
+            uniquingKeysWith: { first, _ in first })
+        guard !reads.isEmpty else { return snapshot }
+        snapshot.books = books.map { book in
+            guard book.finishedDates == nil, let kept = reads[book.id], kept.first == book.finished
+            else { return book }
+            var book = book
+            book.finishedDates = kept
+            return book
+        }
+        return snapshot
     }
 }
 

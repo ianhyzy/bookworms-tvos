@@ -424,4 +424,33 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(merged.sources.first?.books.count, SampleLibrary.books.count)
         XCTAssertEqual(merged.sources.first?.series?.map(\.id), [SampleLibrary.series.id])
     }
+
+    func testCloudMergeKeepsRereadsWhenANewerSnapshotHasNone() throws {
+        let now = Date()
+        func book(_ id: Int, finished: String, reads: [String]?) -> Book {
+            Book(id: id, title: "Book \(id)", author: "A", finished: finished, finishedDates: reads)
+        }
+        let local = SourceSnapshot(
+            source: .hardcover, accountID: "one",
+            books: [
+                book(1, finished: "2026-02-01", reads: ["2026-02-01", "2019-07-04"]),
+                book(2, finished: "2025-05-05", reads: ["2025-05-05", "2020-01-01"]),
+            ], syncedAt: now)
+        // An older build saves the newer snapshot without the lists; book 2 was read again since.
+        let remote = SourceSnapshot(
+            source: .hardcover, accountID: "one",
+            books: [
+                book(1, finished: "2026-02-01", reads: nil),
+                book(2, finished: "2026-03-03", reads: nil),
+            ], syncedAt: now.addingTimeInterval(1))
+        for merged in [
+            CloudLibraryArchive(sources: [remote]).merging(CloudLibraryArchive(sources: [local])),
+            CloudLibraryArchive(sources: [local]).merging(CloudLibraryArchive(sources: [remote])),
+        ] {
+            let books = try XCTUnwrap(merged.sources.first?.books)
+            XCTAssertEqual(books.map(\.finished), ["2026-02-01", "2026-03-03"])
+            XCTAssertEqual(books[0].finishedDates, ["2026-02-01", "2019-07-04"])
+            XCTAssertNil(books[1].finishedDates, "A changed newest finish keeps no stale list")
+        }
+    }
 }
