@@ -149,6 +149,7 @@ final class SocialLibraryModel {
             }
             var token = token
             var renewToken = renewToken
+            var renewalFailed = false
             // Sends one request. The first rejected token is renewed, and every later request in
             // this load uses the replacement.
             @MainActor func authorized<T>(_ send: (String) async throws -> T) async throws -> T {
@@ -157,7 +158,12 @@ final class SocialLibraryModel {
                 } catch HardcoverError.invalidToken {
                     guard let renew = renewToken else { throw HardcoverError.invalidToken }
                     renewToken = nil
-                    token = try await renew(token)
+                    do {
+                        token = try await renew(token)
+                    } catch {
+                        renewalFailed = true
+                        throw error
+                    }
                     return try await send(token)
                 }
             }
@@ -205,13 +211,19 @@ final class SocialLibraryModel {
                     } catch {
                         // Friends' Picks can rank from libraries alone, so a transient feed
                         // failure only stops the sync when the Feed view shows it. Credential and
-                        // permission failures always reach the handler below.
+                        // permission failures always reach the handler below. So does a failed
+                        // renewal, since later requests would send the rejected token and report
+                        // the login as denied.
                         switch error {
                         case HardcoverError.insufficientScope, HardcoverError.forbidden,
                             HardcoverError.invalidToken:
                             throw error
                         default:
-                            if socialViews.contains(.following) || Task.isCancelled { throw error }
+                            if socialViews.contains(.following) || Task.isCancelled
+                                || renewalFailed
+                            {
+                                throw error
+                            }
                         }
                     }
                 }

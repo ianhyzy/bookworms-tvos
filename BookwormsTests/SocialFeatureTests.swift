@@ -126,6 +126,38 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(restoredOwners, owners)
     }
 
+    func testFailedRenewalDuringFriendsPicksFeedKeepsTheCache() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "RenewalFailure.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.failFeed()
+        var time = Date()
+        let model = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root, now: { time })
+        // Caches Following; the failed feed stays due without the readers' libraries.
+        await model.load(token: "hc_at_fixture_old", readerID: 2, enabledViews: [.following])
+        XCTAssertFalse(model.following.isEmpty)
+
+        time += 301
+        await client.reject("hc_at_fixture_old")
+        let sent = await client.tokens.count
+        var renewals = 0
+        await model.load(
+            token: "hc_at_fixture_old", readerID: 2, enabledViews: [.friendsPicks],
+            renewToken: { _ in
+                renewals += 1
+                throw URLError(.timedOut)
+            })
+        XCTAssertEqual(renewals, 1)
+        XCTAssertFalse(model.following.isEmpty, "A failed renewal keeps the cached snapshot")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+        XCTAssertTrue(model.status.contains("Cached data is retained"))
+        let tokens = await client.tokens
+        XCTAssertEqual(
+            tokens.count - sent, 1, "The load stops instead of sending the rejected token again")
+    }
+
     func testRepeatedManualRefreshIsCoalescedByCooldown() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Cooldown.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
