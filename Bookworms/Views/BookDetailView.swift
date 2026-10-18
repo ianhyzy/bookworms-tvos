@@ -286,15 +286,24 @@ struct BookDetailView: View {
         .appFont(size: 26).foregroundStyle(.detailCaption).lineLimit(1)
     }
 
-    /// The finish date when one is recorded, then genres, then the rating histogram, which opens
-    /// reviews when Hardcover can supply them.
+    /// The finish date when one is recorded, with a read count for a reread, then genres, then
+    /// the rating histogram, which opens reviews when Hardcover can supply them.
     private var metadata: some View {
         HStack(alignment: .top, spacing: 44) {
             if book.finished != nil {
-                metadataItem(
-                    "Finished", value: book.finishedLabel(format: dateFormat),
-                    symbol: "checkmark.circle"
-                )
+                VStack(alignment: .leading, spacing: 12) {
+                    metadataItem(
+                        "Finished", value: book.finishedLabel(format: dateFormat),
+                        symbol: "checkmark.circle"
+                    )
+                    if book.readCount > 1 {
+                        Text("Read \(book.readCount) times")
+                            .appFont(size: 19, weight: .semibold)
+                            .padding(.horizontal, 12).padding(.vertical, 4)
+                            .background(.primary.opacity(0.12), in: .capsule)
+                            .accessibilityIdentifier("detail-read-count")
+                    }
+                }
                 .fixedSize()
             }
             if !genres.isEmpty {

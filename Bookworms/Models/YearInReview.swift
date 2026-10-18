@@ -3,8 +3,8 @@ import Foundation
 /// Reading statistics for one calendar year, computed from the finish dates in the library
 /// snapshot.
 ///
-/// The library keeps each book's most recent read, so a reread counts once, in the year of its
-/// latest finish. Books without a finish date are left out.
+/// A book appears in every year it was finished in, once per year, as of its latest finish that
+/// year (`Book.withFinish(_:)`). Books without a finish date are left out.
 struct YearInReview: Equatable, Identifiable, Sendable {
     /// A name and how many books it applies to, such as a genre or format.
     struct Tally: Equatable, Sendable {
@@ -50,8 +50,13 @@ struct YearInReview: Equatable, Identifiable, Sendable {
     static func all(from books: [Book]) -> [YearInReview] {
         var byYear: [Int: [(book: Book, month: Int)]] = [:]
         for book in books {
-            guard let finish = book.finishedYearMonth else { continue }
-            byYear[finish.year, default: []].append((book, finish.month))
+            var years = Set<Int>()
+            // Newest first, so each year keeps the book's latest finish in it.
+            for date in book.finishes {
+                guard let finish = Book.yearMonth(of: date), years.insert(finish.year).inserted
+                else { continue }
+                byYear[finish.year, default: []].append((book.withFinish(date), finish.month))
+            }
         }
         return byYear.keys.sorted(by: >)
             .map { year in
@@ -121,24 +126,30 @@ struct YearInReview: Equatable, Identifiable, Sendable {
 }
 
 extension Book {
-    /// Books finished on `date`'s month and day in earlier years, most recent year first.
+    /// Books finished on `date`'s month and day in earlier years, most recent year first. A book
+    /// finished on that day more than once shows its most recent such finish as `finished`.
     static func finishedOnThisDay(_ books: [Book], date: Date, calendar: Calendar) -> [Book] {
         let today = calendar.dateComponents([.year, .month, .day], from: date)
         let suffix = String(format: "-%02d-%02d", today.month ?? 0, today.day ?? 0)
         return
-            books.filter { book in
-                guard let finished = book.finished?.prefix(10), finished.hasSuffix(suffix),
-                    let year = Int(finished.prefix(4)), year < (today.year ?? 0)
-                else { return false }
-                return true
+            books.compactMap { book in
+                book.finishes
+                    .first { finish in
+                        let day = finish.prefix(10)
+                        return day.hasSuffix(suffix)
+                            && (Int(day.prefix(4)) ?? .max) < (today.year ?? 0)
+                    }
+                    .map(book.withFinish)
             }
             .sorted(by: recentFirst)
     }
 
     /// The year and month (1–12) of the recorded finish date, or `nil` when it is missing or
     /// malformed.
-    var finishedYearMonth: (year: Int, month: Int)? {
-        guard let finished else { return nil }
+    var finishedYearMonth: (year: Int, month: Int)? { finished.flatMap(Self.yearMonth(of:)) }
+
+    /// The year and month (1–12) of a finish date, or `nil` when it is malformed.
+    static func yearMonth(of finished: String) -> (year: Int, month: Int)? {
         let parts = finished.prefix(10).split(separator: "-")
         guard parts.count >= 2, let year = Int(parts[0]), let month = Int(parts[1]),
             year > 0, (1...12).contains(month)

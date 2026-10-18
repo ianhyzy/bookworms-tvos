@@ -71,6 +71,41 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(result.first?.format, "Audiobook")
     }
 
+    func testEveryFinishedReadIsKeptNewestFirst() throws {
+        let json = """
+            [{"id":9,"last_read_date":"2026-09-09","status_id":3,
+              "book":{"id":1,"title":"A reread"},
+              "user_book_reads":[{"finished_at":"2026-09-09"},{"finished_at":"2019-02-01"},
+                {"finished_at":"2023-05-20"}]},
+             {"id":10,"last_read_date":"2024-01-01","book":{"id":2,"title":"Undated reads"}},
+             {"id":11,"status_id":1,"book":{"id":3,"title":"Unread"},"user_book_reads":[]}]
+            """
+        let books = HardcoverClient.normalize(
+            try JSONDecoder().decode([UserBook].self, from: Data(json.utf8)))
+        let reread = try XCTUnwrap(books.first { $0.id == 1 })
+        XCTAssertEqual(reread.finishedDates, ["2026-09-09", "2023-05-20", "2019-02-01"])
+        XCTAssertEqual(reread.finished, reread.finishedDates?.first)
+        XCTAssertEqual(reread.readCount, 3)
+        let undated = try XCTUnwrap(books.first { $0.id == 2 })
+        XCTAssertNil(undated.finishedDates, "Only the last read date is known")
+        XCTAssertEqual(undated.finished, "2024-01-01")
+        XCTAssertEqual(undated.readCount, 1)
+        XCTAssertEqual(books.first { $0.id == 3 }?.readCount, 0)
+    }
+
+    func testSnapshotsWithoutFinishedDatesStillDecode() throws {
+        let old = #"{"id":1,"title":"Old","author":"Author","finished":"2025-01-02"}"#
+        let book = try JSONDecoder().decode(Book.self, from: Data(old.utf8))
+        XCTAssertNil(book.finishedDates)
+        XCTAssertEqual(book.finishes, ["2025-01-02"])
+        var reread = book
+        reread.finishedDates = ["2025-01-02", "2020-01-01"]
+        let encoded = try JSONEncoder().encode(reread)
+        XCTAssertEqual(
+            try JSONDecoder().decode(Book.self, from: encoded).finishedDates,
+            ["2025-01-02", "2020-01-01"])
+    }
+
     func testReaderLibraryBookUsesTheirEditionFormatAndCover() throws {
         let source = try JSONDecoder()
             .decode(

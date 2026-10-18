@@ -10,7 +10,12 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var review: String? = nil
     var coverURL: URL?
     var pages: Int?
+    /// The latest finish date, `yyyy-MM-dd` or a timestamp that starts with one.
     var finished: String?
+    /// Every finished read's date from Hardcover, newest first, in the format of `finished`, which
+    /// equals the first. `nil` when only `finished` is known, as in snapshots saved before rereads
+    /// were fetched. The iPhone reads it from the iCloud archive.
+    var finishedDates: [String]? = nil
     var rating: Double?
     var format: String?
     var seriesID: Int?
@@ -63,6 +68,21 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     }
 
     var preferredCoverURL: URL? { chosenCoverURL ?? detailCoverURL ?? coverURL }
+
+    /// Every recorded finish date, newest first.
+    var finishes: [String] { finishedDates ?? (finished.map { [$0] } ?? []) }
+
+    /// How many times the reader finished the book.
+    var readCount: Int { finishedDates?.count ?? (finished == nil ? 0 : 1) }
+
+    /// The book as one time frame shows it: with `date`, one of its finishes, as `finished`.
+    /// Views that group books by finish date use it, so a reread joins each year it was finished
+    /// in. Never save the copy; its `finished` no longer matches `finishedDates`.
+    func withFinish(_ date: String) -> Book {
+        var book = self
+        book.finished = date
+        return book
+    }
 
     var isHardcoverBook: Bool { sources?.contains(.hardcover) ?? (id < 1_000_000_000_000_000) }
 
@@ -232,7 +252,8 @@ enum SampleLibrary {
             description: String(
                 repeating:
                     "A botanist returns to an island where the trees bloom only after sunset. As the seasons change, a forgotten family archive reveals a different history of the island and the people who call it home. ",
-                count: 8), pages: 384, finished: "2026-09-09", rating: 4.5, format: "Ebook",
+                count: 8), pages: 384, finished: "2026-09-09",
+            finishedDates: ["2026-09-09", "2024-03-14"], rating: 4.5, format: "Ebook",
             seriesID: 1, seriesPosition: 1, seriesName: "The Island Cycle",
             genres: ["Fantasy", "Mystery"], communityRating: 4.24,
             ratingsCount: 100,
