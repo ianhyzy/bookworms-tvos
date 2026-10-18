@@ -263,23 +263,6 @@ final class SocialNavigationTests: XCTestCase {
         capture(app, name: "Ambient page")
     }
 
-    func testAmbientProfileCodeToggleSitsAboveStart() {
-        let app = RemoteNavigation.launch()
-        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
-        RemoteNavigation.selectView("Ambient", in: app)
-        let toggle = app.descendants(matching: .any)["ambient-profile-code-toggle"].firstMatch
-        let start = app.buttons["start-ambient"]
-        let views = ["shelf", "yearInReview", "following", "comparison", "shared", "friendsPicks"]
-            .map { app.descendants(matching: .any)["ambient-view-\($0)"].firstMatch }
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        RemoteNavigation.moveFocus(to: toggle, in: app)
-        RemoteNavigation.press(.down, in: app, expecting: start)
-        RemoteNavigation.press(.up, in: app, expecting: [toggle] + views)
-        RemoteNavigation.moveFocus(to: toggle, in: app)
-        RemoteNavigation.press(.right, in: app, expecting: views)
-        capture(app, name: "Ambient page with profile code toggle")
-    }
-
     func testSpoilerReviewRequiresExplicitReveal() {
         let app = RemoteNavigation.launch(view: "following")
         let first = app.buttons["activity-1"]

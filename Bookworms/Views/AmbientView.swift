@@ -15,8 +15,9 @@ struct AmbientView: View {
     /// Combined with the content index so each ambient change shows a new shelf photo.
     @State private var photoSeed = Int.random(in: 0..<1000)
     @AppStorage("spoilerPolicy") private var spoilerPolicy = SpoilerPolicy.alwaysHide
-    /// Shows a QR code for your Hardcover profile below the content, chosen on the Ambient page.
-    @AppStorage("ambientProfileCode") private var showsProfileCode = false
+    /// The profile link the Ambient page's QR code option was turned on for. The code shows only
+    /// while that account is connected, so it never shows another account's profile.
+    @AppStorage("ambientProfileCodeLink") private var profileCodeLink = ""
 
     static func available(
         library: LibraryModel, social: SocialLibraryModel, preferences: ViewPreferences
@@ -51,7 +52,9 @@ struct AmbientView: View {
                 }
                 // Full-screen presentation can propose zero size during its mounting transaction.
                 if geometry.size.width > 320 && geometry.size.height > 320 {
-                    let profileURL = showsProfileCode ? library.hardcoverProfileURL : nil
+                    let profileURL = library.hardcoverProfileURL.flatMap {
+                        $0.absoluteString == profileCodeLink ? $0 : nil
+                    }
                     // The code takes a band below the content instead of covering any of it.
                     let band: CGFloat = profileURL == nil ? 0 : QRCodeView.linkSide + 24
                     VStack(spacing: 24) {
