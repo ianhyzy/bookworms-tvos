@@ -93,6 +93,18 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(books.first { $0.id == 3 }?.readCount, 0)
     }
 
+    @MainActor func testHardcoverLinksUsePermanentIDPagesAndEncodeAsQRCodes() throws {
+        XCTAssertEqual(
+            Book(id: 312_460, title: "Book", author: "Author").hardcoverURL?.absoluteString,
+            "https://hardcover.app/id/books/312460")
+        let cwa = Book(id: 1_000_000_000_000_001, title: "Book", author: "Author", sources: [.cwa])
+        XCTAssertNil(cwa.hardcoverURL, "Hardcover doesn't list CWA-only books")
+        XCTAssertEqual(HardcoverLink.user(42).absoluteString, "https://hardcover.app/id/user/42")
+        let code = try XCTUnwrap(QRCodeView.image(for: "https://hardcover.app/id/books/312460"))
+        XCTAssertEqual(code.width, code.height)
+        XCTAssertGreaterThanOrEqual(code.width, 21 + 8, "At least version 1 with a quiet zone")
+    }
+
     func testIgnoredBooksAreLeftOut() throws {
         let json = """
             [{"id":1,"status_id":6,"last_read_date":"2025-01-01","book":{"id":1,"title":"Ignored"}},

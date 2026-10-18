@@ -129,15 +129,30 @@ struct HardcoverConnectionView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image("HardcoverTokenQR")
-                .interpolation(.none)
-                .resizable()
-                .frame(width: 320, height: 320)
-                .padding(18)
-                .background(.white, in: .rect(cornerRadius: 24))
-                .accessibilityLabel("QR code that opens hardcover.app/link")
-                .accessibilityIdentifier("hardcover-token-qr")
+            Group {
+                if let url = completeLink {
+                    QRCodeView(url: url)
+                } else {
+                    Image("HardcoverTokenQR")
+                        .interpolation(.none)
+                        .resizable()
+                        .accessibilityLabel("QR code that opens hardcover.app/link")
+                }
+            }
+            .frame(width: 320, height: 320)
+            .padding(18)
+            .background(.white, in: .rect(cornerRadius: 24))
+            .accessibilityIdentifier("hardcover-token-qr")
         }
+    }
+
+    /// The link that opens Hardcover's approval page with the code filled in, when Hardcover
+    /// provides one. Without it, the bundled code opens hardcover.app/link.
+    private var completeLink: URL? {
+        guard let url = library.hardcoverDeviceAuth?.verificationURIComplete,
+            url.scheme == "https", url.host() == "hardcover.app"
+        else { return nil }
+        return url
     }
 
     private var manualEntry: some View {

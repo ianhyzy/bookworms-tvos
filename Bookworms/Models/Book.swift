@@ -86,6 +86,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
 
     var isHardcoverBook: Bool { sources?.contains(.hardcover) ?? (id < 1_000_000_000_000_000) }
 
+    /// The book's permanent Hardcover page, or `nil` for a book Hardcover doesn't list.
+    var hardcoverURL: URL? { isHardcoverBook ? HardcoverLink.book(id) : nil }
+
     var spineTitle: String { title.components(separatedBy: ":").first ?? title }
 
     var spineSubtitle: String? {
@@ -176,6 +179,13 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         if lhs.finished == rhs.finished { return lhs.id > rhs.id }
         return (lhs.finished ?? "") > (rhs.finished ?? "")
     }
+}
+
+/// Permanent Hardcover web links by ID. Hardcover redirects them to the current page, so they
+/// keep working when a slug or username changes.
+enum HardcoverLink {
+    static func book(_ id: Int) -> URL { URL(string: "https://hardcover.app/id/books/\(id)")! }
+    static func user(_ id: Int) -> URL { URL(string: "https://hardcover.app/id/user/\(id)")! }
 }
 
 /// One Hardcover series a book belongs to. The iPhone companion decodes the same keys from the
