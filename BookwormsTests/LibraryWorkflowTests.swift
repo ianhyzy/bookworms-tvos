@@ -18,12 +18,18 @@ final class LibraryWorkflowTests: XCTestCase {
         fixture.secrets["hardcover-refresh-token"] = "hc_rt_fictional_original"
         fixture.defaults.set(fixture.time, forKey: HardcoverSession.renewalKey)
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
-        let dependencies = fixture.dependencies()
+        var dependencies = fixture.dependencies()
+        let revoked = expectation(description: "The removed login is revoked at Hardcover")
+        dependencies.revokeHardcoverToken = { refreshToken in
+            XCTAssertEqual(refreshToken, "hc_rt_fictional_original")
+            revoked.fulfill()
+        }
         let legacy = LibrarySnapshot(books: [fixture.book(1)], syncedAt: fixture.time)
         try JSONEncoder().encode(legacy).write(to: dependencies.legacySnapshotURL)
         let model = LibraryModel(dependencies: dependencies)
 
         try await model.resetHardcoverSetup()
+        await fulfillment(of: [revoked], timeout: 5)
         XCTAssertNil(fixture.secrets["hardcover-token"])
         XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
         XCTAssertNil(fixture.defaults.object(forKey: HardcoverSession.renewalKey))
@@ -896,17 +902,47 @@ final class LibraryWorkflowTests: XCTestCase {
         let renewal = ControlledLibraryResponse<HardcoverTokens>("Token renewal started")
         var dependencies = fixture.dependencies()
         dependencies.refreshHardcoverToken = { _ in try await renewal.value() }
+        let revoked = expectation(description: "Disconnecting revokes the login")
+        dependencies.revokeHardcoverToken = { refreshToken in
+            XCTAssertEqual(refreshToken, "hc_rt_fictional_1")
+            revoked.fulfill()
+        }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         let social = Task { await model.hardcoverTokenForSync() }
         await fulfillment(of: [renewal.started], timeout: 5)
         model.disconnect()
+        await fulfillment(of: [revoked], timeout: 5)
         renewal.resolve(fixture.tokens(2))
         let token = await social.value
         XCTAssertNil(token)
         XCTAssertNil(fixture.secrets["hardcover-token"])
         XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
         XCTAssertNil(fixture.defaults.object(forKey: HardcoverSession.renewalKey))
+    }
+
+    func testDisconnectRevokesTheLoginEvenIfHardcoverIsUnreachable() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 5 * 86_400)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        let revoked = expectation(description: "Disconnecting revokes the login")
+        var revocations: [String] = []
+        dependencies.revokeHardcoverToken = { refreshToken in
+            revocations.append(refreshToken)
+            revoked.fulfill()
+            throw URLError(.notConnectedToInternet)
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.disconnect()
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
+        await fulfillment(of: [revoked], timeout: 5)
+        XCTAssertEqual(revocations, ["hc_rt_fictional_1"])
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertFalse(model.hardcoverSessionExpired)
     }
 
     func testTokenWithoutRefreshReplacesTheSavedRefreshToken() async throws {
@@ -2034,6 +2070,7 @@ private final class LibraryWorkflowFixture {
             XCTFail("Unexpected token renewal")
             throw URLError(.unsupportedURL)
         }
+        dependencies.revokeHardcoverToken = { _ in XCTFail("Unexpected token revocation") }
         dependencies.fetchCWA = { _, _ in
             XCTFail("Unexpected CWA request")
             throw URLError(.unsupportedURL)

@@ -269,6 +269,21 @@ actor HardcoverClient {
         return try Self.tokens(from: data)
     }
 
+    /// Asks Hardcover to end the OAuth login that `refreshToken` belongs to, which also ends its
+    /// access token, so Hardcover's Authorized Apps page stops listing it. Sends one request and
+    /// never retries.
+    func revoke(refreshToken: String) async throws {
+        let refreshToken = try HardcoverToken(refreshToken).value
+        let (_, http) = try await postForm(
+            Self.revocationURL,
+            [
+                "token": refreshToken,
+                "token_type_hint": "refresh_token",
+                "client_id": Self.clientID,
+            ])
+        guard http.statusCode == 200 else { throw HardcoverError.http(http.statusCode) }
+    }
+
     /// Decodes a successful token response and checks the access token's format.
     private static func tokens(from data: Data) throws -> HardcoverTokens {
         guard var tokens = try? JSONDecoder().decode(HardcoverTokens.self, from: data) else {
@@ -280,6 +295,7 @@ actor HardcoverClient {
 
     /// The token endpoint for device-code polling and token renewal.
     static let tokenURL = URL(string: "https://hardcover.app/oauth2/token")!
+    static let revocationURL = URL(string: "https://api.hardcover.app/oauth2/revoke")!
 
     /// Posts a form to an OAuth endpoint. Values are encoded with only RFC 3986 unreserved
     /// characters left literal, so a `+` or `/` in a token reaches Hardcover unchanged.

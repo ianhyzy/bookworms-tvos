@@ -47,13 +47,24 @@ final class HardcoverSession {
         try write(tokens, issued: dependencies.now())
     }
 
-    /// Removes the saved login.
+    /// Removes the saved login and revokes it at Hardcover, so Hardcover's Authorized Apps page
+    /// stops listing the Apple TV. Reads Keychain.
+    ///
+    /// The revocation is one request in its own task, and a failure is ignored: the login is
+    /// removed from the Apple TV either way, and the reader can still revoke it on Hardcover. A
+    /// personal access token has no refresh token and isn't revoked, since the reader may use it
+    /// elsewhere.
     func remove() {
+        let refreshToken =
+            unsaved?.tokens.refreshToken ?? dependencies.readCredential(Self.refreshAccount)
         generation += 1
         unsaved = nil
         dependencies.removeCredential(Self.refreshAccount)
         dependencies.removeCredential(Self.accessAccount)
         dependencies.defaults.removeObject(forKey: Self.renewalKey)
+        if let refreshToken {
+            Task { try? await self.dependencies.revokeHardcoverToken(refreshToken) }
+        }
     }
 
     /// The access token for a sync, renewed first when it's due (`renewalDate(of:issued:)`).

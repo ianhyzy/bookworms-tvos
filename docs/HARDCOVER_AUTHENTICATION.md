@@ -8,6 +8,7 @@ The OAuth configuration uses:
 - **Verification URL**: `https://hardcover.app/link`
 - **Device Authorization Endpoint**: `https://hardcover.app/oauth2/device`
 - **Token Endpoint**: `https://hardcover.app/oauth2/token`
+- **Revocation Endpoint**: `https://api.hardcover.app/oauth2/revoke`
 - **Requested scopes**: `read:me:content read:library read:catalog:data read:social read:users`
 - **Manual Redirect URI (fallback)**: `urn:ietf:wg:oauth:2.0:oob` (and `gay.ian.bookworms:/oauth/callback`)
 
@@ -27,11 +28,11 @@ Hardcover access tokens last one week. Refresh tokens last six months and work o
 - A Keychain read that fails returns no token. The app then skips the renewal or shows **Reconnect Hardcover**, but it never deletes the saved login, and the next sync that reads Keychain recovers.
 - A login without a refresh token, such as a personal access token, works until Hardcover rejects it and then shows **Reconnect Hardcover**.
 - Social sync keys its cache on the Hardcover account rather than the token, so a renewed token keeps cached social data.
-- **Disconnect Hardcover** removes both tokens from the Apple TV but doesn't revoke them at Hardcover. To end the session there too, revoke Bookworms on Hardcover's Authorized Apps page.
+- **Disconnect Hardcover** removes both tokens from the Apple TV and sends Hardcover one request to revoke the login, so Hardcover's Authorized Apps page stops listing the Apple TV. The app doesn't retry a revocation that fails, for example while offline; revoke Bookworms on that page instead. A personal access token isn't revoked, since you may use it elsewhere.
 
 ## Verification
 
-Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, success), authorization code exchange, OAuth and PAT token validation, rejection of malformed or invalid codes before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection. Renewal tests cover the refresh request and its form encoding, renewal before expiry (halfway through a short-lived token's lifetime) and after HTTP 401, refresh token rotation, one shared renewal for concurrent library and social syncs, revoked and unavailable renewals in library and social sync, an access token kept after a rejected renewal, unreadable refresh tokens, Keychain save failures, disconnection during a renewal, and social sync continuing with a renewed token.
+Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, success), authorization code exchange, OAuth and PAT token validation, rejection of malformed or invalid codes before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection. Renewal tests cover the refresh request and its form encoding, renewal before expiry (halfway through a short-lived token's lifetime) and after HTTP 401, refresh token rotation, one shared renewal for concurrent library and social syncs, revoked and unavailable renewals in library and social sync, an access token kept after a rejected renewal, unreadable refresh tokens, Keychain save failures, disconnection during a renewal, revocation when a login is removed, and social sync continuing with a renewed token.
 
 ## Sign in on Apple TV
 
@@ -63,4 +64,4 @@ After the owner authorizes removing the TV's saved Hardcover account, build and 
 python3 scripts/device-build.py --device APPLE_TV_UDID --team TEAM_ID --reset-hardcover-setup
 ```
 
-This launch removes the local Hardcover login, Hardcover and legacy snapshots, account identity, Hardcover sync history and error, and welcome completion flag. It preserves CWA accounts and snapshots, cached artwork, saved designs, and display settings. iCloud restoration waits until welcome setup completes when the popup is needed. A retained CWA account or snapshot suppresses the popup and allows normal iCloud sync to resume after startup. The flag resets only this launch; subsequent launches keep the newly connected account. See [device development](DEVELOPMENT.md#work-with-a-physical-apple-tv).
+This launch removes the local Hardcover login and revokes it at Hardcover, as **Disconnect Hardcover** does, and removes the Hardcover and legacy snapshots, account identity, Hardcover sync history and error, and welcome completion flag. It preserves CWA accounts and snapshots, cached artwork, saved designs, and display settings. iCloud restoration waits until welcome setup completes when the popup is needed. A retained CWA account or snapshot suppresses the popup and allows normal iCloud sync to resume after startup. The flag resets only this launch; subsequent launches keep the newly connected account. See [device development](DEVELOPMENT.md#work-with-a-physical-apple-tv).

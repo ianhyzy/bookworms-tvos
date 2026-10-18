@@ -120,6 +120,19 @@ final class HardcoverAuthenticationTests: XCTestCase {
         } catch { XCTFail("Unexpected error: \(error)") }
     }
 
+    func testRevocationSendsTheRefreshToken() async throws {
+        // The stub accepts only the exact form, with the `+` percent-encoded.
+        try await client().revoke(refreshToken: "hc_rt_fixture+plus")
+    }
+
+    func testFailedRevocationReportsTheStatus() async {
+        do {
+            try await client().revoke(refreshToken: "hc_rt_unknown")
+            XCTFail("A rejected revocation must fail.")
+        } catch HardcoverError.http(400) {
+        } catch { XCTFail("Unexpected error: \(error)") }
+    }
+
     func testReplacementTokenCanBeValidatedWithoutLoadingBooks() async throws {
         let accountID = try await client().validateToken("hc_pat_validate")
         XCTAssertEqual(accountID, "1")
@@ -204,6 +217,22 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// The request's form body, whether URLSession passes it as data or as a stream.
+    private func formBody() -> String {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&bytes, maxLength: bytes.count)
+                if count <= 0 { break }
+                data.append(contentsOf: bytes.prefix(count))
+            }
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     override func startLoading() {
         if request.url?.absoluteString == "https://hardcover.app/oauth2/device" {
             XCTAssertEqual(request.httpMethod, "POST")
@@ -274,6 +303,20 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
                 headerFields: ["Content-Type": "application/json"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(payload.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+
+        if request.url?.absoluteString == "https://api.hardcover.app/oauth2/revoke" {
+            XCTAssertEqual(request.httpMethod, "POST")
+            let accepted =
+                formBody()
+                == "token=hc_rt_fixture%2Bplus&token_type_hint=refresh_token&client_id="
+                + HardcoverClient.clientID
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: accepted ? 200 : 400, httpVersion: nil,
+                headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocolDidFinishLoading(self)
             return
         }
