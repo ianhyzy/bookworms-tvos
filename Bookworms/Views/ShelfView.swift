@@ -549,17 +549,19 @@ struct ShelfView: View {
             social.leaveSample()
             ensureComparisonReader()
             await social.load(
-                token: library.hardcoverTokenForSync(),
+                token: library.hardcoverTokenForSync(), account: library.hardcoverAccountID,
                 readerID: coordinator.preferences.readerID, manual: manual,
-                enabledViews: Set(coordinator.preferences.activeViews))
+                enabledViews: Set(coordinator.preferences.activeViews),
+                renewToken: library.renewHardcoverToken(rejected:))
             ensureComparisonReader()
             if let current = coordinator.preferences.readerID,
                 social.books(for: current).isEmpty
             {
                 await social.load(
-                    token: library.hardcoverTokenForSync(),
+                    token: library.hardcoverTokenForSync(), account: library.hardcoverAccountID,
                     readerID: current, manual: manual,
-                    enabledViews: Set(coordinator.preferences.activeViews))
+                    enabledViews: Set(coordinator.preferences.activeViews),
+                    renewToken: library.renewHardcoverToken(rejected:))
             }
         }
     }

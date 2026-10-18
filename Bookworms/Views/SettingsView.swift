@@ -366,8 +366,10 @@ struct SettingsView: View {
                     await library.refresh(manual: true)
                     await social.load(
                         token: library.hardcoverTokenForSync(),
+                        account: library.hardcoverAccountID,
                         readerID: coordinator.preferences.readerID, manual: true,
-                        enabledViews: Set(coordinator.preferences.activeViews))
+                        enabledViews: Set(coordinator.preferences.activeViews),
+                        renewToken: library.renewHardcoverToken(rejected:))
                 }
             } label: {
                 Label("Sync now", systemImage: "arrow.clockwise")
