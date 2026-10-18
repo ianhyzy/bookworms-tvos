@@ -136,6 +136,14 @@ final class LibraryModel {
         return preferences
     }
     private(set) var hasLoadedLibrarySnapshot = false
+    /// The connected Hardcover account's permanent profile link, for the profile code in ambient
+    /// mode. `nil` without a connected, enabled account.
+    var hardcoverProfileURL: URL? {
+        guard hardcoverEnabled, hardcoverConnected, !isSample,
+            let id = activeHardcoverAccountID.flatMap(Int.init), id > 0
+        else { return nil }
+        return HardcoverLink.user(id)
+    }
     /// Limits My Shelf to one author or genre until cleared. Not saved.
     var shelfFilter: ShelfFilter? {
         didSet { if shelfFilter != oldValue { updateShelf() } }

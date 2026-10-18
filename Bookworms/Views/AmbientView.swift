@@ -15,6 +15,8 @@ struct AmbientView: View {
     /// Combined with the content index so each ambient change shows a new shelf photo.
     @State private var photoSeed = Int.random(in: 0..<1000)
     @AppStorage("spoilerPolicy") private var spoilerPolicy = SpoilerPolicy.alwaysHide
+    /// Shows a QR code for your Hardcover profile below the content, chosen on the Ambient page.
+    @AppStorage("ambientProfileCode") private var showsProfileCode = false
 
     static func available(
         library: LibraryModel, social: SocialLibraryModel, preferences: ViewPreferences
@@ -49,19 +51,29 @@ struct AmbientView: View {
                 }
                 // Full-screen presentation can propose zero size during its mounting transaction.
                 if geometry.size.width > 320 && geometry.size.height > 320 {
-                    presentation(
-                        size: CGSize(
-                            width: geometry.size.width - 160, height: geometry.size.height - 160)
-                    )
-                    .id("\(controller.view.rawValue):\(controller.contentIndex)")
-                    .transition(.opacity)
-                    .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.6),
-                        value: controller.contentIndex
-                    )
-                    .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.6), value: controller.view
-                    )
+                    let profileURL = showsProfileCode ? library.hardcoverProfileURL : nil
+                    // The code takes a band below the content instead of covering any of it.
+                    let band: CGFloat = profileURL == nil ? 0 : Self.profileCodeSize + 24
+                    VStack(spacing: 24) {
+                        presentation(
+                            size: CGSize(
+                                width: geometry.size.width - 160,
+                                height: geometry.size.height - 160 - band)
+                        )
+                        .id("\(controller.view.rawValue):\(controller.contentIndex)")
+                        .transition(.opacity)
+                        .animation(
+                            reduceMotion ? nil : .easeInOut(duration: 0.6),
+                            value: controller.contentIndex
+                        )
+                        .animation(
+                            reduceMotion ? nil : .easeInOut(duration: 0.6), value: controller.view
+                        )
+                        if let profileURL {
+                            profileCode(profileURL)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    }
                     .padding(80)
                     .offset(
                         x: [-24.0, 24, 16, -16][controller.layoutVariant],
@@ -217,6 +229,25 @@ struct AmbientView: View {
     }
 
     private static let monthNames = Calendar.current.standaloneMonthSymbols
+
+    static let profileCodeSize: CGFloat = 132
+
+    /// A QR code for your Hardcover profile with a caption, for guests to scan.
+    private func profileCode(_ url: URL) -> some View {
+        HStack(spacing: 22) {
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("Follow me on Hardcover").appFont(size: 26, weight: .medium)
+                if let username = social.snapshot?.owner.username {
+                    Text("@\(username)").appFont(size: 24).foregroundStyle(.secondary)
+                }
+            }
+            QRCodeView(url: url)
+                .frame(width: Self.profileCodeSize, height: Self.profileCodeSize)
+                .clipShape(.rect(cornerRadius: 10))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("ambient-profile-code")
+    }
 
     static let onThisDayLimit = 5
 

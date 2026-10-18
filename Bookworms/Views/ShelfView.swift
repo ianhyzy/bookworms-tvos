@@ -10,6 +10,7 @@ enum ShelfScreenLayout {
 struct ShelfView: View {
     @AppStorage("dateFormat") private var dateFormat = AppDateFormat.monthName
     @AppStorage("woodBackground") private var woodBackground = true
+    @AppStorage("ambientProfileCode") private var showsProfileCode = false
     let library: LibraryModel
     @State private var social = SocialLibraryModel()
     @State private var coordinator: BookwormsCoordinator
@@ -932,6 +933,15 @@ struct ShelfView: View {
                         Text("Until stopped").tag(0)
                     }
                     .pickerStyle(.segmented)
+                    Toggle("Show a QR code for my Hardcover profile", isOn: $showsProfileCode)
+                        .font(.system(size: 24))
+                        .padding(.top, 10)
+                        .accessibilityIdentifier("ambient-profile-code-toggle")
+                    Text(
+                        "Guests can scan it to open your profile. It appears below the content in ambient mode while Hardcover is connected."
+                    )
+                    .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 // Wide enough for four session segments, including "Until stopped".
                 .frame(width: 920)
