@@ -22,8 +22,16 @@ struct LibraryDependencies {
     var validateHardcover: @MainActor (String) async throws -> String = {
         try await HardcoverClient.shared.validateToken($0)
     }
-    var exchangeHardcoverCode: @MainActor (String) async throws -> String = {
+    var exchangeHardcoverCode: @MainActor (String) async throws -> HardcoverTokens = {
         try await HardcoverClient.shared.exchangeAuthorizationCode($0)
+    }
+    /// Spends a refresh token. Only `HardcoverSession` calls it.
+    var refreshHardcoverToken: @MainActor (String) async throws -> HardcoverTokens = {
+        try await HardcoverClient.shared.refreshTokens($0)
+    }
+    /// Ends the OAuth login a refresh token belongs to, at Hardcover.
+    var revokeHardcoverToken: @MainActor (String) async throws -> Void = {
+        try await HardcoverClient.shared.revoke(refreshToken: $0)
     }
     var requestHardcoverDeviceAuth: @MainActor () async throws -> HardcoverDeviceAuth = {
         try await HardcoverClient.shared.requestDeviceAuth()

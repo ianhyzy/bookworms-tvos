@@ -1,23 +1,38 @@
 # Hardcover authentication
 
-Bookworms uses the OAuth 2.0 Device Authorization Grant (RFC 8628) to connect to Hardcover. The Apple TV requests a device code from Hardcover, displays a short 8-character verification code (e.g. `YSVA-NBK1`), and prompts the user to visit `hardcover.app/link` on their phone or computer. The user enters the code and authorizes Bookworms in their browser. The Apple TV polls Hardcover for approval and automatically completes authentication, storing the bearer access token securely in Keychain. Existing Personal Access Tokens (PATs) and OAuth tokens are accepted by the Bearer token validator.
+Bookworms uses the OAuth 2.0 Device Authorization Grant (RFC 8628) to connect to Hardcover. The Apple TV requests a device code from Hardcover, displays a short 8-character verification code (e.g. `YSVA-NBK1`), and prompts the user to visit `hardcover.app/link` on their phone or computer. The user enters the code and authorizes Bookworms in their browser. The Apple TV polls Hardcover for approval and automatically completes authentication, saving the access token and refresh token in Keychain. Existing Personal Access Tokens (PATs) and OAuth tokens are accepted by the Bearer token validator.
 
 The OAuth configuration uses:
 
 - **Client ID**: `ca996be3-0df1-4cbf-819a-e17644fbcf38`
 - **Verification URL**: `https://hardcover.app/link`
-- **Device Authorization Endpoint**: `https://hardcover.app/oauth2/device`
-- **Token Endpoint**: `https://hardcover.app/oauth2/token`
+- **Device Authorization Endpoint**: `https://api.hardcover.app/oauth2/device`
+- **Token Endpoint**: `https://api.hardcover.app/oauth2/token`
+- **Revocation Endpoint**: `https://api.hardcover.app/oauth2/revoke`
 - **Requested scopes**: `read:me:content read:library read:catalog:data read:social read:users`
 - **Manual Redirect URI (fallback)**: `urn:ietf:wg:oauth:2.0:oob` (and `gay.ian.bookworms:/oauth/callback`)
 
 The GraphQL API endpoint is `https://api.hardcover.app/v1/graphql`, with `Authorization: Bearer <token>`. HTTP 401 indicates an invalid or expired credential. HTTP 403 with `insufficient_scope` asks the user to reconnect with the required read permissions; other 403 responses report denied access without incorrectly calling the token expired.
 
-When connecting or updating login, the app exchanges the approved device code for an access token and validates the account before saving to Keychain. Between scheduled syncs, credential rotation validates the account without refetching the entire library. A rejected connection preserves the displayed shelf and saved credential.
+When connecting or updating login, the app exchanges the approved device code for an access token and refresh token and validates the account before saving to Keychain. Between scheduled syncs, credential rotation validates the account without refetching the entire library. A rejected connection preserves the displayed shelf and saved credential.
+
+## Token renewal
+
+Hardcover access tokens last one week. Refresh tokens last six months and work once: a renewal returns a new access token and a new refresh token, and sending a spent refresh token revokes the login. Bookworms keeps the Apple TV signed in this way:
+
+- Keychain holds the access token (`hardcover-token`) and the refresh token (`hardcover-refresh-token`). User defaults hold the date the access token is due for renewal, which isn't secret.
+- Library sync, social sync, and opening community reviews renew a token before using it when it's due: a day before it expires, or halfway through its lifetime when Hardcover issues a token that lasts less than two days. Each of them renews the token once and retries when Hardcover rejects a request with HTTP 401.
+- `HardcoverSession` is the only code that spends a refresh token, and it runs one renewal at a time. Syncs that need a token during a renewal wait for it and use its result. The renewal request never retries. It runs in its own task, so cancelling a sync doesn't lose the tokens Hardcover rotated, and as a background task, so leaving the app during a renewal leaves time to receive and save them. The Top Shelf extension never holds a credential.
+- The new refresh token is saved before the access token. If Keychain refuses the save, the app uses the new tokens, and their renewal date, for the rest of the launch and retries the save at the next sync.
+- When Hardcover rejects the refresh token, the app keeps using the access token, which can work until it expires, and doesn't send the rejected refresh token again during that launch. Once Hardcover rejects the access token too, Settings shows **Reconnect Hardcover**, as it does for an expired login. A renewal that fails for another reason, such as a timeout, keeps the saved token for that sync and tries again at the next one.
+- A Keychain read that fails returns no token. The app then skips the renewal or shows **Reconnect Hardcover**, but it never deletes the saved login, and the next sync that reads Keychain recovers.
+- A login without a refresh token, such as a personal access token, works until Hardcover rejects it and then shows **Reconnect Hardcover**.
+- Social sync keys its cache on the Hardcover account rather than the token, so a renewed token keeps cached social data.
+- **Disconnect Hardcover** removes both tokens from the Apple TV and sends Hardcover one request to revoke the login, so Hardcover's Authorized Apps page stops listing the Apple TV. A renewal that finishes after the disconnect also revokes the refresh token it received. The app doesn't retry a revocation that fails, for example while offline; revoke Bookworms on that page instead. A personal access token isn't revoked, since you may use it elsewhere.
 
 ## Verification
 
-Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, success), authorization code exchange, OAuth and PAT token validation, rejection of malformed or invalid codes before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection.
+Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, success), authorization code exchange, OAuth and PAT token validation, rejection of malformed or invalid codes before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection. Renewal tests cover the refresh request and its form encoding, token responses with a malformed refresh token or expiry, renewal before expiry (halfway through a short-lived token's lifetime) and after HTTP 401, refresh token rotation, one shared renewal for concurrent library and social syncs, revoked and unavailable renewals in library and social sync, an access token kept after a rejected renewal, unreadable refresh tokens, Keychain save failures, disconnection during a renewal, revocation when a login is removed, and social sync continuing with a renewed token.
 
 ## Sign in on Apple TV
 
@@ -49,4 +64,4 @@ After the owner authorizes removing the TV's saved Hardcover account, build and 
 python3 scripts/device-build.py --device APPLE_TV_UDID --team TEAM_ID --reset-hardcover-setup
 ```
 
-This launch removes the local Hardcover login, Hardcover and legacy snapshots, account identity, Hardcover sync history and error, and welcome completion flag. It preserves CWA accounts and snapshots, cached artwork, saved designs, and display settings. iCloud restoration waits until welcome setup completes when the popup is needed. A retained CWA account or snapshot suppresses the popup and allows normal iCloud sync to resume after startup. The flag resets only this launch; subsequent launches keep the newly connected account. See [device development](DEVELOPMENT.md#work-with-a-physical-apple-tv).
+This launch removes the local Hardcover login and revokes it at Hardcover, as **Disconnect Hardcover** does, and removes the Hardcover and legacy snapshots, account identity, Hardcover sync history and error, and welcome completion flag. It preserves CWA accounts and snapshots, cached artwork, saved designs, and display settings. iCloud restoration waits until welcome setup completes when the popup is needed. A retained CWA account or snapshot suppresses the popup and allows normal iCloud sync to resume after startup. The flag resets only this launch; subsequent launches keep the newly connected account. See [device development](DEVELOPMENT.md#work-with-a-physical-apple-tv).

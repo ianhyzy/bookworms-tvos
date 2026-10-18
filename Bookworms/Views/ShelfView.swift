@@ -549,17 +549,19 @@ struct ShelfView: View {
             social.leaveSample()
             ensureComparisonReader()
             await social.load(
-                token: library.hardcoverTokenForSync(),
+                token: library.hardcoverTokenForSync(), account: library.hardcoverAccountID,
                 readerID: coordinator.preferences.readerID, manual: manual,
-                enabledViews: Set(coordinator.preferences.activeViews))
+                enabledViews: Set(coordinator.preferences.activeViews),
+                renewToken: library.renewHardcoverToken(rejected:))
             ensureComparisonReader()
             if let current = coordinator.preferences.readerID,
                 social.books(for: current).isEmpty
             {
                 await social.load(
-                    token: library.hardcoverTokenForSync(),
+                    token: library.hardcoverTokenForSync(), account: library.hardcoverAccountID,
                     readerID: current, manual: manual,
-                    enabledViews: Set(coordinator.preferences.activeViews))
+                    enabledViews: Set(coordinator.preferences.activeViews),
+                    renewToken: library.renewHardcoverToken(rejected:))
             }
         }
     }
@@ -588,10 +590,15 @@ struct ShelfView: View {
         guard book.isHardcoverBook, library.hardcoverEnabled, library.hardcoverConnected
         else { return nil }
         return { [library] in
-            guard let token = library.hardcoverTokenForSync() else {
+            guard let token = await library.hardcoverTokenForSync() else {
                 throw HardcoverError.invalidToken
             }
-            return try await HardcoverSocialClient().reviews(book: book.id, token: token)
+            do {
+                return try await HardcoverSocialClient().reviews(book: book.id, token: token)
+            } catch HardcoverError.invalidToken {
+                let renewed = try await library.renewHardcoverToken(rejected: token)
+                return try await HardcoverSocialClient().reviews(book: book.id, token: renewed)
+            }
         }
     }
 

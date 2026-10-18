@@ -95,6 +95,69 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(counts["reader2"], 2)
     }
 
+    func testRejectedTokenRenewsOnceAndRenewedTokensKeepTheCache() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Renewal.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.reject("hc_at_fixture_old")
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        var renewals: [String] = []
+        await model.load(
+            token: "hc_at_fixture_old", account: "1", readerID: 2, enabledViews: [.comparison],
+            renewToken: { rejected in
+                renewals.append(rejected)
+                return "hc_at_fixture_new"
+            })
+        XCTAssertEqual(renewals, ["hc_at_fixture_old"])
+        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertFalse(model.books(for: 2).isEmpty)
+        let tokens = await client.tokens
+        XCTAssertEqual(tokens.first, "hc_at_fixture_old")
+        XCTAssertEqual(Set(tokens.dropFirst()), ["hc_at_fixture_new"])
+
+        // A later token of the same account reads the cache without asking for its owner again.
+        let owners = await client.counts["owner"]
+        let restored = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await restored.load(
+            token: "hc_at_fixture_newer", account: "1", readerID: 2, enabledViews: [.comparison])
+        XCTAssertFalse(restored.books(for: 2).isEmpty)
+        let restoredOwners = await client.counts["owner"]
+        XCTAssertEqual(restoredOwners, owners)
+    }
+
+    func testFailedRenewalDuringFriendsPicksFeedKeepsTheCache() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "RenewalFailure.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.failFeed()
+        var time = Date()
+        let model = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root, now: { time })
+        // Caches Following; the failed feed stays due without the readers' libraries.
+        await model.load(token: "hc_at_fixture_old", readerID: 2, enabledViews: [.following])
+        XCTAssertFalse(model.following.isEmpty)
+
+        time += 301
+        await client.reject("hc_at_fixture_old")
+        let sent = await client.tokens.count
+        var renewals = 0
+        await model.load(
+            token: "hc_at_fixture_old", readerID: 2, enabledViews: [.friendsPicks],
+            renewToken: { _ in
+                renewals += 1
+                throw URLError(.timedOut)
+            })
+        XCTAssertEqual(renewals, 1)
+        XCTAssertFalse(model.following.isEmpty, "A failed renewal keeps the cached snapshot")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+        XCTAssertTrue(model.status.contains("Cached data is retained"))
+        let tokens = await client.tokens
+        XCTAssertEqual(
+            tokens.count - sent, 1, "The load stops instead of sending the rejected token again")
+    }
+
     func testRepeatedManualRefreshIsCoalescedByCooldown() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Cooldown.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -446,6 +509,15 @@ final class SocialFeatureTests: XCTestCase {
 private actor SocialFixtureClient: SocialLibraryFetching {
     enum Failure { case offline, denied }
     var counts: [String: Int] = [:]
+    /// Every token a request sent, in order.
+    var tokens: [String] = []
+    private var rejectedToken: String?
+    /// Answers requests that send `token` with HTTP 401.
+    func reject(_ token: String) { rejectedToken = token }
+    private func authorize(_ token: String) throws {
+        tokens.append(token)
+        if token == rejectedToken { throw HardcoverError.invalidToken }
+    }
     private var failure: Failure?
     private var unfollowed = false
     private var holdsReaderTwo = false
@@ -464,10 +536,12 @@ private actor SocialFixtureClient: SocialLibraryFetching {
     }
     func unfollow() { unfollowed = true }
     func owner(token: String) async throws -> ReaderProfile {
+        try authorize(token)
         counts["owner", default: 0] += 1
         return profile(1)
     }
     func following(owner: Int, token: String) async throws -> [ReaderProfile] {
+        try authorize(token)
         counts["following", default: 0] += 1
         if let failure {
             switch failure {
@@ -478,11 +552,13 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         return unfollowed ? [profile(3)] : [profile(2), profile(3)]
     }
     func feed(users: [Int], token: String) async throws -> [FeedActivity] {
+        try authorize(token)
         counts["feed", default: 0] += 1
         if let feedFailure { throw feedFailure }
         return []
     }
     func library(user: Int, token: String) async throws -> [ReaderBook] {
+        try authorize(token)
         counts["reader\(user)", default: 0] += 1
         if user == 2 && holdsReaderTwo {
             await withCheckedContinuation { readerTwoGate = $0 }

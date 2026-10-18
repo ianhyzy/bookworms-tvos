@@ -183,6 +183,8 @@
                 try await client.pollDeviceToken(deviceCode: $0)
             }
             dependencies.exchangeHardcoverCode = { try await client.exchangeAuthorizationCode($0) }
+            dependencies.refreshHardcoverToken = { try await client.refreshTokens($0) }
+            dependencies.revokeHardcoverToken = { try await client.revoke(refreshToken: $0) }
             if name.hasPrefix("welcome") {
                 // The transport holds the first poll until the test approves; no wall-clock wait
                 // is needed to reach the code screen or control its completion.
@@ -438,7 +440,7 @@
                     deliveredArtwork += 1
                     return (200, data)
                 }
-                if url.absoluteString == "https://hardcover.app/oauth2/device",
+                if url.absoluteString == "https://api.hardcover.app/oauth2/device",
                     request.request.httpMethod == "POST"
                 {
                     if scenario == "offline" { return (-1, Data()) }
@@ -450,11 +452,15 @@
                                 .utf8)
                     )
                 }
-                if url.absoluteString == "https://hardcover.app/oauth2/token",
+                if url.absoluteString == "https://api.hardcover.app/oauth2/token",
                     request.request.httpMethod == "POST"
                 {
                     if scenario == "offline" { return (-1, Data()) }
                     if scenario == "error" { return (401, Data()) }
+                    let form = String(decoding: request.body() ?? Data(), as: UTF8.self)
+                    if form.contains("grant_type=authorization_code") {
+                        return (200, Self.authorizedToken)
+                    }
                     if scenario.hasPrefix("welcome") {
                         if !authorizationApproved {
                             pendingAuthorization.append(request)
@@ -463,18 +469,6 @@
                         return (200, Self.authorizedToken)
                     }
                     return (400, Data(#"{"error":"authorization_pending"}"#.utf8))
-                }
-                if url.absoluteString == "https://hardcover.app/oauth/token",
-                    request.request.httpMethod == "POST"
-                {
-                    if scenario == "offline" { return (-1, Data()) }
-                    if scenario == "error" { return (401, Data()) }
-                    return (
-                        200,
-                        Data(
-                            #"{"access_token":"hc_pat_fictional_ui_fixture","token_type":"Bearer"}"#
-                                .utf8)
-                    )
                 }
                 if url.absoluteString == "https://api.hardcover.app/v1/graphql",
                     request.request.httpMethod == "POST",

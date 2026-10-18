@@ -144,7 +144,7 @@ Downloaded information, images, and settings stay on your Apple TV. Bookworms ma
 iCloud storage is optional and off by default. If you turn it on, Bookworms saves a copy of your library information, including your own reviews, to your private iCloud database so your Apple devices can share and restore it. The developer can't access that copy. It excludes your Hardcover sign-in, images, and social information. Apple's privacy policy governs iCloud.
 
 Your choices
-- Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV.
+- Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV and asks Hardcover to end it.
 - Revoke Bookworms' access at any time on Hardcover's Authorized Apps page.
 - Turning off iCloud storage in Settings > General stops syncing. The existing copy stays in iCloud until you remove Bookworms' data in your Apple Account's iCloud storage settings.
 - Deleting Bookworms from your Apple TV removes app files and settings, but your Hardcover sign-in may remain in the Apple TV Keychain. To remove it, choose Settings > Sources > Disconnect Hardcover before deleting Bookworms.

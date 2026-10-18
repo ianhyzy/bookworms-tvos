@@ -76,9 +76,15 @@ final class SocialLibraryModel {
         SharedRead.ranked(mine: mine, theirs: books(for: id), limit: limit)
     }
 
+    /// Loads the social datasets the enabled views need, each on its own daily gate.
+    ///
+    /// `account` is the Hardcover account `token` belongs to, when known; the cache is keyed on
+    /// it so a renewed token keeps cached data. When Hardcover rejects `token`, `renewToken`
+    /// replaces it once and the load continues with the replacement.
     func load(
-        token: String?, readerID: Int?, manual: Bool = false,
-        enabledViews: Set<BookwormsView> = Set(BookwormsView.allCases)
+        token: String?, account: String? = nil, readerID: Int?, manual: Bool = false,
+        enabledViews: Set<BookwormsView> = Set(BookwormsView.allCases),
+        renewToken: (@MainActor (String) async throws -> String)? = nil
     ) async {
         guard !isSample else { return }
         guard let token, (try? HardcoverToken(token)) != nil else {
@@ -99,8 +105,8 @@ final class SocialLibraryModel {
             status = "Social views are disabled."
             return
         }
-        let fingerprint = SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }
-            .joined()
+        let fingerprint = SHA256.hash(data: Data((account ?? token).utf8))
+            .map { String(format: "%02x", $0) }.joined()
         if identity == fingerprint, requestedReader == readerID,
             requestedViews == socialViews, let activeTask
         {
@@ -123,7 +129,8 @@ final class SocialLibraryModel {
         if identity != fingerprint {
             snapshot = nil
             identity = fingerprint
-            // A credential fingerprint is local-only and never enters requests or iCloud.
+            // An account or credential fingerprint is local-only and never enters requests or
+            // iCloud.
             if let ownerID = defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int,
                 let data = try? Data(contentsOf: cacheRoot.appending(path: "\(ownerID).json"))
             {
@@ -140,12 +147,32 @@ final class SocialLibraryModel {
                     activeTask = nil
                 }
             }
+            var token = token
+            var renewToken = renewToken
+            var renewalFailed = false
+            // Sends one request. The first rejected token is renewed, and every later request in
+            // this load uses the replacement.
+            @MainActor func authorized<T>(_ send: (String) async throws -> T) async throws -> T {
+                do {
+                    return try await send(token)
+                } catch HardcoverError.invalidToken {
+                    guard let renew = renewToken else { throw HardcoverError.invalidToken }
+                    renewToken = nil
+                    do {
+                        token = try await renew(token)
+                    } catch {
+                        renewalFailed = true
+                        throw error
+                    }
+                    return try await send(token)
+                }
+            }
             do {
                 var current: SocialSnapshot
                 if let snapshot {
                     current = snapshot
                 } else {
-                    let owner = try await client.owner(token: token)
+                    let owner = try await authorized { try await client.owner(token: $0) }
                     try Task.checkCancellation()
                     guard request == requestRevision else { return }
                     defaults.set(owner.id, forKey: "socialOwner.\(fingerprint)")
@@ -161,8 +188,9 @@ final class SocialLibraryModel {
                     owner: current.owner.id, dataset: "following", manual: manual,
                     lastSuccess: current.dates["following"])
                 {
-                    current.following = try await client.following(
-                        owner: current.owner.id, token: token)
+                    current.following = try await authorized {
+                        try await client.following(owner: current.owner.id, token: $0)
+                    }
                     let allowed = Set(current.following.map(\.id))
                     current.readerBooks = current.readerBooks.filter { allowed.contains($0.key) }
                     current.activities.removeAll { !allowed.contains($0.reader.id) }
@@ -175,20 +203,27 @@ final class SocialLibraryModel {
                         lastSuccess: current.dates["feed"])
                 {
                     do {
-                        current.activities = try await client.feed(
-                            users: current.following.map(\.id), token: token)
+                        current.activities = try await authorized {
+                            try await client.feed(users: current.following.map(\.id), token: $0)
+                        }
                         current.dates["feed"] = now()
                         try install(current, request: request)
                     } catch {
                         // Friends' Picks can rank from libraries alone, so a transient feed
                         // failure only stops the sync when the Feed view shows it. Credential and
-                        // permission failures always reach the handler below.
+                        // permission failures always reach the handler below. So does a failed
+                        // renewal, since later requests would send the rejected token and report
+                        // the login as denied.
                         switch error {
                         case HardcoverError.insufficientScope, HardcoverError.forbidden,
                             HardcoverError.invalidToken:
                             throw error
                         default:
-                            if socialViews.contains(.following) || Task.isCancelled { throw error }
+                            if socialViews.contains(.following) || Task.isCancelled
+                                || renewalFailed
+                            {
+                                throw error
+                            }
                         }
                     }
                 }
@@ -197,7 +232,9 @@ final class SocialLibraryModel {
                         owner: current.owner.id, dataset: "mine", manual: manual,
                         lastSuccess: current.dates["mine"])
                 {
-                    current.mine = try await client.library(user: current.owner.id, token: token)
+                    current.mine = try await authorized {
+                        try await client.library(user: current.owner.id, token: $0)
+                    }
                     current.dates["mine"] = now()
                     try install(current, request: request)
                 }
@@ -207,8 +244,9 @@ final class SocialLibraryModel {
                         owner: current.owner.id, dataset: "reader.\(readerID)", manual: manual,
                         lastSuccess: current.dates["reader.\(readerID)"])
                 {
-                    current.readerBooks[readerID] = try await client.library(
-                        user: readerID, token: token)
+                    current.readerBooks[readerID] = try await authorized {
+                        try await client.library(user: readerID, token: $0)
+                    }
                     current.dates["reader.\(readerID)"] = now()
                     try install(current, request: request)
                 }
@@ -219,7 +257,9 @@ final class SocialLibraryModel {
                         owner: current.owner.id, dataset: "reader.\(id)", manual: manual,
                         lastSuccess: current.dates["reader.\(id)"])
                     {
-                        current.readerBooks[id] = try await client.library(user: id, token: token)
+                        current.readerBooks[id] = try await authorized {
+                            try await client.library(user: id, token: $0)
+                        }
                         current.dates["reader.\(id)"] = now()
                         try install(current, request: request)
                     }

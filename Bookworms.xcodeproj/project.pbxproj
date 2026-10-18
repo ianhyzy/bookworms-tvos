@@ -83,6 +83,7 @@
 		B9A3FDB428325E4177D5D2C3 /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BF19DB5592C0E525C57103 /* AppAppearance.swift */; };
 		BC67458D891B2A8194A8827D /* OfflinePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4BF493AB759B12F8241CA9 /* OfflinePolicyTests.swift */; };
 		BCA4B0C0A0561E4F03AADDB2 /* BookWallLocalSpine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ACAE587D1E3B17F3C2AD9F4 /* BookWallLocalSpine.swift */; };
+		BEEB95B45055AA8289346D32 /* HardcoverSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750C5A665389B48D3DD5E3C /* HardcoverSession.swift */; };
 		C179910D31FE4B592A871394 /* YearInReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75A029EAE0924927A775DE6E /* YearInReview.swift */; };
 		C1AF107C4C026DC497B81E69 /* SocialNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF92C639B243B2856606C1C3 /* SocialNavigationTests.swift */; };
 		C69C074BA46F94ADFFA55F39 /* SocialViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 170BF5AF46BE47E77498DE1A /* SocialViews.swift */; };
@@ -218,6 +219,7 @@
 		760172544F3C7EA25BEA47DE /* LibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTests.swift; sourceTree = "<group>"; };
 		770B8645E4BD2AD2DAA2A202 /* AIStyleGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIStyleGenerator.swift; sourceTree = "<group>"; };
 		77406E428708BDE68E85C200 /* CloudStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStorageTests.swift; sourceTree = "<group>"; };
+		7750C5A665389B48D3DD5E3C /* HardcoverSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardcoverSession.swift; sourceTree = "<group>"; };
 		78636B310365D977E4DC09D0 /* SeriesDesignsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesDesignsTests.swift; sourceTree = "<group>"; };
 		7CB9D11BEC9D6EA2D555F586 /* BookwormsTopShelf.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BookwormsTopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D67BA8EFA6DDFF09034B330 /* ShelfControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfControls.swift; sourceTree = "<group>"; };
@@ -338,6 +340,7 @@
 				E4A2AD46F061D9459E4F2BE0 /* CWAClient.swift */,
 				275D472346E55A4AC09292CD /* GoogleFontLibrary.swift */,
 				706E55F6D914B784F76CC146 /* HardcoverClient.swift */,
+				7750C5A665389B48D3DD5E3C /* HardcoverSession.swift */,
 				A7B6CF12483935FDFC3A90C1 /* HardcoverSocialClient.swift */,
 				E90CB4771D70E516A54D3C45 /* HardcoverToken.swift */,
 				EE94C0561806E9D3CE288AB1 /* InteractionActivity.swift */,
@@ -766,6 +769,7 @@
 				D28077C8A93A3A8DED5FF37E /* GoogleFontLibrary.swift in Sources */,
 				9FA572A4021F37FCD45CDCED /* HardcoverClient.swift in Sources */,
 				08B09F5D77ACBED602B0FEBB /* HardcoverConnectionView.swift in Sources */,
+				BEEB95B45055AA8289346D32 /* HardcoverSession.swift in Sources */,
 				55DD34B5417C08A08001A9E3 /* HardcoverSocialClient.swift in Sources */,
 				AC49499F99D8B42982E5EA10 /* HardcoverToken.swift in Sources */,
 				52ABC63B7FADEB06EA06DEE9 /* InteractionActivity.swift in Sources */,

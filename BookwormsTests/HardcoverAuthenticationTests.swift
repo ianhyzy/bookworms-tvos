@@ -42,8 +42,8 @@ final class HardcoverAuthenticationTests: XCTestCase {
     }
 
     func testExchangeAuthorizationCodeSuccess() async throws {
-        let token = try await client().exchangeAuthorizationCode("valid_code_123")
-        XCTAssertEqual(token, "hc_pat_success")
+        let tokens = try await client().exchangeAuthorizationCode("valid_code_123")
+        XCTAssertEqual(tokens, HardcoverTokens(accessToken: "hc_pat_success"))
     }
 
     func testExchangeAuthorizationCodeRejectsMalformedCode() async {
@@ -87,7 +87,79 @@ final class HardcoverAuthenticationTests: XCTestCase {
         XCTAssertEqual(denied, .accessDenied)
 
         let success = try await client().pollDeviceToken(deviceCode: "device_success")
-        XCTAssertEqual(success, .success(token: "hc_pat_success"))
+        XCTAssertEqual(
+            success,
+            .success(
+                HardcoverTokens(
+                    accessToken: "hc_at_success", refreshToken: "hc_rt_success",
+                    expiresIn: 604_800)))
+    }
+
+    func testRefreshSpendsTheRefreshTokenForItsReplacement() async throws {
+        // The stub accepts only the percent-encoded `+`, so a token reaches Hardcover unchanged.
+        let tokens = try await client().refreshTokens("hc_rt_fixture+plus")
+        XCTAssertEqual(
+            tokens,
+            HardcoverTokens(
+                accessToken: "hc_at_rotated", refreshToken: "hc_rt_rotated", expiresIn: 604_800))
+    }
+
+    func testRejectedRefreshTokenRequiresReconnection() async {
+        do {
+            _ = try await client().refreshTokens("hc_rt_spent")
+            XCTFail("A spent refresh token must fail.")
+        } catch HardcoverError.invalidToken {
+        } catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testUnavailableTokenEndpointIsNotReportedAsRevoked() async {
+        do {
+            _ = try await client().refreshTokens("hc_rt_unavailable")
+            XCTFail("A server error must fail.")
+        } catch HardcoverError.http(503) {
+        } catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testTokenResponseDropsAMalformedRefreshTokenOrExpiry() throws {
+        for json in [
+            #"{"access_token":"hc_at_fixture","refresh_token":"hc_rt two words","expires_in":"604800"}"#,
+            #"{"access_token":"hc_at_fixture","refresh_token":42,"expires_in":604800.5}"#,
+            #"{"access_token":"hc_at_fixture","refresh_token":null,"expires_in":null}"#,
+        ] {
+            let tokens = try JSONDecoder().decode(HardcoverTokens.self, from: Data(json.utf8))
+            XCTAssertEqual(tokens, HardcoverTokens(accessToken: "hc_at_fixture"), json)
+        }
+    }
+
+    @MainActor
+    func testRenewalIsDueADayEarlyOrHalfwayThroughAShortLifetime() {
+        let issued = Date(timeIntervalSince1970: 1_780_000_000)
+        func renewal(_ expiresIn: Int?, refreshToken: String? = "hc_rt_fixture") -> Date? {
+            HardcoverSession.renewalDate(
+                of: HardcoverTokens(
+                    accessToken: "hc_at_fixture", refreshToken: refreshToken,
+                    expiresIn: expiresIn),
+                issued: issued)
+        }
+        XCTAssertEqual(renewal(604_800), issued.addingTimeInterval(518_400))
+        XCTAssertEqual(renewal(172_800), issued.addingTimeInterval(86_400))
+        XCTAssertEqual(renewal(3_600), issued.addingTimeInterval(1_800))
+        XCTAssertNil(renewal(0))
+        XCTAssertNil(renewal(nil))
+        XCTAssertNil(renewal(604_800, refreshToken: nil), "A login without a refresh token")
+    }
+
+    func testRevocationSendsTheRefreshToken() async throws {
+        // The stub accepts only the exact form, with the `+` percent-encoded.
+        try await client().revoke(refreshToken: "hc_rt_fixture+plus")
+    }
+
+    func testFailedRevocationReportsTheStatus() async {
+        do {
+            try await client().revoke(refreshToken: "hc_rt_unknown")
+            XCTFail("A rejected revocation must fail.")
+        } catch HardcoverError.http(400) {
+        } catch { XCTFail("Unexpected error: \(error)") }
     }
 
     func testReplacementTokenCanBeValidatedWithoutLoadingBooks() async throws {
@@ -174,8 +246,24 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// The request's form body, whether URLSession passes it as data or as a stream.
+    private func formBody() -> String {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&bytes, maxLength: bytes.count)
+                if count <= 0 { break }
+                data.append(contentsOf: bytes.prefix(count))
+            }
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     override func startLoading() {
-        if request.url?.absoluteString == "https://hardcover.app/oauth2/device" {
+        if request.url?.absoluteString == "https://api.hardcover.app/oauth2/device" {
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(
                 request.value(forHTTPHeaderField: "Content-Type"),
@@ -191,7 +279,7 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             return
         }
 
-        if request.url?.absoluteString == "https://hardcover.app/oauth2/token" {
+        if request.url?.absoluteString == "https://api.hardcover.app/oauth2/token" {
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(
                 request.value(forHTTPHeaderField: "Content-Type"),
@@ -209,7 +297,26 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             }
             let bodyString = String(decoding: bodyData, as: UTF8.self)
             let (statusCode, payload): (Int, String) = {
-                if bodyString.contains("device_code=device_pending") {
+                if bodyString.contains("grant_type=refresh_token") {
+                    XCTAssertTrue(bodyString.contains("client_id=\(HardcoverClient.clientID)"))
+                    XCTAssertFalse(bodyString.contains("scope="), "A renewal keeps its scopes")
+                    if bodyString.contains("refresh_token=hc_rt_fixture%2Bplus") {
+                        return (
+                            200,
+                            #"{"access_token":"hc_at_rotated","refresh_token":"hc_rt_rotated","expires_in":604800,"token_type":"Bearer"}"#
+                        )
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_unavailable") {
+                        return (503, #"{"error":"temporarily_unavailable"}"#)
+                    }
+                    return (400, #"{"error":"invalid_grant"}"#)
+                } else if bodyString.contains("grant_type=authorization_code") {
+                    XCTAssertTrue(bodyString.contains("client_id=\(HardcoverClient.clientID)"))
+                    if bodyString.contains("code=valid_code") {
+                        return (200, #"{"access_token":"hc_pat_success","token_type":"Bearer"}"#)
+                    }
+                    return (400, #"{"error":"invalid_grant"}"#)
+                } else if bodyString.contains("device_code=device_pending") {
                     return (400, #"{"error":"authorization_pending"}"#)
                 } else if bodyString.contains("device_code=device_slow_down") {
                     return (400, #"{"error":"slow_down"}"#)
@@ -218,7 +325,10 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
                 } else if bodyString.contains("device_code=device_denied") {
                     return (400, #"{"error":"access_denied"}"#)
                 } else if bodyString.contains("device_code=device_success") {
-                    return (200, #"{"access_token":"hc_pat_success","token_type":"Bearer"}"#)
+                    return (
+                        200,
+                        #"{"access_token":"hc_at_success","refresh_token":"hc_rt_success","expires_in":604800,"token_type":"Bearer"}"#
+                    )
                 } else {
                     return (400, #"{"error":"invalid_grant"}"#)
                 }
@@ -232,44 +342,18 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             return
         }
 
-        if request.url?.absoluteString == "https://hardcover.app/oauth/token" {
+        if request.url?.absoluteString == "https://api.hardcover.app/oauth2/revoke" {
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertEqual(
-                request.value(forHTTPHeaderField: "Content-Type"),
-                "application/x-www-form-urlencoded")
-            var bodyData = request.httpBody ?? Data()
-            if let stream = request.httpBodyStream {
-                stream.open()
-                defer { stream.close() }
-                var bytes = [UInt8](repeating: 0, count: 4096)
-                while stream.hasBytesAvailable {
-                    let count = stream.read(&bytes, maxLength: bytes.count)
-                    if count <= 0 { break }
-                    bodyData.append(contentsOf: bytes.prefix(count))
-                }
-            }
-            let bodyString = String(decoding: bodyData, as: UTF8.self)
-            if bodyString.contains("code=valid_code")
-                || bodyString.contains("code=auth_code_success")
-            {
-                let response = HTTPURLResponse(
-                    url: request.url!, statusCode: 200, httpVersion: nil,
-                    headerFields: ["Content-Type": "application/json"])!
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                let payload = #"{"access_token":"hc_pat_success","token_type":"Bearer"}"#
-                client?.urlProtocol(self, didLoad: Data(payload.utf8))
-                client?.urlProtocolDidFinishLoading(self)
-                return
-            } else {
-                let response = HTTPURLResponse(
-                    url: request.url!, statusCode: 400, httpVersion: nil,
-                    headerFields: ["Content-Type": "application/json"])!
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                let payload = #"{"error":"invalid_grant"}"#
-                client?.urlProtocol(self, didLoad: Data(payload.utf8))
-                client?.urlProtocolDidFinishLoading(self)
-                return
-            }
+            let accepted =
+                formBody()
+                == "token=hc_rt_fixture%2Bplus&token_type_hint=refresh_token&client_id="
+                + HardcoverClient.clientID
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: accepted ? 200 : 400, httpVersion: nil,
+                headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
         }
 
         XCTAssertEqual(request.url?.absoluteString, "https://api.hardcover.app/v1/graphql")

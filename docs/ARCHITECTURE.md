@@ -9,6 +9,7 @@ Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the s
 | `BookwormsApp` | Own the library model, apply appearance settings, and respond to app and iCloud account changes. |
 | `LibraryModel` | Coordinate source snapshots, shelf selection, font restoration, generation, and cloud sync. |
 | `HardcoverClient`, `CWAClient` | Fetch read-only metadata and normalize transport responses into books. |
+| `HardcoverSession` | Keep the Hardcover login in Keychain and run one token renewal at a time for library sync, social sync, and reviews. See [token renewal](HARDCOVER_AUTHENTICATION.md#token-renewal). |
 | `ShelfPreferences`, `ShelfLayout` | Filter and sort cached books, then pack bounded book shapes into pages. |
 | `PagedRow`, `ShelfRow` | Present paged collections with every item mounted so that native focus crosses pages. See [focus and remote navigation](FOCUS_NAVIGATION.md). |
 | `ArtworkStore` | Cache and downsample artwork, share downloads, and select suitable full covers. |

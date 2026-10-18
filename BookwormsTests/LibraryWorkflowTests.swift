@@ -15,14 +15,24 @@ final class LibraryWorkflowTests: XCTestCase {
         fixture.defaults.set(fixture.time, forKey: "syncAttempt.hardcover")
         fixture.defaults.set(fixture.time, forKey: "syncSuccess.hardcover")
         fixture.defaults.set(["hardcover": "Saved connection error"], forKey: "sourceErrors")
+        fixture.secrets["hardcover-refresh-token"] = "hc_rt_fictional_original"
+        fixture.defaults.set(fixture.time, forKey: HardcoverSession.renewalKey)
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
-        let dependencies = fixture.dependencies()
+        var dependencies = fixture.dependencies()
+        let revoked = expectation(description: "The removed login is revoked at Hardcover")
+        dependencies.revokeHardcoverToken = { refreshToken in
+            XCTAssertEqual(refreshToken, "hc_rt_fictional_original")
+            revoked.fulfill()
+        }
         let legacy = LibrarySnapshot(books: [fixture.book(1)], syncedAt: fixture.time)
         try JSONEncoder().encode(legacy).write(to: dependencies.legacySnapshotURL)
         let model = LibraryModel(dependencies: dependencies)
 
         try await model.resetHardcoverSetup()
+        await fulfillment(of: [revoked], timeout: 5)
         XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
+        XCTAssertNil(fixture.defaults.object(forKey: HardcoverSession.renewalKey))
         XCTAssertTrue(dependencies.sourceStore.load().isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: dependencies.legacySnapshotURL.path))
         for key in [
@@ -542,6 +552,429 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(dependencies.sourceStore.load().first?.syncedAt, fixture.time)
     }
 
+    func testSyncRenewsAnExpiringTokenAndSpendsEachRefreshTokenOnce() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var spent: [String] = []
+        dependencies.refreshHardcoverToken = { refreshToken in
+            spent.append(refreshToken)
+            return fixture.tokens(spent.count + 1)
+        }
+        var fetched: [String] = []
+        dependencies.fetchHardcover = { token, _ in
+            fetched.append(token)
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.refresh(manual: true)
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"])
+        XCTAssertEqual(fetched, ["hc_at_fictional_2"])
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_at_fictional_2")
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_2")
+        XCTAssertEqual(
+            fixture.defaults.object(forKey: HardcoverSession.renewalKey) as? Date,
+            fixture.time.addingTimeInterval(604_800 - 86_400),
+            "A week-long token renews a day before it expires")
+
+        // A token with more than a day left is used as it is.
+        fixture.time += 86_400
+        await model.refresh(manual: true)
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"])
+
+        // The next renewal spends the rotated refresh token, never the spent one.
+        fixture.time += 5.5 * 86_400
+        await model.refresh(manual: true)
+        XCTAssertEqual(spent, ["hc_rt_fictional_1", "hc_rt_fictional_2"])
+        XCTAssertEqual(fetched, ["hc_at_fictional_2", "hc_at_fictional_2", "hc_at_fictional_3"])
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_3")
+        XCTAssertFalse(model.hardcoverSessionExpired)
+    }
+
+    func testRejectedTokenRenewsOnceAndRetriesTheSync() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 5 * 86_400)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var spent: [String] = []
+        dependencies.refreshHardcoverToken = { refreshToken in
+            spent.append(refreshToken)
+            return fixture.tokens(2)
+        }
+        var fetched: [String] = []
+        dependencies.fetchHardcover = { token, _ in
+            fetched.append(token)
+            if token == "hc_at_fictional_1" { throw HardcoverError.invalidToken }
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.refresh(manual: true)
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"])
+        XCTAssertEqual(fetched, ["hc_at_fictional_1", "hc_at_fictional_2"])
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertFalse(model.hardcoverSessionExpired)
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_2")
+    }
+
+    func testConcurrentSyncsShareOneRenewal() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        // The controlled response fails the test if a second renewal starts while it waits.
+        let renewal = ControlledLibraryResponse<HardcoverTokens>("Token renewal started")
+        var dependencies = fixture.dependencies()
+        var spent: [String] = []
+        dependencies.refreshHardcoverToken = { refreshToken in
+            spent.append(refreshToken)
+            return try await renewal.value()
+        }
+        var fetched: [String] = []
+        dependencies.fetchHardcover = { token, _ in
+            fetched.append(token)
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let library = Task { await model.refresh(manual: true) }
+        await fulfillment(of: [renewal.started], timeout: 5)
+        // The model runs on the main actor, so each task reaches the shared renewal without
+        // suspending after it fulfills its expectation, and the test resumes only once both wait.
+        let socialJoined = expectation(description: "Social sync waits for the renewal")
+        let social = Task {
+            socialJoined.fulfill()
+            return await model.hardcoverTokenForSync()
+        }
+        let rejectedJoined = expectation(description: "A rejected request waits for the renewal")
+        let rejected = Task {
+            rejectedJoined.fulfill()
+            return try await model.renewHardcoverToken(rejected: "hc_at_fictional_1")
+        }
+        await fulfillment(of: [socialJoined, rejectedJoined], timeout: 5)
+        renewal.resolve(fixture.tokens(2))
+        await library.value
+        let socialToken = await social.value
+        let renewedToken = try await rejected.value
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"])
+        XCTAssertEqual(fetched, ["hc_at_fictional_2"])
+        XCTAssertEqual(socialToken, "hc_at_fictional_2")
+        XCTAssertEqual(renewedToken, "hc_at_fictional_2")
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_2")
+    }
+
+    func testRejectedRenewalKeepsAWorkingTokenUntilHardcoverRejectsIt() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var renewals = 0
+        dependencies.refreshHardcoverToken = { _ in
+            renewals += 1
+            throw HardcoverError.invalidToken
+        }
+        var fetches = 0
+        dependencies.fetchHardcover = { token, _ in
+            XCTAssertEqual(token, "hc_at_fictional_1")
+            fetches += 1
+            // Hardcover rejects the access token in the second sync.
+            if fetches == 2 { throw HardcoverError.invalidToken }
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        // The access token still works, so the sync succeeds without asking to reconnect.
+        await model.refresh(manual: true)
+        XCTAssertEqual(renewals, 1)
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertFalse(model.hardcoverSessionExpired)
+
+        // The rejected refresh token isn't sent again.
+        fixture.time += 10
+        let token = await model.hardcoverTokenForSync()
+        XCTAssertEqual(token, "hc_at_fictional_1")
+        XCTAssertEqual(renewals, 1)
+
+        // Once Hardcover rejects the access token too, Settings shows Reconnect Hardcover, and
+        // the login stays saved.
+        fixture.time += 10
+        await model.refresh(manual: true)
+        XCTAssertEqual(fetches, 2)
+        XCTAssertEqual(renewals, 1)
+        XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(
+            model.sourceErrors["hardcover"], HardcoverError.invalidToken.localizedDescription)
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_at_fictional_1")
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_1")
+    }
+
+    func testRejectedSocialRenewalShowsReconnectAndKeepsTheLogin() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 5 * 86_400)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var renewals = 0
+        dependencies.refreshHardcoverToken = { _ in
+            renewals += 1
+            throw HardcoverError.invalidToken
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        do {
+            _ = try await model.renewHardcoverToken(rejected: "hc_at_fictional_1")
+            XCTFail("A rejected refresh token must fail.")
+        } catch HardcoverError.invalidToken {
+        } catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(renewals, 1)
+        XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_at_fictional_1")
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_1")
+    }
+
+    func testRejectedTokenWithoutRefreshTokenShowsReconnect() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        // The fixture's renewal fails the test, so this also checks that none starts.
+        let model = LibraryModel(dependencies: fixture.dependencies())
+        await model.start()
+        do {
+            _ = try await model.renewHardcoverToken(rejected: "hc_pat_fictional_original")
+            XCTFail("A login without a refresh token can't be renewed.")
+        } catch HardcoverError.invalidToken {
+        } catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_original")
+    }
+
+    func testUnavailableRenewalKeepsUsingTheSavedToken() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.refreshHardcoverToken = { _ in throw URLError(.timedOut) }
+        var fetched: [String] = []
+        dependencies.fetchHardcover = { token, _ in
+            fetched.append(token)
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.refresh(manual: true)
+        XCTAssertEqual(fetched, ["hc_at_fictional_1"])
+        XCTAssertFalse(model.hardcoverSessionExpired)
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_1")
+    }
+
+    func testUnreadableRefreshTokenNeverDeletesTheLogin() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var readable = false
+        dependencies.readCredential = { account in
+            account == HardcoverSession.refreshAccount && !readable ? nil : fixture.secrets[account]
+        }
+        var spent: [String] = []
+        dependencies.refreshHardcoverToken = { refreshToken in
+            spent.append(refreshToken)
+            return fixture.tokens(2)
+        }
+        var fetched: [String] = []
+        dependencies.fetchHardcover = { token, _ in
+            fetched.append(token)
+            // Hardcover rejects the second sync's token.
+            if fetched.count == 2 { throw HardcoverError.invalidToken }
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        // A failed read can't renew, so the sync uses the saved token as it is.
+        await model.refresh(manual: true)
+        XCTAssertEqual(fetched, ["hc_at_fictional_1"])
+        XCTAssertFalse(model.hardcoverSessionExpired)
+
+        // A rejected token without a readable refresh token shows Reconnect but deletes nothing.
+        fixture.time += 10
+        await model.refresh(manual: true)
+        XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_at_fictional_1")
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_1")
+        XCTAssertTrue(spent.isEmpty)
+
+        // Once Keychain reads again, the next sync renews and recovers.
+        readable = true
+        fixture.time += 10
+        await model.refresh(manual: true)
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"])
+        XCTAssertEqual(fetched.last, "hc_at_fictional_2")
+        XCTAssertFalse(model.hardcoverSessionExpired)
+    }
+
+    func testShortLivedTokenRenewsHalfwayThroughItsLifetime() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var spent: [String] = []
+        dependencies.refreshHardcoverToken = { refreshToken in
+            spent.append(refreshToken)
+            var tokens = fixture.tokens(spent.count + 1)
+            tokens.expiresIn = 3_600
+            return tokens
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let first = await model.hardcoverTokenForSync()
+        let second = await model.hardcoverTokenForSync()
+        XCTAssertEqual(first, "hc_at_fictional_2")
+        XCTAssertEqual(second, "hc_at_fictional_2")
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"], "Back-to-back syncs share one renewal")
+
+        fixture.time += 1_799
+        let beforeHalfway = await model.hardcoverTokenForSync()
+        XCTAssertEqual(beforeHalfway, "hc_at_fictional_2")
+        fixture.time += 1
+        let halfway = await model.hardcoverTokenForSync()
+        XCTAssertEqual(halfway, "hc_at_fictional_3")
+        XCTAssertEqual(spent, ["hc_rt_fictional_1", "hc_rt_fictional_2"])
+    }
+
+    func testRotatedTokensThatKeychainRefusesStayInUseForThisLaunch() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var refusesSaves = true
+        dependencies.saveCredential = { value, account in
+            if refusesSaves { throw CredentialStore.CredentialError.saveFailed }
+            fixture.secrets[account] = value
+        }
+        var spent: [String] = []
+        dependencies.refreshHardcoverToken = { refreshToken in
+            spent.append(refreshToken)
+            return fixture.tokens(spent.count + 1)
+        }
+        var fetched: [String] = []
+        dependencies.fetchHardcover = { token, _ in
+            fetched.append(token)
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.refresh(manual: true)
+        XCTAssertEqual(fetched, ["hc_at_fictional_2"])
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_1")
+
+        // While Keychain still refuses, the unsaved pair's own schedule applies, so the next
+        // boundary doesn't renew again.
+        fixture.time += 10
+        let unsavedToken = await model.hardcoverTokenForSync()
+        XCTAssertEqual(unsavedToken, "hc_at_fictional_2")
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"])
+
+        // The next boundary saves the rotated pair instead of spending the old token again.
+        refusesSaves = false
+        fixture.time += 10
+        let token = await model.hardcoverTokenForSync()
+        XCTAssertEqual(token, "hc_at_fictional_2")
+        XCTAssertEqual(spent, ["hc_rt_fictional_1"])
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_at_fictional_2")
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_2")
+        XCTAssertEqual(
+            fixture.defaults.object(forKey: HardcoverSession.renewalKey) as? Date,
+            fixture.time.addingTimeInterval(518_400 - 20), "The schedule counts from the renewal")
+    }
+
+    func testDisconnectDuringRenewalKeepsTheLoginRemoved() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        let renewal = ControlledLibraryResponse<HardcoverTokens>("Token renewal started")
+        var dependencies = fixture.dependencies()
+        dependencies.refreshHardcoverToken = { _ in try await renewal.value() }
+        let revoked = expectation(description: "Disconnecting revokes the login")
+        var revocations: [String] = []
+        dependencies.revokeHardcoverToken = { refreshToken in
+            revocations.append(refreshToken)
+            if revocations.count == 1 { revoked.fulfill() }
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let social = Task { await model.hardcoverTokenForSync() }
+        await fulfillment(of: [renewal.started], timeout: 5)
+        model.disconnect()
+        await fulfillment(of: [revoked], timeout: 5)
+        renewal.resolve(fixture.tokens(2))
+        let token = await social.value
+        XCTAssertNil(token)
+        XCTAssertEqual(
+            revocations, ["hc_rt_fictional_1", "hc_rt_fictional_2"],
+            "The refresh token the renewal rotated is revoked too")
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
+        XCTAssertNil(fixture.defaults.object(forKey: HardcoverSession.renewalKey))
+    }
+
+    func testDisconnectRevokesTheLoginEvenIfHardcoverIsUnreachable() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 5 * 86_400)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        let revoked = expectation(description: "Disconnecting revokes the login")
+        var revocations: [String] = []
+        dependencies.revokeHardcoverToken = { refreshToken in
+            revocations.append(refreshToken)
+            revoked.fulfill()
+            throw URLError(.notConnectedToInternet)
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.disconnect()
+        XCTAssertNil(fixture.secrets["hardcover-token"])
+        XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
+        await fulfillment(of: [revoked], timeout: 5)
+        XCTAssertEqual(revocations, ["hc_rt_fictional_1"])
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertFalse(model.hardcoverSessionExpired)
+    }
+
+    func testTokenWithoutRefreshReplacesTheSavedRefreshToken() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 3_600)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let connected = await model.connect("hc_pat_fictional_replacement")
+        XCTAssertTrue(connected)
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_replacement")
+        XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
+        XCTAssertNil(fixture.defaults.object(forKey: HardcoverSession.renewalKey))
+    }
+
     func testDisablingSourceRejectsHeldCredentialValidation() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -580,7 +1013,7 @@ final class LibraryWorkflowTests: XCTestCase {
         var dependencies = fixture.dependencies()
         var validations = 0
         dependencies.validateHardcover = { token in
-            XCTAssertEqual(token, "hc_pat_fictional_replacement")
+            XCTAssertEqual(token, "hc_at_fictional_replacement")
             validations += 1
             return fixture.hardcoverAccountID
         }
@@ -597,7 +1030,10 @@ final class LibraryWorkflowTests: XCTestCase {
         dependencies.pollHardcoverDeviceToken = { code in
             pollCount += 1
             if pollCount == 1 { return .pending }
-            return .success(token: "hc_pat_fictional_replacement")
+            return .success(
+                HardcoverTokens(
+                    accessToken: "hc_at_fictional_replacement",
+                    refreshToken: "hc_rt_fictional_replacement", expiresIn: 604_800))
         }
         dependencies.sleep = { _ in }
         let model = LibraryModel(dependencies: dependencies)
@@ -608,7 +1044,11 @@ final class LibraryWorkflowTests: XCTestCase {
         for _ in 0..<1000 where !model.hardcoverConnected { await Task.yield() }
         XCTAssertTrue(model.hardcoverConnected)
         XCTAssertEqual(validations, 1)
-        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_replacement")
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_at_fictional_replacement")
+        XCTAssertEqual(fixture.secrets["hardcover-refresh-token"], "hc_rt_fictional_replacement")
+        XCTAssertEqual(
+            fixture.defaults.object(forKey: HardcoverSession.renewalKey) as? Date,
+            fixture.time.addingTimeInterval(518_400))
     }
 
     func testDeviceApprovalDuringCWARefreshClearsConsumedCodeAndOffersRetry() async throws {
@@ -646,7 +1086,8 @@ final class LibraryWorkflowTests: XCTestCase {
             retryShown.fulfill()
         }
 
-        authorization.resolve(.success(token: "hc_pat_fictional_replacement"))
+        authorization.resolve(
+            .success(HardcoverTokens(accessToken: "hc_pat_fictional_replacement")))
         await fulfillment(of: [retryShown], timeout: 5)
 
         XCTAssertNil(model.hardcoverDeviceAuth)
@@ -1639,6 +2080,11 @@ private final class LibraryWorkflowFixture {
             XCTFail("Unexpected Hardcover validation")
             throw URLError(.unsupportedURL)
         }
+        dependencies.refreshHardcoverToken = { _ in
+            XCTFail("Unexpected token renewal")
+            throw URLError(.unsupportedURL)
+        }
+        dependencies.revokeHardcoverToken = { _ in XCTFail("Unexpected token revocation") }
         dependencies.fetchCWA = { _, _ in
             XCTFail("Unexpected CWA request")
             throw URLError(.unsupportedURL)
@@ -1662,6 +2108,23 @@ private final class LibraryWorkflowFixture {
             throw CancellationError()
         }
         return dependencies
+    }
+
+    /// Saves a fictional OAuth login, `hc_at_fictional_1` and `hc_rt_fictional_1`, whose
+    /// week-long access token expires `seconds` from now.
+    func signInWithOAuth(expiringIn seconds: TimeInterval) {
+        secrets[HardcoverSession.accessAccount] = "hc_at_fictional_1"
+        secrets[HardcoverSession.refreshAccount] = "hc_rt_fictional_1"
+        defaults.set(
+            time.addingTimeInterval(seconds - HardcoverSession.renewalMargin),
+            forKey: HardcoverSession.renewalKey)
+    }
+
+    /// The fictional pair a renewal returns as the login's `generation`th tokens.
+    func tokens(_ generation: Int) -> HardcoverTokens {
+        HardcoverTokens(
+            accessToken: "hc_at_fictional_\(generation)",
+            refreshToken: "hc_rt_fictional_\(generation)", expiresIn: 604_800)
     }
 
     func book(_ id: Int, title: String? = nil) -> Book {
