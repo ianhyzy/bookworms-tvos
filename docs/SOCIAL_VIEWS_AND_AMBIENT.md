@@ -25,7 +25,7 @@ Select **Ambient** in the sidebar, then **Start ambient mode**. Stopping playbac
 
 Choose timing on the **Ambient** page; see [ambient options](../VIEWS.md#other-displays).
 
-Ambient playback hides controls and selection markers, uses a dark palette with a 35% black overlay, and moves content within safe margins. The optional profile QR code sits under the same overlay and moves with the content, so it stays scannable without outshining the dimmed screen. Bookshelf textures change crop and orientation. Movement uses brief transitions; Reduce Motion removes animation. VoiceOver prevents or stops automatic playback. Spoilers remain hidden unless the spoiler policy is set to show for read books.
+Ambient playback hides controls and selection markers, uses a dark palette with a 35% black overlay, and moves content within safe margins. The optional profile QR code sits under the same overlay and moves with the content. Book and profile codes are 148 points wide, four points per module. Bookshelf textures change crop and orientation. Movement uses brief transitions; Reduce Motion removes animation. VoiceOver prevents or stops automatic playback. Spoilers remain hidden unless the spoiler policy is set to show for read books.
 
 The first directional, Select, Back, or Play/Pause press exits without activating content. Exit, backgrounding, and session expiry restore the system idle timer. Playback does not sync source metadata, look up alternate covers, or generate spines. It reads artwork and avatars from the cache prepared for enabled collections, without starting downloads.
 

@@ -146,8 +146,13 @@ struct BookDetailView: View {
                     }
                     .frame(width: coverColumnWidth)
                     // An overlay, so the code takes the space below the cover without moving it.
+                    // It reaches halfway into the bottom padding, still inside the TV safe area,
+                    // to leave a gap below the cover.
                     .overlay(alignment: .bottom) {
-                        if showsCover, let hardcoverURL { hardcoverCode(hardcoverURL) }
+                        if showsCover, let hardcoverURL {
+                            hardcoverCode(hardcoverURL)
+                                .offset(y: BookDetailCoverLayout.verticalPadding / 2)
+                        }
                     }
                     .focusSection()
                     // Two sibling sections, not nested ones: the header starts level with Back, so
@@ -361,7 +366,7 @@ struct BookDetailView: View {
     /// A QR code for the book's Hardcover page with a caption beside it. It isn't focusable.
     private func hardcoverCode(_ url: URL) -> some View {
         HStack(spacing: 18) {
-            QRCodeView(url: url).frame(width: 124, height: 124)
+            QRCodeView(url: url).frame(width: QRCodeView.linkSide, height: QRCodeView.linkSide)
                 .clipShape(.rect(cornerRadius: 10))
             Text("Scan to open\non Hardcover")
                 .appFont(size: 21).foregroundStyle(.detailCaption)

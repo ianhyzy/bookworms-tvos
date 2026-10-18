@@ -53,7 +53,7 @@ struct AmbientView: View {
                 if geometry.size.width > 320 && geometry.size.height > 320 {
                     let profileURL = showsProfileCode ? library.hardcoverProfileURL : nil
                     // The code takes a band below the content instead of covering any of it.
-                    let band: CGFloat = profileURL == nil ? 0 : Self.profileCodeSize + 24
+                    let band: CGFloat = profileURL == nil ? 0 : QRCodeView.linkSide + 24
                     VStack(spacing: 24) {
                         presentation(
                             size: CGSize(
@@ -230,8 +230,6 @@ struct AmbientView: View {
 
     private static let monthNames = Calendar.current.standaloneMonthSymbols
 
-    static let profileCodeSize: CGFloat = 132
-
     /// A QR code for your Hardcover profile with a caption, for guests to scan.
     private func profileCode(_ url: URL) -> some View {
         HStack(spacing: 22) {
@@ -242,7 +240,7 @@ struct AmbientView: View {
                 }
             }
             QRCodeView(url: url)
-                .frame(width: Self.profileCodeSize, height: Self.profileCodeSize)
+                .frame(width: QRCodeView.linkSide, height: QRCodeView.linkSide)
                 .clipShape(.rect(cornerRadius: 10))
         }
         .accessibilityElement(children: .combine)

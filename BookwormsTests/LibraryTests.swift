@@ -100,9 +100,13 @@ final class LibraryTests: XCTestCase {
         let cwa = Book(id: 1_000_000_000_000_001, title: "Book", author: "Author", sources: [.cwa])
         XCTAssertNil(cwa.hardcoverURL, "Hardcover doesn't list CWA-only books")
         XCTAssertEqual(HardcoverLink.user(42).absoluteString, "https://hardcover.app/id/user/42")
-        let code = try XCTUnwrap(QRCodeView.image(for: "https://hardcover.app/id/books/312460"))
+        let renderer = QRCodeRenderer()
+        let link = "https://hardcover.app/id/books/312460"
+        let code = try XCTUnwrap(renderer.image(for: link))
         XCTAssertEqual(code.width, code.height)
-        XCTAssertGreaterThanOrEqual(code.width, 21 + 8, "At least version 1 with a quiet zone")
+        XCTAssertEqual(
+            code.width, 29 + 8, "A version 3 code with a four-module quiet zone fills linkSide")
+        XCTAssertTrue(renderer.image(for: link) === code, "A drawn code is reused")
     }
 
     func testIgnoredBooksAreLeftOut() throws {
