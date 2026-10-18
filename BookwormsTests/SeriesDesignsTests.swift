@@ -182,6 +182,14 @@ final class SeriesDesignsTests: XCTestCase {
                 createdAt: Date(timeIntervalSince1970: 1_000)
             )
             .provenance, "model:apple/on-device", "A look copies only the model token")
+        var standIn = designs[3]!
+        standIn.provenance = "series-reuse:9 model:local font:system"
+        XCTAssertEqual(
+            SeriesLookV1(
+                key: SeriesLookKey(seriesID: 7, group: "|mattdinniman"), design: standIn,
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+            .provenance, "model:local font:system", "A stand-in's look still awaits its font")
         onDevice.provenance = "generated-colors:1A2B3C,F4E9D0,C08040"
         XCTAssertNil(
             SeriesLookV1(
