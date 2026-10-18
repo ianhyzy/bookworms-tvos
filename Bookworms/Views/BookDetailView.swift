@@ -317,7 +317,7 @@ struct BookDetailView: View {
                     )
                     if book.readCount > 1 {
                         Text("Read \(book.readCount) times")
-                            .appFont(size: 19, weight: .semibold)
+                            .appFont(size: 23, weight: .semibold)
                             .padding(.horizontal, 12).padding(.vertical, 4)
                             .background(.primary.opacity(0.12), in: .capsule)
                             .accessibilityIdentifier("detail-read-count")
@@ -369,7 +369,7 @@ struct BookDetailView: View {
             QRCodeView(url: url).frame(width: QRCodeView.linkSide, height: QRCodeView.linkSide)
                 .clipShape(.rect(cornerRadius: 10))
             Text("Scan to open\non Hardcover")
-                .appFont(size: 21).foregroundStyle(.detailCaption)
+                .appFont(size: 23).foregroundStyle(.detailCaption)
                 .fixedSize()
                 .accessibilityHidden(true)
         }
@@ -391,13 +391,13 @@ struct BookDetailView: View {
                     HStack(spacing: 10) {
                         ReaderLabel(
                             name: read.reader.displayName, avatarURL: read.reader.avatarURL,
-                            size: 22)
+                            size: 23)
                         Text(
                             read.rating.map {
                                 "★" + $0.formatted(.number.precision(.fractionLength(0...1)))
                             } ?? "Read"
                         )
-                        .appFont(size: 22, weight: .semibold).monospacedDigit()
+                        .appFont(size: 23, weight: .semibold).monospacedDigit()
                     }
                 }
             }
