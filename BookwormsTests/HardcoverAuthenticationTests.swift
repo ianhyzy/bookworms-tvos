@@ -310,6 +310,12 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
                         return (503, #"{"error":"temporarily_unavailable"}"#)
                     }
                     return (400, #"{"error":"invalid_grant"}"#)
+                } else if bodyString.contains("grant_type=authorization_code") {
+                    XCTAssertTrue(bodyString.contains("client_id=\(HardcoverClient.clientID)"))
+                    if bodyString.contains("code=valid_code") {
+                        return (200, #"{"access_token":"hc_pat_success","token_type":"Bearer"}"#)
+                    }
+                    return (400, #"{"error":"invalid_grant"}"#)
                 } else if bodyString.contains("device_code=device_pending") {
                     return (400, #"{"error":"authorization_pending"}"#)
                 } else if bodyString.contains("device_code=device_slow_down") {
@@ -348,46 +354,6 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocolDidFinishLoading(self)
             return
-        }
-
-        if request.url?.absoluteString == "https://hardcover.app/oauth/token" {
-            XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertEqual(
-                request.value(forHTTPHeaderField: "Content-Type"),
-                "application/x-www-form-urlencoded")
-            var bodyData = request.httpBody ?? Data()
-            if let stream = request.httpBodyStream {
-                stream.open()
-                defer { stream.close() }
-                var bytes = [UInt8](repeating: 0, count: 4096)
-                while stream.hasBytesAvailable {
-                    let count = stream.read(&bytes, maxLength: bytes.count)
-                    if count <= 0 { break }
-                    bodyData.append(contentsOf: bytes.prefix(count))
-                }
-            }
-            let bodyString = String(decoding: bodyData, as: UTF8.self)
-            if bodyString.contains("code=valid_code")
-                || bodyString.contains("code=auth_code_success")
-            {
-                let response = HTTPURLResponse(
-                    url: request.url!, statusCode: 200, httpVersion: nil,
-                    headerFields: ["Content-Type": "application/json"])!
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                let payload = #"{"access_token":"hc_pat_success","token_type":"Bearer"}"#
-                client?.urlProtocol(self, didLoad: Data(payload.utf8))
-                client?.urlProtocolDidFinishLoading(self)
-                return
-            } else {
-                let response = HTTPURLResponse(
-                    url: request.url!, statusCode: 400, httpVersion: nil,
-                    headerFields: ["Content-Type": "application/json"])!
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                let payload = #"{"error":"invalid_grant"}"#
-                client?.urlProtocol(self, didLoad: Data(payload.utf8))
-                client?.urlProtocolDidFinishLoading(self)
-                return
-            }
         }
 
         XCTAssertEqual(request.url?.absoluteString, "https://api.hardcover.app/v1/graphql")

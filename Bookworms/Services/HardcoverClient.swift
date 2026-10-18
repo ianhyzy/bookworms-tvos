@@ -231,7 +231,7 @@ actor HardcoverClient {
         }
 
         let (data, http) = try await postForm(
-            URL(string: "https://hardcover.app/oauth/token")!,
+            Self.tokenURL,
             [
                 "grant_type": "authorization_code",
                 "client_id": Self.clientID,
@@ -294,7 +294,7 @@ actor HardcoverClient {
     }
 
     // The endpoints Hardcover's discovery document names. The token endpoint serves device-code
-    // polling and token renewal.
+    // polling, authorization-code exchange, and token renewal.
     static let deviceAuthorizationURL = URL(string: "https://api.hardcover.app/oauth2/device")!
     static let tokenURL = URL(string: "https://api.hardcover.app/oauth2/token")!
     static let revocationURL = URL(string: "https://api.hardcover.app/oauth2/revoke")!
