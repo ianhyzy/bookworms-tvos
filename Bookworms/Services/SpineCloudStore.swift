@@ -146,9 +146,11 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     var fontPostScriptName: String? = nil
     var instanceWeight: Int? = nil
     /// The model token of the design the look copies (`SpineDesignV1.modelToken`), which tells
-    /// a companion app the model tier that made it. A look copies no other `provenance` token.
-    /// Private Cloud Compute's looks and Book Wall's cover-sampled looks record none; the
-    /// latter's `origin` marks them.
+    /// a companion app the model tier that made it, followed by `font:system` when that design
+    /// stands in its system typeface for a font that couldn't download, so a companion upgrades
+    /// the look once the font downloads. A look copies no other `provenance` token. Private Cloud
+    /// Compute's looks and Book Wall's cover-sampled looks record none; the latter's `origin`
+    /// marks them.
     var provenance: String? = nil
 
     /// The origin of a look made from Book Wall's cover-sampled style.
@@ -186,10 +188,13 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
 }
 
 extension SeriesLookV1 {
-    /// A look for `key` copied from `design`, a group member's saved design. A design the reader
-    /// recolored (`hasReaderColors`) gives the look the reader's colors, so the look counts as
-    /// edited at `createdAt`, as the iPhone's look does.
+    /// A look for `key` copied from `design`, a group member's saved design, with the design's
+    /// tier tokens as its `provenance`. A design the reader recolored (`hasReaderColors`) gives
+    /// the look the reader's colors, so the look counts as edited at `createdAt`, as the
+    /// iPhone's look does.
     init(key: SeriesLookKey, design: SpineDesignV1, createdAt: Date) {
+        let awaitsFont = design.provenance?.split(separator: " ").contains("font:system") == true
+        let tokens = [design.modelToken, awaitsFont ? "font:system" : nil].compactMap(\.self)
         self.init(
             accountID: design.accountID, seriesID: key.seriesID, group: key.group,
             sourceBookID: design.bookID, origin: design.generatorVersion, createdAt: createdAt,
@@ -198,7 +203,7 @@ extension SeriesLookV1 {
             accentHex: design.accentHex, typeface: design.typeface, weight: design.weight,
             uppercase: design.uppercase, fontFamily: design.fontFamily,
             fontPostScriptName: design.fontPostScriptName, instanceWeight: design.instanceWeight,
-            provenance: design.modelToken)
+            provenance: tokens.isEmpty ? nil : tokens.joined(separator: " "))
     }
 
     /// A look for `key` from Book Wall's cover-sampled `style` of `book`, the group's
