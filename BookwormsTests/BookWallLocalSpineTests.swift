@@ -192,13 +192,16 @@ final class BookWallLocalSpineTests: XCTestCase {
     func testStandInsFollowTheDesignWeight() throws {
         let families = [
             "Bangers": "Bungee", "Bangers-Regular": "Bungee", "Shrikhand": "Changa One",
-            "Dancing Script": "Kalam", "DancingScript-Bold": "Kalam", "Great Vibes": "Caveat",
-            "Pacifico-Regular": "Permanent Marker",
+            "Dancing Script": "Patrick Hand", "DancingScript-Bold": "Patrick Hand",
+            "Great Vibes": "Patrick Hand", "Pacifico-Regular": "Patrick Hand",
+            // Faces whose letters lean without declaring a slant.
+            "Kalam-Bold": "Patrick Hand", "Caveat-Regular": "Patrick Hand",
+            "Shadows Into Light": "Patrick Hand",
         ]
         for (name, family) in families {
             XCTAssertEqual(SpineFontPolicy.standInFamily(for: name), family, name)
         }
-        for name in ["Bungee", "Kalam-Bold", "Lora", "Lora-BoldItalic", "Impact"] {
+        for name in ["Bungee", "PatrickHand-Regular", "Lora", "Lora-BoldItalic", "Impact"] {
             XCTAssertNil(SpineFontPolicy.standInFamily(for: name), name)
         }
 

@@ -298,9 +298,9 @@ final class SeriesDesignsTests: XCTestCase {
         // A slanted script shows in its stand-in family at the design's weight, else in the
         // stand-in's Regular face. An italic shows in its upright face.
         let script = typography("Dancing Script", "DancingScript-Bold")
-        XCTAssertEqual(script.standInFamily, "Kalam")
+        XCTAssertEqual(script.standInFamily, "Patrick Hand")
         XCTAssertEqual(script.weight, 700)
-        XCTAssertEqual(script.fontName, "Kalam-Regular")
+        XCTAssertEqual(script.fontName, "PatrickHand-Regular")
         XCTAssertEqual(typography("Lora", "Lora-BoldIt").fontName, "Lora-Bold")
         for (family, name) in [("EB Garamond", "EBGaramond-Bold"), ("Lora", "Lora-BoldIt")] {
             XCTAssertNil(typography(family, name).standInFamily, name)
