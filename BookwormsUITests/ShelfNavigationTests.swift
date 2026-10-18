@@ -240,7 +240,8 @@ final class ShelfNavigationTests: XCTestCase {
         }
     }
 
-    /// The sample library finishes every dated book in 2026; its shelf runs earliest first.
+    /// The sample library finishes every dated book in 2026, and rereads book 1 from 2024. The
+    /// year menu opens on 2026, whose shelf runs earliest first.
     func testYearInReviewCoversHeaderAndDetailsMoveDirectly() {
         continueAfterFailure = false
         let app = RemoteNavigation.open("Year in Review")

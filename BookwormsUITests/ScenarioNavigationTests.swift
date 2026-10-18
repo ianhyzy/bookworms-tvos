@@ -575,6 +575,33 @@ final class ScenarioNavigationTests: XCTestCase {
         capture(restored, "scenario-reenabled-cached-shelf")
     }
 
+    /// Cover details of a Hardcover book show an unfocusable QR code under the cover. Sample books
+    /// have no Hardcover page, so this runs on the scenario library. Its first book has no genres
+    /// and a description that fits, so the histogram is the metadata row's only control.
+    func testDetailsWithHardcoverCodeHaveCountedDirectionalBoundaries() {
+        let app = launch(focusProbe: true)
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 20))
+        waitForFocus(first)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["detail-hardcover-code"].waitForExistence(timeout: 5))
+        let back = app.buttons["back-to-shelf"]
+        let author = app.buttons["detail-author"]
+        let reviews = app.buttons["community-reviews"]
+        waitForFocus(back)
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        RemoteNavigation.press(.left, in: app, expecting: back)
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: reviews)
+        RemoteNavigation.press(.up, in: app, expecting: author)
+        RemoteNavigation.press(.down, in: app, expecting: reviews)
+        RemoteNavigation.press(.left, in: app, expecting: back)
+        capture(app, "scenario-detail-hardcover-code")
+        XCUIRemote.shared.press(.menu)
+        waitForFocus(first)
+    }
+
     /// The profile QR code toggle needs a connected account, so this runs on the scenario
     /// library instead of the sample one.
     func testAmbientProfileCodeToggleHasCountedDirectionalBoundaries() {
