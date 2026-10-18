@@ -19,10 +19,10 @@ When connecting or updating login, the app exchanges the approved device code fo
 
 Hardcover access tokens last one week. Refresh tokens last six months and work once: a renewal returns a new access token and a new refresh token, and sending a spent refresh token revokes the login. Bookworms keeps the Apple TV signed in this way:
 
-- Keychain holds the access token (`hardcover-token`) and the refresh token (`hardcover-refresh-token`). User defaults hold the access token's expiry, which isn't secret.
-- Library sync, social sync, and opening community reviews renew a token that expires within a day before using it. A request that Hardcover rejects with HTTP 401 renews the token once and retries.
+- Keychain holds the access token (`hardcover-token`) and the refresh token (`hardcover-refresh-token`). User defaults hold the date the access token is due for renewal, which isn't secret.
+- Library sync, social sync, and opening community reviews renew a token before using it when it's due: a day before it expires, or halfway through its lifetime when Hardcover issues a token that lasts less than two days. A request that Hardcover rejects with HTTP 401 renews the token once and retries.
 - `HardcoverSession` is the only code that spends a refresh token, and it runs one renewal at a time. Syncs that need a token during a renewal wait for it and use its result. The renewal request never retries. It runs in its own task, so cancelling a sync doesn't lose the tokens Hardcover rotated. The Top Shelf extension never holds a credential.
-- The new refresh token is saved before the access token. If Keychain refuses the save, the app uses the new tokens for the rest of the launch and retries the save at the next sync.
+- The new refresh token is saved before the access token. If Keychain refuses the save, the app uses the new tokens, and their renewal date, for the rest of the launch and retries the save at the next sync.
 - When Hardcover rejects the refresh token, Settings shows **Reconnect Hardcover**, as it does for an expired login. A renewal that fails for another reason, such as a timeout, keeps the saved token for that sync and tries again at the next one.
 - A Keychain read that fails returns no token. The app then skips the renewal or shows **Reconnect Hardcover**, but it never deletes the saved login, and the next sync that reads Keychain recovers.
 - A login without a refresh token, such as a personal access token, works until Hardcover rejects it and then shows **Reconnect Hardcover**.
@@ -31,7 +31,7 @@ Hardcover access tokens last one week. Refresh tokens last six months and work o
 
 ## Verification
 
-Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, success), authorization code exchange, OAuth and PAT token validation, rejection of malformed or invalid codes before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection. Renewal tests cover the refresh request and its form encoding, renewal before expiry and after HTTP 401, refresh token rotation, one shared renewal for concurrent library and social syncs, revoked and unavailable renewals, unreadable refresh tokens, Keychain save failures, disconnection during a renewal, and social sync continuing with a renewed token.
+Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, success), authorization code exchange, OAuth and PAT token validation, rejection of malformed or invalid codes before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection. Renewal tests cover the refresh request and its form encoding, renewal before expiry (halfway through a short-lived token's lifetime) and after HTTP 401, refresh token rotation, one shared renewal for concurrent library and social syncs, revoked and unavailable renewals, unreadable refresh tokens, Keychain save failures, disconnection during a renewal, and social sync continuing with a renewed token.
 
 ## Sign in on Apple TV
 

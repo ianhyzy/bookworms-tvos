@@ -14,10 +14,11 @@ import Foundation
 final class HardcoverSession {
     static let accessAccount = "hardcover-token"
     static let refreshAccount = "hardcover-refresh-token"
-    /// The access token's expiry, in user defaults; it isn't secret.
-    static let expiryKey = "hardcoverTokenExpiry"
-    /// A token that expires within this interval is renewed before it's used, so a daily sync
-    /// replaces it before it lapses.
+    /// When the access token is due for renewal, in user defaults; it isn't secret.
+    static let renewalKey = "hardcoverTokenRenewal"
+    /// The longest time before expiry that a token is renewed, so a daily sync replaces a
+    /// week-long token before it lapses. A token that lasts less than twice this is renewed
+    /// halfway through its lifetime instead, so each renewal outlasts the requests that follow.
     static let renewalMargin: TimeInterval = 86_400
 
     private let dependencies: LibraryDependencies
@@ -49,10 +50,10 @@ final class HardcoverSession {
         unsaved = nil
         dependencies.removeCredential(Self.refreshAccount)
         dependencies.removeCredential(Self.accessAccount)
-        dependencies.defaults.removeObject(forKey: Self.expiryKey)
+        dependencies.defaults.removeObject(forKey: Self.renewalKey)
     }
 
-    /// The access token for a sync, renewed first when it expires within `renewalMargin`.
+    /// The access token for a sync, renewed first when it's due (`renewalDate(of:issued:)`).
     ///
     /// Throws `HardcoverError.invalidToken` when Hardcover rejects the refresh token. Any other
     /// renewal failure returns the saved token, which may still work; a request it fails renews
@@ -62,15 +63,20 @@ final class HardcoverSession {
         return try await renewedIfExpiring(token)
     }
 
-    /// `token`, the saved access token, or its replacement when it expires within
-    /// `renewalMargin`. Fails like `accessToken()`.
+    /// `token`, the saved access token, or its replacement when it's due for renewal. Fails like
+    /// `accessToken()`.
     func renewedIfExpiring(_ token: String) async throws -> String {
         if let unsaved, (try? write(unsaved.tokens, issued: unsaved.issued)) != nil {
             self.unsaved = nil
         }
-        guard let expiry = dependencies.defaults.object(forKey: Self.expiryKey) as? Date,
-            expiry.timeIntervalSince(dependencies.now()) < Self.renewalMargin
-        else { return token }
+        // The saved date belongs to the spent tokens while Keychain refuses their replacements.
+        let renewal =
+            if let unsaved {
+                Self.renewalDate(of: unsaved.tokens, issued: unsaved.issued)
+            } else {
+                dependencies.defaults.object(forKey: Self.renewalKey) as? Date
+            }
+        guard let renewal, dependencies.now() >= renewal else { return token }
         do {
             return try await renew(rejected: token) ?? token
         } catch HardcoverError.invalidToken {
@@ -114,8 +120,18 @@ final class HardcoverSession {
         return tokens.accessToken
     }
 
-    /// Saves the refresh token first, since it's the part that can't be recovered. The expiry,
-    /// counted from `issued`, is kept only for a token that can be renewed.
+    /// When tokens issued at `issued` are due for renewal: `renewalMargin` before they expire, or
+    /// halfway through a shorter lifetime. Returns `nil` for a login that can't be renewed or
+    /// doesn't say when it expires.
+    static func renewalDate(of tokens: HardcoverTokens, issued: Date) -> Date? {
+        guard tokens.refreshToken != nil, let seconds = tokens.expiresIn, seconds > 0 else {
+            return nil
+        }
+        let lifetime = TimeInterval(seconds)
+        return issued.addingTimeInterval(lifetime - min(renewalMargin, lifetime / 2))
+    }
+
+    /// Saves the refresh token first, since it's the part that can't be recovered.
     private func write(_ tokens: HardcoverTokens, issued: Date) throws {
         if let refreshToken = tokens.refreshToken {
             try dependencies.saveCredential(refreshToken, Self.refreshAccount)
@@ -123,11 +139,10 @@ final class HardcoverSession {
             dependencies.removeCredential(Self.refreshAccount)
         }
         try dependencies.saveCredential(tokens.accessToken, Self.accessAccount)
-        if let seconds = tokens.expiresIn, tokens.refreshToken != nil {
-            dependencies.defaults.set(
-                issued.addingTimeInterval(TimeInterval(seconds)), forKey: Self.expiryKey)
+        if let renewal = Self.renewalDate(of: tokens, issued: issued) {
+            dependencies.defaults.set(renewal, forKey: Self.renewalKey)
         } else {
-            dependencies.defaults.removeObject(forKey: Self.expiryKey)
+            dependencies.defaults.removeObject(forKey: Self.renewalKey)
         }
     }
 }
