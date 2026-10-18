@@ -440,7 +440,7 @@
                     deliveredArtwork += 1
                     return (200, data)
                 }
-                if url.absoluteString == "https://hardcover.app/oauth2/device",
+                if url.absoluteString == "https://api.hardcover.app/oauth2/device",
                     request.request.httpMethod == "POST"
                 {
                     if scenario == "offline" { return (-1, Data()) }
@@ -452,7 +452,7 @@
                                 .utf8)
                     )
                 }
-                if url.absoluteString == "https://hardcover.app/oauth2/token",
+                if url.absoluteString == "https://api.hardcover.app/oauth2/token",
                     request.request.httpMethod == "POST"
                 {
                     if scenario == "offline" { return (-1, Data()) }

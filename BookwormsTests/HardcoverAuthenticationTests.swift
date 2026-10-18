@@ -234,7 +234,7 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
     }
 
     override func startLoading() {
-        if request.url?.absoluteString == "https://hardcover.app/oauth2/device" {
+        if request.url?.absoluteString == "https://api.hardcover.app/oauth2/device" {
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(
                 request.value(forHTTPHeaderField: "Content-Type"),
@@ -250,7 +250,7 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             return
         }
 
-        if request.url?.absoluteString == "https://hardcover.app/oauth2/token" {
+        if request.url?.absoluteString == "https://api.hardcover.app/oauth2/token" {
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(
                 request.value(forHTTPHeaderField: "Content-Type"),

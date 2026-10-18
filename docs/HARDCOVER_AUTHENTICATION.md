@@ -6,8 +6,8 @@ The OAuth configuration uses:
 
 - **Client ID**: `ca996be3-0df1-4cbf-819a-e17644fbcf38`
 - **Verification URL**: `https://hardcover.app/link`
-- **Device Authorization Endpoint**: `https://hardcover.app/oauth2/device`
-- **Token Endpoint**: `https://hardcover.app/oauth2/token`
+- **Device Authorization Endpoint**: `https://api.hardcover.app/oauth2/device`
+- **Token Endpoint**: `https://api.hardcover.app/oauth2/token`
 - **Revocation Endpoint**: `https://api.hardcover.app/oauth2/revoke`
 - **Requested scopes**: `read:me:content read:library read:catalog:data read:social read:users`
 - **Manual Redirect URI (fallback)**: `urn:ietf:wg:oauth:2.0:oob` (and `gay.ian.bookworms:/oauth/callback`)

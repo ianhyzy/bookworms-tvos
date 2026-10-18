@@ -174,7 +174,7 @@ actor HardcoverClient {
 
     func requestDeviceAuth() async throws -> HardcoverDeviceAuth {
         let (data, http) = try await postForm(
-            URL(string: "https://hardcover.app/oauth2/device")!,
+            Self.deviceAuthorizationURL,
             ["client_id": Self.clientID, "scope": Self.scopes])
         guard http.statusCode == 200 else {
             throw HardcoverError.http(http.statusCode)
@@ -293,8 +293,10 @@ actor HardcoverClient {
         return tokens
     }
 
-    /// The token endpoint for device-code polling and token renewal.
-    static let tokenURL = URL(string: "https://hardcover.app/oauth2/token")!
+    // The endpoints Hardcover's discovery document names. The token endpoint serves device-code
+    // polling and token renewal.
+    static let deviceAuthorizationURL = URL(string: "https://api.hardcover.app/oauth2/device")!
+    static let tokenURL = URL(string: "https://api.hardcover.app/oauth2/token")!
     static let revocationURL = URL(string: "https://api.hardcover.app/oauth2/revoke")!
 
     /// Posts a form to an OAuth endpoint. Values are encoded with only RFC 3986 unreserved
