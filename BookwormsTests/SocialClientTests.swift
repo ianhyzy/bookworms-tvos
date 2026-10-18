@@ -28,7 +28,8 @@ final class SocialClientTests: XCTestCase {
 
     func testCompleteRatedLibraryPaginationKeepsReaderRatingsSeparate() async throws {
         let books = try await client().library(user: 2, token: "hc_pat_fixture")
-        XCTAssertEqual(books.count, 101)
+        XCTAssertEqual(books.count, 100)
+        XCTAssertFalse(books.contains { $0.id == 1 }, "Ignored books are left out")
         XCTAssertEqual(books.last?.rating, 4.5)
         XCTAssertNil(books.last?.book.rating)
         XCTAssertEqual(books.last?.book.isRead, true, "Status Read marks a book read")
@@ -160,7 +161,7 @@ private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
                         .map { index in
                             [
                                 "id": index, "rating": 4.5, "review_has_spoilers": false,
-                                "status_id": index == 100 ? 3 : 1,
+                                "status_id": index == 100 ? 3 : index == 1 ? 6 : 1,
                                 "book": [
                                     "id": index, "title": "Book \(index)", "release_year": 2014,
                                     "rating": 4.2, "ratings_count": 4,

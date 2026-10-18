@@ -193,7 +193,8 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                 variables: SocialVariables(
                     user: user, offset: offset, language: HardcoverClient.coverLanguage),
                 token: token)
-            for row in result.userBooks {
+            // Pages are counted before filtering, so Ignored rows don't end pagination early.
+            for row in result.userBooks where row.statusID != HardcoverClient.ignoredStatus {
                 var book = Self.book(row.book, edition: row.edition)
                 // Friends' Picks excludes books marked Read even without a read date.
                 book.isRead = row.statusID == HardcoverClient.readStatus ? true : nil
