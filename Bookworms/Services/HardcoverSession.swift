@@ -136,7 +136,14 @@ final class HardcoverSession {
         }
         // RFC 6749 keeps the old refresh token when a response omits a replacement.
         tokens.refreshToken = tokens.refreshToken ?? refreshToken
-        guard generation == self.generation else { return storedAccessToken() }
+        guard generation == self.generation else {
+            // The login was removed or replaced during the renewal, so nothing keeps the rotated
+            // refresh token. Revoke it, or Hardcover's Authorized Apps page keeps listing it.
+            if let rotated = tokens.refreshToken, rotated != refreshToken {
+                try? await dependencies.revokeHardcoverToken(rotated)
+            }
+            return storedAccessToken()
+        }
         do {
             try write(tokens, issued: issued)
             unsaved = nil

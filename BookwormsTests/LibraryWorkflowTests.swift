@@ -913,9 +913,10 @@ final class LibraryWorkflowTests: XCTestCase {
         var dependencies = fixture.dependencies()
         dependencies.refreshHardcoverToken = { _ in try await renewal.value() }
         let revoked = expectation(description: "Disconnecting revokes the login")
+        var revocations: [String] = []
         dependencies.revokeHardcoverToken = { refreshToken in
-            XCTAssertEqual(refreshToken, "hc_rt_fictional_1")
-            revoked.fulfill()
+            revocations.append(refreshToken)
+            if revocations.count == 1 { revoked.fulfill() }
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -926,6 +927,9 @@ final class LibraryWorkflowTests: XCTestCase {
         renewal.resolve(fixture.tokens(2))
         let token = await social.value
         XCTAssertNil(token)
+        XCTAssertEqual(
+            revocations, ["hc_rt_fictional_1", "hc_rt_fictional_2"],
+            "The refresh token the renewal rotated is revoked too")
         XCTAssertNil(fixture.secrets["hardcover-token"])
         XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
         XCTAssertNil(fixture.defaults.object(forKey: HardcoverSession.renewalKey))
