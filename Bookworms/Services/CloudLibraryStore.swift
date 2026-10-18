@@ -45,7 +45,9 @@ extension SourceSnapshot {
             uniquingKeysWith: { first, _ in first })
         guard !reads.isEmpty else { return snapshot }
         snapshot.books = books.map { book in
-            guard book.finishedDates == nil, let kept = reads[book.id], kept.first == book.finished
+            // An empty list counts as none, as `Book.finishes` reads it.
+            guard book.finishedDates?.isEmpty ?? true, let kept = reads[book.id],
+                kept.first == book.finished
             else { return book }
             var book = book
             book.finishedDates = kept

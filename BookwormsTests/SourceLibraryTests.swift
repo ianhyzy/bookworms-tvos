@@ -435,6 +435,7 @@ final class SourceLibraryTests: XCTestCase {
             books: [
                 book(1, finished: "2026-02-01", reads: ["2026-02-01", "2019-07-04"]),
                 book(2, finished: "2025-05-05", reads: ["2025-05-05", "2020-01-01"]),
+                book(3, finished: "2024-04-04", reads: ["2024-04-04", "2018-08-08"]),
             ], syncedAt: now)
         // An older build saves the newer snapshot without the lists; book 2 was read again since.
         let remote = SourceSnapshot(
@@ -442,15 +443,19 @@ final class SourceLibraryTests: XCTestCase {
             books: [
                 book(1, finished: "2026-02-01", reads: nil),
                 book(2, finished: "2026-03-03", reads: nil),
+                book(3, finished: "2024-04-04", reads: []),
             ], syncedAt: now.addingTimeInterval(1))
         for merged in [
             CloudLibraryArchive(sources: [remote]).merging(CloudLibraryArchive(sources: [local])),
             CloudLibraryArchive(sources: [local]).merging(CloudLibraryArchive(sources: [remote])),
         ] {
             let books = try XCTUnwrap(merged.sources.first?.books)
-            XCTAssertEqual(books.map(\.finished), ["2026-02-01", "2026-03-03"])
+            XCTAssertEqual(books.map(\.finished), ["2026-02-01", "2026-03-03", "2024-04-04"])
             XCTAssertEqual(books[0].finishedDates, ["2026-02-01", "2019-07-04"])
             XCTAssertNil(books[1].finishedDates, "A changed newest finish keeps no stale list")
+            XCTAssertEqual(
+                books[2].finishedDates, ["2024-04-04", "2018-08-08"], "An empty list counts as none"
+            )
         }
     }
 }
