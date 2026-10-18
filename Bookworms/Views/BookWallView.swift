@@ -16,6 +16,8 @@ struct BookWallView: View {
     let libraryBook: (Int) -> Book?
     /// Opens details for another library book, chosen from the series pop-up.
     let onOpenBook: (Book) -> Void
+    /// Followed readers with the book in their synced libraries, for its details.
+    let friendReads: (Book) -> [FriendRead]
     let onActivity: () -> Void
     let returnRevision: Int
     let detailState: BookWallDetailState
@@ -96,7 +98,8 @@ struct BookWallView: View {
                         onShowShelf: { onShowShelf(detailBook, $0) },
                         series: series(detailBook),
                         libraryBook: libraryBook,
-                        onOpenBook: onOpenBook
+                        onOpenBook: onOpenBook,
+                        friendReads: friendReads(detailBook)
                     )
                     .padding(.top, topInset)
                     .appTypography()

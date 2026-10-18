@@ -35,6 +35,8 @@ struct BookDetailView: View {
     var libraryBook: (Int) -> Book? = { _ in nil }
     /// Opens details for another book in your library, chosen from the series pop-up.
     var onOpenBook: ((Book) -> Void)?
+    /// Followed readers with this book in their synced libraries, shown with their ratings.
+    var friendReads: [FriendRead] = []
     @State private var showsSeries = false
     /// The series book chosen in the pop-up, opened after the pop-up finishes closing so that one
     /// presentation never starts while another is still dismissing.
@@ -59,7 +61,8 @@ struct BookDetailView: View {
         onShowShelf: ((ShelfFilter) -> Void)? = nil,
         series: SeriesInfo? = nil,
         libraryBook: @escaping (Int) -> Book? = { _ in nil },
-        onOpenBook: ((Book) -> Void)? = nil
+        onOpenBook: ((Book) -> Void)? = nil,
+        friendReads: [FriendRead] = []
     ) {
         self.book = book
         self.style = style
@@ -71,6 +74,7 @@ struct BookDetailView: View {
         self.series = series
         self.libraryBook = libraryBook
         self.onOpenBook = onOpenBook
+        self.friendReads = friendReads
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
@@ -168,6 +172,7 @@ struct BookDetailView: View {
                                     $focusedGenre, genres.first, priority: .userInitiated)
                         }
                         .focusSection()
+                        if !friendReads.isEmpty { friends }
                         description.focusSection()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -342,6 +347,43 @@ struct BookDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Followed readers who have the book, each with their photo and rating. It isn't focusable:
+    /// remote presses pass between the metadata row and the description.
+    private var friends: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "person.2").frame(width: 20)
+                Text("Friends who read this")
+            }
+            .appFont(size: 18).foregroundStyle(.detailCaption)
+            FlowLayout(spacing: 30) {
+                ForEach(friendReads, id: \.reader.id) { read in
+                    HStack(spacing: 10) {
+                        ReaderLabel(
+                            name: read.reader.displayName, avatarURL: read.reader.avatarURL,
+                            size: 22)
+                        Text(
+                            read.rating.map {
+                                "★" + $0.formatted(.number.precision(.fractionLength(0...1)))
+                            } ?? "Read"
+                        )
+                        .appFont(size: 22, weight: .semibold).monospacedDigit()
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Friends who read this: "
+                + friendReads.map { read in
+                    read.reader.displayName
+                        + (read.rating.map { ", \($0.formatted()) stars" } ?? "")
+                }
+                .joined(separator: "; ")
+        )
+        .accessibilityIdentifier("detail-friend-reads")
     }
 
     /// The author as a compact capsule button when details can filter My Shelf, otherwise text.

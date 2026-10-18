@@ -9,12 +9,17 @@ struct SocialPresentation {
     var myRatings: [Int: Double] = [:]
     var theirRatings: [Int: Double] = [:]
     var picks: [FriendPick] = []
+    /// Followed readers with each book in their synced libraries, by book ID, for book details.
+    var friendReads: [Int: [FriendRead]] = [:]
+    /// Followed readers whose libraries are synced, whose photos `friendReads` shows.
+    var libraryReaders: [ReaderProfile] = []
 
     init() {}
 
     init(snapshot: SocialSnapshot?, preferences: ViewPreferences) {
         guard let snapshot else { return }
         picks = FriendPick.ranked(snapshot, limit: BookLimit.maximum)
+        (friendReads, libraryReaders) = FriendRead.byBook(snapshot)
         reader = snapshot.following.first { $0.id == preferences.readerID }
         guard let reader else { return }
         let other = snapshot.readerBooks[reader.id] ?? []
@@ -99,5 +104,39 @@ struct FriendPick: Identifiable, Hashable, Sendable {
                 (activity[$0] ?? 0, -(order[$0] ?? 0)) > (activity[$1] ?? 0, -(order[$1] ?? 0))
             }
             .prefix(limit).map(\.self)
+    }
+}
+
+/// A followed reader's copy of a book: who has it in their library, and their rating.
+struct FriendRead: Hashable, Sendable {
+    let reader: ReaderProfile
+    let rating: Double?
+
+    /// Every synced followed-reader library, indexed by book. A book's readers come rated first,
+    /// highest rating first, then by name. Libraries of readers you no longer follow, including
+    /// readers you blocked, are left out.
+    static func byBook(_ snapshot: SocialSnapshot) -> (
+        reads: [Int: [FriendRead]], readers: [ReaderProfile]
+    ) {
+        let measurement = PerformanceDiagnostics.begin("FriendReads")
+        defer { measurement.end() }
+        var reads: [Int: [FriendRead]] = [:]
+        var readers: [ReaderProfile] = []
+        for reader in snapshot.following {
+            guard let library = snapshot.readerBooks[reader.id], !library.isEmpty else { continue }
+            readers.append(reader)
+            for item in library {
+                let rating = item.rating.flatMap { (0.5...5).contains($0) ? $0 : nil }
+                reads[item.id, default: []].append(FriendRead(reader: reader, rating: rating))
+            }
+        }
+        let ranked = reads.mapValues { list in
+            list.sorted { lhs, rhs in
+                if lhs.rating != rhs.rating { return (lhs.rating ?? -1) > (rhs.rating ?? -1) }
+                return lhs.reader.displayName.localizedStandardCompare(rhs.reader.displayName)
+                    == .orderedAscending
+            }
+        }
+        return (ranked, readers)
     }
 }

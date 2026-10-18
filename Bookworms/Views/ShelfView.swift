@@ -346,7 +346,8 @@ struct ShelfView: View {
                     onOpenBook: { chosen in
                         lastFocusedID = chosen.id
                         selectedBook = chosen
-                    }
+                    },
+                    friendReads: social.presentation.friendReads[book.id] ?? []
                 )
                 .appTypography()
                 .id(book.id)
@@ -486,6 +487,8 @@ struct ShelfView: View {
         if let readerAvatar = social.reader(coordinator.preferences.readerID)?.avatarURL {
             avatars.append(readerAvatar)
         }
+        // Book details list the readers with synced libraries who have the book.
+        avatars += social.presentation.libraryReaders.compactMap(\.avatarURL)
         let enabled = coordinator.preferences.activeViews
         if enabled.contains(.following) {
             books += social.activities.prefix(20).compactMap(\.book)
@@ -733,6 +736,7 @@ struct ShelfView: View {
                                 libraryBook: { library.book(withID: $0) },
                                 // A series book opens in the cover details, even one on the wall.
                                 onOpenBook: { selectedBook = $0 },
+                                friendReads: { social.presentation.friendReads[$0.id] ?? [] },
                                 onActivity: recordActivity,
                                 returnRevision: socialReturnRevision,
                                 detailState: wallDetail
