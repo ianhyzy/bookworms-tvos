@@ -593,7 +593,12 @@ struct ShelfView: View {
             guard let token = await library.hardcoverTokenForSync() else {
                 throw HardcoverError.invalidToken
             }
-            return try await HardcoverSocialClient().reviews(book: book.id, token: token)
+            do {
+                return try await HardcoverSocialClient().reviews(book: book.id, token: token)
+            } catch HardcoverError.invalidToken {
+                let renewed = try await library.renewHardcoverToken(rejected: token)
+                return try await HardcoverSocialClient().reviews(book: book.id, token: renewed)
+            }
         }
     }
 

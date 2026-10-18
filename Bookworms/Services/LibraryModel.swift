@@ -236,9 +236,9 @@ final class LibraryModel {
         return hardcoverConnected ? token : nil
     }
 
-    /// Replaces an access token that Hardcover rejected during social sync, sharing any renewal
-    /// in progress. Shows **Reconnect Hardcover** and rethrows the rejection when the login can't
-    /// be renewed.
+    /// Replaces an access token that Hardcover rejected during social sync or a reviews request,
+    /// sharing any renewal in progress. Shows **Reconnect Hardcover** and rethrows the rejection
+    /// when the login can't be renewed.
     func renewHardcoverToken(rejected token: String) async throws -> String {
         do {
             if let renewed = try await hardcoverSession.renew(rejected: token), renewed != token {
