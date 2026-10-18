@@ -120,6 +120,35 @@ final class HardcoverAuthenticationTests: XCTestCase {
         } catch { XCTFail("Unexpected error: \(error)") }
     }
 
+    func testTokenResponseDropsAMalformedRefreshTokenOrExpiry() throws {
+        for json in [
+            #"{"access_token":"hc_at_fixture","refresh_token":"hc_rt two words","expires_in":"604800"}"#,
+            #"{"access_token":"hc_at_fixture","refresh_token":42,"expires_in":604800.5}"#,
+            #"{"access_token":"hc_at_fixture","refresh_token":null,"expires_in":null}"#,
+        ] {
+            let tokens = try JSONDecoder().decode(HardcoverTokens.self, from: Data(json.utf8))
+            XCTAssertEqual(tokens, HardcoverTokens(accessToken: "hc_at_fixture"), json)
+        }
+    }
+
+    @MainActor
+    func testRenewalIsDueADayEarlyOrHalfwayThroughAShortLifetime() {
+        let issued = Date(timeIntervalSince1970: 1_780_000_000)
+        func renewal(_ expiresIn: Int?, refreshToken: String? = "hc_rt_fixture") -> Date? {
+            HardcoverSession.renewalDate(
+                of: HardcoverTokens(
+                    accessToken: "hc_at_fixture", refreshToken: refreshToken,
+                    expiresIn: expiresIn),
+                issued: issued)
+        }
+        XCTAssertEqual(renewal(604_800), issued.addingTimeInterval(518_400))
+        XCTAssertEqual(renewal(172_800), issued.addingTimeInterval(86_400))
+        XCTAssertEqual(renewal(3_600), issued.addingTimeInterval(1_800))
+        XCTAssertNil(renewal(0))
+        XCTAssertNil(renewal(nil))
+        XCTAssertNil(renewal(604_800, refreshToken: nil), "A login without a refresh token")
+    }
+
     func testRevocationSendsTheRefreshToken() async throws {
         // The stub accepts only the exact form, with the `+` percent-encoded.
         try await client().revoke(refreshToken: "hc_rt_fixture+plus")

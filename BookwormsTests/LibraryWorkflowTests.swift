@@ -646,9 +646,19 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.start()
         let library = Task { await model.refresh(manual: true) }
         await fulfillment(of: [renewal.started], timeout: 5)
-        let social = Task { await model.hardcoverTokenForSync() }
-        let rejected = Task { try await model.renewHardcoverToken(rejected: "hc_at_fictional_1") }
-        for _ in 0..<20 { await Task.yield() }
+        // The model runs on the main actor, so each task reaches the shared renewal without
+        // suspending after it fulfills its expectation, and the test resumes only once both wait.
+        let socialJoined = expectation(description: "Social sync waits for the renewal")
+        let social = Task {
+            socialJoined.fulfill()
+            return await model.hardcoverTokenForSync()
+        }
+        let rejectedJoined = expectation(description: "A rejected request waits for the renewal")
+        let rejected = Task {
+            rejectedJoined.fulfill()
+            return try await model.renewHardcoverToken(rejected: "hc_at_fictional_1")
+        }
+        await fulfillment(of: [socialJoined, rejectedJoined], timeout: 5)
         renewal.resolve(fixture.tokens(2))
         await library.value
         let socialToken = await social.value
