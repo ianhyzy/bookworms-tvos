@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Keeps the saved Hardcover login in Keychain and renews its OAuth access token.
 ///
@@ -32,6 +33,8 @@ final class HardcoverSession {
     /// A refresh token Hardcover rejected during this launch. It isn't sent again, and the access
     /// token it would have replaced stays in use until Hardcover rejects that too.
     private var rejectedRefreshToken: String?
+    /// Keeps the app running while a renewal finishes after the reader leaves it.
+    private var backgroundTask = UIBackgroundTaskIdentifier.invalid
 
     init(dependencies: LibraryDependencies) { self.dependencies = dependencies }
 
@@ -116,6 +119,12 @@ final class HardcoverSession {
                 ?? dependencies.readCredential(Self.refreshAccount)
         else { return current }
         guard refreshToken != rejectedRefreshToken else { throw HardcoverError.invalidToken }
+        // Hardcover may spend the refresh token even if the app is suspended before the reply
+        // arrives, and the reply holds the only replacement. Ask for time to receive and save it.
+        backgroundTask = UIApplication.shared.beginBackgroundTask(
+            withName: "Hardcover token renewal"
+        ) { [weak self] in self?.endBackgroundTask() }
+        defer { endBackgroundTask() }
         let generation = generation
         let issued = dependencies.now()
         var tokens: HardcoverTokens
@@ -135,6 +144,12 @@ final class HardcoverSession {
             unsaved = (tokens, issued)
         }
         return tokens.accessToken
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
     }
 
     /// When tokens issued at `issued` are due for renewal: `renewalMargin` before they expire, or
