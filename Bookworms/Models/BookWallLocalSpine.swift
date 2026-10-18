@@ -60,8 +60,8 @@ enum BookWallLocalSpine {
     /// The companion design's face, or the genre face without one. A design in a face the type
     /// rules block shows in `SpineFontPolicy.allowedFontName(_:)`'s upright replacement, such
     /// as Bebas Neue for Impact. A face that slants by design shows in its stand-in family
-    /// (`SpineFontPolicy.standInFamily(for:)`) at the design's weight, such as Kalam Bold for
-    /// Dancing Script Bold. A face that is not installed shows in the design's system typeface.
+    /// (`SpineFontPolicy.standInFamily(for:)`) at the design's weight, or its Regular face, such
+    /// as Patrick Hand for Dancing Script Bold. A face that is not installed shows in the design's system typeface.
     static func typography(for book: Book, design: SpineDesignV1?) -> Typography {
         guard let design else { return Typography(fontName: fontName(for: book)) }
         let fontName = design.fontPostScriptName.map(SpineFontPolicy.allowedFontName)

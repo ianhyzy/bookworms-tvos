@@ -31,26 +31,30 @@ enum SpineFontPolicy {
     static let impactReplacement = "BebasNeue"
 
     /// Upright stand-ins, keyed by lowercased family without spaces, for Google Fonts families
-    /// that slant by design without declaring it: the allowed display or hand-drawn family
-    /// nearest in weight and role, as the iPhone companion maps them.
+    /// that slant by design without declaring it: the allowed display family nearest in weight
+    /// and role, or, for a script or hand-drawn family, Patrick Hand, an upright hand-drawn
+    /// face, as the iPhone companion maps them. Kalam, Caveat, Permanent Marker, and Shadows
+    /// Into Light declare no slant, but their letters lean, so they show as Patrick Hand too.
     static let slantedReplacements = [
         "bangers": "Bungee-Regular", "shrikhand": "ChangaOne",
-        "dancingscript": "Kalam-Regular", "pacifico": "PermanentMarker-Regular",
-        "satisfy": "Caveat-Regular", "greatvibes": "Caveat-Regular",
-        "lobster": "PermanentMarker-Regular", "courgette": "Kalam-Regular",
-        "homemadeapple": "Caveat-Regular", "rocksalt": "PermanentMarker-Regular",
+        "dancingscript": "PatrickHand-Regular", "pacifico": "PatrickHand-Regular",
+        "satisfy": "PatrickHand-Regular", "greatvibes": "PatrickHand-Regular",
+        "lobster": "PatrickHand-Regular", "courgette": "PatrickHand-Regular",
+        "homemadeapple": "PatrickHand-Regular", "rocksalt": "PatrickHand-Regular",
+        "kalam": "PatrickHand-Regular", "caveat": "PatrickHand-Regular",
+        "permanentmarker": "PatrickHand-Regular", "shadowsintolight": "PatrickHand-Regular",
     ]
 
     /// The Google Fonts family of each upright stand-in in `slantedReplacements`, by the
     /// PostScript name of its Regular face. Book Wall downloads and draws the family at the
     /// design's weight (`standInFamily(for:)`) and falls back to the Regular face.
     static let standInFamilies = [
-        "Bungee-Regular": "Bungee", "ChangaOne": "Changa One", "Kalam-Regular": "Kalam",
-        "PermanentMarker-Regular": "Permanent Marker", "Caveat-Regular": "Caveat",
+        "Bungee-Regular": "Bungee", "ChangaOne": "Changa One",
+        "PatrickHand-Regular": "Patrick Hand",
     ]
 
     /// Returns the Google Fonts family of the upright stand-in for `name`, a family or
-    /// PostScript name that slants by design, such as Kalam for "Dancing Script" or
+    /// PostScript name that slants by design, such as Patrick Hand for "Dancing Script" or
     /// "DancingScript-Bold". Returns `nil` for an allowed name and for a blocked name without a
     /// downloadable stand-in, such as Impact, whose replacement ships with tvOS.
     static func standInFamily(for name: String) -> String? {

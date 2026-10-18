@@ -64,7 +64,9 @@ actor GoogleFontLibrary {
     }
 
     private func directory(family: String, weight: Int) -> URL {
-        let key = SHA256.hash(data: Data("\(family):\(weight)".utf8))
+        // The key names the file rule (`fileName(for:in:)`), so a file that an earlier rule
+        // chose, such as League Gothic's condensed width, downloads again.
+        let key = SHA256.hash(data: Data("files-v2:\(family):\(weight)".utf8))
             .map { String(format: "%02x", $0) }.joined()
         return root.appending(path: key)
     }
@@ -150,29 +152,60 @@ actor GoogleFontLibrary {
         return font
     }
 
-    /// Returns the font file to download for `weight` from a family's upright `.ttf` file names,
-    /// as the iPhone companion chooses it: the static file of that weight, else the variable
-    /// file, else the static file of the nearest weight, else the first file.
+    /// Returns the font file to download for `weight` from a family's upright `.ttf` file names:
+    /// the static file of that weight, else the variable file, else the static file of the
+    /// nearest weight, at the regular width, and only for a family with no regular-width file,
+    /// in the same order among its width variants; else the first file. The rule matches the
+    /// iPhone companion's
+    /// (`SpineFamily.fileName(for:in:)` in the iOS app), so this app downloads the file whose
+    /// PostScript names a design records.
     ///
     /// A static file names its weight as a suffix, such as "Kalam-Bold.ttf". Of two equally
-    /// near static files, a weight above 500 takes the heavier and any other the lighter.
+    /// near static files, a weight above 500 takes the heavier and any other the lighter. Some
+    /// families ship width variants or optical sizes beside their regular files, named before
+    /// the weight, such as "NotoSans_ExtraCondensed-Bold.ttf" or "Merriweather_120pt-Bold.ttf".
+    /// Of the files of one weight and width, the optical size nearest 24 points comes first, then
+    /// the lowest name.
     static func fileName(for weight: Int, in names: [String]) -> String? {
         let weights = [
             "Thin": 100, "ExtraLight": 200, "Light": 300, "Regular": 400, "Medium": 500,
             "SemiBold": 600, "Bold": 700, "ExtraBold": 800, "Black": 900,
         ]
-        let nearestStatic =
-            names
-            .compactMap { name -> (name: String, weight: Int)? in
-                guard let style = name.dropLast(".ttf".count).split(separator: "-").last,
-                    let fileWeight = weights[String(style)]
-                else { return nil }
-                return (name, fileWeight)
+        let widths = ["Condensed", "Expanded", "Narrow", "Wide", "Compressed"]
+        func isWidthVariant(_ name: String) -> Bool { widths.contains { name.contains($0) } }
+        func opticalDistance(_ name: String) -> Int {
+            let size = name.split { $0 == "_" || $0 == "-" }.lazy
+                .compactMap { $0.hasSuffix("pt") ? Int($0.dropLast(2)) : nil }.first
+            return size.map { abs($0 - 24) } ?? 0
+        }
+        let ordered = names.sorted { lhs, rhs in
+            if isWidthVariant(lhs) != isWidthVariant(rhs) { return !isWidthVariant(lhs) }
+            let (left, right) = (opticalDistance(lhs), opticalDistance(rhs))
+            return left != right ? left < right : lhs < rhs
+        }
+        let statics = ordered.compactMap { name -> (name: String, weight: Int)? in
+            guard let style = name.dropLast(".ttf".count).split(separator: "-").last,
+                let fileWeight = weights[String(style)]
+            else { return nil }
+            return (name, fileWeight)
+        }
+        func isVariable(_ name: String) -> Bool {
+            name.contains("[") || name.contains("VariableFont")
+        }
+        // Regular-width files first, so a width variant of the exact weight never wins over a
+        // regular-width variable or nearer file.
+        for regularWidth in [true, false] {
+            let nearest = statics.filter { isWidthVariant($0.name) != regularWidth }
+                .min { nearer($0.weight, than: $1.weight, to: weight) }
+            if let nearest, nearest.weight == weight { return nearest.name }
+            if let variable = ordered.first(where: {
+                isVariable($0) && isWidthVariant($0) != regularWidth
+            }) {
+                return variable
             }
-            .min { nearer($0.weight, than: $1.weight, to: weight) }
-        if let nearestStatic, nearestStatic.weight == weight { return nearestStatic.name }
-        let variable = names.first { $0.contains("[") || $0.contains("VariableFont") }
-        return variable ?? nearestStatic?.name ?? names.first
+            if let nearest { return nearest.name }
+        }
+        return ordered.first
     }
 
     /// Returns the upright face nearest `weight` in `descriptors`, or `nil` when every face is

@@ -192,13 +192,16 @@ final class BookWallLocalSpineTests: XCTestCase {
     func testStandInsFollowTheDesignWeight() throws {
         let families = [
             "Bangers": "Bungee", "Bangers-Regular": "Bungee", "Shrikhand": "Changa One",
-            "Dancing Script": "Kalam", "DancingScript-Bold": "Kalam", "Great Vibes": "Caveat",
-            "Pacifico-Regular": "Permanent Marker",
+            "Dancing Script": "Patrick Hand", "DancingScript-Bold": "Patrick Hand",
+            "Great Vibes": "Patrick Hand", "Pacifico-Regular": "Patrick Hand",
+            // Faces whose letters lean without declaring a slant.
+            "Kalam-Bold": "Patrick Hand", "Caveat-Regular": "Patrick Hand",
+            "Shadows Into Light": "Patrick Hand",
         ]
         for (name, family) in families {
             XCTAssertEqual(SpineFontPolicy.standInFamily(for: name), family, name)
         }
-        for name in ["Bungee", "Kalam-Bold", "Lora", "Lora-BoldItalic", "Impact"] {
+        for name in ["Bungee", "PatrickHand-Regular", "Lora", "Lora-BoldItalic", "Impact"] {
             XCTAssertNil(SpineFontPolicy.standInFamily(for: name), name)
         }
 
@@ -257,5 +260,50 @@ final class BookWallLocalSpineTests: XCTestCase {
             XCTAssertEqual(GoogleFontLibrary.fileName(for: 700, in: [single]), single)
         }
         XCTAssertNil(GoogleFontLibrary.fileName(for: 400, in: []))
+    }
+
+    /// The same file lists and picks as the iOS app's
+    /// `testFontFilesPreferTheWeightThenTheRegularWidthAndTextSize`, so both apps download the
+    /// file whose PostScript names a design records.
+    func testFontFilesPreferTheRegularWidthAndTextSizeAsTheIPhoneDoes() {
+        let pick = GoogleFontLibrary.fileName(for:in:)
+        let noto = [
+            "NotoSans[wdth,wght].ttf", "static/NotoSans_Condensed-Bold.ttf",
+            "static/NotoSans_ExtraCondensed-Bold.ttf", "static/NotoSans-Bold.ttf",
+            "static/NotoSans-Regular.ttf",
+        ]
+        XCTAssertEqual(pick(700, noto), "static/NotoSans-Bold.ttf")
+        XCTAssertEqual(pick(500, noto), "NotoSans[wdth,wght].ttf")
+        let lato = ["Lato-Light.ttf", "Lato-Regular.ttf", "Lato-Bold.ttf"]
+        XCTAssertEqual(pick(500, lato), "Lato-Regular.ttf")
+        XCTAssertEqual(pick(600, lato), "Lato-Bold.ttf")
+        let archivo = ["static/ArchivoNarrow-Regular.ttf", "static/ArchivoNarrow-Bold.ttf"]
+        XCTAssertEqual(pick(700, archivo), "static/ArchivoNarrow-Bold.ttf")
+        let condensed = ["static/LeagueGothic_Condensed-Regular.ttf"]
+        XCTAssertEqual(pick(500, condensed), condensed[0])
+        let league = [
+            "LeagueGothic-Regular-VariableFont_wdth.ttf",
+            "static/LeagueGothic_Condensed-Regular.ttf", "static/LeagueGothic-Regular.ttf",
+        ]
+        XCTAssertEqual(pick(400, league), "static/LeagueGothic-Regular.ttf")
+        // A width variant of the exact weight gives way to a regular-width file.
+        let mixed = ["Family[wght].ttf", "static/Family_Condensed-Bold.ttf"]
+        XCTAssertEqual(pick(700, mixed), "Family[wght].ttf")
+        let staticsOnly = ["static/Family-Regular.ttf", "static/Family_Condensed-SemiBold.ttf"]
+        XCTAssertEqual(pick(600, staticsOnly), "static/Family-Regular.ttf")
+        let merriweather = [
+            "Merriweather-VariableFont_opsz,wdth,wght.ttf",
+            "static/Merriweather_120pt-SemiBold.ttf",
+            "static/Merriweather_120pt_SemiCondensed-SemiBold.ttf",
+            "static/Merriweather_24pt_SemiCondensed-SemiBold.ttf",
+            "static/Merriweather_24pt-SemiBold.ttf", "static/Merriweather_36pt-SemiBold.ttf",
+        ]
+        XCTAssertEqual(pick(600, merriweather), "static/Merriweather_24pt-SemiBold.ttf")
+        XCTAssertEqual(pick(500, merriweather), merriweather[0])
+        let bodoni = [
+            "static/BodoniModa_9pt-Bold.ttf", "static/BodoniModa_18pt-Bold.ttf",
+            "static/BodoniModa_28pt-Bold.ttf", "static/BodoniModa_72pt-Bold.ttf",
+        ]
+        XCTAssertEqual(pick(700, bodoni), "static/BodoniModa_28pt-Bold.ttf")
     }
 }
