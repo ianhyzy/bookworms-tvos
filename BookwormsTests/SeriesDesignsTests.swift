@@ -320,10 +320,13 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(request("EB Garamond", "EBGaramond-Bold"), "EB Garamond:700")
         XCTAssertEqual(request("Lora", "Lora-BoldIt"), "Lora:700")
         // A slanted family downloads its stand-in at the design's weight, never itself.
-        XCTAssertEqual(request("Dancing Script", "DancingScript-Bold"), "Kalam:700")
-        XCTAssertEqual(request("Dancing Script", "DancingScript-Bold", weight: 500), "Kalam:500")
+        XCTAssertEqual(request("Dancing Script", "DancingScript-Bold"), "Patrick Hand:700")
+        XCTAssertEqual(
+            request("Dancing Script", "DancingScript-Bold", weight: 500), "Patrick Hand:500")
         XCTAssertEqual(request("Bangers", "Bangers-Regular"), "Bungee:700")
-        XCTAssertEqual(request(nil, "Pacifico-Regular", weight: 600), "Permanent Marker:600")
+        XCTAssertEqual(request(nil, "Pacifico-Regular", weight: 600), "Patrick Hand:600")
+        // A face whose letters lean downloads the upright stand-in too.
+        XCTAssertEqual(request("Caveat", "Caveat-Regular"), "Patrick Hand:700")
         XCTAssertNil(request("Impact", "Impact"), "Bebas Neue ships with tvOS")
         for standIn in Set(SpineFontPolicy.slantedReplacements.values) {
             XCTAssertNotNil(SpineFontPolicy.standInFamilies[standIn], standIn)

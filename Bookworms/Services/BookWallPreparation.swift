@@ -299,8 +299,8 @@ extension BookWallPreparation {
     /// unreachable host delays the wall by at most one request timeout.
     ///
     /// A face counts as registered only at the requested weight: a stand-in family's face of
-    /// that weight, or the design's own face by name. A registered Kalam Regular, for example,
-    /// does not stand in for Kalam Bold.
+    /// that weight, or the design's own face by name. A family's registered Regular face, for
+    /// example, does not stand in for its Bold.
     fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
         var requested = Set<String>()
         for design in designs {
