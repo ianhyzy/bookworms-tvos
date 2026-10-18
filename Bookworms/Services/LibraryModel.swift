@@ -35,6 +35,9 @@ final class LibraryModel {
         didSet {
             let years = YearInReview.all(from: allBooks)
             if years != readingYears { readingYears = years }
+            let offersOwned =
+                BookPresentation.offersCWA && allBooks.contains { $0.isOwned == true }
+            if offersOwned != offersOwnedBooks { offersOwnedBooks = offersOwned }
             refreshSeriesSources()
             refreshOnThisDay()
         }
@@ -116,6 +119,22 @@ final class LibraryModel {
     /// Year in Review statistics for every year with a finished book, most recent first.
     /// Prepared when the library changes, so the view only reads them.
     private(set) var readingYears: [YearInReview] = []
+    /// Whether **Owned Books** can show anything: CWA, the only source that marks books owned,
+    /// is offered, and the library has an owned book. Prepared with the library.
+    private(set) var offersOwnedBooks = false
+    /// The collections **Settings → Shelf** offers.
+    var shelfCollections: [ShelfCollection] {
+        ShelfCollection.allCases.filter { $0 != .owned || offersOwnedBooks }
+    }
+    /// The shelf choices in effect. A saved **Owned Books** shows the default collection while
+    /// Owned Books isn't offered, and returns when it is.
+    var activeShelfPreferences: ShelfPreferences {
+        var preferences = shelfPreferences
+        if !shelfCollections.contains(preferences.collection) {
+            preferences.collection = ShelfPreferences().collection
+        }
+        return preferences
+    }
     private(set) var hasLoadedLibrarySnapshot = false
     /// Limits My Shelf to one author or genre until cleared. Not saved.
     var shelfFilter: ShelfFilter? {
@@ -1145,7 +1164,7 @@ final class LibraryModel {
         books =
             isSample
             ? Array(source.prefix(bookCount))
-            : shelfPreferences.select(source, limit: bookCount)
+            : activeShelfPreferences.select(source, limit: bookCount)
         if !isSample {
             restoreSavedStyles(books)
             restoreVisibleFonts()
@@ -1520,7 +1539,7 @@ final class LibraryModel {
         // Top Shelf mirrors the unfiltered shelf.
         let shelf =
             shelfFilter == nil || isSample
-            ? books : shelfPreferences.select(allBooks, limit: bookCount)
+            ? books : activeShelfPreferences.select(allBooks, limit: bookCount)
         let items: [TopShelfBook] =
             isSample
             ? []

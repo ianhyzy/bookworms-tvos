@@ -43,6 +43,29 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.cloudStatus, "iCloud storage waits until setup finishes.")
     }
 
+    func testOwnedBooksIsOfferedOnlyWhenItCanShowBooks() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "hasCompletedWelcome")
+        fixture.defaults.set(
+            try JSONEncoder().encode(ShelfPreferences(collection: .owned)),
+            forKey: "shelfPreferences")
+        var owned = fixture.book(2)
+        owned.isOwned = true
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1), owned])])
+        let model = LibraryModel(dependencies: fixture.dependencies())
+
+        await model.start()
+        XCTAssertEqual(
+            model.shelfCollections.contains(.owned), BookPresentation.offersCWA,
+            "Only the CWA source marks books owned")
+        XCTAssertEqual(model.shelfPreferences.collection, .owned, "The saved choice stays")
+        if !BookPresentation.offersCWA {
+            XCTAssertEqual(model.activeShelfPreferences.collection, ShelfPreferences().collection)
+            XCTAssertEqual(Set(model.books.map(\.id)), [1, 2])
+        }
+    }
+
     func testAnOlderSnapshotOfAnotherAccountDoesNotMakeHardcoverDue() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

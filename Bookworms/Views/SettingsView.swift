@@ -234,8 +234,13 @@ struct SettingsView: View {
     private var shelfSettings: some View {
         columns {
             settingLabel("Collection", "Choose which books appear.")
-            Picker("Show", selection: $library.shelfPreferences.collection) {
-                ForEach(ShelfCollection.allCases) {
+            Picker(
+                "Show",
+                selection: Binding(
+                    get: { library.activeShelfPreferences.collection },
+                    set: { library.shelfPreferences.collection = $0 })
+            ) {
+                ForEach(library.shelfCollections) {
                     Text($0.rawValue).font(.system(size: 26)).tag($0)
                 }
             }

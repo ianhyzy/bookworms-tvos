@@ -93,6 +93,16 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(books.first { $0.id == 3 }?.readCount, 0)
     }
 
+    func testIgnoredBooksAreLeftOut() throws {
+        let json = """
+            [{"id":1,"status_id":6,"last_read_date":"2025-01-01","book":{"id":1,"title":"Ignored"}},
+             {"id":2,"status_id":1,"book":{"id":2,"title":"Want to Read"}}]
+            """
+        let books = HardcoverClient.normalize(
+            try JSONDecoder().decode([UserBook].self, from: Data(json.utf8)))
+        XCTAssertEqual(books.map(\.id), [2])
+    }
+
     func testSnapshotsWithoutFinishedDatesStillDecode() throws {
         let old = #"{"id":1,"title":"Old","author":"Author","finished":"2025-01-02"}"#
         let book = try JSONDecoder().decode(Book.self, from: Data(old.utf8))
