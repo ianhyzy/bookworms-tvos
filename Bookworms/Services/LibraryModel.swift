@@ -218,8 +218,8 @@ final class LibraryModel {
     }
 
     /// Reads the active Hardcover credential only at an explicit synchronization boundary,
-    /// renewing it first when it expires soon (`HardcoverSession`). Returns `nil`, and shows
-    /// **Reconnect Hardcover**, when Hardcover rejects the saved refresh token.
+    /// renewing it first when it's due (`HardcoverSession`). A request that Hardcover rejects
+    /// renews with `renewHardcoverToken(rejected:)`.
     func hardcoverTokenForSync() async -> String? {
         guard hardcoverEnabled, hardcoverConnected, !isSample else { return nil }
         #if DEBUG && targetEnvironment(simulator)
@@ -231,14 +231,9 @@ final class LibraryModel {
                 return hardcoverSession.storedAccessToken() ?? token
             }
         #endif
-        do {
-            let token = try await hardcoverSession.accessToken()
-            // A disconnect during the renewal wins.
-            return hardcoverConnected ? token : nil
-        } catch {
-            if hardcoverConnected { hardcoverSessionExpired = true }
-            return nil
-        }
+        let token = await hardcoverSession.accessToken()
+        // A disconnect during the renewal wins.
+        return hardcoverConnected ? token : nil
     }
 
     /// Replaces an access token that Hardcover rejected during social sync, sharing any renewal
@@ -867,7 +862,7 @@ final class LibraryModel {
                     .begin(
                         .hardcover, now: dependencies.now(), manual: manual,
                         hasSnapshot: hasActiveSnapshot(.hardcover))
-                let token = try await hardcoverSession.renewedIfExpiring(savedToken)
+                let token = await hardcoverSession.renewedIfExpiring(savedToken)
                 let result: HardcoverLibrary
                 do {
                     result = try await dependencies.fetchHardcover(token, activeHardcoverSnapshot())

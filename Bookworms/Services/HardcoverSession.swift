@@ -29,6 +29,9 @@ final class HardcoverSession {
     /// Renewed tokens that Keychain refused to save. They replace the saved ones for this launch,
     /// so the spent refresh token is never sent again, and each later boundary retries the save.
     private var unsaved: (tokens: HardcoverTokens, issued: Date)?
+    /// A refresh token Hardcover rejected during this launch. It isn't sent again, and the access
+    /// token it would have replaced stays in use until Hardcover rejects that too.
+    private var rejectedRefreshToken: String?
 
     init(dependencies: LibraryDependencies) { self.dependencies = dependencies }
 
@@ -55,17 +58,17 @@ final class HardcoverSession {
 
     /// The access token for a sync, renewed first when it's due (`renewalDate(of:issued:)`).
     ///
-    /// Throws `HardcoverError.invalidToken` when Hardcover rejects the refresh token. Any other
-    /// renewal failure returns the saved token, which may still work; a request it fails renews
-    /// again (`renew(rejected:)`).
-    func accessToken() async throws -> String? {
+    /// A renewal that fails, even one Hardcover rejects, returns the saved token, which may still
+    /// work until it expires. A request that Hardcover rejects renews with `renew(rejected:)`,
+    /// which reports a rejected refresh token.
+    func accessToken() async -> String? {
         guard let token = storedAccessToken() else { return nil }
-        return try await renewedIfExpiring(token)
+        return await renewedIfExpiring(token)
     }
 
-    /// `token`, the saved access token, or its replacement when it's due for renewal. Fails like
-    /// `accessToken()`.
-    func renewedIfExpiring(_ token: String) async throws -> String {
+    /// `token`, the saved access token, or its replacement when it's due for renewal. Fails over
+    /// to `token` like `accessToken()`.
+    func renewedIfExpiring(_ token: String) async -> String {
         if let unsaved, (try? write(unsaved.tokens, issued: unsaved.issued)) != nil {
             self.unsaved = nil
         }
@@ -77,17 +80,13 @@ final class HardcoverSession {
                 dependencies.defaults.object(forKey: Self.renewalKey) as? Date
             }
         guard let renewal, dependencies.now() >= renewal else { return token }
-        do {
-            return try await renew(rejected: token) ?? token
-        } catch HardcoverError.invalidToken {
-            throw HardcoverError.invalidToken
-        } catch {
-            return token
-        }
+        return (try? await renew(rejected: token)) ?? token
     }
 
     /// An access token to use in place of `rejected`: the saved one when another sync already
-    /// replaced it, else a renewed one. Returns `nil` when no login or refresh token is saved.
+    /// replaced it, else a renewed one. Returns `nil` when no login or refresh token is saved,
+    /// and throws `HardcoverError.invalidToken` when Hardcover rejects the refresh token, now or
+    /// earlier in this launch.
     ///
     /// Concurrent callers share one renewal. The request runs in its own task, so cancelling a
     /// sync never abandons tokens Hardcover already rotated.
@@ -105,9 +104,16 @@ final class HardcoverSession {
             let refreshToken = unsaved?.tokens.refreshToken
                 ?? dependencies.readCredential(Self.refreshAccount)
         else { return current }
+        guard refreshToken != rejectedRefreshToken else { throw HardcoverError.invalidToken }
         let generation = generation
         let issued = dependencies.now()
-        var tokens = try await dependencies.refreshHardcoverToken(refreshToken)
+        var tokens: HardcoverTokens
+        do {
+            tokens = try await dependencies.refreshHardcoverToken(refreshToken)
+        } catch HardcoverError.invalidToken {
+            rejectedRefreshToken = refreshToken
+            throw HardcoverError.invalidToken
+        }
         // RFC 6749 keeps the old refresh token when a response omits a replacement.
         tokens.refreshToken = tokens.refreshToken ?? refreshToken
         guard generation == self.generation else { return storedAccessToken() }
