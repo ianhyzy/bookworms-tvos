@@ -69,11 +69,16 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
 
     var preferredCoverURL: URL? { chosenCoverURL ?? detailCoverURL ?? coverURL }
 
-    /// Every recorded finish date, newest first.
-    var finishes: [String] { finishedDates ?? (finished.map { [$0] } ?? []) }
+    /// Every recorded finish date, newest first: `finishedDates`, else `finished` alone. An empty
+    /// `finishedDates` counts as absent, as on the iPhone, so a book with `finished` always has a
+    /// finish.
+    var finishes: [String] {
+        if let finishedDates, !finishedDates.isEmpty { return finishedDates }
+        return finished.map { [$0] } ?? []
+    }
 
     /// How many times the reader finished the book.
-    var readCount: Int { finishedDates?.count ?? (finished == nil ? 0 : 1) }
+    var readCount: Int { finishes.count }
 
     /// The book as one time frame shows it: with `date`, one of its finishes, as `finished`.
     /// Views that group books by finish date use it, so a reread joins each year it was finished

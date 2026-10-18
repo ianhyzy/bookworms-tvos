@@ -120,6 +120,10 @@ final class LibraryTests: XCTestCase {
         let book = try JSONDecoder().decode(Book.self, from: Data(old.utf8))
         XCTAssertNil(book.finishedDates)
         XCTAssertEqual(book.finishes, ["2025-01-02"])
+        var empty = book
+        empty.finishedDates = []
+        XCTAssertEqual(empty.finishes, ["2025-01-02"], "An empty list counts as absent")
+        XCTAssertEqual(empty.readCount, 1)
         var reread = book
         reread.finishedDates = ["2025-01-02", "2020-01-01"]
         let encoded = try JSONEncoder().encode(reread)
