@@ -139,6 +139,40 @@ final class BookWallLayoutTests: XCTestCase {
             CGFloat(slot.spineWallWidth) / CGFloat(slot.spineWallHeight), accuracy: 0.03)
     }
 
+    @MainActor
+    func testShelfFrontGrowsDownwardUntilTheLabelMeetsTheMinimum() {
+        // Very long books reach `maximumBookLength`, so every column takes its widest lane and
+        // the camera frames each column count from as far away as it can.
+        func wall(_ count: Int) -> BookWallLayout {
+            BookWallLayout(
+                books: (1...count)
+                    .map { Book(id: $0, title: "Book \($0)", author: "Author", pages: 1_400) })
+        }
+        let minimum = BookWallScene.minimumShelfThickness
+        for (count, columns) in [(8, 3), (30, 3), (40, 4), (50, 5)] {
+            let layout = wall(count)
+            XCTAssertEqual(layout.columns, columns)
+            XCTAssertEqual(
+                layout.totalWidth, Float(columns) * (BookWallLayout.maximumBookLength + 0.24),
+                accuracy: 0.001)
+            let thickness = BookWallScene.shelfThickness(for: layout)
+            XCTAssertGreaterThanOrEqual(
+                BookWallScene.labelPoints(for: layout, shelfThickness: thickness),
+                BookWallScene.minimumLabelPoints)
+            if columns == 3 {
+                XCTAssertEqual(thickness, minimum)
+            } else {
+                // The front is no taller than the minimum needs.
+                XCTAssertLessThan(
+                    BookWallScene.labelPoints(for: layout, shelfThickness: thickness - 0.01),
+                    BookWallScene.minimumLabelPoints)
+            }
+        }
+        XCTAssertGreaterThan(
+            BookWallScene.shelfThickness(for: wall(50)),
+            BookWallScene.shelfThickness(for: wall(40)))
+    }
+
     func testDeviceGateStartsAtAppleTV4KSecondGeneration() {
         XCTAssertFalse(BookWallAvailability.supports(machineIdentifier: "AppleTV6,2"))
         XCTAssertTrue(BookWallAvailability.supports(machineIdentifier: "AppleTV11,1"))
