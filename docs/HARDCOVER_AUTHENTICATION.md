@@ -43,7 +43,7 @@ Select **Connect Hardcover** in the popup, or open **Settings → Sources → Co
 2. Check or enter the 8-character code shown beside it and select **Authorize**.
 3. Your Apple TV checks the account, downloads the library, and saves it automatically after you approve.
 
-The card requests a code as soon as it opens and requests another when that code expires. While a code loads or shows, **New code** is the card's only control; it replaces the code, for example after Hardcover rejects it. A loading card shows account validation, library download, and saving progress. A failed connection returns to the sign-in card with an error and controls to try again.
+The card requests a code as soon as it opens and requests another when that code expires. While a code loads or shows, **New code** is the card's only control; it replaces the code, for example after Hardcover rejects it. A loading card shows account validation, library download, and saving progress. A failed connection returns to the sign-in card with an error and **Get link code** to try again.
 
 If authorization completes while another library operation is running, the app clears the consumed code and asks you to try again after that operation finishes. Select **Get link code** to request a fresh code. The app keeps the existing account and shelf until a new connection succeeds.
 
