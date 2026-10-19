@@ -109,7 +109,7 @@ final class LibraryTests: XCTestCase {
         XCTAssertTrue(renderer.image(for: link) === code, "A drawn code is reused")
     }
 
-    func testIgnoredBooksAreLeftOut() throws {
+    func testIgnoredBooksAreLeftOutAndOthersKeepTheirShelf() throws {
         let json = """
             [{"id":1,"status_id":6,"last_read_date":"2025-01-01","book":{"id":1,"title":"Ignored"}},
              {"id":2,"status_id":1,"book":{"id":2,"title":"Want to Read"}}]
@@ -117,12 +117,17 @@ final class LibraryTests: XCTestCase {
         let books = HardcoverClient.normalize(
             try JSONDecoder().decode([UserBook].self, from: Data(json.utf8)))
         XCTAssertEqual(books.map(\.id), [2])
+        XCTAssertEqual(books.first?.statusID, 1)
+        // The shelf travels with the book in the iCloud archive, where the iPhone reads it.
+        let archived = try JSONDecoder().decode([Book].self, from: JSONEncoder().encode(books))
+        XCTAssertEqual(archived.first?.statusID, 1)
     }
 
     func testSnapshotsWithoutFinishedDatesStillDecode() throws {
         let old = #"{"id":1,"title":"Old","author":"Author","finished":"2025-01-02"}"#
         let book = try JSONDecoder().decode(Book.self, from: Data(old.utf8))
         XCTAssertNil(book.finishedDates)
+        XCTAssertNil(book.statusID)
         XCTAssertEqual(book.finishes, ["2025-01-02"])
         var empty = book
         empty.finishedDates = []

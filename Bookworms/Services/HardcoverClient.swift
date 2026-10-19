@@ -725,7 +725,8 @@ actor HardcoverClient {
     /// (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`).
     ///
     /// Each finished read's date goes into `finishedDates`, newest first, and the newest is
-    /// `finished`. A book without finished reads keeps `last_read_date` as `finished` alone.
+    /// `finished`. A book without finished reads keeps `last_read_date` as `finished` alone. Each
+    /// book keeps its shelf in `statusID`.
     static func normalize(_ rows: [UserBook], previous: [Int: Book] = [:]) -> [Book] {
         var unique: [Int: Book] = [:]
         for row in rows where row.statusID != Self.ignoredStatus {
@@ -766,6 +767,7 @@ actor HardcoverClient {
                 detailCoverURL: covers.preferred, sources: [.hardcover],
                 isRead: row.statusID == Self.readStatus || !finishes.isEmpty
                     || row.lastReadDate != nil,
+                statusID: row.statusID,
                 publicationYear: source.releaseYear,
                 isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
                 progress: row.statusID == Self.currentlyReadingStatus
