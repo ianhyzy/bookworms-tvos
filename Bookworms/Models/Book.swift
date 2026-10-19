@@ -38,6 +38,10 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var sources: [LibrarySource]?
     var isOwned: Bool?
     var isRead: Bool?
+    /// Hardcover's shelf for the book (`user_books.status_id`), such as 1 for **Want to Read**.
+    /// Snapshots saved before statuses were fetched decode it as `nil` until the next sync. The
+    /// iPhone reads it from the iCloud archive.
+    var statusID: Int? = nil
     var publicationYear: Int?
     /// Whether the book is on the reader's Hardcover **Currently Reading** shelf.
     var isReading: Bool?

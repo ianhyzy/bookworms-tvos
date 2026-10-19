@@ -166,6 +166,7 @@ Follow [the testing procedure](TESTING.md) and keep results with the exact candi
 - On Apple TV: navigation and focus, covers and shelf layout, both appearances, VoiceOver, Reduce Motion, Top Shelf, and ambient sessions.
 - From viewing distance on Apple TV: legible captions and headings, with no user-visible text below 23 points, in details, the series pop-up, Feed cards, and the Ambient page; Book Wall's shelf label on a wall with the most columns the library produces.
 - Hardcover connection, explicit sync, automatic daily limits, offline recovery, and social views with spoiler controls.
+- On a signed Apple TV, a real Hardcover sign-in and a token renewal through `api.hardcover.app/oauth2/device` and `api.hardcover.app/oauth2/token`. Tests answer these endpoints with stubs, so only a real login shows that Hardcover serves them there. Don't replay a spent refresh token to see Hardcover's reply: that revokes the login. The tests cover the reply instead.
 - Release-build launch and interaction profiling without coverage instrumentation.
 
 ## Encryption declaration

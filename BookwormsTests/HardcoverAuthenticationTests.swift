@@ -120,6 +120,23 @@ final class HardcoverAuthenticationTests: XCTestCase {
         } catch { XCTFail("Unexpected error: \(error)") }
     }
 
+    func testOnlyInvalidGrantWithHTTP400Or401RejectsTheRefreshToken() async {
+        let cases: [(token: String, expected: HardcoverError)] = [
+            ("hc_rt_spent", .invalidToken), ("hc_rt_unknown_client", .http(401)),
+            ("hc_rt_html", .http(400)), ("hc_rt_numeric_error", .http(400)),
+            ("hc_rt_forbidden", .http(403)), ("hc_rt_limited", .http(429)),
+        ]
+        for (token, expected) in cases {
+            do {
+                _ = try await client().refreshTokens(token)
+                XCTFail("\(token) must fail.")
+            } catch {
+                // `HardcoverError` isn't `Equatable`; its cases describe themselves.
+                XCTAssertEqual(String(describing: error), String(describing: expected), token)
+            }
+        }
+    }
+
     func testTokenResponseDropsAMalformedRefreshTokenOrExpiry() throws {
         for json in [
             #"{"access_token":"hc_at_fixture","refresh_token":"hc_rt two words","expires_in":"604800"}"#,
@@ -308,6 +325,21 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
                     }
                     if bodyString.contains("refresh_token=hc_rt_unavailable") {
                         return (503, #"{"error":"temporarily_unavailable"}"#)
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_unknown_client") {
+                        return (401, #"{"error":"invalid_client"}"#)
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_html") {
+                        return (400, "<html>Bad request</html>")
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_numeric_error") {
+                        return (400, #"{"error":400}"#)
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_forbidden") {
+                        return (403, #"{"error":"access_denied"}"#)
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_limited") {
+                        return (429, #"{"error":"slow_down"}"#)
                     }
                     return (400, #"{"error":"invalid_grant"}"#)
                 } else if bodyString.contains("grant_type=authorization_code") {
