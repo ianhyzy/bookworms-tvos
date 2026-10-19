@@ -120,9 +120,9 @@ final class HardcoverAuthenticationTests: XCTestCase {
         } catch { XCTFail("Unexpected error: \(error)") }
     }
 
-    func testOnlyAnOAuthErrorWithHTTP400Or401RejectsTheRefreshToken() async {
+    func testOnlyInvalidGrantWithHTTP400Or401RejectsTheRefreshToken() async {
         let cases: [(token: String, expected: HardcoverError)] = [
-            ("hc_rt_spent", .invalidToken), ("hc_rt_unknown_client", .invalidToken),
+            ("hc_rt_spent", .invalidToken), ("hc_rt_unknown_client", .http(401)),
             ("hc_rt_html", .http(400)), ("hc_rt_numeric_error", .http(400)),
             ("hc_rt_forbidden", .http(403)), ("hc_rt_limited", .http(429)),
         ]

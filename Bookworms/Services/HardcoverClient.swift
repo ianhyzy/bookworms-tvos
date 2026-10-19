@@ -251,11 +251,12 @@ actor HardcoverClient {
     /// twice, so this request never retries: a response lost after Hardcover accepted the token
     /// can't be recovered by resending it. Only `HardcoverSession` calls it.
     ///
-    /// Throws `HardcoverError.invalidToken` only for an HTTP 400 or 401 reply with an OAuth
-    /// `error`, such as `invalid_grant` for a token that expired, was revoked, or was spent; the
-    /// iPhone, Mac, and Android apps apply the same rule. Any other reply, such as a rate limit, a
-    /// server error, another 4xx status, or a body that isn't an OAuth error, throws
-    /// `HardcoverError.http(_:)` and leaves the token unspent or unknown.
+    /// Throws `HardcoverError.invalidToken` only for an HTTP 400 or 401 reply with the OAuth
+    /// error `invalid_grant`, which RFC 6749 sends for a token that expired, was revoked, or was
+    /// spent; the iPhone, Mac, and Android apps apply the same rule. Any other reply, such as a
+    /// rate limit, a server error, another 4xx status, another OAuth error such as
+    /// `invalid_client`, or a body that isn't an OAuth error, throws `HardcoverError.http(_:)` and
+    /// leaves the token unspent or unknown.
     func refreshTokens(_ refreshToken: String) async throws -> HardcoverTokens {
         let refreshToken = try HardcoverToken(refreshToken).value
         // Omitting `scope` keeps the scopes the reader approved.
@@ -267,7 +268,7 @@ actor HardcoverClient {
                 "client_id": Self.clientID,
             ])
         if http.statusCode == 400 || http.statusCode == 401,
-            (try? JSONDecoder().decode(OAuthErrorReply.self, from: data))?.error != nil
+            (try? JSONDecoder().decode(OAuthErrorReply.self, from: data))?.error == "invalid_grant"
         {
             throw HardcoverError.invalidToken
         }
