@@ -412,6 +412,7 @@
         private var unexpectedCount = 0
         private var unexpectedURLs: [String] = []
         private var deliveredArtwork = 0
+        private var deviceRequests = 0
 
         var artworkRoot: URL? { lock.withLock { root } }
 
@@ -429,6 +430,7 @@
                 requestCount = 0
                 unexpectedCount = 0
                 deliveredArtwork = 0
+                deviceRequests = 0
             }
         }
 
@@ -451,6 +453,7 @@
                 if url.absoluteString == "https://api.hardcover.app/oauth2/device",
                     request.request.httpMethod == "POST"
                 {
+                    deviceRequests += 1
                     if scenario == "offline" { return (-1, Data()) }
                     if scenario == "error" { return (401, Data()) }
                     return (
@@ -562,6 +565,7 @@
                     "requests": requestCount, "unexpected": unexpectedCount,
                     "unexpectedURLs": unexpectedURLs,
                     "heldArtwork": pending.count, "deliveredArtwork": deliveredArtwork,
+                    "deviceRequests": deviceRequests,
                     "heldAuthorization": pendingAuthorization.count,
                     "heldLibrary": pendingLibrary.count,
                 ]

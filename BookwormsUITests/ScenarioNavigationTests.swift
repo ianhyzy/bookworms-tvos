@@ -138,6 +138,20 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(try probe(app)["sourceCalls"] as? Int, 0)
     }
 
+    /// **New code** stays mounted while it requests the replacement code, so it keeps focus.
+    func testHardcoverNewCodeKeepsFocusWhileRequestingAnotherCode() throws {
+        let app = launch("welcome", focusProbe: true)
+        try openWelcomeHardcover(app)
+        let newCode = app.buttons["hardcover-new-code"]
+        RemoteNavigation.pressWithoutMoving(.select, in: app, from: newCode)
+        _ = try waitForProbe(app) {
+            let network = $0["network"] as? [String: Any]
+            return network?["deviceRequests"] as? Int == 2
+                && network?["heldAuthorization"] as? Int == 1
+        }
+        XCTAssertTrue(RemoteNavigation.isFocused(newCode))
+    }
+
     /// **Get link code** is the card's only control after a failed connection.
     func testHardcoverRetrySectionHasCountedDirectionalBoundaries() throws {
         let app = launch("welcome-error", focusProbe: true)

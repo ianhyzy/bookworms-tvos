@@ -96,6 +96,10 @@ struct HardcoverConnectionView: View {
                             .appFont(size: 26).foregroundStyle(.secondary)
                     }
                     .accessibilityIdentifier("hardcover-device-status")
+                }
+                // Requesting a code clears the old one first, so stay mounted while loading too;
+                // otherwise the focused button disappears and the card has nothing to focus.
+                if library.hardcoverDeviceAuth != nil || library.hardcoverDeviceAuthLoading {
                     Button("New code") { library.startHardcoverDeviceAuth() }
                         .appFont(size: 24)
                         .performanceGlassButton()
