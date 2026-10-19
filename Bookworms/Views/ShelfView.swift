@@ -905,11 +905,15 @@ struct ShelfView: View {
     /// starting playback directly, so moving focus through the sidebar never starts it.
     private var ambientLauncher: some View {
         let available = !availableAmbientViews.isEmpty && !voiceOver
-        return VStack(spacing: 26) {
-            Image(systemName: "play.rectangle").appFont(size: 80, weight: .ultraLight)
-                .foregroundStyle(palette.text)
-                .accessibilityHidden(true)
-            Text("Ambient mode").appFont(size: 42).foregroundStyle(palette.text)
+        // The symbol sits beside the title, so the introduction keeps all its lines above the
+        // two columns inside the TV safe area.
+        return VStack(spacing: 22) {
+            HStack(spacing: 20) {
+                Image(systemName: "play.rectangle").appFont(size: 52, weight: .ultraLight)
+                    .accessibilityHidden(true)
+                Text("Ambient mode").appFont(size: 42)
+            }
+            .foregroundStyle(palette.text)
             Text(
                 voiceOver
                     ? "Ambient mode is unavailable while VoiceOver is running."
@@ -917,7 +921,8 @@ struct ShelfView: View {
                         ? "Ambient mode needs at least one chosen view with content."
                         : "Rotates the views you choose below on a dimmed screen. Content changes every minute. Press any button to stop."
             )
-            .appFont(size: 25).multilineTextAlignment(.center).frame(maxWidth: 850)
+            .appFont(size: 28).multilineTextAlignment(.center).frame(maxWidth: 900)
+            .fixedSize(horizontal: false, vertical: true)
             .foregroundStyle(palette.text)
             // Two columns, like Settings: timing on the left, views on the right. Each column is a
             // focus section so Left and Right move between them from any row.
@@ -956,7 +961,7 @@ struct ShelfView: View {
                         Text(
                             "Guests can scan it to open your profile. It appears below the content in ambient mode."
                         )
-                        .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
+                        .appFont(size: 24).foregroundStyle(palette.text).opacity(0.7)
                         .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -979,7 +984,7 @@ struct ShelfView: View {
                         .accessibilityIdentifier("ambient-view-\(view)")
                     }
                     Text("Hiding a view from the menu doesn't remove it here.")
-                        .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
+                        .appFont(size: 24).foregroundStyle(palette.text).opacity(0.7)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(width: 460)
