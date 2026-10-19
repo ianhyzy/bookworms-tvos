@@ -95,14 +95,14 @@ Check each item that your change touches. These are the problems CodeRabbit find
 
 - **After an `await` or a delay,** recheck the state the action needs before acting, and cancel the task when its view resets. Run a cache lookup, match, and insert under the same lock that invalidation takes, as `GoogleFontLibrary.registeredFacesLock` does.
 - **Hardcover tokens.** Only HTTP 400 or 401 with OAuth error `invalid_grant` ends a login. Keep the token for `invalid_client`, other OAuth errors, timeouts, and malformed replies. Renew at most once per social load. When a renewal finishes after the login was removed or replaced, revoke the rotated refresh token. Release checks never replay a spent refresh token, which revokes the login.
-- **Shared records.** Keep `Bookworms/Models/SeriesDesigns.swift` identical to the iPhone app's copy. Keep fields the iPhone app writes when you re-encode its records, reject malformed values instead of replacing them, and trim archived text with `.whitespacesAndNewlines`. A failed fetch is a failure, never an empty list.
+- **Shared records.** Keep the series rules and tables in `Bookworms/Models/SeriesDesigns.swift` the same as the iPhone app's copy; each copy keeps its own types. Keep fields the iPhone app writes when you re-encode its records, reject malformed values instead of replacing them, and trim archived text with `.whitespacesAndNewlines`. A failed fetch is a failure, never an empty list.
 - **Legibility.** User-visible text is at least 23 pt and uses `appFont(size:weight:)`. Text drawn into a RealityKit texture counts by its size on screen.
 - **Tests.** When you change a table that tests pin, such as `slantedReplacements`, search the tests for its entries and update their expectations. Fixtures use invented titles and names.
 - **Docs.** Search `docs/` for each name your change touches and correct every statement. State the settings and limits a checklist step assumes.
 
 ## CodeRabbit
 
-- Before you open a pull request into `main`, run `coderabbit review --agent --base main` in the background (allow 15 minutes). Fix its Critical and Major findings and any useful Minor ones. Run it again on fix commits before you push them. Never pass `--use-credits`.
+- Before you open a pull request into `main`, run `coderabbit review --agent --base main` in the background and wait until it reports `complete`. Fix its Critical and Major findings and any useful Minor ones. Run it again on fix commits before you push them; a result with `reused: true` didn't review again, so rerun it with `--fresh`. Never pass `--use-credits`.
 - CodeRabbit reviews a pull request once, when it opens; fix pushes don't start a review. Open pull requests ready for review, and don't merge while a review runs: merging cancels it.
 - Critical and Major findings block a merge. Minor and Trivial findings never block testing, merging, or installs, but read each one, because the Minor label includes real bugs. Fix useful Minor findings in the same pull request; list any that need larger changes in a follow-up pull request. Fix a Trivial nitpick in the same pull request only when it's one line.
 - When you decline a finding, reply in its thread with the reason. CodeRabbit can withdraw the finding and save the reason as a learning.

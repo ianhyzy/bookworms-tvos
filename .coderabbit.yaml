@@ -102,5 +102,5 @@ knowledge_base:
         The iPhone and Mac companion. Its `Bookworms/Models/CloudContract.swift`
         writes the CloudKit JSON contract that `SpineCloudStore.swift` and
         `CloudLibraryStore.swift` read, its `Bookworms/Models/SeriesDesigns.swift`
-        must match this repository's copy, and it shares the Hardcover
-        token-renewal rule.
+        follows the same series rules and tables as this repository's copy, and
+        it shares the Hardcover token-renewal rule.
