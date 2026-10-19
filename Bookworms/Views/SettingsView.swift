@@ -199,7 +199,7 @@ struct SettingsView: View {
                     Text("\(value)")
                         .font(.system(size: 64, weight: .semibold)).monospacedDigit()
                         .accessibilityIdentifier(identifiers.value)
-                    Text("of \(BookLimit.maximum) books").font(.system(size: 22))
+                    Text("of \(BookLimit.maximum) books").font(.system(size: 23))
                         .foregroundStyle(.secondary)
                 }
                 .frame(minWidth: 160)

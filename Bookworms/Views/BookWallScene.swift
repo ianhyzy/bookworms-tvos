@@ -2258,7 +2258,9 @@ enum BookWallShelfLabel {
     /// Letters `text`, which names `book` when it has one, in gilt.
     static func make(_ text: String, book: Book? = nil, style: AppFontStyle) -> CGImage? {
         let pixelHeight = (CGFloat(height) * pixelsPerUnit).rounded()
-        let font = style.uiFont(size: pixelHeight * 0.62)
+        // The line nearly fills the label, so the lettering shows about 24 points tall on a
+        // three-column wall. Larger walls frame the shelf from farther away.
+        let font = style.uiFont(size: pixelHeight * 0.74)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         paragraph.alignment = .center

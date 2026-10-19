@@ -33,7 +33,7 @@ struct RatingsView: View {
         HStack(alignment: .top, spacing: 24) {
             VStack(alignment: .leading, spacing: 4) {
                 if ratings.isEmpty {
-                    Text("No ratings yet").appFont(size: 23, weight: .medium)
+                    Text("No ratings yet").appFont(size: 26, weight: .medium)
                 } else {
                     Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                         ForEach(ratings, id: \.label) { rating in
@@ -43,12 +43,12 @@ struct RatingsView: View {
                             }
                         }
                     }
-                    .appFont(size: 23, weight: .medium)
+                    .appFont(size: 26, weight: .medium)
                     .accessibilityElement(children: .combine)
                 }
                 if book.communityRating != nil {
                     Text("\((book.ratingsCount ?? 0).formatted()) ratings")
-                        .appFont(size: 18).foregroundStyle(.detailCaption).padding(.top, 4)
+                        .appFont(size: 23).foregroundStyle(.detailCaption).padding(.top, 4)
                 }
             }
             .lineLimit(1).fixedSize()

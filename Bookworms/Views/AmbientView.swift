@@ -349,7 +349,7 @@ struct AmbientView: View {
                     ? "Review contains spoilers" : (item.reviewText ?? "No written review"),
                 of: item.book
             )
-            .appFont(size: 25).lineLimit(5)
+            .appFont(size: 28).lineLimit(5)
         }
     }
 }

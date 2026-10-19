@@ -317,7 +317,7 @@ struct BookDetailView: View {
                     )
                     if book.readCount > 1 {
                         Text("Read \(book.readCount) times")
-                            .appFont(size: 23, weight: .semibold)
+                            .appFont(size: 24, weight: .semibold)
                             .padding(.horizontal, 12).padding(.vertical, 4)
                             .background(.primary.opacity(0.12), in: .capsule)
                             .accessibilityIdentifier("detail-read-count")
@@ -381,23 +381,19 @@ struct BookDetailView: View {
     /// remote presses pass between the metadata row and the description.
     private var friends: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                Image(systemName: "person.2").frame(width: 20)
-                Text("Friends who read this")
-            }
-            .appFont(size: 18).foregroundStyle(.detailCaption)
+            sectionHeading("Friends who read this", symbol: "person.2")
             FlowLayout(spacing: 30) {
                 ForEach(friendReads, id: \.reader.id) { read in
                     HStack(spacing: 10) {
                         ReaderLabel(
                             name: read.reader.displayName, avatarURL: read.reader.avatarURL,
-                            size: 23)
+                            size: 26)
                         Text(
                             read.rating.map {
                                 "★" + $0.formatted(.number.precision(.fractionLength(0...1)))
                             } ?? "Read"
                         )
-                        .appFont(size: 23, weight: .semibold).monospacedDigit()
+                        .appFont(size: 26, weight: .semibold).monospacedDigit()
                     }
                 }
             }
@@ -471,20 +467,16 @@ struct BookDetailView: View {
     /// The Genres label above one capsule button per genre.
     private func genreButtons(_ onShowShelf: @escaping (ShelfFilter) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "tag").frame(width: 20)
-                Text("Genres")
-            }
-            .appFont(size: 18).foregroundStyle(.detailCaption)
-            .accessibilityHidden(true)
+            sectionHeading("Genres", symbol: "tag")
+                .accessibilityHidden(true)
             FlowLayout(spacing: 10) {
                 ForEach(genres, id: \.self) { genre in
                     Button {
                         onShowShelf(.genre(genre))
                     } label: {
-                        Text(genre).appFont(size: 21, weight: .medium)
+                        Text(genre).appFont(size: 26, weight: .medium)
                     }
-                    .buttonStyle(FlatButtonStyle(horizontalPadding: 14, verticalPadding: 5))
+                    .buttonStyle(FlatButtonStyle(horizontalPadding: 16, verticalPadding: 6))
                     .focused($focusedGenre, equals: genre)
                     .accessibilityHint("Shows your books in this genre.")
                     .accessibilityIdentifier("detail-genre-\(genre)")
@@ -497,14 +489,19 @@ struct BookDetailView: View {
         -> some View
     {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: symbol).frame(width: 20)
-                Text(title)
-            }
-            .appFont(size: 18).foregroundStyle(.detailCaption)
-            Text(value).appFont(size: 23, weight: .medium).lineLimit(lines)
+            sectionHeading(title, symbol: symbol)
+            Text(value).appFont(size: 28, weight: .medium).lineLimit(lines)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// A caption-colored heading at the tvOS Caption 2 size, smaller than the value below it.
+    private func sectionHeading(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol).frame(width: 26)
+            Text(title)
+        }
+        .appFont(size: 23).foregroundStyle(.detailCaption)
     }
 }
 
@@ -783,7 +780,7 @@ private struct BookReviewCard: View {
                 }
                 if hidesSpoilers || fullHeight > shownHeight + 1 {
                     Text(hidesSpoilers ? "Reveal review" : "Read more")
-                        .appFont(size: 22, weight: .semibold).foregroundStyle(.tint)
+                        .appFont(size: 24, weight: .semibold).foregroundStyle(.tint)
                 }
             }
             .padding(30)
@@ -871,9 +868,11 @@ private struct SeriesPopup: View {
     @State private var position = ScrollPosition(idType: Int.self)
     @State private var visiblePage = 0
 
-    private static let columns = 7
-    private static let coverSize = CGSize(width: 160, height: 240)
-    private static let columnWidth: CGFloat = 180
+    // Six wide columns keep two lines of 23-point title legible under each cover, and the
+    // smaller covers keep both rows inside the TV safe area.
+    private static let columns = 6
+    private static let coverSize = CGSize(width: 150, height: 225)
+    private static let columnWidth: CGFloat = 210
     private static let columnSpacing: CGFloat = 36
     private static let rowSpacing: CGFloat = 34
     /// Room inside each page for focus lift, which the scroll view would otherwise clip.
@@ -998,19 +997,21 @@ private struct SeriesPopup: View {
                 CoverView(book: book)
                     .frame(width: Self.coverSize.width, height: Self.coverSize.height)
                     .opacity(faded ? 0.4 : 1)
+                // The release status shares this line so a truncated title can't hide it.
                 Text(
-                    [SeriesInfo.positionLabel(entry.position), entry.releaseYear.map(String.init)]
-                        .compactMap(\.self).joined(separator: " · ")
+                    [
+                        SeriesInfo.positionLabel(entry.position),
+                        entry.releaseYear.map { unreleased ? "Out in \($0)" : String($0) },
+                    ]
+                    .compactMap(\.self).joined(separator: " · ")
                 )
-                .appFont(size: 22, weight: .medium)
-                // Titles wrap rather than truncate; long ones shrink slightly to fit two lines.
-                Text(
-                    entry.id == currentID
-                        ? "This book" : unreleased ? "\(entry.title) (not out yet)" : entry.title
-                )
-                .appFont(size: 19).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.7)
-                .frame(height: 48, alignment: .top)
+                .appFont(size: 24, weight: .medium)
+                .lineLimit(1).minimumScaleFactor(23 / 24)
+                // Titles wrap to two lines; longer ones truncate rather than shrink.
+                Text(entry.id == currentID ? "This book" : entry.title)
+                    .appFont(size: 23).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).lineLimit(2)
+                    .frame(height: 58, alignment: .top)
             }
             .frame(width: Self.columnWidth)
         }
@@ -1019,6 +1020,7 @@ private struct SeriesPopup: View {
         .focused($focused, equals: entry.id)
         .accessibilityLabel(
             "\(SeriesInfo.positionLabel(entry.position)), \(entry.title)"
+                + (unreleased ? ", not yet released" : "")
                 + (owned == nil ? ", not in your library" : "")
         )
         .accessibilityIdentifier("series-book-\(entry.id)")

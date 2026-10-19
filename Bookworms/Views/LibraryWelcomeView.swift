@@ -75,7 +75,7 @@ struct LibraryWelcomeView: View {
             .defaultFocus($focusedChoice, .hardcover, priority: .userInitiated)
             .disabled(library.isLoading)
             if library.isLoading {
-                ProgressView("Please wait…").appFont(size: 23)
+                ProgressView("Please wait…").appFont(size: 26)
             }
         }
     }
@@ -88,7 +88,7 @@ struct LibraryWelcomeView: View {
                 .appFont(size: 26)
                 .foregroundStyle(.secondary)
             Text("Your books will appear when they're ready.")
-                .appFont(size: 23)
+                .appFont(size: 26)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 60)

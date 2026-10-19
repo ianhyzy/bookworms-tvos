@@ -44,7 +44,7 @@ struct ComparisonBookshelf: View {
                 )
             } else {
                 Text(isLoading ? "Loading books…" : "No books match this ordering")
-                    .appFont(size: 25)
+                    .appFont(size: 28)
                     .frame(height: rowHeight)
             }
             ShelfBoard(palette: palette, surfaceDepth: 10, edgeHeight: 7)
