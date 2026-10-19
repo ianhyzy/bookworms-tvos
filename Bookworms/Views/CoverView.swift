@@ -171,17 +171,17 @@ struct CoverView: View {
             } else {
                 Rectangle().fill(.gray.opacity(0.18))
                 VStack(spacing: compact ? 12 : 20) {
-                    BookText(book.title, of: book).appFont(size: compact ? 23 : 30)
+                    BookText(book.title, of: book).appFont(size: compact ? 24 : 32)
                         .multilineTextAlignment(.center).lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(book.author).appFont(size: 20).lineLimit(2)
+                    Text(book.author).appFont(size: compact ? 23 : 26).lineLimit(2)
                         .multilineTextAlignment(.center)
                     if !compact {
                         Text(
                             book.coverURLs.isEmpty || failed
                                 ? "Cover unavailable" : "Loading cover…"
                         )
-                        .appFont(size: 22).foregroundStyle(.secondary).lineLimit(2)
+                        .appFont(size: 24).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
                 .padding(compact ? 12 : 28)

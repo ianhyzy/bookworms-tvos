@@ -206,10 +206,10 @@ struct BookWallView: View {
                             Text(
                                 reduceMotion ? "Arranging books…" : "Books are falling into place…"
                             )
-                            .appFont(size: 25)
+                            .appFont(size: 28)
                         } else if openingFailed {
                             Text("This book could not open. Please try again.")
-                                .appFont(size: 25)
+                                .appFont(size: 28)
                         }
                         // The focused title and the resting hint appear on the shelf front.
                         Spacer()

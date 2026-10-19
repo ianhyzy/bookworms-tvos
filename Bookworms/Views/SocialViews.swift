@@ -528,8 +528,8 @@ struct SocialViews: View {
     private func empty(_ title: String, _ message: String) -> some View {
         VStack(spacing: 22) {
             Text(title).appFont(size: 38, weight: .medium)
-            Text(message).appFont(size: 26).multilineTextAlignment(.center)
-                .frame(maxWidth: 850)
+            Text(message).appFont(size: 28).multilineTextAlignment(.center)
+                .frame(maxWidth: 900)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -1057,7 +1057,7 @@ struct ShelfView: View {
                 .accessibilityIdentifier("clear-shelf-filter")
             }
             if library.isSample {
-                Text("Sample shelf").appFont(size: 21)
+                Text("Sample shelf").appFont(size: 24)
                     .foregroundStyle(palette.text.opacity(0.6))
             }
             Spacer()
@@ -1102,7 +1102,7 @@ struct ShelfView: View {
                     ? "No books match your shelf choices. Change Show in Settings → Shelf."
                     : "Connect a source in Settings to explore your books."
             )
-            .appFont(size: 25).multilineTextAlignment(.center).frame(maxWidth: 850)
+            .appFont(size: 28).multilineTextAlignment(.center).frame(maxWidth: 900)
             if let filter = library.shelfFilter {
                 Button("Show all books") { library.shelfFilter = nil }
                     .buttonStyle(.glassProminent)

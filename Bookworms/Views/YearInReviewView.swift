@@ -135,7 +135,7 @@ struct YearInReviewView: View {
             Text(title).appFont(size: 24).foregroundStyle(.secondary)
             Text(value).appFont(size: 54, weight: .semibold).lineLimit(1)
                 .minimumScaleFactor(0.6)
-            Text(detail).appFont(size: 22).foregroundStyle(.secondary).lineLimit(1)
+            Text(detail).appFont(size: 23).foregroundStyle(.secondary).lineLimit(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.horizontal, 28)
@@ -153,10 +153,10 @@ struct YearInReviewView: View {
                     StarRating(rating: (average * 2).rounded() / 2, size: 24)
                 }
                 Text("From \(Self.bookCount(review.ratedBooks)) rated")
-                    .appFont(size: 22).foregroundStyle(.secondary).lineLimit(1)
+                    .appFont(size: 23).foregroundStyle(.secondary).lineLimit(1)
             } else {
                 Text("—").appFont(size: 54, weight: .semibold)
-                Text("No ratings recorded").appFont(size: 22).foregroundStyle(.secondary)
+                Text("No ratings recorded").appFont(size: 23).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -172,14 +172,14 @@ struct YearInReviewView: View {
             Text("Books by month").appFont(size: 24).foregroundStyle(.secondary)
             GeometryReader { geometry in
                 // Room for the count above each bar and the month name below it.
-                let barSpace = max(20, geometry.size.height - 76)
+                let barSpace = max(20, geometry.size.height - 84)
                 HStack(alignment: .bottom, spacing: 14) {
                     ForEach(0..<12, id: \.self) { month in
                         let count = review.monthlyCounts[month]
                         VStack(spacing: 8) {
                             // Two-digit counts are wider than a bar beside the records panel.
                             Text(verbatim: count > 0 ? String(count) : " ")
-                                .appFont(size: 22, weight: .medium).fixedSize()
+                                .appFont(size: 24, weight: .medium).fixedSize()
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(
                                     count > 0
@@ -189,7 +189,7 @@ struct YearInReviewView: View {
                                 .frame(
                                     height: count > 0
                                         ? max(8, barSpace * CGFloat(count) / CGFloat(most)) : 4)
-                            Text(Self.monthInitials[month]).appFont(size: 22)
+                            Text(Self.monthInitials[month]).appFont(size: 24)
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -359,7 +359,7 @@ struct YearInReviewView: View {
                     ? "Books with a recorded finish date appear here, grouped by year."
                     : "Connect Hardcover in Settings to see what you read each year."
             )
-            .appFont(size: 26).multilineTextAlignment(.center).frame(maxWidth: 850)
+            .appFont(size: 28).multilineTextAlignment(.center).frame(maxWidth: 900)
         }
         .foregroundStyle(palette.text)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
