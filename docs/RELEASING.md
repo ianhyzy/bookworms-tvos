@@ -165,6 +165,7 @@ Follow [the testing procedure](TESTING.md) and keep results with the exact candi
 - The minimum/current simulator matrix (`python3 scripts/test-worker.py --detach --profile major`). Missing runtimes and unexpected skips block verification.
 - On Apple TV: navigation and focus, covers and shelf layout, both appearances, VoiceOver, Reduce Motion, Top Shelf, and ambient sessions.
 - Hardcover connection, explicit sync, automatic daily limits, offline recovery, and social views with spoiler controls.
+- On a signed Apple TV, a real Hardcover sign-in and a token renewal through `api.hardcover.app/oauth2/device` and `api.hardcover.app/oauth2/token`. Tests answer these endpoints with stubs, so only a real login shows that Hardcover serves them there and answers a spent refresh token with HTTP 400 or 401 and an OAuth `error`.
 - Release-build launch and interaction profiling without coverage instrumentation.
 
 ## Encryption declaration

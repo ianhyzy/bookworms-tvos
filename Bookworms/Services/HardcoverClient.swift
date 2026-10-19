@@ -197,10 +197,7 @@ actor HardcoverClient {
 
         if http.statusCode == 200 { return .success(try Self.tokens(from: data)) }
 
-        struct ErrorResponse: Decodable {
-            let error: String?
-        }
-        let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data)
+        let errorResponse = try? JSONDecoder().decode(OAuthErrorReply.self, from: data)
         switch errorResponse?.error {
         case "authorization_pending":
             return .pending
@@ -252,8 +249,13 @@ actor HardcoverClient {
     ///
     /// Hardcover accepts each refresh token once and revokes the whole login if one is sent
     /// twice, so this request never retries: a response lost after Hardcover accepted the token
-    /// can't be recovered by resending it. Only `HardcoverSession` calls it. A rejected token
-    /// throws `HardcoverError.invalidToken`; other failures leave the token unspent or unknown.
+    /// can't be recovered by resending it. Only `HardcoverSession` calls it.
+    ///
+    /// Throws `HardcoverError.invalidToken` only for an HTTP 400 or 401 reply with an OAuth
+    /// `error`, such as `invalid_grant` for a token that expired, was revoked, or was spent; the
+    /// iPhone, Mac, and Android apps apply the same rule. Any other reply, such as a rate limit, a
+    /// server error, another 4xx status, or a body that isn't an OAuth error, throws
+    /// `HardcoverError.http(_:)` and leaves the token unspent or unknown.
     func refreshTokens(_ refreshToken: String) async throws -> HardcoverTokens {
         let refreshToken = try HardcoverToken(refreshToken).value
         // Omitting `scope` keeps the scopes the reader approved.
@@ -264,7 +266,11 @@ actor HardcoverClient {
                 "refresh_token": refreshToken,
                 "client_id": Self.clientID,
             ])
-        if http.statusCode == 400 || http.statusCode == 401 { throw HardcoverError.invalidToken }
+        if http.statusCode == 400 || http.statusCode == 401,
+            (try? JSONDecoder().decode(OAuthErrorReply.self, from: data))?.error != nil
+        {
+            throw HardcoverError.invalidToken
+        }
         guard http.statusCode == 200 else { throw HardcoverError.http(http.statusCode) }
         return try Self.tokens(from: data)
     }
@@ -282,6 +288,11 @@ actor HardcoverClient {
                 "client_id": Self.clientID,
             ])
         guard http.statusCode == 200 else { throw HardcoverError.http(http.statusCode) }
+    }
+
+    /// The `error` code of an OAuth error reply (RFC 6749, section 5.2).
+    private struct OAuthErrorReply: Decodable {
+        let error: String?
     }
 
     /// Decodes a successful token response and checks the access token's format.
