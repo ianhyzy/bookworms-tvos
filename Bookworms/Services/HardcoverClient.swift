@@ -39,7 +39,7 @@ enum HardcoverError: LocalizedError {
         case .invalidToken:
             "The Hardcover login is invalid or expired. Reconnect in Settings."
         case .invalidAuthorizationCode:
-            "The authorization code is invalid or expired. Reconnect in Settings."
+            "Hardcover rejected this sign-in code. Select New code to try again."
         case .deviceFlowDenied:
             "Hardcover authorization was denied. Reconnect in Settings."
         case .deviceFlowExpired:
@@ -126,20 +126,7 @@ actor HardcoverClient {
     static let shared = HardcoverClient()
 
     static let clientID = "ca996be3-0df1-4cbf-819a-e17644fbcf38"
-    static let redirectURI = "urn:ietf:wg:oauth:2.0:oob"
-    static let callbackScheme = "gay.ian.bookworms"
     static let scopes = "read:me:content read:library read:catalog:data read:social read:users"
-
-    static func authorizationURL() -> URL {
-        var components = URLComponents(string: "https://hardcover.app/oauth/authorize")!
-        components.queryItems = [
-            URLQueryItem(name: "client_id", value: clientID),
-            URLQueryItem(name: "redirect_uri", value: redirectURI),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "scope", value: scopes),
-        ]
-        return components.url!
-    }
 
     private var retryAfter = Date.distantPast
     private var nextRequestAt = Date.distantPast
@@ -215,36 +202,6 @@ actor HardcoverClient {
         }
     }
 
-    func exchangeAuthorizationCode(
-        _ code: String,
-        redirectURI: String = HardcoverClient.redirectURI
-    ) async throws -> HardcoverTokens {
-        let code = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !code.isEmpty,
-            !code.contains(where: { $0.isWhitespace || $0.isNewline }),
-            code.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
-        else {
-            throw HardcoverError.invalidAuthorizationCode
-        }
-
-        let (data, http) = try await postForm(
-            Self.tokenURL,
-            [
-                "grant_type": "authorization_code",
-                "client_id": Self.clientID,
-                "code": code,
-                "redirect_uri": redirectURI,
-            ])
-
-        if http.statusCode == 400 || http.statusCode == 401 {
-            throw HardcoverError.invalidAuthorizationCode
-        }
-        guard http.statusCode == 200 else {
-            throw HardcoverError.http(http.statusCode)
-        }
-        return try Self.tokens(from: data)
-    }
-
     /// Spends `refreshToken` for a new access token and the refresh token that replaces it.
     ///
     /// Hardcover accepts each refresh token once and revokes the whole login if one is sent
@@ -306,7 +263,7 @@ actor HardcoverClient {
     }
 
     // The endpoints Hardcover's discovery document names. The token endpoint serves device-code
-    // polling, authorization-code exchange, and token renewal.
+    // polling and token renewal.
     static let deviceAuthorizationURL = URL(string: "https://api.hardcover.app/oauth2/device")!
     static let tokenURL = URL(string: "https://api.hardcover.app/oauth2/token")!
     static let revocationURL = URL(string: "https://api.hardcover.app/oauth2/revoke")!

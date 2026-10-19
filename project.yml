@@ -40,7 +40,7 @@ targets:
         UIRequiredDeviceCapabilities: [arm64]
         CFBundleURLTypes:
           - CFBundleURLName: gay.ian.Bookworms.books
-            CFBundleURLSchemes: [bookworms, gay.ian.bookworms]
+            CFBundleURLSchemes: [bookworms]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: gay.ian.Bookworms

@@ -24,7 +24,6 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>bookworms</string>
-				<string>gay.ian.bookworms</string>
 			</array>
 		</dict>
 	</array>

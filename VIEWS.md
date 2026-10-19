@@ -4,7 +4,7 @@ This file defines the available views and user options for tvOS. See [data sourc
 
 ## First launch
 
-After checking saved state, the app opens a welcome popup when it has no saved account, library snapshot, or completed welcome choice. **Connect Hardcover** receives focus by default; **Explore sample library** appears below it. Connecting uses the same phone link and manual code flow as **Settings → Sources**, with a loading card while the account is checked, the library downloads, and the snapshot is saved. The popup then shows **Preparing your library** until covers and the shelf layout are ready. A connection error keeps sign-in controls available. Transitions respect Reduce Motion. See [Hardcover setup](docs/HARDCOVER_AUTHENTICATION.md) for sign-in and Back behavior.
+After checking saved state, the app opens a welcome popup when it has no saved account, library snapshot, or completed welcome choice. **Connect Hardcover** receives focus by default; **Explore sample library** appears below it. Connecting uses the same phone-link sign-in as **Settings → Sources**, with a loading card while the account is checked, the library downloads, and the snapshot is saved. The popup then shows **Preparing your library** until covers and the shelf layout are ready. A connection error leaves **Get link code** available. Transitions respect Reduce Motion. See [Hardcover setup](docs/HARDCOVER_AUTHENTICATION.md) for sign-in and Back behavior.
 
 ## Main views
 
