@@ -997,19 +997,21 @@ private struct SeriesPopup: View {
                 CoverView(book: book)
                     .frame(width: Self.coverSize.width, height: Self.coverSize.height)
                     .opacity(faded ? 0.4 : 1)
+                // The release status shares this line so a truncated title can't hide it.
                 Text(
-                    [SeriesInfo.positionLabel(entry.position), entry.releaseYear.map(String.init)]
-                        .compactMap(\.self).joined(separator: " · ")
+                    [
+                        SeriesInfo.positionLabel(entry.position),
+                        entry.releaseYear.map { unreleased ? "Out in \($0)" : String($0) },
+                    ]
+                    .compactMap(\.self).joined(separator: " · ")
                 )
                 .appFont(size: 24, weight: .medium)
+                .lineLimit(1).minimumScaleFactor(23 / 24)
                 // Titles wrap to two lines; longer ones truncate rather than shrink.
-                Text(
-                    entry.id == currentID
-                        ? "This book" : unreleased ? "\(entry.title) (not out yet)" : entry.title
-                )
-                .appFont(size: 23).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).lineLimit(2)
-                .frame(height: 58, alignment: .top)
+                Text(entry.id == currentID ? "This book" : entry.title)
+                    .appFont(size: 23).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).lineLimit(2)
+                    .frame(height: 58, alignment: .top)
             }
             .frame(width: Self.columnWidth)
         }
@@ -1018,6 +1020,7 @@ private struct SeriesPopup: View {
         .focused($focused, equals: entry.id)
         .accessibilityLabel(
             "\(SeriesInfo.positionLabel(entry.position)), \(entry.title)"
+                + (unreleased ? ", not yet released" : "")
                 + (owned == nil ? ", not in your library" : "")
         )
         .accessibilityIdentifier("series-book-\(entry.id)")
