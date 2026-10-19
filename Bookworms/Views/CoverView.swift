@@ -170,11 +170,15 @@ struct CoverView: View {
                     .accessibilityIdentifier("detail-cover")
             } else {
                 Rectangle().fill(.gray.opacity(0.18))
+                // Compact placeholders keep the title and author at the 23-point minimum, so the
+                // author's secondary color keeps the title first, and slim padding leaves room for
+                // words such as "Midsummer" on a 150-point cover.
                 VStack(spacing: compact ? 12 : 20) {
-                    BookText(book.title, of: book).appFont(size: compact ? 24 : 32)
+                    BookText(book.title, of: book).appFont(size: compact ? 23 : 32)
                         .multilineTextAlignment(.center).lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(book.author).appFont(size: compact ? 23 : 26).lineLimit(2)
+                        .foregroundStyle(compact ? .secondary : .primary)
                         .multilineTextAlignment(.center)
                     if !compact {
                         Text(
@@ -184,7 +188,7 @@ struct CoverView: View {
                         .appFont(size: 24).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
-                .padding(compact ? 12 : 28)
+                .padding(compact ? 8 : 28)
             }
         }
     }
