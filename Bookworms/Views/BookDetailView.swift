@@ -868,9 +868,11 @@ private struct SeriesPopup: View {
     @State private var position = ScrollPosition(idType: Int.self)
     @State private var visiblePage = 0
 
-    private static let columns = 7
-    private static let coverSize = CGSize(width: 160, height: 240)
-    private static let columnWidth: CGFloat = 180
+    // Six wide columns keep two lines of 23-point title legible under each cover, and the
+    // smaller covers keep both rows inside the TV safe area.
+    private static let columns = 6
+    private static let coverSize = CGSize(width: 150, height: 225)
+    private static let columnWidth: CGFloat = 210
     private static let columnSpacing: CGFloat = 36
     private static let rowSpacing: CGFloat = 34
     /// Room inside each page for focus lift, which the scroll view would otherwise clip.
@@ -999,15 +1001,15 @@ private struct SeriesPopup: View {
                     [SeriesInfo.positionLabel(entry.position), entry.releaseYear.map(String.init)]
                         .compactMap(\.self).joined(separator: " · ")
                 )
-                .appFont(size: 22, weight: .medium)
-                // Titles wrap rather than truncate; long ones shrink slightly to fit two lines.
+                .appFont(size: 24, weight: .medium)
+                // Titles wrap to two lines; longer ones truncate rather than shrink.
                 Text(
                     entry.id == currentID
                         ? "This book" : unreleased ? "\(entry.title) (not out yet)" : entry.title
                 )
-                .appFont(size: 19).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.7)
-                .frame(height: 48, alignment: .top)
+                .appFont(size: 23).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).lineLimit(2)
+                .frame(height: 58, alignment: .top)
             }
             .frame(width: Self.columnWidth)
         }
