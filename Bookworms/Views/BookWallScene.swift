@@ -113,8 +113,15 @@ final class BookWallScene {
     /// this distance.
     private static let backdropGap: Float = 3.5
     private static let warmLight = UIColor(red: 1, green: 0.87, blue: 0.7, alpha: 1)
-    /// Front-face height of the shelf, deep enough to carry a readable label.
-    private static let shelfThickness: Float = 0.5
+    /// The shelf front's height where the label already letters at `minimumLabelPoints`.
+    /// Wider walls get a taller front (`shelfThickness(for:)`).
+    static let minimumShelfThickness: Float = 0.5
+    /// The smallest point size the shelf label may show at: the app's legibility minimum for
+    /// text read from viewing distance.
+    static let minimumLabelPoints: Float = 23
+    /// The full-screen canvas the wall fills on Apple TV, in points, which the label's size
+    /// is fitted to.
+    private static let screenBounds = CGRect(x: 0, y: 0, width: 1920, height: 1080)
     /// The joint's distance from the spine edge and the width of its shading.
     private static let hingeInset: Float = 0.085
     private static let hingeWidth: Float = 0.06
@@ -165,6 +172,7 @@ final class BookWallScene {
     private let contactShadow = ModelEntity()
     private var detailLightLevel: Float = 0
     private var shelf: ModelEntity?
+    private var shelfThickness = BookWallScene.minimumShelfThickness
     private var collisionSubscription: Cancellable?
     private var continuingCollisionSubscription: Cancellable?
     private var layout = BookWallLayout(books: [])
@@ -360,6 +368,7 @@ final class BookWallScene {
         signature = books
         preparedWallID = prepared.id
         layout = prepared.layout
+        shelfThickness = Self.shelfThickness(for: layout)
         preparedBodies = prepared.bodies
         labels = prepared.labels
         hintLabel = prepared.hint
@@ -548,7 +557,9 @@ final class BookWallScene {
         material.blending = .transparent(opacity: .init(floatLiteral: 1))
         shelfLabel.model = ModelComponent(
             mesh: Self.unitPlane, materials: [material])
-        shelfLabel.scale = [label.width, BookWallShelfLabel.height, 1]
+        // The label grows with the shelf front, so a taller front letters it larger.
+        let scale = shelfThickness / Self.minimumShelfThickness
+        shelfLabel.scale = [label.width * scale, BookWallShelfLabel.height * scale, 1]
         shelfLabel.isEnabled = true
     }
 
@@ -592,7 +603,8 @@ final class BookWallScene {
         else { return }
         viewportSize = renderBounds.size
         cancelTransition()
-        wallCameraDepth = Self.wallCameraDepth(fitting: layout, in: renderBounds)
+        wallCameraDepth = Self.wallCameraDepth(
+            fitting: layout, shelfThickness: shelfThickness, in: renderBounds)
         setCameraDepth(wallCameraDepth)
         let frameTop = Float(renderBounds.midY) * wallCameraDepth / focalLength
         let thickest = layout.slots.map(\.spineThickness).max() ?? 0
@@ -651,9 +663,9 @@ final class BookWallScene {
     /// The camera depth that frames `layout`'s settled stacks, the header room above them, the
     /// shelf, and the focus pull-out inside `bounds`, without changing book proportions. Books
     /// start above the frame and fall into view.
-    private static func wallCameraDepth(fitting layout: BookWallLayout, in bounds: CGRect)
-        -> Float
-    {
+    private static func wallCameraDepth(
+        fitting layout: BookWallLayout, shelfThickness: Float, in bounds: CGRect
+    ) -> Float {
         let area = visibleArea(in: bounds)
         let focal = focalLength(in: bounds)
         var depth: Float = 1
@@ -680,6 +692,33 @@ final class BookWallScene {
         return depth + 0.15
     }
 
+    /// The shelf front's height for `layout`. The camera frames a wider wall from farther away,
+    /// so where the label would letter below `minimumLabelPoints`, the front extends downward
+    /// and the label grows with it. The shelf's top stays at the floor, where the books rest.
+    static func shelfThickness(for layout: BookWallLayout) -> Float {
+        var thickness = minimumShelfThickness
+        // A taller front moves the camera back only when the shelf's bottom edge sets the
+        // frame, and then by less than the label grows, so a few passes settle it. Rounding up
+        // to hundredths of a unit keeps each pass's result at or above the minimum.
+        while true {
+            let points = labelPoints(for: layout, shelfThickness: thickness)
+            guard points < minimumLabelPoints else { return thickness }
+            thickness = (thickness * minimumLabelPoints / points * 100).rounded(.up) / 100
+        }
+    }
+
+    /// The point size the shelf label letters at on the Apple TV screen, with a front
+    /// `shelfThickness` tall.
+    static func labelPoints(for layout: BookWallLayout, shelfThickness: Float) -> Float {
+        let cameraDepth = wallCameraDepth(
+            fitting: layout, shelfThickness: shelfThickness, in: screenBounds)
+        let shelfFront = (layout.slots.map(\.coverWidth).max() ?? 0.8) / 2 + 0.275
+        let letterSize =
+            BookWallShelfLabel.height * BookWallShelfLabel.letterShare * shelfThickness
+            / minimumShelfThickness
+        return letterSize * focalLength(in: screenBounds) / (cameraDepth - shelfFront)
+    }
+
     /// Spine rectangles for `layout` at rest, in full-screen points for `viewport`.
     ///
     /// Needs neither a renderer nor a configured scene, so `BookWallView` mounts its focus
@@ -690,7 +729,9 @@ final class BookWallScene {
         guard !layout.slots.isEmpty, bounds.width > 0, bounds.height > 0 else { return [:] }
         return focusFrames(
             for: layout, resting: [:],
-            cameraDepth: wallCameraDepth(fitting: layout, in: bounds), in: bounds)
+            cameraDepth: wallCameraDepth(
+                fitting: layout, shelfThickness: shelfThickness(for: layout), in: bounds),
+            in: bounds)
     }
 
     private func corners(of slot: BookWallLayout.Slot, at pose: Transform) -> [SIMD3<Float>] {
@@ -1632,7 +1673,7 @@ final class BookWallScene {
     private func installShelf() {
         let half = layout.totalWidth / 2
         let depth = layout.slots.map(\.coverWidth).max() ?? 0.8
-        let shelfSize = SIMD3<Float>(half * 2 + 1.4, Self.shelfThickness, depth + 0.55)
+        let shelfSize = SIMD3<Float>(half * 2 + 1.4, shelfThickness, depth + 0.55)
         let shelfColor = BookWallShelfLabel.wood.uiColor
         let shelfMaterial: any RealityKit.Material
         if PerformanceDiagnostics.isolates("wall-unlit-shelf") {
@@ -2245,8 +2286,11 @@ enum BookWallShelfLabel {
         let width: Float
     }
 
-    /// Label height in scene units, within the shelf's front face.
+    /// Label height in scene units on a front `BookWallScene.minimumShelfThickness` tall. The
+    /// texture is drawn at this height; a taller front scales the label up.
     static let height: Float = 0.38
+    /// The lettering's point size as a share of the label's height.
+    static let letterShare: Float = 0.74
     static let maximumWidth: Float = 12
     private static let pixelsPerUnit: CGFloat = 128
     /// Warm gilt, like lettering stamped into a wooden shelf.
@@ -2258,9 +2302,9 @@ enum BookWallShelfLabel {
     /// Letters `text`, which names `book` when it has one, in gilt.
     static func make(_ text: String, book: Book? = nil, style: AppFontStyle) -> CGImage? {
         let pixelHeight = (CGFloat(height) * pixelsPerUnit).rounded()
-        // The line nearly fills the label, so the lettering shows about 24 points tall on a
-        // three-column wall. Larger walls frame the shelf from farther away.
-        let font = style.uiFont(size: pixelHeight * 0.74)
+        // The line nearly fills the label. `BookWallScene.shelfThickness(for:)` sizes the shelf
+        // front, and the label with it, so the lettering shows at 23 points or larger.
+        let font = style.uiFont(size: pixelHeight * CGFloat(letterShare))
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         paragraph.alignment = .center

@@ -139,6 +139,45 @@ final class BookWallLayoutTests: XCTestCase {
             CGFloat(slot.spineWallWidth) / CGFloat(slot.spineWallHeight), accuracy: 0.03)
     }
 
+    @MainActor
+    func testShelfFrontGrowsDownwardUntilTheLabelMeetsTheMinimum() {
+        // Very long books with short titles reach `maximumBookLength`, so every column takes the
+        // widest lane that page count alone produces.
+        func wall(_ count: Int, pages: Int = 1_400) -> BookWallLayout {
+            BookWallLayout(
+                books: (1...count)
+                    .map { Book(id: $0, title: "Book \($0)", author: "Author", pages: pages) })
+        }
+        let minimum = BookWallScene.minimumShelfThickness
+        for (count, columns) in [(8, 3), (30, 3), (40, 4), (50, 5)] {
+            let layout = wall(count)
+            XCTAssertEqual(layout.columns, columns)
+            XCTAssertEqual(
+                layout.totalWidth, Float(columns) * (BookWallLayout.maximumBookLength + 0.24),
+                accuracy: 0.001)
+            let thickness = BookWallScene.shelfThickness(for: layout)
+            XCTAssertGreaterThanOrEqual(
+                BookWallScene.labelPoints(for: layout, shelfThickness: thickness),
+                BookWallScene.minimumLabelPoints)
+            if columns == 3 {
+                XCTAssertEqual(thickness, minimum)
+            } else {
+                // The front is no taller than the minimum needs.
+                XCTAssertLessThan(
+                    BookWallScene.labelPoints(for: layout, shelfThickness: thickness - 0.01),
+                    BookWallScene.minimumLabelPoints)
+            }
+        }
+        XCTAssertGreaterThan(
+            BookWallScene.shelfThickness(for: wall(50)),
+            BookWallScene.shelfThickness(for: wall(40)))
+        // Short books keep a 4-column wall narrow enough that its label already meets the
+        // minimum, so the front keeps its minimum height.
+        let narrow = wall(40, pages: 100)
+        XCTAssertEqual(narrow.columns, 4)
+        XCTAssertEqual(BookWallScene.shelfThickness(for: narrow), minimum)
+    }
+
     func testDeviceGateStartsAtAppleTV4KSecondGeneration() {
         XCTAssertFalse(BookWallAvailability.supports(machineIdentifier: "AppleTV6,2"))
         XCTAssertTrue(BookWallAvailability.supports(machineIdentifier: "AppleTV11,1"))
