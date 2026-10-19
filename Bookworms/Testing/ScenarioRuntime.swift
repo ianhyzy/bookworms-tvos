@@ -183,7 +183,6 @@
             dependencies.pollHardcoverDeviceToken = {
                 try await client.pollDeviceToken(deviceCode: $0)
             }
-            dependencies.exchangeHardcoverCode = { try await client.exchangeAuthorizationCode($0) }
             dependencies.refreshHardcoverToken = { try await client.refreshTokens($0) }
             dependencies.revokeHardcoverToken = { try await client.revoke(refreshToken: $0) }
             if name.hasPrefix("welcome") {
@@ -466,10 +465,6 @@
                 {
                     if scenario == "offline" { return (-1, Data()) }
                     if scenario == "error" { return (401, Data()) }
-                    let form = String(decoding: request.body() ?? Data(), as: UTF8.self)
-                    if form.contains("grant_type=authorization_code") {
-                        return (200, Self.authorizedToken)
-                    }
                     if scenario.hasPrefix("welcome") {
                         if !authorizationApproved {
                             pendingAuthorization.append(request)

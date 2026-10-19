@@ -47,18 +47,6 @@ struct BookwormsApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .CKAccountChanged)) { _ in
                     library.cloudAccountChanged()
                 }
-                .onOpenURL { url in
-                    let scheme = url.scheme ?? ""
-                    if scheme == "gay.ian.bookworms" || scheme == "bookworms",
-                        url.path == "/oauth/callback" || url.host == "oauth",
-                        let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                        let code = components.queryItems?.first(where: { $0.name == "code" })?.value
-                    {
-                        Task {
-                            _ = await library.connectWithCode(code)
-                        }
-                    }
-                }
         }
     }
 }

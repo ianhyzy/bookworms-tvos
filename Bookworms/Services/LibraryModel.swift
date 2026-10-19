@@ -738,25 +738,6 @@ final class LibraryModel {
         hardcoverDeviceAuthMessage = nil
     }
 
-    func connectWithCode(_ rawCode: String) async -> Bool {
-        guard !isLoading else { return false }
-        // Manual entry replaces device polling, so only one authorization can install a library.
-        cancelHardcoverDeviceAuth()
-        isLoading = true
-        let revision = sourceRevision
-        defer { isLoading = false }
-        let tokens: HardcoverTokens
-        do {
-            tokens = try await dependencies.exchangeHardcoverCode(rawCode)
-        } catch {
-            guard revision == sourceRevision, !Task.isCancelled else { return false }
-            message = readable(error)
-            sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
-            return false
-        }
-        return await connectValidatedToken(tokens, revision: revision)
-    }
-
     /// Connects with a token that has no refresh token, such as a personal access token.
     func connect(_ rawToken: String) async -> Bool {
         guard !isLoading else { return false }

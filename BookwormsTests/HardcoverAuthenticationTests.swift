@@ -41,27 +41,6 @@ final class HardcoverAuthenticationTests: XCTestCase {
         XCTAssertTrue(books.isEmpty)
     }
 
-    func testExchangeAuthorizationCodeSuccess() async throws {
-        let tokens = try await client().exchangeAuthorizationCode("valid_code_123")
-        XCTAssertEqual(tokens, HardcoverTokens(accessToken: "hc_pat_success"))
-    }
-
-    func testExchangeAuthorizationCodeRejectsMalformedCode() async {
-        do {
-            _ = try await client().exchangeAuthorizationCode("code with spaces")
-            XCTFail("Malformed authorization code must be rejected.")
-        } catch HardcoverError.invalidAuthorizationCode {
-        } catch { XCTFail("Unexpected error: \(error)") }
-    }
-
-    func testExchangeAuthorizationCodeHandlesErrorResponse() async {
-        do {
-            _ = try await client().exchangeAuthorizationCode("expired_code")
-            XCTFail("Invalid grant must fail.")
-        } catch HardcoverError.invalidAuthorizationCode {
-        } catch { XCTFail("Unexpected error: \(error)") }
-    }
-
     func testRequestDeviceAuthSuccess() async throws {
         let auth = try await client().requestDeviceAuth()
         XCTAssertEqual(auth.deviceCode, "hc_dc_stub")
@@ -93,6 +72,12 @@ final class HardcoverAuthenticationTests: XCTestCase {
                 HardcoverTokens(
                     accessToken: "hc_at_success", refreshToken: "hc_rt_success",
                     expiresIn: 604_800)))
+
+        do {
+            _ = try await client().pollDeviceToken(deviceCode: "device_rejected")
+            XCTFail("A rejected device code must fail.")
+        } catch HardcoverError.invalidAuthorizationCode {
+        } catch { XCTFail("Unexpected error: \(error)") }
     }
 
     func testRefreshSpendsTheRefreshTokenForItsReplacement() async throws {
@@ -340,12 +325,6 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
                     }
                     if bodyString.contains("refresh_token=hc_rt_limited") {
                         return (429, #"{"error":"slow_down"}"#)
-                    }
-                    return (400, #"{"error":"invalid_grant"}"#)
-                } else if bodyString.contains("grant_type=authorization_code") {
-                    XCTAssertTrue(bodyString.contains("client_id=\(HardcoverClient.clientID)"))
-                    if bodyString.contains("code=valid_code") {
-                        return (200, #"{"access_token":"hc_pat_success","token_type":"Bearer"}"#)
                     }
                     return (400, #"{"error":"invalid_grant"}"#)
                 } else if bodyString.contains("device_code=device_pending") {
