@@ -244,9 +244,10 @@ struct SocialViews: View {
                     activity: activity,
                     isBookRead: isBookReadByUser(activity.book?.id ?? activity.id),
                     isCompact: true,
-                    // Leaves room for a one-line title and every caption above the Read review
-                    // button. A longer title shrinks the cover instead of overlapping the button.
-                    coverHeight: max(260, cardHeight - 380)
+                    // Leaves room for a two-line title and every caption above the Read review
+                    // button, so covers on a page share a height. A longer title shrinks its
+                    // cover instead of overlapping the button.
+                    coverHeight: max(260, cardHeight - 414)
                 )
                 .frame(
                     width: cardWidth,
