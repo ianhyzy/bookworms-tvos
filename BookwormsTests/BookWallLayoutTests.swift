@@ -141,8 +141,8 @@ final class BookWallLayoutTests: XCTestCase {
 
     @MainActor
     func testShelfFrontGrowsDownwardUntilTheLabelMeetsTheMinimum() {
-        // Very long books reach `maximumBookLength`, so every column takes its widest lane and
-        // the camera frames each column count from as far away as it can.
+        // Very long books with short titles reach `maximumBookLength`, so every column takes the
+        // widest lane that page count alone produces.
         func wall(_ count: Int) -> BookWallLayout {
             BookWallLayout(
                 books: (1...count)
