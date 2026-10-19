@@ -124,7 +124,8 @@ final class ScenarioNavigationTests: XCTestCase {
         _ = try waitForProbe(app) {
             ($0["network"] as? [String: Any])?["heldAuthorization"] as? Int == 1
         }
-        RemoteNavigation.moveFocus(to: app.buttons["hardcover-new-code"], in: app)
+        // **New code** is the card's only control, so focus must reach it without a press.
+        waitForFocus(app.buttons["hardcover-new-code"])
     }
 
     /// **New code** is the card's only control while a code shows, so no press moves focus.

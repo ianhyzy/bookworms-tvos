@@ -81,9 +81,10 @@ final class SettingsInteractionTests: XCTestCase {
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(connect)
         XCUIRemote.shared.press(.select)
-        // The card shows its instructions and QR code whether or not the offline test guard
-        // lets the simulated link-code request through.
         XCTAssertTrue(app.staticTexts["hardcover-instructions"].waitForExistence(timeout: 5))
+        // **New code** shows while the code is requested and after, so focus enters the card
+        // inside the sheet's scroll view without a press.
+        RemoteNavigation.waitForFocus(app.buttons["hardcover-new-code"])
         XCTAssertTrue(app.descendants(matching: .any)["hardcover-token-qr"].firstMatch.exists)
         XCTAssertTrue(
             app.staticTexts["hardcover-instructions"].label.contains("hardcover.app/link"))
