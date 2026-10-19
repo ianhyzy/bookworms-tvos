@@ -133,6 +133,7 @@
                 ProcessInfo.processInfo.environment["BOOKWORMS_SCENARIO_CONTROL"] ?? "manual"
             for command in [
                 "probe", "release-artwork", "advance-clock", "approve-hardcover", "release-library",
+                "start-ambient",
             ] {
                 let name = "gay.ian.Bookworms.scenario.\(channel).\(command)"
                 CFNotificationCenterAddObserver(
@@ -241,6 +242,14 @@
                 {
                     date = date.addingTimeInterval(seconds)
                     ambient.tick(views: availableViews)
+                }
+            case "/start-ambient":
+                // For captures: starts ambient mode as **Start ambient mode** does.
+                library.setAmbientActive(true)
+                if !ambient.start(
+                    views: availableViews, preferences: ViewPreferences(), voiceOver: false)
+                {
+                    library.setAmbientActive(false)
                 }
             case "/probe": break
             default: preconditionFailure("Unknown simulator test command")

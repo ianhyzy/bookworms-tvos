@@ -35,6 +35,11 @@ struct BookDetailView: View {
     var libraryBook: (Int) -> Book? = { _ in nil }
     /// Opens details for another book in your library, chosen from the series pop-up.
     var onOpenBook: ((Book) -> Void)?
+    /// Followed readers with this book in their synced libraries, shown with their ratings.
+    var friendReads: [FriendRead] = []
+    /// The book's Hardcover page, shown as a QR code under the cover. Book Wall details, which
+    /// reserve the column for the 3D book, leave it out.
+    var hardcoverURL: URL?
     @State private var showsSeries = false
     /// The series book chosen in the pop-up, opened after the pop-up finishes closing so that one
     /// presentation never starts while another is still dismissing.
@@ -59,7 +64,9 @@ struct BookDetailView: View {
         onShowShelf: ((ShelfFilter) -> Void)? = nil,
         series: SeriesInfo? = nil,
         libraryBook: @escaping (Int) -> Book? = { _ in nil },
-        onOpenBook: ((Book) -> Void)? = nil
+        onOpenBook: ((Book) -> Void)? = nil,
+        friendReads: [FriendRead] = [],
+        hardcoverURL: URL? = nil
     ) {
         self.book = book
         self.style = style
@@ -71,6 +78,8 @@ struct BookDetailView: View {
         self.series = series
         self.libraryBook = libraryBook
         self.onOpenBook = onOpenBook
+        self.friendReads = friendReads
+        self.hardcoverURL = hardcoverURL
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
@@ -136,6 +145,15 @@ struct BookDetailView: View {
                         Spacer(minLength: 0)
                     }
                     .frame(width: coverColumnWidth)
+                    // An overlay, so the code takes the space below the cover without moving it.
+                    // It reaches halfway into the bottom padding, still inside the TV safe area,
+                    // to leave a gap below the cover.
+                    .overlay(alignment: .bottom) {
+                        if showsCover, let hardcoverURL {
+                            hardcoverCode(hardcoverURL)
+                                .offset(y: BookDetailCoverLayout.verticalPadding / 2)
+                        }
+                    }
                     .focusSection()
                     // Two sibling sections, not nested ones: the header starts level with Back, so
                     // Right from Back reaches the header (the author button, or the histogram when
@@ -168,6 +186,7 @@ struct BookDetailView: View {
                                     $focusedGenre, genres.first, priority: .userInitiated)
                         }
                         .focusSection()
+                        if !friendReads.isEmpty { friends }
                         description.focusSection()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -286,15 +305,24 @@ struct BookDetailView: View {
         .appFont(size: 26).foregroundStyle(.detailCaption).lineLimit(1)
     }
 
-    /// The finish date when one is recorded, then genres, then the rating histogram, which opens
-    /// reviews when Hardcover can supply them.
+    /// The finish date when one is recorded, with a read count for a reread, then genres, then
+    /// the rating histogram, which opens reviews when Hardcover can supply them.
     private var metadata: some View {
         HStack(alignment: .top, spacing: 44) {
             if book.finished != nil {
-                metadataItem(
-                    "Finished", value: book.finishedLabel(format: dateFormat),
-                    symbol: "checkmark.circle"
-                )
+                VStack(alignment: .leading, spacing: 12) {
+                    metadataItem(
+                        "Finished", value: book.finishedLabel(format: dateFormat),
+                        symbol: "checkmark.circle"
+                    )
+                    if book.readCount > 1 {
+                        Text("Read \(book.readCount) times")
+                            .appFont(size: 23, weight: .semibold)
+                            .padding(.horizontal, 12).padding(.vertical, 4)
+                            .background(.primary.opacity(0.12), in: .capsule)
+                            .accessibilityIdentifier("detail-read-count")
+                    }
+                }
                 .fixedSize()
             }
             if !genres.isEmpty {
@@ -333,6 +361,57 @@ struct BookDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A QR code for the book's Hardcover page with a caption beside it. It isn't focusable.
+    private func hardcoverCode(_ url: URL) -> some View {
+        HStack(spacing: 18) {
+            QRCodeView(url: url).frame(width: QRCodeView.linkSide, height: QRCodeView.linkSide)
+                .clipShape(.rect(cornerRadius: 10))
+            Text("Scan to open\non Hardcover")
+                .appFont(size: 23).foregroundStyle(.detailCaption)
+                .fixedSize()
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("detail-hardcover-code")
+    }
+
+    /// Followed readers who have the book, each with their photo and rating. It isn't focusable:
+    /// remote presses pass between the metadata row and the description.
+    private var friends: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "person.2").frame(width: 20)
+                Text("Friends who read this")
+            }
+            .appFont(size: 18).foregroundStyle(.detailCaption)
+            FlowLayout(spacing: 30) {
+                ForEach(friendReads, id: \.reader.id) { read in
+                    HStack(spacing: 10) {
+                        ReaderLabel(
+                            name: read.reader.displayName, avatarURL: read.reader.avatarURL,
+                            size: 23)
+                        Text(
+                            read.rating.map {
+                                "★" + $0.formatted(.number.precision(.fractionLength(0...1)))
+                            } ?? "Read"
+                        )
+                        .appFont(size: 23, weight: .semibold).monospacedDigit()
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Friends who read this: "
+                + friendReads.map { read in
+                    read.reader.displayName
+                        + (read.rating.map { ", \($0.formatted()) stars" } ?? "")
+                }
+                .joined(separator: "; ")
+        )
+        .accessibilityIdentifier("detail-friend-reads")
     }
 
     /// The author as a compact capsule button when details can filter My Shelf, otherwise text.

@@ -338,7 +338,7 @@ actor HardcoverClient {
                 }
                 edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
                 user_book_reads(where: {finished_at: {_is_null: false}},
-                  order_by: [{finished_at: desc}, {id: desc}], limit: 1) {
+                  order_by: [{finished_at: desc}, {id: desc}]) {
                   finished_at edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
                 }
                 current_read: user_book_reads(where: {finished_at: {_is_null: true}},
@@ -668,6 +668,8 @@ actor HardcoverClient {
     static let currentlyReadingStatus = 2
     /// Hardcover's `status_id` for **Read**.
     static let readStatus = 3
+    /// Hardcover's `status_id` for **Ignored**, books the reader chose not to see.
+    static let ignoredStatus = 6
 
     /// The fraction of an unfinished read completed, from 0 to 1, or `nil` when the read logs no
     /// progress.
@@ -717,14 +719,19 @@ actor HardcoverClient {
         return text.isEmpty ? nil : text
     }
 
-    /// Turns library rows into books, one per Hardcover book. `previous` holds the account's
-    /// books from its last sync, by ID, whose covers stay fixed unless an upgrade applies
+    /// Turns library rows into books, one per Hardcover book, leaving out books the reader marked
+    /// **Ignored**. `previous` holds the account's books from its last sync, by ID, whose covers
+    /// stay fixed unless an upgrade applies
     /// (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`).
+    ///
+    /// Each finished read's date goes into `finishedDates`, newest first, and the newest is
+    /// `finished`. A book without finished reads keeps `last_read_date` as `finished` alone.
     static func normalize(_ rows: [UserBook], previous: [Int: Book] = [:]) -> [Book] {
         var unique: [Int: Book] = [:]
-        for row in rows {
+        for row in rows where row.statusID != Self.ignoredStatus {
             let source = row.book
             let read = row.userBookReads?.first
+            let finishes = (row.userBookReads ?? []).compactMap(\.finishedAt).sorted(by: >)
             let edition = read?.edition ?? row.edition
             let author = (source.cachedContributors ?? [])
                 .filter {
@@ -746,7 +753,8 @@ actor HardcoverClient {
                 description: source.description, review: Self.plainText(from: row.review),
                 coverURL: covers.alternate,
                 pages: edition?.pages ?? source.pages,
-                finished: read?.finishedAt ?? row.lastReadDate, rating: row.rating,
+                finished: finishes.first ?? row.lastReadDate,
+                finishedDates: finishes.isEmpty ? nil : finishes, rating: row.rating,
                 format: edition?.readingFormat?.format,
                 seriesID: membership?.series?.id,
                 seriesPosition: membership?.position,
@@ -756,7 +764,7 @@ actor HardcoverClient {
                 communityRating: source.rating, ratingsCount: source.ratingsCount,
                 ratingDistribution: source.validRatingDistribution,
                 detailCoverURL: covers.preferred, sources: [.hardcover],
-                isRead: row.statusID == Self.readStatus || read?.finishedAt != nil
+                isRead: row.statusID == Self.readStatus || !finishes.isEmpty
                     || row.lastReadDate != nil,
                 publicationYear: source.releaseYear,
                 isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,

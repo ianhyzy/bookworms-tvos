@@ -10,6 +10,8 @@ enum ShelfScreenLayout {
 struct ShelfView: View {
     @AppStorage("dateFormat") private var dateFormat = AppDateFormat.monthName
     @AppStorage("woodBackground") private var woodBackground = true
+    /// The profile link the ambient QR code option was turned on for (`AmbientView`).
+    @AppStorage("ambientProfileCodeLink") private var profileCodeLink = ""
     let library: LibraryModel
     @State private var social = SocialLibraryModel()
     @State private var coordinator: BookwormsCoordinator
@@ -346,7 +348,10 @@ struct ShelfView: View {
                     onOpenBook: { chosen in
                         lastFocusedID = chosen.id
                         selectedBook = chosen
-                    }
+                    },
+                    friendReads: social.presentation.friendReads[book.id] ?? [],
+                    // Sample books are fictional, so their IDs aren't their Hardcover pages.
+                    hardcoverURL: library.isSample ? nil : book.hardcoverURL
                 )
                 .appTypography()
                 .id(book.id)
@@ -486,6 +491,8 @@ struct ShelfView: View {
         if let readerAvatar = social.reader(coordinator.preferences.readerID)?.avatarURL {
             avatars.append(readerAvatar)
         }
+        // Book details list the readers with synced libraries who have the book.
+        avatars += social.presentation.libraryReaders.compactMap(\.avatarURL)
         let enabled = coordinator.preferences.activeViews
         if enabled.contains(.following) {
             books += social.activities.prefix(20).compactMap(\.book)
@@ -740,6 +747,7 @@ struct ShelfView: View {
                                 libraryBook: { library.book(withID: $0) },
                                 // A series book opens in the cover details, even one on the wall.
                                 onOpenBook: { selectedBook = $0 },
+                                friendReads: { social.presentation.friendReads[$0.id] ?? [] },
                                 onActivity: recordActivity,
                                 returnRevision: socialReturnRevision,
                                 detailState: wallDetail
@@ -933,6 +941,24 @@ struct ShelfView: View {
                         Text("Until stopped").tag(0)
                     }
                     .pickerStyle(.segmented)
+                    // Offered only with a connected account, and on only for the account it was
+                    // turned on for.
+                    if let profileURL = library.hardcoverProfileURL {
+                        Toggle(
+                            "Show a QR code for my Hardcover profile",
+                            isOn: Binding(
+                                get: { profileCodeLink == profileURL.absoluteString },
+                                set: { profileCodeLink = $0 ? profileURL.absoluteString : "" })
+                        )
+                        .font(.system(size: 24))
+                        .padding(.top, 10)
+                        .accessibilityIdentifier("ambient-profile-code-toggle")
+                        Text(
+                            "Guests can scan it to open your profile. It appears below the content in ambient mode."
+                        )
+                        .appFont(size: 22).foregroundStyle(palette.text).opacity(0.7)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 // Wide enough for four session segments, including "Until stopped".
                 .frame(width: 920)

@@ -612,4 +612,31 @@ private actor SocialFixtureClient: SocialLibraryFetching {
             FriendPick.readersToSync(snapshot, limit: 2), [4, 2],
             "The most active readers in the feed sync first")
     }
+
+    func testFriendReadsIndexFollowedReadersRatedFirst() {
+        func reader(_ id: Int, _ name: String) -> ReaderProfile {
+            ReaderProfile(id: id, username: "r\(id)", name: name, avatarURL: nil)
+        }
+        func item(_ id: Int, _ rating: Double?) -> ReaderBook {
+            ReaderBook(
+                book: Book(id: id, title: "Book \(id)", author: "A"), rating: rating, review: nil,
+                hasSpoilers: false, finished: nil)
+        }
+        let snapshot = SocialSnapshot(
+            owner: reader(1, "Owner"),
+            following: [reader(2, "Blair"), reader(3, "Avery"), reader(4, "Casey")],
+            readerBooks: [
+                2: [item(10, 4), item(11, nil)],
+                3: [item(10, 4), item(11, 5)],
+                4: [item(10, nil)],
+                9: [item(10, 5)],
+            ])
+        let index = FriendRead.byBook(snapshot)
+        XCTAssertEqual(
+            index.reads[10]?.map(\.reader.id), [3, 2, 4],
+            "Rated first, ties by name; readers you don't follow are left out")
+        XCTAssertEqual(index.reads[11]?.map(\.rating), [5, nil])
+        XCTAssertNil(index.reads[12], "A book no friend has shows no row")
+        XCTAssertEqual(Set(index.readers.map(\.id)), [2, 3, 4])
+    }
 }

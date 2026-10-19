@@ -15,6 +15,13 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["HARDCOVER"].exists)
         XCTAssertFalse(app.staticTexts["About this book"].exists)
         XCTAssertTrue(app.otherElements["rating-distribution"].exists)
+        // The sample book was finished twice, and the sample reader has it. Neither the read
+        // count nor the readers row takes focus; the presses below cross the row.
+        XCTAssertEqual(app.staticTexts["detail-read-count"].label, "Read 2 times")
+        XCTAssertTrue(app.descendants(matching: .any)["detail-friend-reads"].exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["detail-hardcover-code"].exists,
+            "Fictional sample books have no Hardcover page")
         let back = app.buttons["back-to-shelf"]
         let reviews = app.buttons["community-reviews"]
         let author = app.buttons["detail-author"]
@@ -233,7 +240,8 @@ final class ShelfNavigationTests: XCTestCase {
         }
     }
 
-    /// The sample library finishes every dated book in 2026; its shelf runs earliest first.
+    /// The sample library finishes every dated book in 2026, and rereads book 1 from 2024. The
+    /// year menu opens on 2026, whose shelf runs earliest first.
     func testYearInReviewCoversHeaderAndDetailsMoveDirectly() {
         continueAfterFailure = false
         let app = RemoteNavigation.open("Year in Review")

@@ -86,6 +86,33 @@ final class YearInReviewTests: XCTestCase {
             "Today's own finishes and other days are left out")
     }
 
+    func testRereadsJoinEveryYearTheyWereFinishedIn() throws {
+        var reread = book(1, finished: "2026-02-10", rating: 5, pages: 300)
+        reread.finishedDates = ["2026-02-10", "2025-11-03", "2025-04-01", "2023-06-30"]
+        let years = YearInReview.all(from: [reread, book(2, finished: "2025-05-01")])
+        XCTAssertEqual(years.map(\.year), [2026, 2025, 2023])
+        let review2025 = try XCTUnwrap(years.first { $0.year == 2025 })
+        XCTAssertEqual(review2025.books.map(\.id), [2, 1], "One entry per book and year")
+        XCTAssertEqual(
+            review2025.books.last?.finished, "2025-11-03",
+            "The year's latest finish orders and labels the book")
+        XCTAssertEqual(review2025.monthlyCounts[10], 1)
+        XCTAssertEqual(review2025.monthlyCounts[3], 0)
+        XCTAssertEqual(years.last?.books.first?.finished, "2023-06-30")
+        XCTAssertEqual(years.first?.books.first?.readCount, 4, "Copies keep the read count")
+    }
+
+    func testOnThisDayFindsAnEarlierReadOfAReread() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let today = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 10, day: 4)))
+        var reread = book(1, finished: "2026-03-01")
+        reread.finishedDates = ["2026-03-01", "2024-10-04", "2020-10-04"]
+        let found = Book.finishedOnThisDay([reread], date: today, calendar: calendar)
+        XCTAssertEqual(found.map(\.finished), ["2024-10-04"], "The most recent match labels it")
+    }
+
     func testGenresAndAuthorsRankByCountThenName() throws {
         let review = try XCTUnwrap(
             YearInReview.all(from: [

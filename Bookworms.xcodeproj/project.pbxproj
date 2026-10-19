@@ -67,6 +67,7 @@
 		8A7D3AB2BFBD63715D11928E /* AIStyleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E85DB3D309F8DF85CCD4690 /* AIStyleStore.swift */; };
 		8B3BC67477C31F9468E438F3 /* PerformanceDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F8CD616984999BA355D0253 /* PerformanceDiagnostics.swift */; };
 		912B66560983762247CB5581 /* OfflinePolicyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11E9065D31DF1E5830146909 /* OfflinePolicyUITests.swift */; };
+		9683E2EA3A9350C77B480251 /* QRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD96835740925C53BC20B3C /* QRCodeView.swift */; };
 		974255187E0673AA2FACF14B /* ArtworkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DE0AE68DB17CF2BED251A3A /* ArtworkStore.swift */; };
 		99266641924EE1CFC3E640C5 /* SocialPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1CC621CA196F6EFD0EC2812 /* SocialPresentation.swift */; };
 		9CB2EF842504D1DEA5CBF9D0 /* ScenarioNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C8C86653FAA22D82D34C3 /* ScenarioNavigationTests.swift */; };
@@ -251,6 +252,7 @@
 		ABD792402E78441E4FE1D3BD /* YearInReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YearInReviewView.swift; sourceTree = "<group>"; };
 		AD0A9C120F107486B855A0F3 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AD15ED4A371F7D2C1E369E23 /* ComparisonBookshelf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComparisonBookshelf.swift; sourceTree = "<group>"; };
+		ADD96835740925C53BC20B3C /* QRCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeView.swift; sourceTree = "<group>"; };
 		AE6C82B5F8B073F4CBD40C73 /* DeviceAmbientProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAmbientProfileTests.swift; sourceTree = "<group>"; };
 		B476083EE441D966AF927F0B /* HardcoverAuthenticationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardcoverAuthenticationTests.swift; sourceTree = "<group>"; };
 		B49901D4DCB9619875ED62CE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -376,6 +378,7 @@
 				FA76DA467F4A638010B02043 /* HardcoverConnectionView.swift */,
 				D46A8D35D0BB9E4754E0D22E /* LibraryWelcomeView.swift */,
 				40CED90EFA1702669E842843 /* PerformanceDiagnosticObserver.swift */,
+				ADD96835740925C53BC20B3C /* QRCodeView.swift */,
 				D3CEAE1FF7663BF109E6E0DD /* RatingsView.swift */,
 				099BF6C6069C79350E8D5F47 /* SettingsView.swift */,
 				7D67BA8EFA6DDFF09034B330 /* ShelfControls.swift */,
@@ -781,6 +784,7 @@
 				06E219F03B5FC2B5B5A3A11F /* OfflineTestPolicy.swift in Sources */,
 				DB25333923CBBEA6360672C5 /* PerformanceDiagnosticObserver.swift in Sources */,
 				D14173598C660A4A5A63677E /* PerformanceDiagnostics.swift in Sources */,
+				9683E2EA3A9350C77B480251 /* QRCodeView.swift in Sources */,
 				EEAB09C5A8489AF50677E6CF /* RatingsView.swift in Sources */,
 				4DDCADC679875E59C9292579 /* ScenarioRuntime.swift in Sources */,
 				6402D7611927CCDB38428F9E /* SeriesDesigns.swift in Sources */,
