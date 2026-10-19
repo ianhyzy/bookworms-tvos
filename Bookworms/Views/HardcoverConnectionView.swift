@@ -92,7 +92,7 @@ struct HardcoverConnectionView: View {
                 Text("Sign in to Hardcover").appFont(size: 46, weight: .semibold)
                 if library.hardcoverSessionExpired {
                     Text("Hardcover rejected the saved login. Sign in again to resume syncing.")
-                        .appFont(size: 24).foregroundStyle(.orange)
+                        .appFont(size: 26).foregroundStyle(.orange)
                 }
                 Text("Scan the code with your phone, or go to **hardcover.app/link** and enter:")
                     .appFont(size: 26).foregroundStyle(.secondary)
@@ -102,7 +102,7 @@ struct HardcoverConnectionView: View {
                     HStack(spacing: 12) {
                         ProgressView().controlSize(.small)
                         Text(library.hardcoverDeviceAuthMessage ?? "Waiting for approval…")
-                            .appFont(size: 23).foregroundStyle(.secondary)
+                            .appFont(size: 26).foregroundStyle(.secondary)
                     }
                     .accessibilityIdentifier("hardcover-device-status")
                 }
@@ -124,7 +124,7 @@ struct HardcoverConnectionView: View {
                     manualEntry
                 }
                 if let message = library.message {
-                    Text(message).appFont(size: 23).foregroundStyle(.orange)
+                    Text(message).appFont(size: 26).foregroundStyle(.orange)
                         .accessibilityIdentifier("hardcover-connection-error")
                 }
             }
@@ -194,7 +194,7 @@ struct HardcoverConnectionView: View {
                     .buttonStyle(.glassProminent)
                     .accessibilityIdentifier("hardcover-device-retry")
                 if let failure = library.hardcoverDeviceAuthMessage {
-                    Text(failure).appFont(size: 23).foregroundStyle(.orange)
+                    Text(failure).appFont(size: 26).foregroundStyle(.orange)
                 }
             }
             .focusSection()
