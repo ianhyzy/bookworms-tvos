@@ -317,7 +317,7 @@ struct BookDetailView: View {
                     )
                     if book.readCount > 1 {
                         Text("Read \(book.readCount) times")
-                            .appFont(size: 23, weight: .semibold)
+                            .appFont(size: 24, weight: .semibold)
                             .padding(.horizontal, 12).padding(.vertical, 4)
                             .background(.primary.opacity(0.12), in: .capsule)
                             .accessibilityIdentifier("detail-read-count")
@@ -381,23 +381,19 @@ struct BookDetailView: View {
     /// remote presses pass between the metadata row and the description.
     private var friends: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                Image(systemName: "person.2").frame(width: 20)
-                Text("Friends who read this")
-            }
-            .appFont(size: 18).foregroundStyle(.detailCaption)
+            sectionHeading("Friends who read this", symbol: "person.2")
             FlowLayout(spacing: 30) {
                 ForEach(friendReads, id: \.reader.id) { read in
                     HStack(spacing: 10) {
                         ReaderLabel(
                             name: read.reader.displayName, avatarURL: read.reader.avatarURL,
-                            size: 23)
+                            size: 26)
                         Text(
                             read.rating.map {
                                 "★" + $0.formatted(.number.precision(.fractionLength(0...1)))
                             } ?? "Read"
                         )
-                        .appFont(size: 23, weight: .semibold).monospacedDigit()
+                        .appFont(size: 26, weight: .semibold).monospacedDigit()
                     }
                 }
             }
@@ -471,20 +467,16 @@ struct BookDetailView: View {
     /// The Genres label above one capsule button per genre.
     private func genreButtons(_ onShowShelf: @escaping (ShelfFilter) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "tag").frame(width: 20)
-                Text("Genres")
-            }
-            .appFont(size: 18).foregroundStyle(.detailCaption)
-            .accessibilityHidden(true)
+            sectionHeading("Genres", symbol: "tag")
+                .accessibilityHidden(true)
             FlowLayout(spacing: 10) {
                 ForEach(genres, id: \.self) { genre in
                     Button {
                         onShowShelf(.genre(genre))
                     } label: {
-                        Text(genre).appFont(size: 21, weight: .medium)
+                        Text(genre).appFont(size: 26, weight: .medium)
                     }
-                    .buttonStyle(FlatButtonStyle(horizontalPadding: 14, verticalPadding: 5))
+                    .buttonStyle(FlatButtonStyle(horizontalPadding: 16, verticalPadding: 6))
                     .focused($focusedGenre, equals: genre)
                     .accessibilityHint("Shows your books in this genre.")
                     .accessibilityIdentifier("detail-genre-\(genre)")
@@ -497,14 +489,19 @@ struct BookDetailView: View {
         -> some View
     {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: symbol).frame(width: 20)
-                Text(title)
-            }
-            .appFont(size: 18).foregroundStyle(.detailCaption)
-            Text(value).appFont(size: 23, weight: .medium).lineLimit(lines)
+            sectionHeading(title, symbol: symbol)
+            Text(value).appFont(size: 28, weight: .medium).lineLimit(lines)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// A caption-colored heading at the tvOS Caption 2 size, smaller than the value below it.
+    private func sectionHeading(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol).frame(width: 26)
+            Text(title)
+        }
+        .appFont(size: 23).foregroundStyle(.detailCaption)
     }
 }
 
@@ -783,7 +780,7 @@ private struct BookReviewCard: View {
                 }
                 if hidesSpoilers || fullHeight > shownHeight + 1 {
                     Text(hidesSpoilers ? "Reveal review" : "Read more")
-                        .appFont(size: 22, weight: .semibold).foregroundStyle(.tint)
+                        .appFont(size: 24, weight: .semibold).foregroundStyle(.tint)
                 }
             }
             .padding(30)
