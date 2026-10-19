@@ -171,8 +171,8 @@ struct CoverView: View {
             } else {
                 Rectangle().fill(.gray.opacity(0.18))
                 // Compact placeholders keep the title and author at the 23-point minimum, so the
-                // author's secondary color keeps the title first, and slim padding leaves room for
-                // words such as "Midsummer" on a 150-point cover.
+                // author's secondary color keeps the title first. Slim padding keeps words such as
+                // "Midsummer" whole on a 150-point cover and "Annihilation" on a 235-point Feed cover.
                 VStack(spacing: compact ? 12 : 20) {
                     BookText(book.title, of: book).appFont(size: compact ? 23 : 32)
                         .multilineTextAlignment(.center).lineLimit(3)
@@ -188,7 +188,7 @@ struct CoverView: View {
                         .appFont(size: 24).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
-                .padding(compact ? 8 : 28)
+                .padding(compact ? 8 : 16)
             }
         }
     }
