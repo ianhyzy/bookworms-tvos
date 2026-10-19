@@ -8,13 +8,27 @@ language: en-US
 tone_instructions: >-
   Be brief and concrete. Lead with frame-rate, focus, legibility, and
   book-realism problems. Skip formatting nits that swift-format already
-  enforces.
+  enforces, and nitpicks that prevent no bug or measurable cost.
 
 reviews:
   profile: chill
   poem: false
   in_progress_fortune: false
   sequence_diagrams: false
+  suggested_reviewers: false
+  suggested_labels: false
+  estimate_code_review_effort: false
+
+  auto_review:
+    # Review each pull request once, when it opens. Fix pushes don't start a
+    # review: AGENTS.md has the author review fix commits locally with
+    # `coderabbit review --agent` and comment `@coderabbitai review` only after
+    # fixes to credentials, shared records, or concurrency.
+    auto_incremental_review: false
+
+  pre_merge_checks:
+    docstrings:
+      mode: "off" # AGENTS.md asks for comments that explain intent, not coverage.
 
   # Generated, bundled, or binary content. Excluding it keeps reviews (and the
   # trial's rate limit) on source code.
@@ -49,7 +63,7 @@ reviews:
 
         Focus: the focus engine owns directional movement. Flag focus set from move-command handlers, timers, data changes, or loading completion; lost focus restoration after details; and a sidebar that Left from the leftmost item or Back cannot reach. Follow `docs/FOCUS_NAVIGATION.md`.
 
-        Legibility at TV distance: flag user-visible text below 23 pt (the tvOS Caption 2 size), body text well below 29 pt, and text colors likely to miss WCAG 4.5:1 contrast (3:1 for large text) against their background. User-visible text uses `appFont(size:weight:)`, not `.font(.system(size:))`; Settings uses the system font. Pairs and sets of colors should complement each other.
+        Legibility at TV distance: flag user-visible text below 23 pt (the tvOS Caption 2 size), body text well below 29 pt, and text colors likely to miss WCAG 4.5:1 contrast (3:1 for large text) against their background. Text drawn into RealityKit textures counts by its projected size on screen; when 23 pt needs a geometry change, say so instead of calling it a quick win. User-visible text uses `appFont(size:weight:)`, not `.font(.system(size:))`; Settings uses the system font. Pairs and sets of colors should complement each other.
 
         Library: treat it as a read-only snapshot between syncs. Sorting, intersections, and page layouts are prepared when data or configuration changes, never on focus changes. Displayed collections respect `BookLimit.maximum` except where AGENTS.md says otherwise. No per-cover network calls while scrolling or rendering details.
 
@@ -78,3 +92,15 @@ reviews:
   tools:
     swiftlint:
       enabled: false # The repository uses swift-format (.swift-format).
+
+knowledge_base:
+  learnings:
+    scope: global # Share learnings with the other Bookworms repositories; public repositories default to local.
+  linked_repositories:
+    - repository: ianhyzy/bookworms-ios
+      instructions: >-
+        The iPhone and Mac companion. Its `Bookworms/Models/CloudContract.swift`
+        writes the CloudKit JSON contract that `SpineCloudStore.swift` and
+        `CloudLibraryStore.swift` read, its `Bookworms/Models/SeriesDesigns.swift`
+        must match this repository's copy, and it shares the Hardcover
+        token-renewal rule.
