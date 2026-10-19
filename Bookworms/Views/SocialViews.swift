@@ -244,7 +244,9 @@ struct SocialViews: View {
                     activity: activity,
                     isBookRead: isBookReadByUser(activity.book?.id ?? activity.id),
                     isCompact: true,
-                    coverHeight: max(260, cardHeight - 340)
+                    // Leaves room for a one-line title and every caption above the Read review
+                    // button. A longer title shrinks the cover instead of overlapping the button.
+                    coverHeight: max(260, cardHeight - 380)
                 )
                 .frame(
                     width: cardWidth,
@@ -774,8 +776,12 @@ struct ActivityCard: View {
             : AnyLayout(HStackLayout(alignment: .top, spacing: 26))
         layout {
             if let book = activity.book {
+                // A compact cover is laid out last and takes the height the text leaves, up to
+                // `coverHeight`, so titles stay complete within the card.
                 CoverView(book: book)
-                    .frame(width: isCompact ? nil : 160, height: isCompact ? coverHeight : 225)
+                    .frame(width: isCompact ? nil : 160, height: isCompact ? nil : 225)
+                    .frame(maxHeight: isCompact ? coverHeight : nil)
+                    .layoutPriority(isCompact ? -1 : 0)
                     .accessibilityIdentifier("activity-cover-\(activity.id)")
             }
             VStack(alignment: .leading, spacing: isCompact ? 6 : 10) {
@@ -813,11 +819,11 @@ struct ActivityCard: View {
                     BookText(
                         hidesSpoilers ? "Review contains spoilers" : review, of: activity.book
                     )
-                    .appFont(size: 23).lineLimit(2)
+                    .appFont(size: 26).lineLimit(2)
                 }
                 if let date = activity.date {
                     Text(dateFormat.string(from: date))
-                        .appFont(size: 21).foregroundStyle(.secondary)
+                        .appFont(size: 23).foregroundStyle(.secondary)
                 }
                 LikesLabel(count: activity.likes)
             }
@@ -923,7 +929,7 @@ struct LikesLabel: View {
     var body: some View {
         if let count, count > 0 {
             Label(count == 1 ? "1 like" : "\(count.formatted()) likes", systemImage: "heart")
-                .appFont(size: 21).foregroundStyle(.secondary)
+                .appFont(size: 23).foregroundStyle(.secondary)
         }
     }
 }
