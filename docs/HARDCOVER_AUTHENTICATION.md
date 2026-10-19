@@ -10,7 +10,6 @@ The OAuth configuration uses:
 - **Token Endpoint**: `https://api.hardcover.app/oauth2/token`
 - **Revocation Endpoint**: `https://api.hardcover.app/oauth2/revoke`
 - **Requested scopes**: `read:me:content read:library read:catalog:data read:social read:users`
-- **Manual Redirect URI (fallback)**: `urn:ietf:wg:oauth:2.0:oob` (and `gay.ian.bookworms:/oauth/callback`)
 
 The GraphQL API endpoint is `https://api.hardcover.app/v1/graphql`, with `Authorization: Bearer <token>`. HTTP 401 indicates an invalid or expired credential. HTTP 403 with `insufficient_scope` asks the user to reconnect with the required read permissions; other 403 responses report denied access without incorrectly calling the token expired.
 
@@ -32,7 +31,7 @@ Hardcover access tokens last one week. Refresh tokens last six months and work o
 
 ## Verification
 
-Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, success), authorization code exchange, OAuth and PAT token validation, rejection of malformed or invalid codes before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection. Renewal tests cover the refresh request and its form encoding, which replies reject the refresh token, token responses with a malformed refresh token or expiry, renewal before expiry (halfway through a short-lived token's lifetime) and after HTTP 401, refresh token rotation, one shared renewal for concurrent library and social syncs, revoked and unavailable renewals in library and social sync, an access token kept after a rejected renewal, unreadable refresh tokens, Keychain save failures, disconnection during a renewal, revocation when a login is removed, and social sync continuing with a renewed token.
+Authentication tests cover device authorization initiation, device token polling states (pending, slow down, expired, access denied, rejected code, success), OAuth and PAT token validation, rejection of malformed tokens before transport, Bearer authentication, distinct 401/403 errors, and shelf preservation after a rejected connection. Renewal tests cover the refresh request and its form encoding, which replies reject the refresh token, token responses with a malformed refresh token or expiry, renewal before expiry (halfway through a short-lived token's lifetime) and after HTTP 401, refresh token rotation, one shared renewal for concurrent library and social syncs, revoked and unavailable renewals in library and social sync, an access token kept after a rejected renewal, unreadable refresh tokens, Keychain save failures, disconnection during a renewal, revocation when a login is removed, and social sync continuing with a renewed token.
 
 ## Sign in on Apple TV
 
@@ -44,7 +43,7 @@ Select **Connect Hardcover** in the popup, or open **Settings → Sources → Co
 2. Check or enter the 8-character code shown beside it and select **Authorize**.
 3. Your Apple TV checks the account, downloads the library, and saves it automatically after you approve.
 
-The card requests a code as soon as it opens. **New code** replaces an expired code, and **Enter a code instead** shows a text field for an authorization code typed with the remote. A loading card shows account validation, library download, and saving progress. A failed connection returns to the sign-in card with an error and controls to try again.
+The card requests a code as soon as it opens and requests another when that code expires. While a code shows, **New code** is the card's only control; it replaces the code, for example after Hardcover rejects it. A loading card shows account validation, library download, and saving progress. A failed connection returns to the sign-in card with an error and controls to try again.
 
 If authorization completes while another library operation is running, the app clears the consumed code and asks you to try again after that operation finishes. Select **Get link code** to request a fresh code. The app keeps the existing account and shelf until a new connection succeeds.
 
