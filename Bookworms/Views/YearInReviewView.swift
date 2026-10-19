@@ -215,7 +215,7 @@ struct YearInReviewView: View {
                 Text("No genres recorded").appFont(size: 28, weight: .medium)
             } else {
                 Text(review.genres.prefix(4).map(\.name).joined(separator: " · "))
-                    .appFont(size: 28, weight: .medium).lineLimit(1).minimumScaleFactor(0.8)
+                    .appFont(size: 28, weight: .medium).lineLimit(1).minimumScaleFactor(23 / 28)
             }
             if let author = review.topAuthor {
                 Text("Most-read author").appFont(size: 24).foregroundStyle(.secondary)
