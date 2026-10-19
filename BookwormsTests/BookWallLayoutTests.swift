@@ -143,10 +143,10 @@ final class BookWallLayoutTests: XCTestCase {
     func testShelfFrontGrowsDownwardUntilTheLabelMeetsTheMinimum() {
         // Very long books with short titles reach `maximumBookLength`, so every column takes the
         // widest lane that page count alone produces.
-        func wall(_ count: Int) -> BookWallLayout {
+        func wall(_ count: Int, pages: Int = 1_400) -> BookWallLayout {
             BookWallLayout(
                 books: (1...count)
-                    .map { Book(id: $0, title: "Book \($0)", author: "Author", pages: 1_400) })
+                    .map { Book(id: $0, title: "Book \($0)", author: "Author", pages: pages) })
         }
         let minimum = BookWallScene.minimumShelfThickness
         for (count, columns) in [(8, 3), (30, 3), (40, 4), (50, 5)] {
@@ -171,6 +171,11 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertGreaterThan(
             BookWallScene.shelfThickness(for: wall(50)),
             BookWallScene.shelfThickness(for: wall(40)))
+        // Short books keep a 4-column wall narrow enough that its label already meets the
+        // minimum, so the front keeps its minimum height.
+        let narrow = wall(40, pages: 100)
+        XCTAssertEqual(narrow.columns, 4)
+        XCTAssertEqual(BookWallScene.shelfThickness(for: narrow), minimum)
     }
 
     func testDeviceGateStartsAtAppleTV4KSecondGeneration() {
