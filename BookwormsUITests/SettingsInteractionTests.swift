@@ -56,7 +56,7 @@ final class SettingsInteractionTests: XCTestCase {
         XCTAssertTrue(text(containing: "2026-09-09", in: app).waitForExistence(timeout: 15))
     }
 
-    func testChooseSourcesOpensSourcesAndExplainsTokenEntry() {
+    func testChooseSourcesOpensSourcesAndExplainsLinkSignIn() {
         let app = XCUIApplication()
         // The empty scenario has no books and answers the link-code request locally.
         app.launchEnvironment["BOOKWORMS_SCENARIO_CONTROL"] = UUID().uuidString
@@ -88,15 +88,10 @@ final class SettingsInteractionTests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts["hardcover-instructions"].label.contains("hardcover.app/link"))
         XCTAssertFalse(app.buttons["Back to Sources"].exists)
-        XCTAssertFalse(app.textFields["hardcover-token"].exists)
-        let manual = app.buttons["hardcover-manual-entry"]
-        RemoteNavigation.moveFocus(to: manual, in: app)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Hardcover sign-in"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        XCUIRemote.shared.press(.select)
-        XCTAssertTrue(app.textFields["hardcover-token"].waitForExistence(timeout: 5))
     }
 
     func testCountButtonsStepByFiveAndPersistAcrossLaunches() {

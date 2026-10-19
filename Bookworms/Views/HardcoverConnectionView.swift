@@ -1,15 +1,12 @@
 import SwiftUI
 
-/// Connects a Hardcover account with a phone link or a manually entered authorization code.
-/// The completion callback runs after the account and library finish connecting.
+/// Connects a Hardcover account with Hardcover's device-code sign-in: a QR code, or the code
+/// entered at hardcover.app/link. The completion callback runs after the account and library
+/// finish connecting.
 struct HardcoverConnectionView: View {
     @Bindable var library: LibraryModel
     let onConnected: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var authorizationCode = ""
-    @State private var entersCodeManually = false
-    @State private var manualConnectTask: Task<Void, Never>?
-    @State private var manualRequestID: UUID?
     @State private var isVisible = false
     @State private var didComplete = false
 
@@ -38,18 +35,12 @@ struct HardcoverConnectionView: View {
         }
         .onChange(of: library.isLoading) {
             completeIfReady()
-            if manualConnectTask == nil, library.hardcoverDeviceAuthMessage == nil,
-                library.message == nil
-            {
+            if library.hardcoverDeviceAuthMessage == nil, library.message == nil {
                 startDeviceAuthIfNeeded()
             }
         }
         .onDisappear {
             isVisible = false
-            manualConnectTask?.cancel()
-            manualConnectTask = nil
-            manualRequestID = nil
-            authorizationCode = ""
             library.cancelHardcoverDeviceAuth()
         }
     }
@@ -105,23 +96,12 @@ struct HardcoverConnectionView: View {
                             .appFont(size: 26).foregroundStyle(.secondary)
                     }
                     .accessibilityIdentifier("hardcover-device-status")
-                }
-                HStack(spacing: 25) {
-                    Button("Enter a code instead") { entersCodeManually.toggle() }
+                    Button("New code") { library.startHardcoverDeviceAuth() }
                         .appFont(size: 24)
                         .performanceGlassButton()
-                        .accessibilityIdentifier("hardcover-manual-entry")
-                    if library.hardcoverDeviceAuth != nil {
-                        Button("New code") { library.startHardcoverDeviceAuth() }
-                            .appFont(size: 24)
-                            .performanceGlassButton()
-                            .accessibilityIdentifier("hardcover-new-code")
-                    }
-                }
-                .padding(.top, 8)
-                .focusSection()
-                if entersCodeManually {
-                    manualEntry
+                        .accessibilityIdentifier("hardcover-new-code")
+                        .padding(.top, 8)
+                        .focusSection()
                 }
                 if let message = library.message {
                     Text(message).appFont(size: 26).foregroundStyle(.orange)
@@ -153,22 +133,6 @@ struct HardcoverConnectionView: View {
             url.scheme == "https", url.host() == "hardcover.app"
         else { return nil }
         return url
-    }
-
-    private var manualEntry: some View {
-        HStack(spacing: 20) {
-            TextField("Authorization code", text: $authorizationCode)
-                .appFont(size: 26)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("hardcover-token")
-            Button("Connect", action: connectManually)
-                .appFont(size: 26)
-                .performanceGlassButton()
-                .disabled(authorizationCode.isEmpty)
-                .accessibilityIdentifier("hardcover-manual-connect")
-        }
-        .focusSection()
     }
 
     /// Shows the device code, its request spinner, or a retry after a failed request.
@@ -204,28 +168,9 @@ struct HardcoverConnectionView: View {
     private func startDeviceAuthIfNeeded() {
         guard isVisible, !didComplete, needsHardcoverLink, !library.isLoading,
             library.hardcoverConnectionPhase == nil, library.hardcoverDeviceAuth == nil,
-            !library.hardcoverDeviceAuthLoading, manualConnectTask == nil
+            !library.hardcoverDeviceAuthLoading
         else { return }
         library.startHardcoverDeviceAuth()
-    }
-
-    private func connectManually() {
-        guard !library.isLoading, !authorizationCode.isEmpty else { return }
-        manualConnectTask?.cancel()
-        library.cancelHardcoverDeviceAuth()
-        let requestID = UUID()
-        let code = authorizationCode
-        manualRequestID = requestID
-        manualConnectTask = Task { @MainActor in
-            let connected = await library.connectWithCode(code)
-            guard !Task.isCancelled, isVisible, manualRequestID == requestID else { return }
-            manualConnectTask = nil
-            manualRequestID = nil
-            if connected {
-                authorizationCode = ""
-                completeIfReady()
-            }
-        }
     }
 
     private func completeIfReady() {
@@ -234,7 +179,6 @@ struct HardcoverConnectionView: View {
             !library.hardcoverSessionExpired, !isConnecting
         else { return }
         didComplete = true
-        authorizationCode = ""
         onConnected()
     }
 }
