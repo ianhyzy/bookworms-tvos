@@ -135,9 +135,11 @@ struct SpineDesignMakers: Equatable {
     /// How many books draw no design, so Book Wall draws them in its own local look.
     var undesigned = 0
 
-    /// Counts the design each of `books` draws: its series look from `looks`, else its series
-    /// source's design from `designs`, else its own (`LibraryModel.seriesDrawing`). It counts
-    /// before preparation's glyph checks, which can give a book its own design instead.
+    /// Counts the design each of `books` draws: its series look from `looks`, else, with a
+    /// series source in `sources`, the source's design from `designs`, else its own
+    /// (`LibraryModel.seriesDrawing`). A book whose source has no design counts as undesigned
+    /// even with a design of its own, because Book Wall draws the source's local look on it. It
+    /// counts before preparation's glyph checks, which can give a book its own design instead.
     init(
         books: [Book], designs: [Int: SpineDesignV1], sources: [Int: Book],
         looks: [Int: SpineDesignV1]
@@ -151,10 +153,11 @@ struct SpineDesignMakers: Equatable {
             let maker = design.madeBy
             counts[maker.name, default: (maker.tier, 0)].books += 1
         }
-        makers = counts.sorted {
-            ($0.value.tier, $0.value.books, $1.key) > ($1.value.tier, $1.value.books, $0.key)
-        }
-        .map { Maker(name: $0.key, books: $0.value.books) }
+        makers =
+            counts.sorted {
+                ($0.value.tier, $0.value.books, $1.key) > ($1.value.tier, $1.value.books, $0.key)
+            }
+            .map { Maker(name: $0.key, books: $0.value.books) }
     }
 
     init() {}

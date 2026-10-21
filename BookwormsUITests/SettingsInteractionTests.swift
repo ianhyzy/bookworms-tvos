@@ -117,8 +117,9 @@ final class SettingsInteractionTests: XCTestCase {
             ("Private Cloud Compute", "1 book"), ("Google Gemini (gemini-3.8-flash)", "4 books"),
             ("Apple on-device model", "2 books"), ("Default styling", "1 book"),
         ] {
-            let row = app.descendants(matching: .any).matching(
-                NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", model, count))
+            let label = NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@", model, count)
+            let row = app.descendants(matching: .any).matching(label)
             XCTAssertTrue(row.firstMatch.exists, "\(model): \(count)")
         }
         let screenshot = XCTAttachment(screenshot: app.screenshot())

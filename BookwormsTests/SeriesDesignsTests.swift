@@ -297,8 +297,9 @@ final class SeriesDesignsTests: XCTestCase {
         var onDevice = companionDesign(4, family: nil, postScriptName: nil)
         onDevice.provenance = "model:apple/on-device"
         let lender = book(6, series: 9)
+        let others = [book(4, series: nil), book(5, series: nil), lender, book(7, series: 9)]
         let makers = SpineDesignMakers(
-            books: series + [book(4, series: nil), book(5, series: nil), lender, book(7, series: 9)],
+            books: series + others,
             designs: [
                 3: companionDesign(3, family: nil, postScriptName: nil), 4: onDevice,
                 6: companionDesign(6, family: nil, postScriptName: nil),
