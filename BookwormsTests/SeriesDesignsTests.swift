@@ -302,6 +302,67 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(without.sources[2]?.id, 1, "Without a look, the best-ranked book lends")
     }
 
+    /// The Apple TV names a design's model as the iPhone and Mac do, from the design alone.
+    func testDesignsNameTheModelThatMadeThem() {
+        func madeBy(_ provenance: String?, generator: String = "ios-pcc-v2") -> String {
+            SpineDesignV1(
+                version: 1, accountID: "account", bookID: 1,
+                workItemHash: String(repeating: "a", count: 64),
+                coverHash: String(repeating: "b", count: 64), generatorVersion: generator,
+                generatedAt: Date(timeIntervalSince1970: 0), backgroundHex: "#1F3A5A",
+                foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+                uppercase: false, provenance: provenance
+            )
+            .madeBy.name
+        }
+        let gemini = "Google Gemini (gemini-3.8-flash)"
+        XCTAssertEqual(madeBy("model:google/gemini-3.8-flash"), gemini)
+        XCTAssertEqual(madeBy("series-reuse:8 model:google/gemini-3.8-flash"), gemini)
+        XCTAssertEqual(madeBy("model:anthropic/claude-haiku-5-5"), "Anthropic (claude-haiku-5-5)")
+        XCTAssertEqual(madeBy("model:openAI/gpt-6-luna"), "OpenAI (gpt-6-luna)")
+        XCTAssertEqual(madeBy("model:custom/qwen3-vl"), "OpenAI-compatible endpoint (qwen3-vl)")
+        XCTAssertEqual(madeBy(nil), "Private Cloud Compute")
+        XCTAssertEqual(madeBy("model:apple/on-device"), "Apple on-device model")
+        XCTAssertEqual(madeBy(nil, generator: "mac-foundation-models-v1"), "Apple on-device model")
+        XCTAssertEqual(
+            madeBy("model:local", generator: "mac-foundation-models-v2"), "Apple on-device model")
+        XCTAssertEqual(madeBy("model:local font:system"), "Default styling")
+        XCTAssertEqual(madeBy(nil, generator: SeriesLookV1.localOrigin), "Default styling")
+    }
+
+    /// **Settings → Spines** counts the design each book draws: its series look, with the look's
+    /// model, else its series source's design, else its own, and the books that draw none.
+    func testSpineSettingsCountTheDesignEachBookDraws() {
+        let series = [book(1, position: 1), book(2, position: 2), book(3, position: 3)]
+        let look = SeriesLookV1(
+            accountID: "account", seriesID: 7, group: "|mattdinniman", sourceBookID: 2,
+            origin: "ios-pcc-v2", createdAt: Date(timeIntervalSince1970: 1_000),
+            backgroundHex: "#102030", foregroundHex: "#F0E0D0", accentHex: "#C0A060",
+            typeface: "serif", weight: 600, uppercase: false,
+            provenance: "model:google/gemini-3.8-flash")
+        let drawing = LibraryModel.seriesDrawing(
+            of: series, links: [3: link(3, ownLook: true)], looks: [look.key: look])
+        var onDevice = companionDesign(4, family: nil, postScriptName: nil)
+        onDevice.provenance = "model:apple/on-device"
+        let lender = book(6, series: 9)
+        let others = [book(4, series: nil), book(5, series: nil), lender, book(7, series: 9)]
+        let makers = SpineDesignMakers(
+            books: series + others,
+            designs: [
+                3: companionDesign(3, family: nil, postScriptName: nil), 4: onDevice,
+                6: companionDesign(6, family: nil, postScriptName: nil),
+            ],
+            sources: [6: lender, 7: lender], looks: drawing.looks)
+        XCTAssertEqual(
+            makers.makers,
+            [
+                .init(name: "Private Cloud Compute", books: 3),
+                .init(name: "Google Gemini (gemini-3.8-flash)", books: 2),
+                .init(name: "Apple on-device model", books: 1),
+            ])
+        XCTAssertEqual(makers.undesigned, 1, "Book 5 draws Book Wall's own look")
+    }
+
     func testBookWallsLocalLookBecomesAPortableSeriesLook() {
         let key = SeriesLookKey(seriesID: 7, group: "|mattdinniman")
         func local(_ face: String) -> SeriesLookV1 {

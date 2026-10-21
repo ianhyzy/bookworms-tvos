@@ -325,8 +325,14 @@
         }
 
         /// Fictional companion designs with no font family, so spines use system faces offline.
+        /// Their models vary, so **Settings → Spines** lists several.
         static func designs(accountID: String, books: [Book]) -> [Int: SpineDesignV1] {
             let typefaces = ["serif", "sans", "rounded", "monospaced"]
+            let models: [String?] = [
+                "model:google/gemini-3.8-flash", "model:google/gemini-3.8-flash",
+                "model:google/gemini-3.8-flash", "model:google/gemini-3.8-flash",
+                "model:apple/on-device", "model:apple/on-device", nil, "model:local",
+            ]
             return Dictionary(
                 books.map { book in
                     (
@@ -336,11 +342,12 @@
                             workItemHash: SpineCloudIdentity.workItemHash(
                                 accountID: accountID, book: book),
                             coverHash: String(repeating: "0", count: 64),
-                            generatorVersion: "scenario",
+                            generatorVersion: "ios-pcc-v2",
                             generatedAt: Date(timeIntervalSince1970: 1_789_603_200),
                             backgroundHex: "#1F2A44", foregroundHex: "#F4E9D8",
                             accentHex: "#C8A24A", typeface: typefaces[book.id % typefaces.count],
-                            weight: 700, uppercase: book.id.isMultiple(of: 2))
+                            weight: 700, uppercase: book.id.isMultiple(of: 2),
+                            provenance: models[(book.id - 1) % models.count])
                     )
                 }, uniquingKeysWith: { first, _ in first })
         }
