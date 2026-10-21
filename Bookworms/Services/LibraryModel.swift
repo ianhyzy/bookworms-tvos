@@ -161,9 +161,10 @@ final class LibraryModel {
             do {
                 try await dependencies.saveSeriesLink(link, accountID, book.id)
             } catch {
-                guard activeHardcoverAccountID == accountID, seriesLinks[book.id] == link else {
-                    return
-                }
+                // Turning iCloud storage off or changing accounts clears the links; keep them clear.
+                guard iCloudEnabled, activeHardcoverAccountID == accountID,
+                    seriesLinks[book.id] == link
+                else { return }
                 setPickedLink(old, for: book.id)
             }
         }
