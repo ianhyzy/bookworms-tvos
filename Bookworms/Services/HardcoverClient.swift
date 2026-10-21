@@ -484,7 +484,9 @@ actor HardcoverClient {
             if result.userBooks.count < 100 {
                 let books = Self.normalize(rows, previous: previousBooks)
                 // Series are an enhancement: a failure keeps the library sync complete.
-                let series = try? await fetchSeries(Self.seriesIDs(of: books), token: token)
+                let series = try? await fetchSeries(
+                    Self.seriesIDs(of: books), token: token,
+                    previous: previous?.accountID == accountID ? previous?.series : nil)
                 return HardcoverLibrary(accountID: accountID, books: books, series: series)
             }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
@@ -503,16 +505,29 @@ actor HardcoverClient {
     }
 
     /// Fetches series names and main books in batches of 50, paced like library pages.
-    private func fetchSeries(_ ids: Set<Int>, token: String) async throws -> [SeriesInfo] {
+    ///
+    /// When a batch fails after earlier ones succeeded, returns the fetched series and
+    /// `previous`'s copies of the series still to fetch, so a partial download never discards
+    /// series the last sync had. Throws when the first batch fails or the task is cancelled.
+    private func fetchSeries(_ ids: Set<Int>, token: String, previous: [SeriesInfo]?)
+        async throws -> [SeriesInfo]
+    {
         var result: [SeriesInfo] = []
         let sorted = ids.sorted()
         for start in stride(from: 0, to: sorted.count, by: 50) {
             try Task.checkCancellation()
             try await Task.sleep(for: .seconds(1.1))
             let batch = Array(sorted[start..<min(start + 50, sorted.count)])
-            let response: SeriesResponse = try await request(
-                .series, variables: ["ids": batch], token: token)
-            result += response.series.map(Self.normalize)
+            do {
+                let response: SeriesResponse = try await request(
+                    .series, variables: ["ids": batch], token: token)
+                result += response.series.map(Self.normalize)
+            } catch {
+                try Task.checkCancellation()
+                guard !result.isEmpty else { throw error }
+                let remaining = Set(sorted[start...])
+                return result + (previous ?? []).filter { remaining.contains($0.id) }
+            }
         }
         return result
     }

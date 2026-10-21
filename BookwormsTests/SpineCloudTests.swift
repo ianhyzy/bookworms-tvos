@@ -521,6 +521,56 @@ final class SpineCloudTests: XCTestCase {
         XCTAssertTrue(afterClear.isEmpty, "An empty account clears the look cache")
     }
 
+    func testPickedSeriesLinksReplaceAndDeleteTheBooksRecord() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = FakeSpineDatabase()
+        let store = SpineCloudStore(database: database, cacheURL: cacheURL)
+        let offline = SpineCloudStore(
+            database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
+        let first = SeriesLinkV1(
+            accountID: "42", bookID: 7, linkedSeriesID: 3,
+            chosenAt: Date(timeIntervalSince1970: 1_780_000_000))
+        let second = SeriesLinkV1(
+            accountID: "42", bookID: 7, linkedSeriesID: 4, ownLook: true,
+            chosenAt: Date(timeIntervalSince1970: 1_780_000_060))
+        try await store.setSeriesLink(first, accountID: "42", bookID: 7)
+        // Another device's record is replaced: the last writer wins, as on the iPhone.
+        try await store.setSeriesLink(second, accountID: "42", bookID: 7)
+        let read = try await store.seriesLinks(accountID: "42", books: [book()]).values
+        XCTAssertEqual(read, [7: second])
+        let name =
+            SpineCloudIdentity.seriesLinkRecordID(accountID: "42", bookID: 7).recordName
+        let saved = await database.payload(named: name)
+        let payload = try XCTUnwrap(saved)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        XCTAssertEqual(
+            Set(object.keys),
+            [
+                "version", "accountID", "bookID", "linkedSeriesID", "standsAlone", "ownLook",
+                "chosenAt",
+            ])
+        let cached = try await offline.seriesLinks(accountID: "42", books: [book()]).values
+        XCTAssertEqual(cached, [7: second], "A saved link is cached for offline reads")
+
+        try await store.setSeriesLink(nil, accountID: "42", bookID: 7)
+        let deleted = await database.payload(named: name)
+        XCTAssertNil(deleted)
+        let afterDelete = try await offline.seriesLinks(accountID: "42", books: [book()]).values
+        XCTAssertTrue(afterDelete.isEmpty, "A deleted link leaves the cache")
+        try await store.setSeriesLink(nil, accountID: "42", bookID: 7)
+
+        do {
+            try await store.setSeriesLink(first, accountID: "43", bookID: 7)
+            XCTFail("A link for another account must not be saved")
+        } catch CloudStorageError.incomplete {}
+        do {
+            try await offline.setSeriesLink(first, accountID: "42", bookID: 7)
+            XCTFail("Saving a link needs iCloud")
+        } catch CloudStorageError.unavailable {}
+    }
+
     func testCreatingASeriesLookKeepsTheLookSavedFirst() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let cacheURL = directory.appending(path: "spine-designs.json")
@@ -708,6 +758,12 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
         saves += 1
     }
 
+    func delete(_ id: CKRecord.ID) {
+        payloads[id.recordName] = nil
+        recordTypes[id.recordName] = nil
+    }
+
+    func payload(named name: String) -> Data? { payloads[name] }
     func saveCount() -> Int { saves }
     func savedType() -> String? { recordTypes[SpineCloudIdentity.worklistRecordID.recordName] }
 }

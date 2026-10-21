@@ -210,6 +210,7 @@
             dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
             dependencies.fetchSeriesLooks = { _, _ in [:] }
             dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }
+            dependencies.saveSeriesLink = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
             dependencies.readTopShelf = { [] }
             dependencies.writeTopShelf = { _ in }

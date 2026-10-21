@@ -97,6 +97,8 @@ struct BookWallView: View {
                         onClose: closeDetail,
                         onShowShelf: { onShowShelf(detailBook, $0) },
                         series: series(detailBook),
+                        onPickSeries: library.canPickSeries(for: detailBook)
+                            ? { library.pickSeries($0, for: detailBook) } : nil,
                         libraryBook: libraryBook,
                         onOpenBook: onOpenBook,
                         friendReads: friendReads(detailBook)

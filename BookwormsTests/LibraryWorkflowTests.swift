@@ -499,6 +499,73 @@ final class LibraryWorkflowTests: XCTestCase {
         }
     }
 
+    func testPickingASeriesSavesTheBooksLinkAsTheiPhoneDoes() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let saga = SeriesMembership(
+            seriesID: 7, name: "Fictional Saga", position: 12, featured: true, size: 20)
+        let arc = SeriesMembership(seriesID: 8, name: "Fictional Arc", position: 2, size: 3)
+        var book = fixture.book(1)
+        book.seriesID = 7
+        book.seriesName = "Fictional Saga"
+        book.seriesMemberships = [saga, arc]
+        try fixture.save([
+            SourceSnapshot(
+                source: .hardcover, accountID: fixture.hardcoverAccountID, books: [book],
+                syncedAt: fixture.time)
+        ])
+        var saves: [SeriesLinkV1?] = []
+        var savesFail = false
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
+        dependencies.saveSeriesLink = { link, accountID, bookID in
+            XCTAssertEqual(accountID, fixture.hardcoverAccountID)
+            XCTAssertEqual(bookID, 1)
+            if savesFail { throw CloudStorageError.unavailable }
+            saves.append(link)
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.canPickSeries(for: book))
+        XCTAssertEqual(model.series(for: book)?.all, [saga, arc])
+        XCTAssertEqual(model.series(for: book)?.membership, arc, "The shortest series by default")
+
+        model.pickSeries(7, for: book)
+        XCTAssertEqual(model.series(for: book)?.membership, saga, "A pick shows at once")
+        await model.waitForSeriesLinkSaves()
+        XCTAssertEqual(saves.count, 1)
+        XCTAssertEqual(saves.last??.linkedSeriesID, 7)
+        XCTAssertEqual(saves.last??.ownLook, false)
+        XCTAssertEqual(saves.last??.standsAlone, false)
+
+        // A read that missed the save keeps the pick.
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+
+        // Picking the shortest series deletes the link.
+        model.pickSeries(8, for: book)
+        await model.waitForSeriesLinkSaves()
+        XCTAssertEqual(saves.count, 2)
+        XCTAssertNil(saves.last ?? nil)
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+        model.pickSeries(8, for: book)
+        await model.waitForSeriesLinkSaves()
+        XCTAssertEqual(saves.count, 2, "Picking the shown series saves nothing")
+
+        // A failed save restores the earlier choice.
+        savesFail = true
+        model.pickSeries(7, for: book)
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+        await model.waitForSeriesLinkSaves()
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+    }
+
     func testFilteredShelfStillPublishesTheUnfilteredTopShelf() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

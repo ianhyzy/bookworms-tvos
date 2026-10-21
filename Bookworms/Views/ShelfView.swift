@@ -344,6 +344,9 @@ struct ShelfView: View {
                         selectedBook = nil
                     },
                     series: library.series(for: library.book(withID: book.id) ?? book),
+                    onPickSeries: library.canPickSeries(for: book)
+                        ? { library.pickSeries($0, for: library.book(withID: book.id) ?? book) }
+                        : nil,
                     libraryBook: { library.book(withID: $0) },
                     onOpenBook: { chosen in
                         lastFocusedID = chosen.id

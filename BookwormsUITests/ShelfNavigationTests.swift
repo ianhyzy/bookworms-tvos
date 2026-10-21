@@ -70,14 +70,15 @@ final class ShelfNavigationTests: XCTestCase {
         let app = RemoteNavigation.launch()
         let first = app.buttons["book-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
-        RemoteNavigation.waitForFocus(first)
+        // Launch and the first presentation wait as long as launch may take on a busy machine.
+        RemoteNavigation.waitForFocus(first, timeout: 15)
         XCUIRemote.shared.press(.select)
         let back = app.buttons["back-to-shelf"]
         let author = app.buttons["detail-author"]
         let fantasy = app.buttons["detail-genre-Fantasy"]
         let mystery = app.buttons["detail-genre-Mystery"]
         let reviews = app.buttons["community-reviews"]
-        RemoteNavigation.waitForFocus(back)
+        RemoteNavigation.waitForFocus(back, timeout: 15)
         // Every direction out of the author and genre buttons.
         let series = app.buttons["detail-series"]
         RemoteNavigation.press(.right, in: app, expecting: author)
@@ -136,26 +137,42 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertFalse(clear.exists)
     }
 
-    func testSeriesPopupListsTheSeriesAndOpensLibraryBooks() {
+    /// Opens sample book 1's details and focuses its series label, which names The Island Cycle,
+    /// the shorter of its two series.
+    private func openSeriesLabel(file: StaticString = #filePath, line: UInt = #line)
+        -> (XCUIApplication, XCUIElement)
+    {
         let app = RemoteNavigation.launch()
         let first = app.buttons["book-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 15))
-        RemoteNavigation.waitForFocus(first)
+        XCTAssertTrue(first.waitForExistence(timeout: 15), file: file, line: line)
+        // Launch and the first presentation wait as long as launch may take on a busy machine.
+        RemoteNavigation.waitForFocus(first, timeout: 15, file: file, line: line)
         XCUIRemote.shared.press(.select)
-        RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"])
+        RemoteNavigation.waitForFocus(
+            app.buttons["back-to-shelf"], timeout: 15, file: file, line: line)
+        let series = app.buttons["detail-series"]
+        XCTAssertTrue(
+            series.label.contains("The Island Cycle 1 of 3"), series.label, file: file, line: line)
+        RemoteNavigation.press(
+            .right, in: app, expecting: app.buttons["detail-author"], file: file, line: line)
+        RemoteNavigation.press(.right, in: app, expecting: series, file: file, line: line)
+        return (app, series)
+    }
+
+    func testSeriesPopupListsTheSeriesAndOpensLibraryBooks() {
+        let (app, series) = openSeriesLabel()
         XCTAssertTrue(
             app.descendants(matching: .any)["detail-fact-Published"].label.contains("2023"),
             "Details list the publication year")
-        let series = app.buttons["detail-series"]
-        XCTAssertTrue(series.label.contains("The Island Cycle 1 of 3"))
-        RemoteNavigation.press(.right, in: app, expecting: app.buttons["detail-author"])
-        RemoteNavigation.press(.right, in: app, expecting: series)
-        XCUIRemote.shared.press(.select)
+        // The list of the book's series opens on the series the label names.
+        let island = app.buttons["series-row-1"]
+        RemoteNavigation.press(.select, in: app, expecting: island)
+        XCTAssertTrue(series.exists)
+        // The series' books replace the list, with one focus update to this book.
         let current = app.buttons["series-book-1"]
         let second = app.buttons["series-book-8"]
         let unowned = app.buttons["series-book-9"]
-        XCTAssertTrue(current.waitForExistence(timeout: 5))
-        RemoteNavigation.waitForFocus(current)
+        RemoteNavigation.press(.select, in: app, expecting: current)
         RemoteNavigation.press(.right, in: app, expecting: second)
         RemoteNavigation.press(.right, in: app, expecting: unowned)
         RemoteNavigation.pressWithoutMoving(.right, in: app, from: unowned)
@@ -166,13 +183,70 @@ final class ShelfNavigationTests: XCTestCase {
         // A book outside the library stays put; one in it opens its details.
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(RemoteNavigation.isFocused(unowned))
-        RemoteNavigation.press(.left, in: app, expecting: second)
+        // Back returns to the list, on the series that was open. Focus passes through no item
+        // while the books leave, as when a pop-up closes, so this waits instead of counting.
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(island)
+        RemoteNavigation.press(.select, in: app, expecting: current)
+        RemoteNavigation.press(.right, in: app, expecting: second)
         XCUIRemote.shared.press(.select)
         let title = app.staticTexts["detail-title"]
         XCTAssertTrue(
             title.waitForExistence(timeout: 5)
                 && NSPredicate(format: "label == %@", "Winter in the Orchard").evaluate(with: title)
         )
+    }
+
+    /// Sample book 1's series list: The Island Cycle, the series its label names, then Tales of the
+    /// Night Orchard, each row followed by its check button.
+    func testSeriesListMovesFocusOnceAndPicksTheNamedSeries() {
+        let (app, series) = openSeriesLabel()
+        let island = app.buttons["series-row-1"]
+        let tales = app.buttons["series-row-2"]
+        let islandCheck = app.buttons["series-pick-1"]
+        let talesCheck = app.buttons["series-pick-2"]
+        RemoteNavigation.press(.select, in: app, expecting: island)
+        XCTAssertTrue(islandCheck.isSelected)
+        XCTAssertFalse(talesCheck.isSelected)
+
+        // Every direction out of each row and check.
+        RemoteNavigation.pressWithoutMoving(.up, in: app, from: island)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: island)
+        RemoteNavigation.press(.down, in: app, expecting: tales)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: tales)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: tales)
+        RemoteNavigation.press(.right, in: app, expecting: talesCheck)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: talesCheck)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: talesCheck)
+        RemoteNavigation.press(.up, in: app, expecting: islandCheck)
+        RemoteNavigation.pressWithoutMoving(.up, in: app, from: islandCheck)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: islandCheck)
+        RemoteNavigation.press(.left, in: app, expecting: island)
+        RemoteNavigation.press(.right, in: app, expecting: islandCheck)
+        RemoteNavigation.press(.down, in: app, expecting: talesCheck)
+        let list = XCTAttachment(screenshot: app.screenshot())
+        list.name = "Series list"
+        list.lifetime = .keepAlways
+        add(list)
+
+        // A check picks its series without moving focus, and the label names it.
+        RemoteNavigation.pressWithoutMoving(.select, in: app, from: talesCheck)
+        XCTAssertTrue(talesCheck.isSelected)
+        XCTAssertFalse(islandCheck.isSelected)
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(series)
+        XCTAssertTrue(
+            series.label.contains("Tales of the Night Orchard 1 of 4"), series.label)
+
+        // The list reopens on the picked series; picking the shortest restores the default.
+        RemoteNavigation.press(.select, in: app, expecting: tales)
+        RemoteNavigation.press(.up, in: app, expecting: island)
+        RemoteNavigation.press(.right, in: app, expecting: islandCheck)
+        RemoteNavigation.pressWithoutMoving(.select, in: app, from: islandCheck)
+        XCTAssertTrue(islandCheck.isSelected)
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(series)
+        XCTAssertTrue(series.label.contains("The Island Cycle 1 of 3"), series.label)
     }
 
     func testShelfPagesMoveWithOneFocusUpdate() {
