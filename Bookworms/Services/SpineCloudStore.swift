@@ -304,8 +304,10 @@ extension SeriesLookV1 {
     }
 }
 
-/// The reader's series choice for one book in a companion app: a series to draw its look from,
-/// no series, or its own look instead of its series'. Choosing the default deletes the record.
+/// The reader's series choice for one book: a series to draw its look from, no series, or its own
+/// look instead of its series'. The iPhone and Mac app saves every kind; picking a series in this
+/// app's book details saves the first (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`).
+/// Choosing the default deletes the record.
 struct SeriesLinkV1: Codable, Equatable, Sendable {
     var version = 1
     let accountID: String
@@ -319,9 +321,13 @@ struct SeriesLinkV1: Codable, Equatable, Sendable {
     let chosenAt: Date
 
     func isValid(accountID: String, book: Book) -> Bool {
-        version == 1 && self.accountID == accountID && accountID.count <= 512 && bookID > 0
-            && bookID == book.id && (linkedSeriesID.map { $0 > 0 } ?? true)
-            && chosenAt.timeIntervalSince1970.isFinite
+        isValid(accountID: accountID, bookID: book.id)
+    }
+
+    func isValid(accountID: String, bookID: Int) -> Bool {
+        version == 1 && self.accountID == accountID && !accountID.isEmpty
+            && accountID.count <= 512 && self.bookID > 0 && self.bookID == bookID
+            && (linkedSeriesID.map { $0 > 0 } ?? true) && chosenAt.timeIntervalSince1970.isFinite
     }
 }
 
@@ -374,6 +380,8 @@ protocol SpineCloudDatabase: Sendable {
     func record(for id: CKRecord.ID) async throws -> CKRecord
     func records(for ids: [CKRecord.ID]) async throws -> [CKRecord.ID: Result<CKRecord, any Error>]
     func save(_ record: CKRecord) async throws
+    /// Deletes the record, and succeeds when it doesn't exist.
+    func delete(_ id: CKRecord.ID) async throws
 }
 
 private struct AppleSpineCloudDatabase: SpineCloudDatabase {
@@ -401,6 +409,12 @@ private struct AppleSpineCloudDatabase: SpineCloudDatabase {
             throw CloudStorageError.incomplete
         }
         _ = try saved.get()
+    }
+
+    func delete(_ id: CKRecord.ID) async throws {
+        do {
+            _ = try await database.deleteRecord(withID: id)
+        } catch let error as CKError where error.code == .unknownItem {}
     }
 }
 
@@ -601,6 +615,49 @@ actor SpineCloudStore {
         cache[id.recordName] = saved
         try? saveCache(cache, to: kind, generation: cacheGenerations[kind.recordType, default: 0])
         return saved
+    }
+
+    /// Saves `link` as its book's series choice, or deletes the book's `SeriesLinkV1` record when
+    /// `link` is `nil`, as the iPhone and Mac do, then caches the result for offline reads. The
+    /// last writer wins: a save replaces the record another device saved.
+    ///
+    /// Throws when CloudKit is unavailable, the save fails, or the record holds another type.
+    func setSeriesLink(_ link: SeriesLinkV1?, accountID: String, bookID: Int) async throws {
+        guard
+            link?.isValid(accountID: accountID, bookID: bookID)
+                ?? (!accountID.isEmpty && bookID > 0)
+        else {
+            throw CloudStorageError.incomplete
+        }
+        let database = try await availableDatabase()
+        let id = SpineCloudIdentity.seriesLinkRecordID(accountID: accountID, bookID: bookID)
+        if let link {
+            let payload = try JSONEncoder().encode(link)
+            var saved = false
+            for _ in 0..<3 where !saved {
+                let record: CKRecord
+                do {
+                    record = try await database.record(for: id)
+                } catch let error as CKError where error.code == .unknownItem {
+                    record = CKRecord(recordType: "SeriesLinkV1", recordID: id)
+                }
+                guard record.recordType == "SeriesLinkV1" else {
+                    throw CloudStorageError.incomplete
+                }
+                record["payload"] = payload as NSData
+                do {
+                    try await database.save(record)
+                    saved = true
+                } catch let error as CKError where error.code == .serverRecordChanged {}
+            }
+            guard saved else { throw CloudStorageError.conflict }
+        } else {
+            try await database.delete(id)
+        }
+        let kind = CompanionRecordKind.seriesLinks(cacheURL: seriesLinkCacheURL)
+        var cache = loadCache(kind)
+        cache[id.recordName] = link
+        try? saveCache(cache, to: kind, generation: cacheGenerations[kind.recordType, default: 0])
     }
 
     private static func byID(_ books: [Book]) -> [Int: Book] {

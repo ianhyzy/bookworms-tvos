@@ -29,8 +29,11 @@ struct BookDetailView: View {
     var onClose: (() -> Void)?
     /// Shows My Shelf filtered to the chosen author or genre. When `nil`, they appear as text.
     var onShowShelf: ((ShelfFilter) -> Void)?
-    /// The book's series, shown as a button beside the author that opens the series pop-up.
-    var series: SeriesInfo?
+    /// The book's series, whose label beside the author names one (`seriesButton`).
+    var series: ShownSeries?
+    /// Makes a series the one the label names, from the series list's check buttons. When `nil`,
+    /// the list has no check buttons.
+    var onPickSeries: ((Int) -> Void)?
     /// Your library's copy of a series book, or `nil` when you don't have it.
     var libraryBook: (Int) -> Book? = { _ in nil }
     /// Opens details for another book in your library, chosen from the series pop-up.
@@ -62,7 +65,8 @@ struct BookDetailView: View {
         showsBackButton: Bool = true,
         onClose: (() -> Void)? = nil,
         onShowShelf: ((ShelfFilter) -> Void)? = nil,
-        series: SeriesInfo? = nil,
+        series: ShownSeries? = nil,
+        onPickSeries: ((Int) -> Void)? = nil,
         libraryBook: @escaping (Int) -> Book? = { _ in nil },
         onOpenBook: ((Book) -> Void)? = nil,
         friendReads: [FriendRead] = [],
@@ -76,6 +80,7 @@ struct BookDetailView: View {
         self.onClose = onClose
         self.onShowShelf = onShowShelf
         self.series = series
+        self.onPickSeries = onPickSeries
         self.libraryBook = libraryBook
         self.onOpenBook = onOpenBook
         self.friendReads = friendReads
@@ -428,39 +433,52 @@ struct BookDetailView: View {
         }
     }
 
-    /// "#3 · Ana and Din Mysteries" beside the author; opens every main book in the series.
+    /// "Discworld - Industrial Revolution 5 of 6" beside the author (`SeriesDesigns.label(of:)`).
+    /// It opens the book's series (`SeriesBrowser`) when the last sync has at least two main books
+    /// of one of them, or the book is in more than one to pick from; otherwise it is text.
     @ViewBuilder private var seriesButton: some View {
-        if let series, series.books.count > 1 {
-            let position = book.seriesPosition ?? series.books.first { $0.id == book.id }?.position
-            Button {
-                showsSeries = true
-            } label: {
-                Label(
-                    [position.map(SeriesInfo.positionLabel), series.name].compactMap(\.self)
-                        .joined(separator: " · "),
-                    systemImage: "books.vertical"
-                )
-                .labelStyle(CompactLabelStyle())
-                .appFont(size: 26, weight: .medium)
-                .lineLimit(1)
+        if let shown = series {
+            let label = Label(
+                SeriesDesigns.label(of: shown.membership), systemImage: "books.vertical"
+            )
+            .labelStyle(CompactLabelStyle())
+            .appFont(size: 26, weight: .medium)
+            .lineLimit(1)
+            let opens = shown.all.contains { (shown.infos[$0.seriesID]?.books.count ?? 0) > 1 }
+            if opens || (shown.all.count > 1 && onPickSeries != nil) {
+                seriesButton(shown, label: label)
+            } else {
+                label.foregroundStyle(.detailCaption)
+                    .accessibilityIdentifier("detail-series-label")
             }
-            // Matches the height of the author capsule, whose text is larger.
-            .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 8))
-            .accessibilityHint("Shows every book in the series.")
-            .accessibilityIdentifier("detail-series")
-            .fullScreenCover(isPresented: $showsSeries, onDismiss: openChosenSeriesBook) {
-                SeriesPopup(
-                    series: series, currentID: book.id, libraryBook: libraryBook,
-                    onOpen: { chosen in
-                        if chosen.id != book.id { chosenSeriesBook = chosen }
-                        showsSeries = false
-                    }
-                )
-                .appTypography()
-                .onExitCommand { showsSeries = false }
-                // Details stay visible, dimmed, around the card.
-                .presentationBackground(.black.opacity(0.55))
-            }
+        }
+    }
+
+    private func seriesButton(_ shown: ShownSeries, label: some View) -> some View {
+        Button {
+            showsSeries = true
+        } label: {
+            label
+        }
+        // Matches the height of the author capsule, whose text is larger.
+        .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 8))
+        .accessibilityHint(
+            shown.all.count > 1 ? "Shows the book's series." : "Shows every book in the series."
+        )
+        .accessibilityIdentifier("detail-series")
+        .fullScreenCover(isPresented: $showsSeries, onDismiss: openChosenSeriesBook) {
+            SeriesBrowser(
+                series: shown, title: book.title, currentID: book.id, libraryBook: libraryBook,
+                onPick: onPickSeries,
+                onOpen: { chosen in
+                    if chosen.id != book.id { chosenSeriesBook = chosen }
+                    showsSeries = false
+                },
+                onClose: { showsSeries = false }
+            )
+            .appTypography()
+            // Details stay visible, dimmed, around the card.
+            .presentationBackground(.black.opacity(0.55))
         }
     }
 
@@ -849,6 +867,127 @@ private struct FlowLayout: Layout {
     }
 }
 
+/// A book's series, opened from its series label: the list of every series the book belongs to
+/// (`SeriesList`), each opening its main books (`SeriesPopup`). A book in one series opens
+/// straight to its books. Back from a series' books returns to the list, whose default focus is
+/// the series that was open; Back from the list closes the pop-up.
+private struct SeriesBrowser: View {
+    let series: ShownSeries
+    let title: String
+    let currentID: Int
+    let libraryBook: (Int) -> Book?
+    let onPick: ((Int) -> Void)?
+    let onOpen: (Book) -> Void
+    let onClose: () -> Void
+    /// The series whose books show in place of the list.
+    @State private var opened: Int?
+    /// The series opened last, which receives focus when the list returns.
+    @State private var lastOpened: Int?
+
+    var body: some View {
+        let single = series.all.count > 1 ? nil : series.info
+        Group {
+            if let info = opened.flatMap({ series.infos[$0] }) ?? single {
+                SeriesPopup(
+                    series: info, currentID: currentID, libraryBook: libraryBook, onOpen: onOpen)
+            } else {
+                SeriesList(
+                    series: series, title: title,
+                    entryID: lastOpened ?? series.membership.seriesID, onPick: onPick
+                ) { id in
+                    lastOpened = id
+                    opened = id
+                }
+            }
+        }
+        .onExitCommand {
+            if opened != nil { opened = nil } else { onClose() }
+        }
+    }
+}
+
+/// Every series a book belongs to, one row each in Hardcover's order with the book's place in
+/// it. Selecting a series whose last sync has at least two main books opens them; other rows are
+/// text that focus skips.
+///
+/// With `onPick`, a check button after each row marks the series the book's label names, and
+/// selecting another check picks that series (`LibraryModel.pickSeries(_:for:)`). The rows and
+/// the checks form two columns: Left and Right move between a row and its check, Up and Down
+/// between rows.
+private struct SeriesList: View {
+    let series: ShownSeries
+    let title: String
+    /// The series whose row receives focus when the list appears.
+    let entryID: Int
+    let onPick: ((Int) -> Void)?
+    let onOpenSeries: (Int) -> Void
+    @FocusState private var focused: Int?
+
+    /// Wide enough for a long name, such as "Discworld - Industrial Revolution", at 30 points.
+    private static let rowWidth: CGFloat = 900
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 30) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Series").appFont(size: 44, weight: .semibold)
+                Text(title).appFont(size: 26).foregroundStyle(.secondary).lineLimit(1)
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(series.all, id: \.seriesID) { row($0) }
+            }
+            .defaultFocus($focused, entryID, priority: .userInitiated)
+            if onPick != nil {
+                Text("The checked series names this book on every device.")
+                    .appFont(size: 24).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 50).padding(.horizontal, 60)
+        .background(.regularMaterial, in: .rect(cornerRadius: 44))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func row(_ membership: SeriesMembership) -> some View {
+        let id = membership.seriesID
+        let isShown = id == series.membership.seriesID
+        let text = VStack(alignment: .leading, spacing: 4) {
+            Text(membership.name).appFont(size: 30, weight: .medium).lineLimit(1)
+            if let place = SeriesDesigns.place(in: membership) {
+                Text(place).appFont(size: 24).opacity(0.72)
+            }
+        }
+        .frame(width: Self.rowWidth, alignment: .leading)
+        return HStack(spacing: 24) {
+            if (series.infos[id]?.books.count ?? 0) > 1 {
+                Button {
+                    onOpenSeries(id)
+                } label: {
+                    text
+                }
+                .buttonStyle(FlatButtonStyle(horizontalPadding: 30, verticalPadding: 14))
+                .focused($focused, equals: id)
+                .accessibilityHint("Shows the books in this series.")
+                .accessibilityIdentifier("series-row-\(id)")
+            } else {
+                text.padding(.horizontal, 30).padding(.vertical, 14)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("series-row-\(id)")
+            }
+            if let onPick {
+                Button {
+                    onPick(id)
+                } label: {
+                    Image(systemName: isShown ? "checkmark.circle.fill" : "circle")
+                        .appFont(size: 40)
+                }
+                .buttonStyle(FlatButtonStyle(horizontalPadding: 14, verticalPadding: 14))
+                .accessibilityLabel("Name \(membership.name) on this book")
+                .accessibilityAddTraits(isShown ? .isSelected : [])
+                .accessibilityIdentifier("series-pick-\(id)")
+            }
+        }
+    }
+}
+
 /// Every main book in a series, in order, on pages of two rows with the series name above them.
 /// Each book shows its position, publication year, and full title. Books you haven't read, or
 /// that aren't out yet, are faded. Selecting a book in your library opens it.
@@ -930,7 +1069,15 @@ private struct SeriesPopup: View {
                     position.scrollTo(id: page(of: focused))
                 }
             }
-            .onAppear { position.scrollTo(id: page(of: currentID)) }
+            .onAppear {
+                position.scrollTo(id: page(of: currentID))
+                // Opened from the series list, the pop-up replaces the focused row, so it takes
+                // focus as it appears, as the reviews reader does. `defaultFocus` alone leaves
+                // focus unset after the swap.
+                focused =
+                    series.books.contains { $0.id == currentID }
+                    ? currentID : series.books.first?.id
+            }
             .overlay(alignment: .leading) {
                 if visiblePage > 0 { chevron("chevron.left").offset(x: -40) }
             }

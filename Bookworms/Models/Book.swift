@@ -234,6 +234,20 @@ struct SeriesInfo: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// A book's series as its details show them: the series its label names
+/// (`SeriesDesigns.shownSeries(of:link:)`) and every series the book belongs to, with each
+/// series' main books when the last sync fetched them.
+struct ShownSeries: Hashable, Sendable {
+    /// The series the label names.
+    let membership: SeriesMembership
+    /// Every series the book belongs to, once each in Hardcover's order, including `membership`.
+    let all: [SeriesMembership]
+    /// The main books of the series in `all` that the last sync fetched, by series ID.
+    let infos: [Int: SeriesInfo]
+
+    var info: SeriesInfo? { infos[membership.seriesID] }
+}
+
 struct LibrarySnapshot: Codable, Sendable {
     let books: [Book]
     let syncedAt: Date
@@ -274,6 +288,12 @@ enum SampleLibrary {
                 count: 8), pages: 384, finished: "2026-09-09",
             finishedDates: ["2026-09-09", "2024-03-14"], rating: 4.5, format: "Ebook",
             seriesID: 1, seriesPosition: 1, seriesName: "The Island Cycle",
+            seriesMemberships: [
+                SeriesMembership(
+                    seriesID: 1, name: "The Island Cycle", position: 1, featured: true, size: 3),
+                SeriesMembership(
+                    seriesID: 2, name: "Tales of the Night Orchard", position: 1, size: 4),
+            ],
             genres: ["Fantasy", "Mystery"], communityRating: 4.24,
             ratingsCount: 100,
             ratingDistribution: [
@@ -309,11 +329,18 @@ enum SampleLibrary {
             id: 8, title: "Winter in the Orchard", author: "Alex Rowan",
             description: "The island's story continues.", pages: 410, finished: "2026-08-18",
             format: "Audiobook", seriesID: 1, seriesPosition: 2, seriesName: "The Island Cycle",
+            seriesMemberships: [
+                SeriesMembership(
+                    seriesID: 1, name: "The Island Cycle", position: 2, featured: true, size: 3)
+            ],
             publicationYear: 2025),
     ]
 }
 
 extension SampleLibrary {
+    /// Sample book 1's series: `series`, its shortest, which its details name, and `tales`.
+    static let allSeries = [series, tales]
+
     /// The sample books 1 and 8, plus a third book the sample reader doesn't own.
     static let series = SeriesInfo(
         id: 1, name: "The Island Cycle",
@@ -324,6 +351,18 @@ extension SampleLibrary {
                 id: 8, title: "Winter in the Orchard", position: 2, releaseYear: 2025, coverURL: nil
             ),
             .init(id: 9, title: "The Last Harvest", position: 3, releaseYear: 2027, coverURL: nil),
+        ])
+
+    /// A longer series of sample book 1, whose other books the sample reader doesn't own.
+    static let tales = SeriesInfo(
+        id: 2, name: "Tales of the Night Orchard",
+        books: [
+            .init(
+                id: 1, title: "The Orchard at Night", position: 1, releaseYear: 2023, coverURL: nil),
+            .init(
+                id: 10, title: "The Lantern Keeper", position: 2, releaseYear: 2024, coverURL: nil),
+            .init(id: 11, title: "Seeds of Morning", position: 3, releaseYear: 2025, coverURL: nil),
+            .init(id: 12, title: "The Quiet Grove", position: 4, releaseYear: 2026, coverURL: nil),
         ])
 
     /// Fictional books only the sample reader has read.

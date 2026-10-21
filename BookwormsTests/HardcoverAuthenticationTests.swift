@@ -199,6 +199,23 @@ final class HardcoverAuthenticationTests: XCTestCase {
             "Another account's snapshot never fixes covers")
     }
 
+    func testFailedSeriesBatchKeepsFetchedAndSavedSeries() async throws {
+        // The stub's only book is in series 1 to 60, and the second batch of 50 fails.
+        let saved = SourceSnapshot(
+            source: .hardcover, accountID: "1", books: [], syncedAt: .distantPast,
+            series: [
+                SeriesInfo(id: 5, name: "Saved five", books: []),
+                SeriesInfo(id: 55, name: "Saved fifty-five", books: []),
+            ])
+        let library = try await client().fetchLibrary(token: "hc_pat_series", previous: saved)
+        let series = try XCTUnwrap(library.series)
+        XCTAssertEqual(series.map(\.id), Array(1...50) + [55])
+        XCTAssertEqual(series.first { $0.id == 5 }?.name, "Fixture series 5")
+        XCTAssertEqual(series.last?.name, "Saved fifty-five")
+        let unsaved = try await client().fetchLibrary(token: "hc_pat_series")
+        XCTAssertEqual(unsaved.series?.map(\.id), Array(1...50))
+    }
+
     func testMissingScopeIsNotReportedAsExpired() async {
         do {
             _ = try await client().fetchBooks(token: "hc_pat_scope")
@@ -423,6 +440,48 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             status = 200
             body =
                 #"{"data":{"me":[{"id":1}],"user_books":[{"id":1,"book":{"id":5,"title":"Covered","image":{"url":"https://example.com/current","width":1000,"height":1500}}}]}}"#
+        case "Bearer hc_pat_series":
+            status = 200
+            let object =
+                try! JSONSerialization.jsonObject(with: Data(formBody().utf8)) as! [String: Any]
+            let query = object["query"] as! String
+            let ids = (object["variables"] as? [String: Any])?["ids"] as? [Int] ?? []
+            let response: Any
+            if query.contains("ShelfAccount") {
+                response = ["data": ["me": [["id": 1]]]]
+            } else if query.contains("ShelfLibrary") {
+                let memberships = (1...60)
+                    .map { id in
+                        ["position": 1, "series": ["id": id, "name": "Fixture series \(id)"]]
+                    }
+                response = [
+                    "data": [
+                        "user_books": [
+                            [
+                                "id": 1,
+                                "book": ["id": 1, "title": "Fixture", "book_series": memberships],
+                            ]
+                        ]
+                    ]
+                ]
+            } else if ids.contains(where: { $0 > 50 }) {
+                response = ["errors": [["message": "fixture failure"]]]
+            } else {
+                response = [
+                    "data": [
+                        "series": ids.map { id in
+                            [
+                                "id": id, "name": "Fixture series \(id)",
+                                "book_series": [
+                                    ["position": 1, "book": ["id": 1, "title": "Fixture"]]
+                                ],
+                            ] as [String: Any]
+                        }
+                    ]
+                ]
+            }
+            body = String(
+                decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self)
         case "Bearer hc_pat_scope":
             status = 403
             body = #"{"error":"insufficient_scope","scope":"read:library"}"#

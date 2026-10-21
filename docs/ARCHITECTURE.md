@@ -19,7 +19,7 @@ Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the s
 | `AIStyleGenerator`, `GoogleFontLibrary` | Match covers against the full font catalog and download licensed fonts for retained AI designs and Book Wall companion designs. |
 | `AutomaticSpineGeneration`, `AIStyleStore` | Select missing designs, record attempt cooldowns, and retain completed designs. |
 | `CloudLibraryStore`, `SourceLibraryStore` | Merge cloud archives and persist source snapshots and sync schedules. |
-| `SpineCloudStore` | Publish the complete Hardcover worklist; validate and cache companion designs, series links, and series looks for Book Wall and companion cover choices for every view; and create missing series looks without replacing saved ones. |
+| `SpineCloudStore` | Publish the complete Hardcover worklist; validate and cache companion designs, series links, and series looks for Book Wall and companion cover choices for every view; create missing series looks without replacing saved ones; and save or delete the series link a reader picks in book details. |
 | `TopShelfSnapshot`, `ContentProvider` | Share public cover metadata with the Home Screen extension and open book details through validated links. |
 
 Source code is in [Bookworms](../Bookworms), [BookwormsTopShelf](../BookwormsTopShelf), and [Shared](../Shared). The [XcodeGen configuration](../project.yml) defines targets, signing identifiers, and test plans.

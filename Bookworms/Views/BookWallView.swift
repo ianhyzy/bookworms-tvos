@@ -12,7 +12,7 @@ struct BookWallView: View {
     let reviewLoader: (Book) -> (@MainActor () async throws -> [BookReview])?
     /// Shows My Shelf filtered to the author or genre chosen in the given book's details.
     let onShowShelf: (Book, ShelfFilter) -> Void
-    let series: (Book) -> SeriesInfo?
+    let series: (Book) -> ShownSeries?
     let libraryBook: (Int) -> Book?
     /// Opens details for another library book, chosen from the series pop-up.
     let onOpenBook: (Book) -> Void
@@ -97,6 +97,8 @@ struct BookWallView: View {
                         onClose: closeDetail,
                         onShowShelf: { onShowShelf(detailBook, $0) },
                         series: series(detailBook),
+                        onPickSeries: library.canPickSeries(for: detailBook)
+                            ? { library.pickSeries($0, for: detailBook) } : nil,
                         libraryBook: libraryBook,
                         onOpenBook: onOpenBook,
                         friendReads: friendReads(detailBook)

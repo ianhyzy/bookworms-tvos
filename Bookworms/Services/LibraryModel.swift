@@ -114,8 +114,73 @@ final class LibraryModel {
     /// first. Prepared with the library.
     private(set) var browsingCoverURLs: [URL] = []
 
-    func series(for book: Book) -> SeriesInfo? {
-        book.seriesID.flatMap { seriesByID[$0] }
+    /// `book`'s series for its details: the series its label names, which its link chooses, else
+    /// its shortest series, and every series it belongs to, with their books when synced. `nil`
+    /// for a book without a named series.
+    func series(for book: Book) -> ShownSeries? {
+        guard let shown = SeriesDesigns.shownSeries(of: book, link: seriesLinks[book.id]) else {
+            return nil
+        }
+        var seen = Set<Int>()
+        var all = (book.seriesMemberships ?? []).filter { seen.insert($0.seriesID).inserted }
+        if !seen.contains(shown.seriesID) { all.insert(shown, at: 0) }
+        return ShownSeries(
+            membership: shown, all: all,
+            infos: Dictionary(
+                uniqueKeysWithValues: all.compactMap { series in
+                    seriesByID[series.seriesID].map { (series.seriesID, $0) }
+                }))
+    }
+
+    /// Whether picking a series in `book`'s details can save it: always in the sample library,
+    /// which keeps picks in memory, and otherwise for a book of the active Hardcover account
+    /// with iCloud storage on.
+    func canPickSeries(for book: Book) -> Bool {
+        isSample
+            || (iCloudEnabled && hardcoverEnabled && activeHardcoverAccountID != nil
+                && book.isHardcoverBook)
+    }
+
+    /// Makes `seriesID` the series `book`'s details name and its spine's look follows, saved as
+    /// the book's `SeriesLinkV1` as the iPhone and Mac save it: picking the book's shortest
+    /// series deletes the link, and the link keeps its own-look choice. The pick shows at once.
+    /// Saves run in the order of the picks; a failed save restores the earlier choice unless a
+    /// later pick replaced it. The sample library keeps picks in memory.
+    func pickSeries(_ seriesID: Int, for book: Book) {
+        guard canPickSeries(for: book) else { return }
+        let accountID = isSample ? "" : activeHardcoverAccountID ?? ""
+        let old = seriesLinks[book.id]
+        let chosen = SeriesLinkV1(
+            accountID: accountID, bookID: book.id,
+            linkedSeriesID: seriesID == SeriesDesigns.styleSeries(of: book, link: nil)?.id
+                ? nil : seriesID,
+            ownLook: old?.ownLook == true, chosenAt: dependencies.now())
+        let link = chosen.linkedSeriesID == nil && !chosen.ownLook ? nil : chosen
+        guard link?.linkedSeriesID != old?.linkedSeriesID || old?.standsAlone == true else {
+            return
+        }
+        setPickedLink(link, for: book.id)
+        guard !isSample else { return }
+        let previous = seriesLinkSave
+        seriesLinkSave = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            do {
+                try await dependencies.saveSeriesLink(link, accountID, book.id)
+            } catch {
+                // Turning iCloud storage off or changing accounts clears the links; keep them clear.
+                guard iCloudEnabled, activeHardcoverAccountID == accountID,
+                    seriesLinks[book.id] == link
+                else { return }
+                setPickedLink(old, for: book.id)
+            }
+        }
+    }
+
+    private func setPickedLink(_ link: SeriesLinkV1?, for bookID: Int) {
+        seriesLinks[bookID] = link
+        pickedLinks[bookID] = (link, dependencies.now())
+        refreshSeriesSources()
     }
 
     /// Books finished on today's date in earlier years, for ambient mode. Prepared when the
@@ -207,8 +272,15 @@ final class LibraryModel {
     /// `rebuildLibrary` applies them to displayed books.
     @ObservationIgnored private var coverChoices: [Int: CoverChoiceV1] = [:]
     /// Validated companion series links for the active Hardcover snapshot, keyed by book ID.
-    /// Look groups read them when the library is rebuilt (`refreshSeriesSources`).
-    @ObservationIgnored private var seriesLinks: [Int: SeriesLinkV1] = [:]
+    /// Look groups read them when the library is rebuilt (`refreshSeriesSources`), and details
+    /// observe them through `series(for:)`, so a pick shows at once.
+    private var seriesLinks: [Int: SeriesLinkV1] = [:]
+    /// This session's series picks (`pickSeries(_:for:)`), each with its time, so a CloudKit read
+    /// that started before a pick's save doesn't undo it. A read keeps a pick unless it returns a
+    /// link chosen later.
+    @ObservationIgnored private var pickedLinks: [Int: (link: SeriesLinkV1?, at: Date)] = [:]
+    /// The latest series-link save, which the next one waits for.
+    @ObservationIgnored private var seriesLinkSave: Task<Void, Never>?
     /// Validated series looks of the active Hardcover snapshot's look groups.
     @ObservationIgnored private var seriesLooks: [SeriesLookKey: SeriesLookV1] = [:]
     private(set) var presentationRevision = 0
@@ -437,6 +509,7 @@ final class LibraryModel {
                 // on. The on-disk caches stay, so turning iCloud back on restores them.
                 spineDesigns = [:]
                 seriesLinks = [:]
+                pickedLinks = [:]
                 seriesLooks = [:]
                 refreshSeriesSources()
                 if !coverChoices.isEmpty {
@@ -1028,7 +1101,7 @@ final class LibraryModel {
         guard !isLoading else { return }
         cancelShelfWork()
         allBooks = SampleLibrary.books
-        seriesByID = [SampleLibrary.series.id: SampleLibrary.series]
+        seriesByID = Dictionary(uniqueKeysWithValues: SampleLibrary.allSeries.map { ($0.id, $0) })
         #if DEBUG
             if dependencies.allowLaunchOverrides,
                 ProcessInfo.processInfo.arguments.contains("--sample-pages")
@@ -1210,7 +1283,9 @@ final class LibraryModel {
     private func updateBrowsingCovers() {
         let owned = Dictionary(
             allBooks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shelfSeries = books.compactMap(\.seriesID)
+        let shelfSeries = books.compactMap {
+            SeriesDesigns.styleSeries(of: $0, link: seriesLinks[$0.id])?.id
+        }
         let order = shelfSeries + seriesByID.keys.sorted().filter { !shelfSeries.contains($0) }
         var seen = Set<URL>()
         let urls = order.compactMap { seriesByID[$0] }.flatMap(\.books)
@@ -1406,6 +1481,7 @@ final class LibraryModel {
             || seriesLooks.values.contains(where: { $0.accountID != accountID })
         {
             seriesLinks = [:]
+            pickedLinks = [:]
             seriesLooks = [:]
             refreshSeriesSources()
         }
@@ -1430,9 +1506,15 @@ final class LibraryModel {
                 coverChoices = choices.values
                 rebuild = true
             }
-            if let links, links.values != seriesLinks {
-                seriesLinks = links.values
-                rebuild = true
+            if var values = links?.values {
+                for (id, pick) in pickedLinks where (values[id]?.chosenAt ?? .distantPast) < pick.at
+                {
+                    values[id] = pick.link
+                }
+                if values != seriesLinks {
+                    seriesLinks = values
+                    rebuild = true
+                }
             }
             if let looks, looks != seriesLooks {
                 seriesLooks = looks
@@ -1515,6 +1597,7 @@ final class LibraryModel {
         spineDesigns = [:]
         coverChoices = [:]
         seriesLinks = [:]
+        pickedLinks = [:]
         seriesLooks = [:]
         refreshSeriesSources()
         let requestID = UUID()
@@ -1557,6 +1640,11 @@ final class LibraryModel {
     /// Waits for the current companion record read and series-look creation.
     func waitForCompanionRecords() async {
         await spineDesignTask?.value
+    }
+
+    /// Waits for the queued series-link saves (`pickSeries(_:for:)`).
+    func waitForSeriesLinkSaves() async {
+        await seriesLinkSave?.value
     }
 
     /// Waits for queued Top Shelf renders and publications.
