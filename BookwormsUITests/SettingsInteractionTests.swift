@@ -95,6 +95,58 @@ final class SettingsInteractionTests: XCTestCase {
         add(screenshot)
     }
 
+    /// **Settings → Spines** names the model behind each cached companion design, with a count.
+    /// It has no controls, so Down leaves focus on its tab, and Left and Right move along the
+    /// tabs with one focus update each.
+    func testSpinesNamesEachDesignsModelWithCountedFocus() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--test-scenario=artwork", "--test-companion-designs", "--start-view=shelf",
+            "--settings-tab=Spines", "--focus-probe", "--test-appearance=dark",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
+        RemoteNavigation.openSettings(app)
+        let tabs = app.descendants(matching: .any)["settings-sections"]
+        let spines = tabs.buttons["Spines"]
+        RemoteNavigation.waitForFocus(spines)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["spine-makers"].waitForExistence(timeout: 10))
+        for (model, count) in [
+            ("Private Cloud Compute", "1 book"), ("Google Gemini (gemini-3.8-flash)", "4 books"),
+            ("Apple on-device model", "2 books"), ("Default styling", "1 book"),
+        ] {
+            let label = NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@", model, count)
+            let row = app.descendants(matching: .any).matching(label)
+            XCTAssertTrue(row.firstMatch.exists, "\(model): \(count)")
+        }
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Settings spines"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: spines)
+        RemoteNavigation.press(.right, in: app, expecting: tabs.buttons["Sources"])
+        RemoteNavigation.press(.left, in: app, expecting: spines)
+        RemoteNavigation.press(.left, in: app, expecting: tabs.buttons["Shelf"])
+        RemoteNavigation.press(.right, in: app, expecting: spines)
+    }
+
+    /// Without designs, **Settings → Spines** says Book Wall draws every book in the Apple TV's
+    /// own look, and that iCloud storage is off.
+    func testSpinesWithoutDesignsExplainsBookWallsOwnLook() {
+        let app = openSettings("Spines")
+        XCTAssertTrue(app.staticTexts["No designs yet"].waitForExistence(timeout: 5))
+        XCTAssertTrue(text(containing: "this Apple TV's own default look", in: app).exists)
+        XCTAssertTrue(text(containing: "iCloud storage is off", in: app).exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Settings spines without designs"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testCountButtonsStepByFiveAndPersistAcrossLaunches() {
         let app = openSettings()
         let fewer = app.buttons["fewer-books"]

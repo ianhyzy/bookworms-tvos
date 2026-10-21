@@ -49,6 +49,9 @@ final class LibraryModel {
     /// The series look each book draws as its design, by ID, in place of its companion design
     /// (`spineDesigns`). Prepared with `seriesSources`.
     private(set) var lookDesigns: [Int: SpineDesignV1] = [:]
+    /// Who made the designs the library's books draw, for **Settings → Spines**. Prepared with
+    /// `seriesSources`.
+    private(set) var designMakers = SpineDesignMakers()
 
     /// What Book Wall draws `books` with, by book ID.
     ///
@@ -97,6 +100,10 @@ final class LibraryModel {
             : Self.seriesDrawing(of: allBooks, links: seriesLinks)
         if drawing.sources != seriesSources { seriesSources = drawing.sources }
         if drawing.looks != lookDesigns { lookDesigns = drawing.looks }
+        let makers = SpineDesignMakers(
+            books: allBooks, designs: BookPresentation.showsCompanionSpines ? spineDesigns : [:],
+            sources: drawing.sources, looks: drawing.looks)
+        if makers != designMakers { designMakers = makers }
     }
 
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.

@@ -47,7 +47,8 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     var instanceWeight: Int? = nil
     /// How the design was made, in space-separated tokens such as "model:apple/on-device" or
     /// "series-reuse:12". The model token names the companion's model tier; Private Cloud
-    /// Compute's designs record none. The Apple TV doesn't read the tier.
+    /// Compute's designs record none. The Apple TV reads it only to name the model in
+    /// **Settings → Spines** (`madeBy`); it draws a valid design whatever its tier.
     var provenance: String? = nil
 
     func isValid(accountID: String, book: Book) -> Bool {
@@ -84,6 +85,82 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
         else { return nil }
         return try? StyleColor(hex: hex)
     }
+
+    /// The model that made the design and its tier, best 3, named as the iPhone and Mac name it
+    /// (`SpineDesignV1.madeBy` and `tier` in the iOS app), from the design alone, so every device
+    /// credits the same model: "Google Gemini (gemini-3.8-flash)" for
+    /// "model:google/gemini-3.8-flash", or "Private Cloud Compute", "Apple on-device model", or
+    /// "Default styling".
+    ///
+    /// The `model:` token decides, else the generator: any `ios-pcc-` version is Private Cloud
+    /// Compute, the retired Mac companion's `mac-foundation-models-` versions are Apple's
+    /// on-device model, also with a `model:local` token, and any other generator, such as Book
+    /// Wall's `tvos-local-v1` series looks, is default styling.
+    var madeBy: (name: String, tier: Int) {
+        let isCompanion = generatorVersion.hasPrefix("mac-foundation-models-")
+        let token =
+            modelToken.map { isCompanion && $0 == "model:local" ? "model:apple/on-device" : $0 }
+            ?? (generatorVersion.hasPrefix("ios-pcc-")
+                ? nil : isCompanion ? "model:apple/on-device" : "model:local")
+        switch token {
+        case nil: return ("Private Cloud Compute", 3)
+        case "model:apple/on-device": return ("Apple on-device model", 1)
+        case "model:local": return ("Default styling", 0)
+        case let token?:
+            let model = token.dropFirst("model:".count)
+            let parts = model.split(separator: "/", maxSplits: 1)
+            let providers = [
+                "anthropic": "Anthropic", "openAI": "OpenAI", "google": "Google Gemini",
+                "custom": "OpenAI-compatible endpoint",
+            ]
+            guard parts.count == 2, let provider = providers[String(parts[0])] else {
+                return (String(model), 2)
+            }
+            return ("\(provider) (\(parts[1]))", 2)
+        }
+    }
+}
+
+/// Who made the designs the library's books draw, as **Settings → Spines** lists them.
+struct SpineDesignMakers: Equatable {
+    struct Maker: Equatable {
+        /// The model, as `SpineDesignV1.madeBy` names it.
+        let name: String
+        let books: Int
+    }
+
+    /// The models, best tier first, then the most books, as the iPhone and Mac's **Saved
+    /// designs** list them.
+    var makers: [Maker] = []
+    /// How many books draw no design, so Book Wall draws them in its own local look.
+    var undesigned = 0
+
+    /// Counts the design each of `books` draws: its series look from `looks`, else, with a
+    /// series source in `sources`, the source's design from `designs`, else its own
+    /// (`LibraryModel.seriesDrawing`). A book whose source has no design counts as undesigned
+    /// even with a design of its own, because Book Wall draws the source's local look on it. It
+    /// counts before preparation's glyph checks, which can give a book its own design instead.
+    init(
+        books: [Book], designs: [Int: SpineDesignV1], sources: [Int: Book],
+        looks: [Int: SpineDesignV1]
+    ) {
+        var counts: [String: (tier: Int, books: Int)] = [:]
+        for book in books {
+            guard let design = looks[book.id] ?? designs[sources[book.id]?.id ?? book.id] else {
+                undesigned += 1
+                continue
+            }
+            let maker = design.madeBy
+            counts[maker.name, default: (maker.tier, 0)].books += 1
+        }
+        makers =
+            counts.sorted {
+                ($0.value.tier, $0.value.books, $1.key) > ($1.value.tier, $1.value.books, $0.key)
+            }
+            .map { Maker(name: $0.key, books: $0.value.books) }
+    }
+
+    init() {}
 }
 
 /// The reader's choice of cover for one book in a companion app. Views try it before the book's
@@ -168,8 +245,9 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
             && design(bookID: sourceBookID, workItemHash: "").isValidLook
     }
 
-    /// The look as `book`'s design, so Book Wall draws it like a companion design. The cover
-    /// hash is a placeholder; Book Wall never reads it.
+    /// The look as `book`'s design, so Book Wall draws it like a companion design and
+    /// **Settings → Spines** credits its model (`SpineDesignV1.madeBy`) from the look's
+    /// `provenance`. The cover hash is a placeholder; Book Wall never reads it.
     func design(for book: Book) -> SpineDesignV1 {
         design(
             bookID: book.id,
@@ -183,7 +261,8 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
             generatedAt: editedAt ?? createdAt, backgroundHex: backgroundHex,
             foregroundHex: foregroundHex, accentHex: accentHex, typeface: typeface,
             weight: weight, uppercase: uppercase, fontFamily: fontFamily,
-            fontPostScriptName: fontPostScriptName, instanceWeight: instanceWeight)
+            fontPostScriptName: fontPostScriptName, instanceWeight: instanceWeight,
+            provenance: provenance)
     }
 }
 
