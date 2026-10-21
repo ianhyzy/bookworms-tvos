@@ -29,8 +29,9 @@ struct BookDetailView: View {
     var onClose: (() -> Void)?
     /// Shows My Shelf filtered to the chosen author or genre. When `nil`, they appear as text.
     var onShowShelf: ((ShelfFilter) -> Void)?
-    /// The book's series, shown as a button beside the author that opens the series pop-up.
-    var series: SeriesInfo?
+    /// The series the book's label names, shown beside the author: a button that opens the series
+    /// pop-up when the series has synced books, otherwise text.
+    var series: ShownSeries?
     /// Your library's copy of a series book, or `nil` when you don't have it.
     var libraryBook: (Int) -> Book? = { _ in nil }
     /// Opens details for another book in your library, chosen from the series pop-up.
@@ -62,7 +63,7 @@ struct BookDetailView: View {
         showsBackButton: Bool = true,
         onClose: (() -> Void)? = nil,
         onShowShelf: ((ShelfFilter) -> Void)? = nil,
-        series: SeriesInfo? = nil,
+        series: ShownSeries? = nil,
         libraryBook: @escaping (Int) -> Book? = { _ in nil },
         onOpenBook: ((Book) -> Void)? = nil,
         friendReads: [FriendRead] = [],
@@ -428,39 +429,47 @@ struct BookDetailView: View {
         }
     }
 
-    /// "#3 · Ana and Din Mysteries" beside the author; opens every main book in the series.
+    /// "Discworld - Industrial Revolution 5 of 6" beside the author (`SeriesDesigns.label(of:)`);
+    /// opens every main book in the series, or is text when the last sync has fewer than two.
     @ViewBuilder private var seriesButton: some View {
-        if let series, series.books.count > 1 {
-            let position = book.seriesPosition ?? series.books.first { $0.id == book.id }?.position
-            Button {
-                showsSeries = true
-            } label: {
-                Label(
-                    [position.map(SeriesInfo.positionLabel), series.name].compactMap(\.self)
-                        .joined(separator: " · "),
-                    systemImage: "books.vertical"
-                )
-                .labelStyle(CompactLabelStyle())
-                .appFont(size: 26, weight: .medium)
-                .lineLimit(1)
+        if let shown = series {
+            let label = Label(
+                SeriesDesigns.label(of: shown.membership), systemImage: "books.vertical"
+            )
+            .labelStyle(CompactLabelStyle())
+            .appFont(size: 26, weight: .medium)
+            .lineLimit(1)
+            if let series = shown.info, series.books.count > 1 {
+                seriesButton(series, label: label)
+            } else {
+                label.foregroundStyle(.detailCaption)
+                    .accessibilityIdentifier("detail-series-label")
             }
-            // Matches the height of the author capsule, whose text is larger.
-            .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 8))
-            .accessibilityHint("Shows every book in the series.")
-            .accessibilityIdentifier("detail-series")
-            .fullScreenCover(isPresented: $showsSeries, onDismiss: openChosenSeriesBook) {
-                SeriesPopup(
-                    series: series, currentID: book.id, libraryBook: libraryBook,
-                    onOpen: { chosen in
-                        if chosen.id != book.id { chosenSeriesBook = chosen }
-                        showsSeries = false
-                    }
-                )
-                .appTypography()
-                .onExitCommand { showsSeries = false }
-                // Details stay visible, dimmed, around the card.
-                .presentationBackground(.black.opacity(0.55))
-            }
+        }
+    }
+
+    private func seriesButton(_ series: SeriesInfo, label: some View) -> some View {
+        Button {
+            showsSeries = true
+        } label: {
+            label
+        }
+        // Matches the height of the author capsule, whose text is larger.
+        .buttonStyle(FlatButtonStyle(horizontalPadding: 18, verticalPadding: 8))
+        .accessibilityHint("Shows every book in the series.")
+        .accessibilityIdentifier("detail-series")
+        .fullScreenCover(isPresented: $showsSeries, onDismiss: openChosenSeriesBook) {
+            SeriesPopup(
+                series: series, currentID: book.id, libraryBook: libraryBook,
+                onOpen: { chosen in
+                    if chosen.id != book.id { chosenSeriesBook = chosen }
+                    showsSeries = false
+                }
+            )
+            .appTypography()
+            .onExitCommand { showsSeries = false }
+            // Details stay visible, dimmed, around the card.
+            .presentationBackground(.black.opacity(0.55))
         }
     }
 

@@ -484,13 +484,22 @@ actor HardcoverClient {
             if result.userBooks.count < 100 {
                 let books = Self.normalize(rows, previous: previousBooks)
                 // Series are an enhancement: a failure keeps the library sync complete.
-                let series = try? await fetchSeries(Set(books.compactMap(\.seriesID)), token: token)
+                let series = try? await fetchSeries(Self.seriesIDs(of: books), token: token)
                 return HardcoverLibrary(accountID: accountID, books: books, series: series)
             }
             // Pace full pages to avoid exhausting the read API rate limit during large syncs.
             try await Task.sleep(for: .seconds(1.1))
         }
         throw HardcoverError.incomplete
+    }
+
+    /// Every series the books belong to: each featured series and membership, so book details in
+    /// both apps can list whichever series a book's label names.
+    static func seriesIDs(of books: [Book]) -> Set<Int> {
+        Set(
+            books.flatMap { book in
+                [book.seriesID].compactMap(\.self) + (book.seriesMemberships ?? []).map(\.seriesID)
+            })
     }
 
     /// Fetches series names and main books in batches of 50, paced like library pages.

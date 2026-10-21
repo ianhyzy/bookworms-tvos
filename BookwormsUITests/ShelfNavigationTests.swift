@@ -147,7 +147,7 @@ final class ShelfNavigationTests: XCTestCase {
             app.descendants(matching: .any)["detail-fact-Published"].label.contains("2023"),
             "Details list the publication year")
         let series = app.buttons["detail-series"]
-        XCTAssertTrue(series.label.contains("The Island Cycle"))
+        XCTAssertTrue(series.label.contains("The Island Cycle 1 of 3"))
         RemoteNavigation.press(.right, in: app, expecting: app.buttons["detail-author"])
         RemoteNavigation.press(.right, in: app, expecting: series)
         XCUIRemote.shared.press(.select)

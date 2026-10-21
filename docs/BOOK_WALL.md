@@ -58,7 +58,7 @@ The hidden generated-spine views follow the sources but not series looks: `Libra
 
 ### Series links and looks
 
-The iPhone and Mac app saves a reader's series choice for a book as a `SeriesLinkV1` record: a series to follow instead of the shortest, no series, or the book's own look instead of its group's. The Apple TV reads links and never writes them.
+The iPhone and Mac app saves a reader's series choice for a book as a `SeriesLinkV1` record: a series to follow instead of the shortest, no series, or the book's own look instead of its group's. The Apple TV reads links and never writes them. Links also choose the series that book details name ([views](../VIEWS.md)).
 
 A `SeriesLookV1` record holds the look one group shares on every device; see [sources and iCloud](SOURCES_AND_ICLOUD.md#icloud) for both records. With iCloud storage on, the Apple TV reads the links and looks of the active Hardcover snapshot with its companion designs and cover choices: at launch, on activation, and after each cloud sync. It reads links first, because they change look keys, then the looks of the snapshot's look keys.
 

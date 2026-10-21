@@ -90,6 +90,54 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(style(nil), "1018@8.0", "Books saved before memberships use seriesID")
     }
 
+    /// Mirrors the iPhone companion's `SeriesLookTests`, so both apps label a series alike.
+    func testSeriesLabelNamesTheLinkedElseTheShortestSeries() throws {
+        // Making Money's Hardcover series.
+        let discworld = SeriesMembership(
+            seriesID: 1018, name: "Discworld", position: 36, featured: true, size: 41)
+        let moist = SeriesMembership(
+            seriesID: 10604, name: "Discworld - Moist von Lipwig", position: 2, size: 3)
+        let industrial = SeriesMembership(
+            seriesID: 10605, name: "Discworld - Industrial Revolution", position: 5, size: 6)
+        var makingMoney = book(
+            377256, series: 1018, position: 36, author: "Terry Pratchett", title: "Making Money")
+        makingMoney.seriesMemberships = [discworld, moist, industrial]
+
+        let shortest = try XCTUnwrap(SeriesDesigns.shownSeries(of: makingMoney, link: nil))
+        XCTAssertEqual(SeriesDesigns.label(of: shortest), "Discworld - Moist von Lipwig 2 of 3")
+        let linked = try XCTUnwrap(
+            SeriesDesigns.shownSeries(of: makingMoney, link: link(377256, series: 10605)))
+        XCTAssertEqual(
+            SeriesDesigns.label(of: linked), "Discworld - Industrial Revolution 5 of 6")
+        XCTAssertEqual(
+            SeriesDesigns.shownSeries(of: makingMoney, link: link(377256, ownLook: true)), moist)
+        XCTAssertNil(
+            SeriesDesigns.shownSeries(of: makingMoney, link: link(377256, standsAlone: true)))
+        XCTAssertNil(
+            SeriesDesigns.shownSeries(of: makingMoney, link: link(377256, series: 9999)),
+            "A link to a series Hardcover no longer lists for the book names none")
+
+        // Without memberships, the featured series shows when it has a name.
+        let older = book(6, series: 7, position: 4)
+        XCTAssertEqual(
+            SeriesDesigns.shownSeries(of: older, link: nil).map(SeriesDesigns.label(of:)),
+            "Dungeon Crawler Carl Book 4")
+        var unnamed = older
+        unnamed.seriesName = nil
+        XCTAssertNil(SeriesDesigns.shownSeries(of: unnamed, link: nil))
+
+        // A place outside the series' size, or a size unknown, falls back to the position alone.
+        func place(_ position: Double?, size: Int? = 3) -> String? {
+            SeriesDesigns.place(
+                in: SeriesMembership(seriesID: 1, name: "Series 1", position: position, size: size))
+        }
+        XCTAssertEqual(place(0), "Book 0")
+        XCTAssertEqual(place(2.5), "2.5 of 3")
+        XCTAssertEqual(place(4), "Book 4")
+        XCTAssertEqual(place(2, size: nil), "Book 2")
+        XCTAssertNil(place(nil))
+    }
+
     func testLookKeysSplitDiscworldGroupsAndFirstAuthors() {
         func discworld(_ id: Int, _ title: String) -> Book {
             book(id, series: 1018, author: "Terry Pratchett, Stephen Baxter", title: title)

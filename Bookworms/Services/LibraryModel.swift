@@ -107,8 +107,12 @@ final class LibraryModel {
     /// first. Prepared with the library.
     private(set) var browsingCoverURLs: [URL] = []
 
-    func series(for book: Book) -> SeriesInfo? {
-        book.seriesID.flatMap { seriesByID[$0] }
+    /// The series `book`'s label names: the series its companion link chooses, else its shortest
+    /// series, with the series' books when synced.
+    func series(for book: Book) -> ShownSeries? {
+        SeriesDesigns.shownSeries(of: book, link: seriesLinks[book.id]).map {
+            ShownSeries(membership: $0, info: seriesByID[$0.seriesID])
+        }
     }
 
     /// Books finished on today's date in earlier years, for ambient mode. Prepared when the
@@ -1203,7 +1207,9 @@ final class LibraryModel {
     private func updateBrowsingCovers() {
         let owned = Dictionary(
             allBooks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shelfSeries = books.compactMap(\.seriesID)
+        let shelfSeries = books.compactMap {
+            SeriesDesigns.styleSeries(of: $0, link: seriesLinks[$0.id])?.id
+        }
         let order = shelfSeries + seriesByID.keys.sorted().filter { !shelfSeries.contains($0) }
         var seen = Set<URL>()
         let urls = order.compactMap { seriesByID[$0] }.flatMap(\.books)

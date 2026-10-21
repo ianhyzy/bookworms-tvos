@@ -234,6 +234,13 @@ struct SeriesInfo: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// The series a book's label names (`SeriesDesigns.shownSeries(of:link:)`), with the series' main
+/// books when the last sync fetched them.
+struct ShownSeries: Hashable, Sendable {
+    let membership: SeriesMembership
+    let info: SeriesInfo?
+}
+
 struct LibrarySnapshot: Codable, Sendable {
     let books: [Book]
     let syncedAt: Date
@@ -274,6 +281,10 @@ enum SampleLibrary {
                 count: 8), pages: 384, finished: "2026-09-09",
             finishedDates: ["2026-09-09", "2024-03-14"], rating: 4.5, format: "Ebook",
             seriesID: 1, seriesPosition: 1, seriesName: "The Island Cycle",
+            seriesMemberships: [
+                SeriesMembership(
+                    seriesID: 1, name: "The Island Cycle", position: 1, featured: true, size: 3)
+            ],
             genres: ["Fantasy", "Mystery"], communityRating: 4.24,
             ratingsCount: 100,
             ratingDistribution: [
@@ -309,6 +320,10 @@ enum SampleLibrary {
             id: 8, title: "Winter in the Orchard", author: "Alex Rowan",
             description: "The island's story continues.", pages: 410, finished: "2026-08-18",
             format: "Audiobook", seriesID: 1, seriesPosition: 2, seriesName: "The Island Cycle",
+            seriesMemberships: [
+                SeriesMembership(
+                    seriesID: 1, name: "The Island Cycle", position: 2, featured: true, size: 3)
+            ],
             publicationYear: 2025),
     ]
 }
