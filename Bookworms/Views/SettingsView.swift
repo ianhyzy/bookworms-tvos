@@ -21,6 +21,7 @@ struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case views = "Views"
         case shelf = "Shelf"
+        case spines = "Spines"
         case ai = "AI spines"
         case sources = "Sources"
         case general = "General"
@@ -63,6 +64,7 @@ struct SettingsView: View {
                         switch section {
                         case .views: viewsSettings
                         case .shelf: shelfSettings
+                        case .spines: spinesSettings
                         case .ai: aiSettings
                         case .sources: sourcesSettings
                         case .general: generalSettings
@@ -156,8 +158,10 @@ struct SettingsView: View {
     private func settingLabel(_ title: String, _ description: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.system(size: 26, weight: .medium))
+            // A column with little else in it can propose one line; wrap instead of truncating.
             Text(description).font(.system(size: 23))
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -308,6 +312,59 @@ struct SettingsView: View {
                 identifiers: ("fewer-comparison-books", "comparison-limit", "more-comparison-books")
             )
             spoilerSettings
+        }
+    }
+
+    /// Which models made the spine designs the library draws, with a count for each, read from
+    /// the cached designs (`LibraryModel.designMakers`), which devices design spines, and why a
+    /// book can look different on another device. It has no controls, so it fits on one screen
+    /// and Down from its tab leaves focus there.
+    private var spinesSettings: some View {
+        let designs = library.designMakers
+        return columns {
+            settingLabel(
+                "Where designs come from",
+                "Your iPhone and Mac design spines and save them to iCloud, and Book Wall draws them. Each design records the model that made it."
+            )
+            if designs.makers.isEmpty {
+                Text("No designs yet").font(.system(size: 26)).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(designs.makers, id: \.name) { maker in
+                        HStack(spacing: 24) {
+                            Text(maker.name)
+                            Spacer(minLength: 0)
+                            Text(maker.books == 1 ? "1 book" : "\(maker.books) books")
+                                .monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 26))
+                        .padding(.vertical, 14).padding(.horizontal, 24)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .background(Color.primary.opacity(0.06), in: .rect(cornerRadius: 24))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("spine-makers")
+            }
+            if designs.undesigned > 0 {
+                note(
+                    designs.undesigned == 1
+                        ? "1 book has no design yet, so Book Wall draws it in this Apple TV's own default look."
+                        : "\(designs.undesigned) books have no design yet, so Book Wall draws them in this Apple TV's own default look."
+                )
+            }
+            if !library.iCloudEnabled {
+                note("iCloud storage is off, so no new designs arrive. Turn it on in General.")
+            }
+        } trailing: {
+            settingLabel(
+                "Which devices design spines",
+                "iPhone and Mac design with the best model each has: Private Cloud Compute, then your model with an API key, then Apple's on-device model, then default styling. Apple TV has no model. Until a design arrives, it draws its own default look, which it also shares for a series without a look."
+            )
+            settingLabel(
+                "Why a book can look different elsewhere",
+                "Designs sync through iCloud, so a device that hasn't synced yet can show an older design, or its own default look for a book whose design hasn't arrived. A device replaces a design only with one from a better model."
+            )
         }
     }
 
