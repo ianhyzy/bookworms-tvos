@@ -18,6 +18,7 @@ import sys
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+SIMSLIM_KEEP = "siri,icloud"
 spec = importlib.util.spec_from_file_location("source_identity", ROOT / "scripts/source-identity.py")
 sources = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sources)
@@ -376,7 +377,13 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None,
             raise VerificationError("simctl did not return a simulator UUID")
         record["simulator_id"] = device
         save_json(output / "owned-simulator.json", {"id": device})
-        run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
+        if shutil.which("simslim"):
+            # Boots the new simulator without background daemons the tests don't use. Siri keeps
+            # on-device models and icloud keeps CloudKit and account services available.
+            run(["simslim", "on", device, "--except", SIMSLIM_KEEP], capture_output=True, text=True)
+            record["simslim"] = SIMSLIM_KEEP
+        else:
+            run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
         run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
         environment = offline_environment()
         if reduce_motion:
