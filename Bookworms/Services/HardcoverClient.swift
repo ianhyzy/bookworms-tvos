@@ -296,7 +296,7 @@ actor HardcoverClient {
         case library = """
             query ShelfLibrary($user: Int!, $offset: Int!, $language: String!) {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
-                id last_read_date rating status_id review
+                id last_read_date rating status_id review updated_at
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
                   book_series { featured position compilation series { id name books_count primary_books_count } }
                   editions(where: {image_id: {_is_null: false},
@@ -313,10 +313,6 @@ actor HardcoverClient {
                 current_read: user_book_reads(where: {finished_at: {_is_null: true}},
                   order_by: [{id: desc}], limit: 1) {
                   started_at progress progress_pages progress_seconds edition { pages audio_seconds }
-                }
-                status_change: reading_journals(where: {event: {_like: "status_%"}},
-                  order_by: [{action_at: desc}, {id: desc}], limit: 1) {
-                  action_at
                 }
               }
             }
@@ -738,7 +734,8 @@ actor HardcoverClient {
     /// Turns library rows into books, one per Hardcover book, leaving out books the reader marked
     /// **Ignored**. `previous` holds the account's books from its last sync, by ID, whose covers
     /// stay fixed unless an upgrade applies
-    /// (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`).
+    /// (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`), and whose drop
+    /// dates stay while the book stays on **Did Not Finish**, so a later edit doesn't move them.
     ///
     /// Each finished read's date goes into `finishedDates`, newest first, and the newest is
     /// `finished`. A book without finished reads keeps `last_read_date` as `finished` alone. Each
@@ -785,7 +782,7 @@ actor HardcoverClient {
                     || row.lastReadDate != nil,
                 statusID: row.statusID,
                 dropped: row.statusID == Self.didNotFinishStatus
-                    ? Self.localDay(row.statusChanges?.first?.actionAt) : nil,
+                    ? previous[source.id]?.dropped ?? Self.localDay(row.updatedAt) : nil,
                 publicationYear: source.releaseYear,
                 isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
                 progress: row.statusID == Self.currentlyReadingStatus
@@ -850,14 +847,10 @@ struct UserBook: Decodable, Sendable {
     let userBookReads: [ReadEvent]?
     var currentReads: [CurrentRead]? = nil
     var currentRead: CurrentRead? { currentReads?.first }
-    /// The reader's newest shelf change, from their reading journal. Only the library query
-    /// asks for it.
-    var statusChanges: [JournalEntry]? = nil
-    struct JournalEntry: Decodable, Sendable {
-        /// A timestamp with a time zone, such as `2025-08-14T21:03:11.123456+00:00`.
-        let actionAt: String?
-        enum CodingKeys: String, CodingKey { case actionAt = "action_at" }
-    }
+    /// When the reader last edited the entry, such as `2025-08-14T21:03:11.123456+00:00`. The
+    /// app's scopes can read no shelf-change date, so this stands in for the day a book was
+    /// dropped. Only the library query asks for it.
+    var updatedAt: String? = nil
     enum CodingKeys: String, CodingKey {
         case id
         case statusID = "status_id"
@@ -868,7 +861,7 @@ struct UserBook: Decodable, Sendable {
         case edition
         case userBookReads = "user_book_reads"
         case currentReads = "current_read"
-        case statusChanges = "status_change"
+        case updatedAt = "updated_at"
     }
 
 }
