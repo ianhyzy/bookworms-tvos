@@ -296,7 +296,7 @@ actor HardcoverClient {
         case library = """
             query ShelfLibrary($user: Int!, $offset: Int!, $language: String!) {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
-                id last_read_date rating status_id review
+                id last_read_date rating status_id review updated_at
                 book { id title description pages release_year cached_contributors cached_tags rating ratings_count ratings_distribution image { url width height }
                   book_series { featured position compilation series { id name books_count primary_books_count } }
                   editions(where: {image_id: {_is_null: false},
@@ -663,6 +663,25 @@ actor HardcoverClient {
     static let readStatus = 3
     /// Hardcover's `status_id` for **Ignored**, books the reader chose not to see.
     static let ignoredStatus = 6
+    /// Hardcover's `status_id` for **Did Not Finish**.
+    static let didNotFinishStatus = 5
+
+    /// The `yyyy-MM-dd` day in the reader's time zone of a Hardcover timestamp, which Hardcover
+    /// writes with or without fractional seconds.
+    static func localDay(_ timestamp: String?) -> String? {
+        guard let timestamp else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = parser.date(from: timestamp)
+        if date == nil {
+            parser.formatOptions = [.withInternetDateTime]
+            date = parser.date(from: timestamp)
+        }
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        return date.map(day.string(from:))
+    }
 
     /// The fraction of an unfinished read completed, from 0 to 1, or `nil` when the read logs no
     /// progress.
@@ -715,7 +734,8 @@ actor HardcoverClient {
     /// Turns library rows into books, one per Hardcover book, leaving out books the reader marked
     /// **Ignored**. `previous` holds the account's books from its last sync, by ID, whose covers
     /// stay fixed unless an upgrade applies
-    /// (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`).
+    /// (`coverURLs(edition:book:otherEditions:editionIsInLanguage:previous:)`), and whose drop
+    /// dates stay while the book stays on **Did Not Finish**, so a later edit doesn't move them.
     ///
     /// Each finished read's date goes into `finishedDates`, newest first, and the newest is
     /// `finished`. A book without finished reads keeps `last_read_date` as `finished` alone. Each
@@ -761,6 +781,8 @@ actor HardcoverClient {
                 isRead: row.statusID == Self.readStatus || !finishes.isEmpty
                     || row.lastReadDate != nil,
                 statusID: row.statusID,
+                dropped: row.statusID == Self.didNotFinishStatus
+                    ? previous[source.id]?.dropped ?? Self.localDay(row.updatedAt) : nil,
                 publicationYear: source.releaseYear,
                 isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
                 progress: row.statusID == Self.currentlyReadingStatus
@@ -825,6 +847,10 @@ struct UserBook: Decodable, Sendable {
     let userBookReads: [ReadEvent]?
     var currentReads: [CurrentRead]? = nil
     var currentRead: CurrentRead? { currentReads?.first }
+    /// When the reader last edited the entry, such as `2025-08-14T21:03:11.123456+00:00`. The
+    /// app's scopes can read no shelf-change date, so this stands in for the day a book was
+    /// dropped. Only the library query asks for it.
+    var updatedAt: String? = nil
     enum CodingKeys: String, CodingKey {
         case id
         case statusID = "status_id"
@@ -835,6 +861,7 @@ struct UserBook: Decodable, Sendable {
         case edition
         case userBookReads = "user_book_reads"
         case currentReads = "current_read"
+        case updatedAt = "updated_at"
     }
 
 }
