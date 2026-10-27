@@ -192,7 +192,7 @@ struct BookDetailView: View {
                         }
                         .focusSection()
                         if !friendReads.isEmpty { friends }
-                        description.focusSection()
+                        if let text = descriptionText { description(text).focusSection() }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
@@ -228,9 +228,9 @@ struct BookDetailView: View {
 
     /// The description truncated to the remaining height. A hidden full-height copy detects
     /// overflow, which offers **Show more** to read the whole text in a sheet.
-    private var description: some View {
+    private func description(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            BookText(descriptionText, of: book)
+            BookText(text, of: book)
                 .appFont(size: 27).lineSpacing(8)
                 .foregroundStyle(.primary.opacity(0.86))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -240,7 +240,7 @@ struct BookDetailView: View {
                     descriptionHeight = $0
                 }
                 .background(alignment: .topLeading) {
-                    BookText(descriptionText, of: book)
+                    BookText(text, of: book)
                         .appFont(size: 27).lineSpacing(8)
                         .fixedSize(horizontal: false, vertical: true)
                         .hidden()
@@ -257,7 +257,7 @@ struct BookDetailView: View {
             {
                 let showMore = Button("Show more") {
                     readingDescription = ReviewPresentation(
-                        title: book.title, text: descriptionText, spoilers: false, book: book)
+                        title: book.title, text: text, spoilers: false, book: book)
                 }
                 // Book Wall shows details over its live 3D scene, without the cover. Glass there
                 // samples a layer that changes every frame, which kept the open state at 40 fps
@@ -277,12 +277,11 @@ struct BookDetailView: View {
         .padding(.bottom, 10)
     }
 
-    private var descriptionText: String {
+    /// The book's description, or `nil` without one, which leaves its space empty.
+    private var descriptionText: String? {
         guard let description = book.description?.trimmingCharacters(in: .whitespacesAndNewlines),
             !description.isEmpty
-        else {
-            return "No description is available from your sources."
-        }
+        else { return nil }
         return description
     }
 
@@ -311,7 +310,8 @@ struct BookDetailView: View {
     }
 
     /// The finish date when one is recorded, with a read count for a reread, then genres, then
-    /// the rating histogram, which opens reviews when Hardcover can supply them.
+    /// the ratings and their histogram when the book has a rating, which open reviews when
+    /// Hardcover can supply them.
     private var metadata: some View {
         HStack(alignment: .top, spacing: 44) {
             if book.finished != nil {
@@ -347,7 +347,7 @@ struct BookDetailView: View {
                 // width; the chart takes what they leave.
                 .layoutPriority(1)
             }
-            Group {
+            if RatingsView.shows(book) {
                 if loadReviews != nil {
                     Button {
                         showsReviews = true

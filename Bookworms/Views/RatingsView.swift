@@ -1,8 +1,13 @@
 import Charts
 import SwiftUI
 
+/// Your rating and the community's, with the community's distribution. A book with neither
+/// rating shows no ratings block (`shows(_:)`).
 struct RatingsView: View {
     let book: Book
+
+    /// Whether `book` has a rating to show.
+    static func shows(_ book: Book) -> Bool { book.rating != nil || book.communityRating != nil }
 
     private var buckets: [RatingBucket] {
         let counts = Dictionary(
@@ -32,20 +37,16 @@ struct RatingsView: View {
         // height to the description. Stacking the two ratings keeps the text narrow for the chart.
         HStack(alignment: .top, spacing: 24) {
             VStack(alignment: .leading, spacing: 4) {
-                if ratings.isEmpty {
-                    Text("No ratings yet").appFont(size: 26, weight: .medium)
-                } else {
-                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
-                        ForEach(ratings, id: \.label) { rating in
-                            GridRow {
-                                Text(rating.label)
-                                Text(rating.stars).monospacedDigit()
-                            }
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+                    ForEach(ratings, id: \.label) { rating in
+                        GridRow {
+                            Text(rating.label)
+                            Text(rating.stars).monospacedDigit()
                         }
                     }
-                    .appFont(size: 26, weight: .medium)
-                    .accessibilityElement(children: .combine)
                 }
+                .appFont(size: 26, weight: .medium)
+                .accessibilityElement(children: .combine)
                 if book.communityRating != nil {
                     Text("\((book.ratingsCount ?? 0).formatted()) ratings")
                         .appFont(size: 23).foregroundStyle(.detailCaption).padding(.top, 4)
