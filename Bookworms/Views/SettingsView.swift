@@ -324,7 +324,7 @@ struct SettingsView: View {
         return columns {
             settingLabel(
                 "Where designs come from",
-                "Your iPhone and Mac design spines and sync them here through iCloud."
+                "Designs sync here through iCloud."
             )
             if designs.makers.isEmpty {
                 Text("No designs yet").font(.system(size: 26)).foregroundStyle(.secondary)
