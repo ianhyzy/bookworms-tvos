@@ -326,9 +326,7 @@ struct SettingsView: View {
                 "Where designs come from",
                 "Designs sync here through iCloud."
             )
-            if designs.makers.isEmpty {
-                Text("No designs yet").font(.system(size: 26)).foregroundStyle(.secondary)
-            } else {
+            if !designs.makers.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(designs.makers, id: \.name) { maker in
                         HStack(spacing: 24) {

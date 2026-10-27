@@ -134,12 +134,14 @@ final class SettingsInteractionTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: spines)
     }
 
-    /// Without designs, **Settings → Spines** says Book Wall shows a default look, and that iCloud
-    /// storage is off.
+    /// Without designs, **Settings → Spines** lists no models and says Book Wall shows a default
+    /// look, and that iCloud storage is off.
     func testSpinesWithoutDesignsExplainsBookWallsOwnLook() {
         let app = openSettings("Spines")
-        XCTAssertTrue(app.staticTexts["No designs yet"].waitForExistence(timeout: 5))
-        XCTAssertTrue(text(containing: "Book Wall shows a default look", in: app).exists)
+        XCTAssertTrue(
+            text(containing: "Book Wall shows a default look", in: app).waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["spine-makers"].exists)
         XCTAssertTrue(text(containing: "iCloud storage is off", in: app).exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Settings spines without designs"

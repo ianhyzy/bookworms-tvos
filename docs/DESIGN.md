@@ -22,7 +22,7 @@ Material tiles show the year's totals above a books-by-month bar chart and a pan
 
 ## Details
 
-Details show the full cover in its original proportions, title, author, description, completion date, personal rating, format, and length when available. Hardcover community ratings appear as an average and distribution chart. Up and Down scroll long descriptions directly. Missing metadata is described as unavailable rather than invented.
+Details show the full cover in its original proportions, title, author, description, completion date, personal rating, format, and length when available. Hardcover community ratings appear as an average and distribution chart. Up and Down scroll long descriptions directly. Missing metadata is left out rather than invented or described as unavailable.
 
 ## Home Screen
 
