@@ -42,6 +42,11 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     /// Snapshots saved before statuses were fetched decode it as `nil` until the next sync. The
     /// iPhone reads it from the iCloud archive.
     var statusID: Int? = nil
+    /// The day the reader shelved a book as **Did Not Finish**, as `yyyy-MM-dd`, from their
+    /// newest Hardcover status change. It is `nil` for other shelves and when Hardcover has no
+    /// record of the change. The iPhone's **Dropped** share image reads it from the iCloud
+    /// archive.
+    var dropped: String? = nil
     var publicationYear: Int?
     /// Whether the book is on the reader's Hardcover **Currently Reading** shelf.
     var isReading: Bool?
