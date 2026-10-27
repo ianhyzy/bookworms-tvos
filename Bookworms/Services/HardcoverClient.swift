@@ -314,6 +314,10 @@ actor HardcoverClient {
                   order_by: [{id: desc}], limit: 1) {
                   started_at progress progress_pages progress_seconds edition { pages audio_seconds }
                 }
+                status_change: reading_journals(where: {event: {_like: "status_%"}},
+                  order_by: [{action_at: desc}, {id: desc}], limit: 1) {
+                  action_at
+                }
               }
             }
             """
@@ -663,6 +667,25 @@ actor HardcoverClient {
     static let readStatus = 3
     /// Hardcover's `status_id` for **Ignored**, books the reader chose not to see.
     static let ignoredStatus = 6
+    /// Hardcover's `status_id` for **Did Not Finish**.
+    static let didNotFinishStatus = 5
+
+    /// The `yyyy-MM-dd` day in the reader's time zone of a Hardcover timestamp, which Hardcover
+    /// writes with or without fractional seconds.
+    static func localDay(_ timestamp: String?) -> String? {
+        guard let timestamp else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = parser.date(from: timestamp)
+        if date == nil {
+            parser.formatOptions = [.withInternetDateTime]
+            date = parser.date(from: timestamp)
+        }
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        return date.map(day.string(from:))
+    }
 
     /// The fraction of an unfinished read completed, from 0 to 1, or `nil` when the read logs no
     /// progress.
@@ -761,6 +784,8 @@ actor HardcoverClient {
                 isRead: row.statusID == Self.readStatus || !finishes.isEmpty
                     || row.lastReadDate != nil,
                 statusID: row.statusID,
+                dropped: row.statusID == Self.didNotFinishStatus
+                    ? Self.localDay(row.statusChanges?.first?.actionAt) : nil,
                 publicationYear: source.releaseYear,
                 isReading: row.statusID == Self.currentlyReadingStatus ? true : nil,
                 progress: row.statusID == Self.currentlyReadingStatus
@@ -825,6 +850,14 @@ struct UserBook: Decodable, Sendable {
     let userBookReads: [ReadEvent]?
     var currentReads: [CurrentRead]? = nil
     var currentRead: CurrentRead? { currentReads?.first }
+    /// The reader's newest shelf change, from their reading journal. Only the library query
+    /// asks for it.
+    var statusChanges: [JournalEntry]? = nil
+    struct JournalEntry: Decodable, Sendable {
+        /// A timestamp with a time zone, such as `2025-08-14T21:03:11.123456+00:00`.
+        let actionAt: String?
+        enum CodingKeys: String, CodingKey { case actionAt = "action_at" }
+    }
     enum CodingKeys: String, CodingKey {
         case id
         case statusID = "status_id"
@@ -835,6 +868,7 @@ struct UserBook: Decodable, Sendable {
         case edition
         case userBookReads = "user_book_reads"
         case currentReads = "current_read"
+        case statusChanges = "status_change"
     }
 
 }
