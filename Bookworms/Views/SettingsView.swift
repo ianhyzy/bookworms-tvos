@@ -324,7 +324,7 @@ struct SettingsView: View {
         return columns {
             settingLabel(
                 "Where designs come from",
-                "Your iPhone and Mac design spines and save them to iCloud, and Book Wall draws them. Each design records the model that made it."
+                "Designs sync here through iCloud."
             )
             if designs.makers.isEmpty {
                 Text("No designs yet").font(.system(size: 26)).foregroundStyle(.secondary)
@@ -349,8 +349,8 @@ struct SettingsView: View {
             if designs.undesigned > 0 {
                 note(
                     designs.undesigned == 1
-                        ? "1 book has no design yet, so Book Wall draws it in this Apple TV's own default look."
-                        : "\(designs.undesigned) books have no design yet, so Book Wall draws them in this Apple TV's own default look."
+                        ? "1 book has no design yet, so Book Wall shows a default look."
+                        : "\(designs.undesigned) books have no design yet, so Book Wall shows a default look."
                 )
             }
             if !library.iCloudEnabled {
@@ -359,11 +359,11 @@ struct SettingsView: View {
         } trailing: {
             settingLabel(
                 "Which devices design spines",
-                "iPhone and Mac design with the best model each has: Private Cloud Compute, then your model with an API key, then Apple's on-device model, then default styling. On iPhone or Mac, you can choose your model instead of Private Cloud Compute. Apple TV has no model. Until a design arrives, it draws its own default look, which it also shares for a series without a look."
+                "Each iPhone and Mac designs with its own model. To change a device's model, use Choose model in its Spines tab."
             )
             settingLabel(
                 "Why a book can look different elsewhere",
-                "Designs sync through iCloud, so a device that hasn't synced yet can show an older design, or its own default look for a book whose design hasn't arrived. A device replaces only spines from Apple's on-device model or default styling, with one from a better model. Spines from Private Cloud Compute or a model with an API key stay."
+                "A device that hasn't synced yet can show an older design or a default look."
             )
         }
     }
