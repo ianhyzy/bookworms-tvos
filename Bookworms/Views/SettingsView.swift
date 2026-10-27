@@ -359,11 +359,11 @@ struct SettingsView: View {
         } trailing: {
             settingLabel(
                 "Which devices design spines",
-                "iPhone and Mac design with the best model each has: Private Cloud Compute, then your model with an API key, then Apple's on-device model, then default styling. Apple TV has no model. Until a design arrives, it draws its own default look, which it also shares for a series without a look."
+                "iPhone and Mac design with the best model each has: Private Cloud Compute, then your model with an API key, then Apple's on-device model, then default styling. On iPhone or Mac, you can choose your model instead of Private Cloud Compute. Apple TV has no model. Until a design arrives, it draws its own default look, which it also shares for a series without a look."
             )
             settingLabel(
                 "Why a book can look different elsewhere",
-                "Designs sync through iCloud, so a device that hasn't synced yet can show an older design, or its own default look for a book whose design hasn't arrived. A device replaces a design only with one from a better model."
+                "Designs sync through iCloud, so a device that hasn't synced yet can show an older design, or its own default look for a book whose design hasn't arrived. A device replaces only spines from Apple's on-device model or default styling, with one from a better model. Spines from Private Cloud Compute or a model with an API key stay."
             )
         }
     }
