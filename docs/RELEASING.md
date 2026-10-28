@@ -136,7 +136,7 @@ When you connect Hardcover, Bookworms saves your sign-in in the Apple TV's Keych
 
 Bookworms only reads this information and never changes your Hardcover account. Hardcover's policies govern the data Hardcover holds, including the moderation of reviews.
 
-Covers and profile photos download from the addresses Hardcover provides. For spine designs made by Bookworms on your iPhone or Mac, Book Wall downloads fonts from Google Fonts, which receives the names of those fonts. Those servers receive standard connection information, such as your IP address. Your settings are stored in the app.
+Covers and profile photos download from the addresses Hardcover provides. For spine designs made by Bookworms on your iPhone or Mac, Book Wall downloads fonts from Google Fonts, which receives the names of those fonts. Each of these servers receives standard connection information, such as your IP address. Your settings are stored in the app.
 
 Where data is stored
 Downloaded information, images, and settings stay on your Apple TV. Bookworms may remove cached data when space is needed and download it again at the next sync. A troubleshooting log records the status and timing of recent requests. It excludes credentials and book content, and it never leaves your Apple TV.
