@@ -264,7 +264,11 @@ final class SocialLibraryModel {
                         try install(current, request: request)
                     }
                 }
-                try install(current, request: request)
+                // Each due dataset installed as it arrived. Only a load that fetched the owner and
+                // found nothing due still has to install, so a load with nothing due neither
+                // rewrites the cache nor advances `revision`.
+                if snapshot == nil { try install(current, request: request) }
+                guard request == requestRevision else { return }
                 status =
                     "Social data is cached. Automatic checks run once a day."
             } catch {

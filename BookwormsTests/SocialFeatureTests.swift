@@ -375,9 +375,11 @@ final class SocialFeatureTests: XCTestCase {
         let token = "hc_pat_" + String(repeating: "x", count: 32)
         await model.load(token: token, readerID: 2)
         let first = await client.counts
+        let revision = model.revision
         await model.load(token: token, readerID: 2)
         let second = await client.counts
         XCTAssertEqual(first, second)
+        XCTAssertEqual(model.revision, revision, "A load with nothing due doesn't reinstall")
         XCTAssertEqual(model.shared(with: 2, limit: 20).count, 1)
         await model.load(token: token, readerID: 3)
         let third = await client.counts
