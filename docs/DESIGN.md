@@ -30,6 +30,6 @@ The Top Shelf extension shows the first ten books of the selected shelf collecti
 
 ## Visual review
 
-Check both appearances on Apple TV at normal viewing distance: long titles, missing covers, partial shelves with photos, Compare Shelves alignment, VoiceOver labels, Reduce Motion, and focus restoration. Simulator screenshots help catch layout regressions but do not show real covers or TV-distance readability. See [testing](TESTING.md) and [icon assets](../design/icon/README.md).
+Check both appearances on Apple TV at normal viewing distance: long titles, missing covers, partial shelves, Compare Shelves alignment, Reduce Motion, and focus restoration. Simulator screenshots help catch layout regressions but do not show real covers or TV-distance readability. See [testing](TESTING.md) and [icon assets](../design/icon/README.md).
 
 See [social views and ambient mode](SOCIAL_VIEWS_AND_AMBIENT.md) for Feed, Compare Shelves, Book Club, Friends' Picks, and ambient playback.
