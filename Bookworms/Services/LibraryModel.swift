@@ -1263,10 +1263,10 @@ final class LibraryModel {
         dependencies.defaults.set(id, forKey: "activeHardcoverAccountID")
     }
 
-    /// Seeds each source's sync schedule from the snapshot its active account uses. Seeding from
-    /// every snapshot let an older one of another account, such as the legacy `"hardcover"`
-    /// placeholder that merges never remove, set the last success and make the source look due
-    /// again five minutes after each attempt.
+    /// Seeds each source's sync schedule from the snapshot its active account uses, never from
+    /// another account's: an older snapshot, such as the legacy `"hardcover"` placeholder that
+    /// merges never remove, would set the last success and make the source look due again five
+    /// minutes after each attempt.
     private func seedSchedule() {
         if let snapshot = activeHardcoverSnapshot() {
             schedule.seed(.hardcover, date: snapshot.syncedAt)

@@ -115,8 +115,10 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                 profiles[row.followedUser.id] = row.followedUser.model
             }
             if result.followedUsers.count < 100 {
+                // Readers who share a name keep one order from load to load.
                 return profiles.values.sorted {
-                    $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                    let order = $0.displayName.localizedStandardCompare($1.displayName)
+                    return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
                 }
             }
         }

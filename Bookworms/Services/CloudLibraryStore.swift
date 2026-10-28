@@ -116,9 +116,14 @@ actor CloudLibraryStore {
             let remote: CloudLibraryArchive
             if let asset = record["archive"] as? CKAsset {
                 guard let url = asset.fileURL else { throw CloudStorageError.incomplete }
-                remote = try JSONDecoder()
-                    .decode(CloudLibraryArchive.self, from: Data(contentsOf: url))
-                guard remote.version == 1 else { throw CloudStorageError.newerVersion }
+                let data = try Data(contentsOf: url)
+                // A newer format may change the archive's shape, so its version is read alone
+                // first.
+                struct Header: Decodable { let version: Int }
+                guard try JSONDecoder().decode(Header.self, from: data).version == 1 else {
+                    throw CloudStorageError.newerVersion
+                }
+                remote = try JSONDecoder().decode(CloudLibraryArchive.self, from: data)
             } else {
                 guard record.modificationDate == nil else { throw CloudStorageError.incomplete }
                 remote = CloudLibraryArchive()
