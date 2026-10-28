@@ -35,8 +35,9 @@ def main():
     parser.add_argument("--team", help=f"Apple development team ID; defaults to {LOCAL_DEFAULTS.name}")
     parser.add_argument("--test", action="store_true", help="Run tests instead of installing a normal build")
     parser.add_argument("--only-testing", help="Optional test target or method")
-    parser.add_argument("--test-plan", choices=["Local", "Unit", "Device"], default="Local",
-                        help="Choose Device for opt-in live-library checks")
+    # Local and Unit expect simulator-only hooks; on a TV, Local's UI tests change the owner's settings.
+    parser.add_argument("--test-plan", choices=["Local", "Unit", "Device"], default="Device",
+                        help="Defaults to Device, the opt-in checks against the TV's library")
     parser.add_argument("--configuration", choices=["Debug", "Release"], help="Defaults to Release for installs and Debug for tests")
     parser.add_argument("--start-view", help="Optional view to launch directly into (e.g. shared)")
     parser.add_argument("--reset-hardcover-setup", action="store_true",
