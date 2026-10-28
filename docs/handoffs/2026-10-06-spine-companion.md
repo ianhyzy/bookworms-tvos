@@ -41,7 +41,7 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 ## Remaining steps
 
 1. **Signed end-to-end check**: a signed iPhone or Mac and the Apple TV on one iCloud account. Confirm the worklist lists every book, a companion design reaches the TV cache with its font fields, and Book Wall shows it while other views show covers. See [testing](../TESTING.md).
-2. **Privacy policy**: Book Wall now requests Google Fonts faces. Update the published policy and the [policy text](../RELEASING.md#apple-tv-privacy-policy-text) before uploading a candidate with `showsCompanionSpines` on.
+2. **Privacy policy**: the [policy text](../RELEASING.md#apple-tv-privacy-policy-text) names the Google Fonts requests that Book Wall makes. Publish the same wording and effective date in the web policy before uploading a candidate with `showsCompanionSpines` on.
 3. **Deploy `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`** (each with a `payload` Bytes field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
 4. **Design refresh cadence**: the TV refetches every design, cover-choice, series-link, and series-look record on launch, activation, and after each cloud sync. A new design or series look for a current-year book rebuilds Book Wall, even while it is on screen. Consider subscriptions with silent push, as the iPhone uses for the worklist.
 5. **Validator alignment**: decide whether the TV should adopt the iPhone's lowercase-only `coverHash` and the account ID length bound.
