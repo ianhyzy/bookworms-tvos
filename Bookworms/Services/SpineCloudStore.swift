@@ -210,8 +210,8 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     let origin: String
     let createdAt: Date
     /// When a companion app last edited the look's colors or type. A look copied from a design
-    /// whose colors the reader chose counts as edited at `createdAt`, so no companion upgrade
-    /// replaces those colors.
+    /// whose colors or font the reader chose counts as edited at `createdAt`, so no companion
+    /// upgrade replaces them.
     var editedAt: Date? = nil
     let backgroundHex: String
     let foregroundHex: String
@@ -229,6 +229,9 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
     /// Compute's looks and Book Wall's cover-sampled looks record none; the latter's `origin`
     /// marks them.
     var provenance: String? = nil
+    /// When a companion app last made the look again from a new design, keeping `createdAt`. The
+    /// Apple TV never remakes a look, so it leaves this out of the looks it creates.
+    var remadeAt: Date? = nil
 
     /// The origin of a look made from Book Wall's cover-sampled style.
     static let localOrigin = "tvos-local-v1"
@@ -240,6 +243,7 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
             && accountID.count <= 512 && self.key == key && seriesID > 0 && group.count <= 200
             && sourceBookID > 0 && createdAt.timeIntervalSince1970.isFinite
             && (editedAt?.timeIntervalSince1970.isFinite ?? true)
+            && (remadeAt?.timeIntervalSince1970.isFinite ?? true)
             && SpineDesignV1.isShortLine(origin) && SpineDesignV1.isShortLine(provenance)
             && !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && design(bookID: sourceBookID, workItemHash: "").isValidLook
