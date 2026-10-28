@@ -171,8 +171,8 @@ struct FeedActivity: Codable, Identifiable, Hashable, Sendable {
         return result
     }
 
-    /// `createdAt` parsed with or without fractional seconds. Format styles are values that
-    /// Foundation caches, so feed card bodies can read this without building formatters.
+    /// `createdAt` parsed with or without fractional seconds. `ISO8601FormatStyle` is a plain
+    /// value with no formatter object to build, so feed card bodies can read this cheaply.
     var date: Date? {
         guard let createdAt else { return nil }
         return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(createdAt))

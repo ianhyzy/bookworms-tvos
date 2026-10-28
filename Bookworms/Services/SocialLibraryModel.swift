@@ -270,9 +270,9 @@ final class SocialLibraryModel {
                         try install(current, request: request)
                     }
                 }
-                // Each due dataset installed as it arrived. Only a load that fetched the owner and
-                // found nothing due still has to install, so a load with nothing due neither
-                // rewrites the cache nor advances `revision`.
+                // Each due dataset installed as it arrived. `snapshot` is still nil only when this
+                // load fetched the owner and nothing was due, so it installs the cached copy; any
+                // other load with nothing due leaves the cache file and `revision` alone.
                 if snapshot == nil { try install(current, request: request) }
                 guard request == requestRevision else { return }
                 status =

@@ -426,9 +426,13 @@ final class SocialFeatureTests: XCTestCase {
     }
 
     func testDeniedReaderLibraryIsEmptyAndKeepsOtherSocialData() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "DeniedReader.\(UUID())"))
-        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "SocialDeniedReaderTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
         let client = SocialFixtureClient()
         await client.deny(reader: 2)
         let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
