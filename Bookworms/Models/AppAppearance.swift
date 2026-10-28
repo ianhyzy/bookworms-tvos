@@ -101,10 +101,10 @@ enum AppFontStyle: String, CaseIterable, Identifiable {
     /// `.serif` is New York on Apple platforms.
     var design: Font.Design { self == .serif ? .serif : .default }
 
-    /// New York reads lighter than SF at the same weight, so regular serif text uses medium.
-    /// Heavier weights are unchanged to preserve the heading hierarchy.
     private var boostsRegular: Bool { self == .serif }
 
+    /// New York reads lighter than SF at the same weight, so regular serif text uses medium.
+    /// Heavier weights are unchanged to preserve the heading hierarchy.
     func displayWeight(_ weight: Font.Weight) -> Font.Weight {
         boostsRegular && weight == .regular ? .medium : weight
     }
