@@ -243,6 +243,7 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
             && accountID.count <= 512 && self.key == key && seriesID > 0 && group.count <= 200
             && sourceBookID > 0 && createdAt.timeIntervalSince1970.isFinite
             && (editedAt?.timeIntervalSince1970.isFinite ?? true)
+            && (remadeAt?.timeIntervalSince1970.isFinite ?? true)
             && SpineDesignV1.isShortLine(origin) && SpineDesignV1.isShortLine(provenance)
             && !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && design(bookID: sourceBookID, workItemHash: "").isValidLook
