@@ -505,7 +505,7 @@ final class SpineCloudTests: XCTestCase {
         try await database.put(look())
         let online = SpineCloudStore(database: database, cacheURL: cacheURL)
         let links = try await online.seriesLinks(accountID: "42", books: [book()]).values
-        let looks = try await online.seriesLooks(accountID: "42", keys: [cityWatch])
+        let looks = try await online.seriesLooks(accountID: "42", keys: [cityWatch]).values
         XCTAssertEqual(links, [7: link])
         XCTAssertEqual(looks, [cityWatch: look()])
 
@@ -513,15 +513,17 @@ final class SpineCloudTests: XCTestCase {
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
         let cachedLinks = try await offline.seriesLinks(accountID: "42", books: [book()]).values
         let cachedLooks = try await offline.seriesLooks(accountID: "42", keys: [cityWatch])
+            .values
         XCTAssertEqual(cachedLinks, [7: link])
         XCTAssertEqual(cachedLooks, [cityWatch: look()])
-        let cleared = try await offline.seriesLooks(accountID: "", keys: [])
+        let cleared = try await offline.seriesLooks(accountID: "", keys: []).values
         XCTAssertTrue(cleared.isEmpty)
         let afterClear = try await offline.seriesLooks(accountID: "42", keys: [cityWatch])
+            .values
         XCTAssertTrue(afterClear.isEmpty, "An empty account clears the look cache")
     }
 
-    func testPickedSeriesLinksReplaceAndDeleteTheBooksRecord() async throws {
+    func testPickedSeriesLinksKeepTheStoredOwnLookAndDeleteAChoiceOfNothing() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let cacheURL = directory.appending(path: "spine-designs.json")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -529,17 +531,19 @@ final class SpineCloudTests: XCTestCase {
         let store = SpineCloudStore(database: database, cacheURL: cacheURL)
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let first = SeriesLinkV1(
-            accountID: "42", bookID: 7, linkedSeriesID: 3,
-            chosenAt: Date(timeIntervalSince1970: 1_780_000_000))
-        let second = SeriesLinkV1(
-            accountID: "42", bookID: 7, linkedSeriesID: 4, ownLook: true,
-            chosenAt: Date(timeIntervalSince1970: 1_780_000_060))
-        try await store.setSeriesLink(first, accountID: "42", bookID: 7)
-        // Another device's record is replaced: the last writer wins, as on the iPhone.
-        try await store.setSeriesLink(second, accountID: "42", bookID: 7)
+        func pick(_ series: Int?, ownLook: Bool = false, at seconds: TimeInterval = 0)
+            -> SeriesLinkV1
+        {
+            SeriesLinkV1(
+                accountID: "42", bookID: 7, linkedSeriesID: series, ownLook: ownLook,
+                chosenAt: Date(timeIntervalSince1970: 1_780_000_000 + seconds))
+        }
+        try await store.setSeriesLink(pick(3), accountID: "42", bookID: 7)
+        // The iPhone then keeps the book's own look, which the Apple TV's copy doesn't know.
+        try await database.put(pick(3, ownLook: true, at: 30))
+        try await store.setSeriesLink(pick(4, at: 60), accountID: "42", bookID: 7)
         let read = try await store.seriesLinks(accountID: "42", books: [book()]).values
-        XCTAssertEqual(read, [7: second])
+        XCTAssertEqual(read, [7: pick(4, ownLook: true, at: 60)], "A pick changes only the series")
         let name =
             SpineCloudIdentity.seriesLinkRecordID(accountID: "42", bookID: 7).recordName
         let saved = await database.payload(named: name)
@@ -552,23 +556,135 @@ final class SpineCloudTests: XCTestCase {
                 "chosenAt",
             ])
         let cached = try await offline.seriesLinks(accountID: "42", books: [book()]).values
-        XCTAssertEqual(cached, [7: second], "A saved link is cached for offline reads")
+        XCTAssertEqual(cached, read, "A saved link is cached for offline reads")
 
-        try await store.setSeriesLink(nil, accountID: "42", bookID: 7)
+        // Picking the shortest series keeps a link that keeps the book's own look.
+        try await store.setSeriesLink(pick(nil, at: 90), accountID: "42", bookID: 7)
+        let ownLook = try await store.seriesLinks(accountID: "42", books: [book()]).values
+        XCTAssertEqual(ownLook, [7: pick(nil, ownLook: true, at: 90)])
+
+        // A copy that keeps an own look the iPhone since removed deletes the record.
+        try await database.put(pick(4, at: 120))
+        try await store.setSeriesLink(pick(nil, ownLook: true, at: 150), accountID: "42", bookID: 7)
         let deleted = await database.payload(named: name)
         XCTAssertNil(deleted)
         let afterDelete = try await offline.seriesLinks(accountID: "42", books: [book()]).values
         XCTAssertTrue(afterDelete.isEmpty, "A deleted link leaves the cache")
-        try await store.setSeriesLink(nil, accountID: "42", bookID: 7)
+        try await store.setSeriesLink(pick(nil), accountID: "42", bookID: 7)
+        let nothing = await database.payload(named: name)
+        XCTAssertNil(nothing, "Choosing nothing for a book without a link saves nothing")
+
+        // A link this app can't read, such as a newer version, is left as the iPhone saved it.
+        var newer = pick(3, ownLook: true, at: 180)
+        newer.version = 2
+        try await database.put(newer)
+        let unread = await database.payload(named: name)
+        for series in [4, nil] {
+            do {
+                try await store.setSeriesLink(pick(series, at: 210), accountID: "42", bookID: 7)
+                XCTFail("A pick must not replace or delete a link this app can't read")
+            } catch CloudStorageError.incomplete {}
+            let kept = await database.payload(named: name)
+            XCTAssertEqual(kept, unread)
+        }
 
         do {
-            try await store.setSeriesLink(first, accountID: "43", bookID: 7)
+            try await store.setSeriesLink(pick(3), accountID: "43", bookID: 7)
             XCTFail("A link for another account must not be saved")
         } catch CloudStorageError.incomplete {}
         do {
-            try await offline.setSeriesLink(first, accountID: "42", bookID: 7)
+            try await offline.setSeriesLink(pick(3), accountID: "42", bookID: 7)
             XCTFail("Saving a link needs iCloud")
         } catch CloudStorageError.unavailable {}
+    }
+
+    func testRecordSavesRetryWhenAnotherDeviceChangesTheRecord() async throws {
+        let link = SeriesLinkV1(
+            accountID: "42", bookID: 7, linkedSeriesID: 3,
+            chosenAt: Date(timeIntervalSince1970: 1_780_000_000))
+        let worklist = SpineWorklistV1(
+            accountID: "42", syncedAt: Date(timeIntervalSince1970: 1_780_000_000), bookIDs: [7])
+        for conflicts in [2, 3] {
+            let directory = FileManager.default.temporaryDirectory.appending(
+                path: UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let database = FakeSpineDatabase()
+            let store = SpineCloudStore(
+                database: database, cacheURL: directory.appending(path: "spine-designs.json"))
+            await database.failNextSaves(conflicts)
+            do {
+                try await store.setSeriesLink(link, accountID: "42", bookID: 7)
+                XCTAssertEqual(conflicts, 2, "The third try saves")
+            } catch CloudStorageError.conflict {
+                XCTAssertEqual(conflicts, 3, "Three conflicts in a row give up")
+            }
+            await database.failNextSaves(conflicts)
+            do {
+                try await store.publish(worklist)
+                XCTAssertEqual(conflicts, 2, "The third try saves")
+            } catch CloudStorageError.conflict {
+                XCTAssertEqual(conflicts, 3, "Three conflicts in a row give up")
+            }
+            let saves = await database.saveCount()
+            XCTAssertEqual(saves, conflicts == 2 ? 2 : 0)
+        }
+    }
+
+    func testAWriteDuringAnEarlierReadOfItsTypeStaysCached() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cacheURL = directory.appending(path: "spine-designs.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = FakeSpineDatabase()
+        let store = SpineCloudStore(database: database, cacheURL: cacheURL)
+        let offline = SpineCloudStore(
+            database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
+        let other = SeriesLookKey(seriesID: 2001, group: "|frankherbert")
+
+        // A read of book 7's link is suspended while book 8's link saves.
+        let seven = book()
+        await database.holdNextBatch()
+        let linkRead = Task { try await store.seriesLinks(accountID: "42", books: [seven]) }
+        await database.waitForHeldBatch()
+        let link = SeriesLinkV1(
+            accountID: "42", bookID: 8, linkedSeriesID: 3,
+            chosenAt: Date(timeIntervalSince1970: 1_780_000_000))
+        try await store.setSeriesLink(link, accountID: "42", bookID: 8)
+        await database.releaseHeldBatch()
+        do {
+            _ = try await linkRead.value
+            XCTFail("A read that started before the save must not save its copy of the cache")
+        } catch is CancellationError {}
+        let links = try await offline.seriesLinks(accountID: "42", books: [book(id: 8)]).values
+        XCTAssertEqual(links, [8: link])
+
+        // The same holds for a look created during a read of another group's look.
+        await database.holdNextBatch()
+        let lookRead = Task { try await store.seriesLooks(accountID: "42", keys: [other]) }
+        await database.waitForHeldBatch()
+        _ = try await store.createSeriesLook(look())
+        await database.releaseHeldBatch()
+        do {
+            _ = try await lookRead.value
+            XCTFail("A read that started before the save must not save its copy of the cache")
+        } catch is CancellationError {}
+        let looks = try await offline.seriesLooks(accountID: "42", keys: [cityWatch]).values
+        XCTAssertEqual(looks, [cityWatch: look()])
+    }
+
+    func testAFailedLookBatchReadsAsIncomplete() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = FakeSpineDatabase()
+        try await database.put(look())
+        let store = SpineCloudStore(
+            database: database, cacheURL: directory.appending(path: "spine-designs.json"))
+        let complete = try await store.seriesLooks(accountID: "42", keys: [cityWatch])
+        XCTAssertEqual(complete.values, [cityWatch: look()])
+        XCTAssertTrue(complete.isComplete)
+        await database.failBatch(number: 2, with: CKError(.serviceUnavailable))
+        let failed = try await store.seriesLooks(accountID: "42", keys: [cityWatch])
+        XCTAssertEqual(failed.values, [cityWatch: look()], "A failed read keeps the cached look")
+        XCTAssertFalse(failed.isComplete)
     }
 
     func testCreatingASeriesLookKeepsTheLookSavedFirst() async throws {
@@ -581,7 +697,7 @@ final class SpineCloudTests: XCTestCase {
         XCTAssertEqual(first, look())
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let cached = try await offline.seriesLooks(accountID: "42", keys: [cityWatch])
+        let cached = try await offline.seriesLooks(accountID: "42", keys: [cityWatch]).values
         XCTAssertEqual(cached[cityWatch], look(), "A created look is cached for offline reads")
 
         // Another device's later look loses to the saved one, which is never replaced.
@@ -590,7 +706,7 @@ final class SpineCloudTests: XCTestCase {
         XCTAssertEqual(kept, look())
         let saveCount = await database.saveCount()
         XCTAssertEqual(saveCount, 1)
-        let read = try await later.seriesLooks(accountID: "42", keys: [cityWatch])
+        let read = try await later.seriesLooks(accountID: "42", keys: [cityWatch]).values
         XCTAssertEqual(read[cityWatch]?.backgroundHex, "#1A2B3C")
         do {
             _ = try await offline.createSeriesLook(look())
@@ -644,6 +760,7 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
     private var batchCount = 0
     private var saves = 0
     private var holdNext = false
+    private var conflictingSaves = 0
     private var heldBatch: CheckedContinuation<Void, Never>?
     private var holdObserver: CheckedContinuation<Void, Never>?
     /// Records this database returned, which `save(_:)` may change.
@@ -707,6 +824,9 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
 
     func holdNextBatch() { holdNext = true }
 
+    /// Makes the next `count` saves fail as if another device changed the record meanwhile.
+    func failNextSaves(_ count: Int) { conflictingSaves = count }
+
     func waitForHeldBatch() async {
         if heldBatch != nil { return }
         await withCheckedContinuation { holdObserver = $0 }
@@ -749,6 +869,10 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
     func save(_ record: CKRecord) throws {
         guard let payload = record["payload"] as? Data else {
             throw CloudStorageError.incomplete
+        }
+        if conflictingSaves > 0 {
+            conflictingSaves -= 1
+            throw CKError(.serverRecordChanged)
         }
         if payloads[record.recordID.recordName] != nil, !served.contains(where: { $0 === record }) {
             throw CKError(.serverRecordChanged)

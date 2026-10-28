@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Serializes local snapshot writes away from the UI actor and discards superseded requests.
 actor LibraryPersistence {
@@ -9,7 +10,9 @@ actor LibraryPersistence {
     private var styleRevision = 0
     private var topShelfRevision = 0
     private var newestTopShelfRequest = 0
-    private var publishedTopShelf: [TopShelfBook] = []
+    /// The last snapshot written, or `nil` until a write succeeds.
+    private var publishedTopShelf: [TopShelfBook]?
+    private static let log = Logger(subsystem: "gay.ian.Bookworms", category: "TopShelf")
 
     init(
         sourceStore: SourceLibraryStore, styleCacheURL: URL,
@@ -41,9 +44,9 @@ actor LibraryPersistence {
         guard revision >= styleRevision else { return nil }
         styleRevision = revision
         let data = try JSONEncoder().encode(records)
-        try? FileManager.default.createDirectory(
+        try FileManager.default.createDirectory(
             at: styleCacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: styleCacheURL, options: .atomic)
+        try data.write(to: styleCacheURL, options: .atomic)
         return data
     }
 
@@ -58,14 +61,21 @@ actor LibraryPersistence {
     /// snapshot removes its own leftovers when no render is still pending.
     func publishTopShelf(_ books: [TopShelfBook], revision: Int) {
         guard revision >= topShelfRevision else {
-            if topShelfRevision == newestTopShelfRequest {
+            if topShelfRevision == newestTopShelfRequest, let publishedTopShelf {
                 TopShelfPoster.removeUnused(keeping: publishedTopShelf)
             }
             return
         }
         topShelfRevision = revision
-        publishedTopShelf = books
-        try? writeTopShelf(books)
+        do {
+            try writeTopShelf(books)
+            publishedTopShelf = books
+        } catch {
+            // Top Shelf keeps showing its last snapshot, so its posters stay until a write
+            // succeeds.
+            Self.log.error("Top Shelf snapshot not saved: \(error.localizedDescription)")
+            return
+        }
         if revision == newestTopShelfRequest { TopShelfPoster.removeUnused(keeping: books) }
     }
 }

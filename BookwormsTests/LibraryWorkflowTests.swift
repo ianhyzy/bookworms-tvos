@@ -515,17 +515,22 @@ final class LibraryWorkflowTests: XCTestCase {
                 source: .hardcover, accountID: fixture.hardcoverAccountID, books: [book],
                 syncedAt: fixture.time)
         ])
-        var saves: [SeriesLinkV1?] = []
+        // The links iCloud holds: a save replaces the link, or deletes one that changes nothing.
+        var stored: [Int: SeriesLinkV1] = [:]
+        var saves: [SeriesLinkV1] = []
         var savesFail = false
+        var heldSave: ControlledLibraryResponse<Void>?
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
         dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
-        dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
+        dependencies.fetchSeriesLinks = { _, _ in (stored, true) }
         dependencies.saveSeriesLink = { link, accountID, bookID in
             XCTAssertEqual(accountID, fixture.hardcoverAccountID)
             XCTAssertEqual(bookID, 1)
+            if let heldSave { try await heldSave.value() }
             if savesFail { throw CloudStorageError.unavailable }
             saves.append(link)
+            stored[bookID] = link.changesNothing ? nil : link
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -535,35 +540,125 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.series(for: book)?.all, [saga, arc])
         XCTAssertEqual(model.series(for: book)?.membership, arc, "The shortest series by default")
 
+        let save = ControlledLibraryResponse<Void>("Series link save started")
+        heldSave = save
         model.pickSeries(7, for: book)
         XCTAssertEqual(model.series(for: book)?.membership, saga, "A pick shows at once")
-        await model.waitForSeriesLinkSaves()
-        XCTAssertEqual(saves.count, 1)
-        XCTAssertEqual(saves.last??.linkedSeriesID, 7)
-        XCTAssertEqual(saves.last??.ownLook, false)
-        XCTAssertEqual(saves.last??.standsAlone, false)
-
-        // A read that missed the save keeps the pick.
+        await fulfillment(of: [save.started], timeout: 5)
         await model.becameActive()
         await model.waitForCompanionRecords()
+        XCTAssertEqual(
+            model.series(for: book)?.membership, saga, "A read during the save keeps the pick")
+        heldSave = nil
+        save.resolve(())
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(saves.count, 1)
+        XCTAssertEqual(saves.last?.linkedSeriesID, 7)
+        XCTAssertEqual(saves.last?.ownLook, false)
+        XCTAssertEqual(saves.last?.standsAlone, false)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
-        // Picking the shortest series deletes the link.
+        // A read that starts after the save shows the link iCloud holds, such as none once the
+        // iPhone resets the book to its default series.
+        stored = [:]
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+
+        // Picking the shortest series saves a link that changes nothing, which deletes it.
+        model.pickSeries(7, for: book)
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
         model.pickSeries(8, for: book)
         await model.waitForSeriesLinkSaves()
-        XCTAssertEqual(saves.count, 2)
-        XCTAssertNil(saves.last ?? nil)
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(saves.count, 3)
+        XCTAssertEqual(saves.last?.changesNothing, true)
+        XCTAssertNil(stored[1])
         XCTAssertEqual(model.series(for: book)?.membership, arc)
         model.pickSeries(8, for: book)
         await model.waitForSeriesLinkSaves()
-        XCTAssertEqual(saves.count, 2, "Picking the shown series saves nothing")
+        XCTAssertEqual(saves.count, 3, "Picking the shown series saves nothing")
 
-        // A failed save restores the earlier choice.
+        // A failed save restores the earlier choice, which then gives way to another device's
+        // link, even one stamped by a clock behind this one.
         savesFail = true
         model.pickSeries(7, for: book)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
         await model.waitForSeriesLinkSaves()
         XCTAssertEqual(model.series(for: book)?.membership, arc)
+        stored[1] = SeriesLinkV1(
+            accountID: fixture.hardcoverAccountID, bookID: 1, linkedSeriesID: 7,
+            chosenAt: fixture.time.addingTimeInterval(-60))
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+    }
+
+    func testAPickKeepsTheBooksOwnLookAndReplacesNotInASeries() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let saga = SeriesMembership(
+            seriesID: 7, name: "Fictional Saga", position: 12, featured: true, size: 20)
+        let arc = SeriesMembership(seriesID: 8, name: "Fictional Arc", position: 2, size: 3)
+        var book = fixture.book(1)
+        book.seriesID = 7
+        book.seriesName = "Fictional Saga"
+        book.seriesMemberships = [saga, arc]
+        try fixture.save([
+            SourceSnapshot(
+                source: .hardcover, accountID: fixture.hardcoverAccountID, books: [book],
+                syncedAt: fixture.time)
+        ])
+        // iPhone edits: **This book** keeps the book's own look; **Not in a series** stands alone.
+        for iPhoneLink in [
+            SeriesLinkV1(
+                accountID: fixture.hardcoverAccountID, bookID: 1, ownLook: true,
+                chosenAt: fixture.time),
+            SeriesLinkV1(
+                accountID: fixture.hardcoverAccountID, bookID: 1, standsAlone: true,
+                chosenAt: fixture.time),
+        ] {
+            var stored: SeriesLinkV1? = iPhoneLink
+            var saves: [SeriesLinkV1] = []
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+            dependencies.fetchSeriesLinks = { _, _ in (stored.map { [1: $0] } ?? [:], true) }
+            dependencies.saveSeriesLink = { link, _, _ in
+                saves.append(link)
+                stored = link.changesNothing ? nil : link
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            if iPhoneLink.ownLook {
+                model.pickSeries(7, for: book)
+                await model.waitForSeriesLinkSaves()
+                await model.waitForCompanionRecords()
+                XCTAssertEqual(saves.last?.linkedSeriesID, 7)
+                XCTAssertEqual(saves.last?.ownLook, true, "A pick keeps the book's own look")
+                model.pickSeries(8, for: book)
+                await model.waitForSeriesLinkSaves()
+                await model.waitForCompanionRecords()
+                XCTAssertNil(saves.last?.linkedSeriesID)
+                XCTAssertEqual(saves.last?.ownLook, true)
+                XCTAssertNotNil(stored, "The shortest series keeps a link with its own look")
+            } else {
+                XCTAssertNil(model.series(for: book))
+                model.pickSeries(8, for: book)
+                await model.waitForSeriesLinkSaves()
+                await model.waitForCompanionRecords()
+                XCTAssertEqual(
+                    saves.count, 1, "Picking the shortest series replaces standing alone")
+                XCTAssertEqual(saves.last?.changesNothing, true)
+                XCTAssertNil(stored)
+            }
+            XCTAssertEqual(model.series(for: book)?.membership, arc)
+        }
     }
 
     func testFilteredShelfStillPublishesTheUnfilteredTopShelf() async throws {
@@ -1245,6 +1340,113 @@ final class LibraryWorkflowTests: XCTestCase {
             model.hardcoverDeviceAuthMessage, "Finishing the refresh must preserve retry.")
     }
 
+    func testARejectedDeviceCodeStopsPolling() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        var dependencies = fixture.dependencies()
+        dependencies.requestHardcoverDeviceAuth = {
+            HardcoverDeviceAuth(
+                deviceCode: "fixture_device_code", userCode: "TEST-CODE",
+                verificationURI: URL(string: "https://hardcover.app/link")!,
+                verificationURIComplete: URL(string: "https://hardcover.app/link?c=TESTCODE")!,
+                expiresIn: 900, interval: 1)
+        }
+        let polled = expectation(description: "Device code polled")
+        var polls = 0
+        dependencies.pollHardcoverDeviceToken = { _ in
+            polls += 1
+            if polls == 1 { polled.fulfill() }
+            throw HardcoverError.invalidAuthorizationCode
+        }
+        // Bounds the polling a regression would repeat without waiting.
+        var sleeps = 0
+        dependencies.sleep = { _ in
+            sleeps += 1
+            if sleeps > 3 { throw CancellationError() }
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.startHardcoverDeviceAuth()
+        await fulfillment(of: [polled], timeout: 5)
+        // The polling task runs on the main actor without suspending after the rejection, so it
+        // has stopped or polled again before this test resumes.
+        XCTAssertEqual(polls, 1, "Hardcover won't accept a rejected code again")
+        XCTAssertEqual(
+            model.hardcoverDeviceAuthMessage,
+            HardcoverError.invalidAuthorizationCode.errorDescription)
+        XCTAssertNotNil(model.hardcoverDeviceAuth, "The card keeps New code beside the message")
+    }
+
+    func testADeviceSignInThatIsntKeptRevokesItsLogin() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        var dependencies = fixture.dependencies()
+        dependencies.requestHardcoverDeviceAuth = {
+            HardcoverDeviceAuth(
+                deviceCode: "fixture_device_code", userCode: "TEST-CODE",
+                verificationURI: URL(string: "https://hardcover.app/link")!,
+                verificationURIComplete: URL(string: "https://hardcover.app/link?c=TESTCODE")!,
+                expiresIn: 900, interval: 1)
+        }
+        dependencies.pollHardcoverDeviceToken = { _ in .success(fixture.tokens(2)) }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        dependencies.fetchHardcover = { _, _ in throw HardcoverError.http(503) }
+        dependencies.sleep = { _ in }
+        let revoked = expectation(description: "Unsaved login revoked")
+        dependencies.revokeHardcoverToken = { token in
+            XCTAssertEqual(token, "hc_rt_fictional_2")
+            revoked.fulfill()
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.startHardcoverDeviceAuth()
+        await fulfillment(of: [revoked], timeout: 5)
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertNil(fixture.secrets[HardcoverSession.refreshAccount])
+    }
+
+    func testConnectingCWASkipsTheDailyGate() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "cwaEnabled")
+        fixture.secrets["cwa-password"] = "fictional-original"
+        try fixture.save([fixture.snapshot(.cwa, books: [fixture.book(2)])])
+        var dependencies = fixture.dependencies()
+        var requestedPasswords: [String] = []
+        dependencies.fetchCWA = { _, password in
+            requestedPasswords.append(password)
+            return [fixture.book(3)]
+        }
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(requestedPasswords.isEmpty, "The snapshot synced today isn't due")
+        let connected = await model.connectCWA(
+            fixture.configuration, password: "fictional-replacement")
+        XCTAssertTrue(connected, "A changed password connects within a day of the last sync")
+        XCTAssertEqual(requestedPasswords, ["fictional-replacement"])
+        XCTAssertEqual(fixture.secrets["cwa-password"], "fictional-replacement")
+    }
+
+    func testCWAStatusFollowsTheActiveAccountsSnapshot() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([
+            SourceSnapshot(
+                source: .cwa, accountID: "https://other.invalid/fixture",
+                books: [fixture.book(2)], syncedAt: fixture.time)
+        ])
+        fixture.defaults.set(fixture.time.addingTimeInterval(-1000), forKey: "syncAttempt.cwa")
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        let model = LibraryModel(dependencies: fixture.dependencies())
+        await model.start()
+        XCTAssertNil(
+            model.sourceStatus(.cwa),
+            "Another account's sync today doesn't push the active account's check to tomorrow")
+    }
+
     func testRejectedCWAReplacementRetainsAccountAndCredential() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -1551,7 +1753,7 @@ final class LibraryWorkflowTests: XCTestCase {
         var requestedKeys: [SeriesLookKey] = []
         dependencies.fetchSeriesLooks = { _, keys in
             requestedKeys = keys
-            return [:]
+            return ([:], true)
         }
         var created: [SeriesLookV1] = []
         dependencies.createSeriesLook = { look in
@@ -1600,12 +1802,17 @@ final class LibraryWorkflowTests: XCTestCase {
         let link = SeriesLinkV1(
             accountID: fixture.hardcoverAccountID, bookID: 1, ownLook: true,
             chosenAt: fixture.time)
-        for isComplete in [false, true] {
+        // Designs, links, and looks each answered in full, or not.
+        for complete in [
+            (false, true, true), (true, false, true), (true, true, false), (true, true, true),
+        ] {
+            let isComplete = complete == (true, true, true)
             var dependencies = fixture.dependencies()
             dependencies.sleep = { _ in }
             dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
-            dependencies.fetchSpineDesigns = { _, _ in (designs, isComplete) }
-            dependencies.fetchSeriesLinks = { _, _ in ([1: link], true) }
+            dependencies.fetchSpineDesigns = { _, _ in (designs, complete.0) }
+            dependencies.fetchSeriesLinks = { _, _ in ([1: link], complete.1) }
+            dependencies.fetchSeriesLooks = { _, _ in ([:], complete.2) }
             var created: [SeriesLookV1] = []
             dependencies.createSeriesLook = { look in
                 created.append(look)
@@ -2236,7 +2443,7 @@ private final class LibraryWorkflowFixture {
         dependencies.fetchSpineDesigns = { _, _ in ([:], true) }
         dependencies.fetchCoverChoices = { _, _ in ([:], true) }
         dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
-        dependencies.fetchSeriesLooks = { _, _ in [:] }
+        dependencies.fetchSeriesLooks = { _, _ in ([:], true) }
         dependencies.createSeriesLook = { _ in
             XCTFail("Unexpected series look")
             throw URLError(.unsupportedURL)

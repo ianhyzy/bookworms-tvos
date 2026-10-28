@@ -53,6 +53,17 @@ final class SeriesDesignsTests: XCTestCase {
             standsAlone: standsAlone, ownLook: ownLook, chosenAt: Date(timeIntervalSince1970: 0))
     }
 
+    func testLookGroupsLeaveOutBooksThatKeepTheirOwnLook() {
+        let books = [book(1), book(2), book(3), book(4, series: nil)]
+        let groups = SeriesDesigns.lookGroups(books, links: [2: link(2, ownLook: true)])
+        XCTAssertEqual(
+            groups.mapValues { $0.map(\.id) },
+            [SeriesLookKey(seriesID: 7, group: "|mattdinniman"): [1, 3]])
+        XCTAssertEqual(
+            SeriesDesigns.authorKeys(of: book(5, author: "Matt Dinniman, Jeff Hays")),
+            ["mattdinniman", "jeffhays"])
+    }
+
     func testStyleSeriesFollowsTheLinkElseTheShortestSeries() throws {
         var guards = book(1, series: 1018, position: 8, author: "Terry Pratchett")
         guards.seriesMemberships = [
@@ -136,6 +147,14 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(place(4), "Book 4")
         XCTAssertEqual(place(2, size: nil), "Book 2")
         XCTAssertNil(place(nil))
+        XCTAssertEqual(
+            SeriesDesigns.label(of: SeriesMembership(seriesID: 1, name: "Series 1", size: 3)),
+            "Series 1", "A label without a place is the series' name")
+        var unlisted = older
+        unlisted.seriesMemberships = []
+        XCTAssertNil(
+            SeriesDesigns.shownSeries(of: unlisted, link: nil),
+            "A book Hardcover lists in no series names none")
     }
 
     func testLookKeysSplitDiscworldGroupsAndFirstAuthors() {
@@ -336,6 +355,35 @@ final class SeriesDesignsTests: XCTestCase {
             madeBy("model:local", generator: "mac-foundation-models-v2"), "Apple on-device model")
         XCTAssertEqual(madeBy("model:local font:system"), "Default styling")
         XCTAssertEqual(madeBy(nil, generator: SeriesLookV1.localOrigin), "Default styling")
+    }
+
+    /// Mirrors the iPhone companion's `SpineDesignV1.modelToken`, so a look copied from a design
+    /// records the same tier whichever device creates it.
+    func testALookRecordsItsDesignsTierAsTheIPhoneReadsIt() {
+        func look(_ provenance: String?, generator: String) -> String? {
+            let design = SpineDesignV1(
+                version: 1, accountID: "account", bookID: 1,
+                workItemHash: String(repeating: "a", count: 64),
+                coverHash: String(repeating: "b", count: 64), generatorVersion: generator,
+                generatedAt: Date(timeIntervalSince1970: 0), backgroundHex: "#1F3A5A",
+                foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+                uppercase: false, provenance: provenance)
+            return SeriesLookV1(
+                key: SeriesLookKey(seriesID: 7, group: "|mattdinniman"), design: design,
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+            .provenance
+        }
+        XCTAssertNil(look(nil, generator: "ios-pcc-v2"), "Private Cloud Compute records none")
+        XCTAssertEqual(look(nil, generator: "mac-foundation-models-v1"), "model:apple/on-device")
+        XCTAssertEqual(
+            look("model:local", generator: "mac-foundation-models-v2"), "model:apple/on-device")
+        XCTAssertEqual(look(nil, generator: "other-generator-v1"), "model:local")
+        XCTAssertEqual(
+            look("font:system", generator: "other-generator-v1"), "model:local font:system")
+        XCTAssertEqual(
+            look("model:google/gemini-3.8-flash", generator: "ios-pcc-v2"),
+            "model:google/gemini-3.8-flash")
     }
 
     /// **Settings → Spines** counts the design each book draws: its series look, with the look's

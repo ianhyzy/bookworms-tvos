@@ -43,6 +43,38 @@ final class SourceLibraryTests: XCTestCase {
         }
     }
 
+    func testOPDSSkipsABookWithoutFilesAndKeepsTheRest() throws {
+        let data = Data(
+            #"""
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><id>urn:uuid:files</id><title>With Files</title>
+                <link rel="http://opds-spec.org/acquisition" href="/opds/download/1/epub"/>
+              </entry>
+              <entry><id>urn:uuid:empty</id><title>Metadata Only</title></entry>
+            </feed>
+            """#
+            .utf8)
+        let feed = try OPDSFeed.parse(
+            data, url: URL(string: "https://example.com/opds/new")!, server: "https://example.com")
+        XCTAssertEqual(feed.books.map(\.title), ["With Files"])
+    }
+
+    func testTitleAndAuthorSortsCompareNumbersByValue() {
+        let books = [
+            Book(id: 1, title: "Volume 10", author: "Writer 10"),
+            Book(id: 2, title: "Volume 2", author: "Writer 2"),
+            Book(id: 3, title: "volume 1", author: "writer 1"),
+        ]
+        for sort in [ShelfSort.title, .author] {
+            XCTAssertEqual(
+                ShelfPreferences(collection: .all, sort: sort).select(books, limit: 40).map(\.id),
+                [3, 2, 1], "Volume 2 comes before Volume 10, as on the iPhone and Mac")
+            XCTAssertEqual(
+                ShelfPreferences(collection: .all, sort: sort, reversed: true)
+                    .select(books, limit: 40).map(\.id), [1, 2, 3])
+        }
+    }
+
     func testCredentialsStayOnHTTPSOrigin() {
         let base = URL(string: "https://example.com")!
         XCTAssertTrue(

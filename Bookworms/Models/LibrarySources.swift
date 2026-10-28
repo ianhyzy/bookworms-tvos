@@ -32,11 +32,15 @@ struct CWAConfiguration: Codable, Equatable, Sendable {
 
     var identity: String { "\(server.trimmingCharacters(in: .whitespacesAndNewlines))/\(username)" }
 
+    /// The lowest CWA book ID. CWA IDs take a separate positive range above Hardcover's, which
+    /// keeps Hardcover IDs and deep links, so a book's ID tells its source
+    /// (`Book.isHardcoverBook`).
+    static let firstBookID = 1_000_000_000_000_000
+
     static func bookID(server: String, identifier: String) -> Int {
-        // Reserve a separate positive range, preserving existing Hardcover IDs and deep links.
         let digest = SHA256.hash(data: Data("cwa:\(server):\(identifier)".utf8))
         let value = digest.prefix(6).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-        return Int(value) + 1_000_000_000_000_000
+        return Int(value) + firstBookID
     }
 }
 
@@ -183,6 +187,12 @@ struct ShelfPreferences: Codable, Equatable {
                 guard let b else { return true }
                 return descending != reversed ? a > b : a < b
             }
+            // Numbers in text compare by value, so "Volume 2" comes before "Volume 10", as on
+            // the iPhone and Mac.
+            func compareText(_ a: String, _ b: String) -> Bool? {
+                let result = a.localizedStandardCompare(b)
+                return result == .orderedSame ? nil : (result == .orderedAscending) != reversed
+            }
             let order: Bool?
             switch sort {
             case .dateRead: order = compare(lhs.finished, rhs.finished, descending: true)
@@ -191,12 +201,8 @@ struct ShelfPreferences: Codable, Equatable {
                 order = compare(lhs.publicationYear, rhs.publicationYear, descending: true)
             case .length: order = compare(lhs.pages, rhs.pages, descending: false)
             case .hotTakes: order = compare(lhs.ratingGap, rhs.ratingGap, descending: true)
-            case .title:
-                order = compare(
-                    lhs.title.lowercased(), rhs.title.lowercased(), descending: false)
-            case .author:
-                order = compare(
-                    lhs.author.lowercased(), rhs.author.lowercased(), descending: false)
+            case .title: order = compareText(lhs.title, rhs.title)
+            case .author: order = compareText(lhs.author, rhs.author)
             }
             return order ?? (lhs.id < rhs.id)
         }

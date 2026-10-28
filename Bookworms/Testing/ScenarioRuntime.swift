@@ -208,7 +208,7 @@
             }
             dependencies.fetchCoverChoices = { _, _ in ([:], true) }
             dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
-            dependencies.fetchSeriesLooks = { _, _ in [:] }
+            dependencies.fetchSeriesLooks = { _, _ in ([:], true) }
             dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }
             dependencies.saveSeriesLink = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
