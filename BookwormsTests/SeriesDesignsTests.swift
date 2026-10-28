@@ -252,6 +252,14 @@ final class SeriesDesignsTests: XCTestCase {
             )
             .editedAt, Date(timeIntervalSince1970: 1_000),
             "A look in the reader's colors counts as edited, so no upgrade replaces it")
+        onDevice.provenance = "reader-font"
+        XCTAssertEqual(
+            SeriesLookV1(
+                key: SeriesLookKey(seriesID: 7, group: "|mattdinniman"), design: onDevice,
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+            .editedAt, Date(timeIntervalSince1970: 1_000),
+            "A look in the reader's font counts as edited, so no upgrade replaces it")
         onDevice.provenance = "model:apple/on-device"
         XCTAssertNil(
             SeriesLookV1(

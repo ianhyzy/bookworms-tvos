@@ -268,16 +268,16 @@ struct SeriesLookV1: Codable, Equatable, Sendable {
 
 extension SeriesLookV1 {
     /// A look for `key` copied from `design`, a group member's saved design, with the design's
-    /// tier tokens as its `provenance`. A design the reader recolored (`hasReaderColors`) gives
-    /// the look the reader's colors, so the look counts as edited at `createdAt`, as the
-    /// iPhone's look does.
+    /// tier tokens as its `provenance`. A design the reader recolored or set in another font
+    /// (`hasReaderEdits`) gives the look the reader's colors and font, so the look counts as
+    /// edited at `createdAt`, as the iPhone's look does, and no upgrade replaces them.
     init(key: SeriesLookKey, design: SpineDesignV1, createdAt: Date) {
         let awaitsFont = design.provenance?.split(separator: " ").contains("font:system") == true
         let tokens = [design.modelToken, awaitsFont ? "font:system" : nil].compactMap(\.self)
         self.init(
             accountID: design.accountID, seriesID: key.seriesID, group: key.group,
             sourceBookID: design.bookID, origin: design.generatorVersion, createdAt: createdAt,
-            editedAt: design.hasReaderColors ? createdAt : nil,
+            editedAt: design.hasReaderEdits ? createdAt : nil,
             backgroundHex: design.backgroundHex, foregroundHex: design.foregroundHex,
             accentHex: design.accentHex, typeface: design.typeface, weight: design.weight,
             uppercase: design.uppercase, fontFamily: design.fontFamily,

@@ -263,6 +263,16 @@ extension SpineDesignV1 {
         provenance?.split(separator: " ").contains { $0.hasPrefix("generated-colors:") } == true
     }
 
+    /// Whether the reader chose the design's font on the iPhone or Mac (a "reader-font"
+    /// `provenance` token).
+    var hasReaderFont: Bool {
+        provenance?.split(separator: " ").contains("reader-font") == true
+    }
+
+    /// Whether the reader chose the design's colors or font, which the iPhone's generation runs
+    /// keep.
+    var hasReaderEdits: Bool { hasReaderColors || hasReaderFont }
+
     /// The first `model:` token of `provenance`, which names the companion's model tier, such
     /// as "model:apple/on-device". Private Cloud Compute's designs have none.
     var modelToken: String? {
