@@ -85,6 +85,9 @@ actor ArtworkStore {
     private let usesSavedCWAConfiguration: Bool
     private var pendingDownloads: [URL: Task<Data, Error>] = [:]
     private var failedDownloads: [URL: Date] = [:]
+    /// Set by each new library download. The next `prefetch` prunes once when it finishes, so
+    /// preparing many covers doesn't list and measure both cache directories after each one.
+    private var needsPrune = false
     nonisolated let imageCache: CoverImageCache
     private static let log = Logger(subsystem: "gay.ian.Bookworms", category: "Artwork")
 
@@ -122,7 +125,8 @@ actor ArtworkStore {
         -> Data
     {
         let original = try await originalData(for: url, allowsNetwork: allowsNetwork)
-        return maximumPixelSize >= 2400 ? original : try resized(original, size: maximumPixelSize)
+        return maximumPixelSize >= 2400
+            ? original : try await Self.resized(original, size: maximumPixelSize)
     }
 
     /// Covers downloaded for browsing beyond the library, such as series books you don't own.
@@ -153,7 +157,7 @@ actor ArtworkStore {
                 continue
             }
             do {
-                let data = try resized(try await fetchOriginal(url), size: 900)
+                let data = try await Self.resized(try await fetchOriginal(url), size: 900)
                 try data.write(to: target, options: .atomic)
                 saved += 1
             } catch {
@@ -212,11 +216,11 @@ actor ArtworkStore {
         }
         let task = Task {
             let data = try await self.fetchOriginal(url)
-            let original = try self.resized(data, size: 2400)
+            let original = try await Self.resized(data, size: 2400)
             try FileManager.default.createDirectory(
                 at: self.root, withIntermediateDirectories: true)
             try original.write(to: canonical, options: .atomic)
-            self.prune()
+            self.needsPrune = true
             return original
         }
         pendingDownloads[url] = task
@@ -245,7 +249,11 @@ actor ArtworkStore {
         return image
     }
 
-    private func resized(_ data: Data, size: Int) throws -> Data {
+    /// Downsamples and re-encodes `data` as JPEG away from the artwork actor, so a large cover
+    /// doesn't hold up the reads and downloads queued behind it.
+    @concurrent private nonisolated static func resized(_ data: Data, size: Int) async throws
+        -> Data
+    {
         let image = try Self.thumbnail(data, size: size)
         let output = NSMutableData()
         guard
@@ -387,10 +395,12 @@ actor ArtworkStore {
                 }
             }
         }
+        // Only the stored source is needed; avatar views downsample it when they load.
         for url in Set(avatarURLs) {
             guard !Task.isCancelled else { break }
-            _ = try? await data(for: url, maximumPixelSize: 400)
+            _ = try? await originalData(for: url, allowsNetwork: true)
         }
+        if needsPrune { prune() }
         if result.failureCount > 0, !Task.isCancelled {
             Self.log.notice(
                 "\(result.failureCount, privacy: .public) of \(books.count, privacy: .public) covers failed; retrying book IDs \(result.failed.map(\.id), privacy: .public)"
@@ -407,6 +417,7 @@ actor ArtworkStore {
     /// Removes the oldest covers over each tier's budget. Browsing covers go first: all of them
     /// when free space runs low, so the system is less likely to purge library data.
     private func prune() {
+        needsPrune = false
         if !Self.hasRoomForBrowsing() {
             try? FileManager.default.removeItem(at: browsingRoot)
         }

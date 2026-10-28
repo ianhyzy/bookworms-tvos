@@ -19,8 +19,9 @@ final class ServiceIntegrationTests: XCTestCase {
                     id: $0, title: "Fixture", author: "Author",
                     coverURL: URL(string: "https://image.invalid/\(UUID().uuidString)"))
             }
+        let avatar = URL(string: "https://image.invalid/\(UUID().uuidString)")!
         let store = ArtworkStore(root: root, session: session())
-        let preparation = await store.prefetch(books: books, avatarURLs: [])
+        let preparation = await store.prefetch(books: books, avatarURLs: [avatar, avatar])
         XCTAssertEqual(preparation.ratios.count, 20)
         XCTAssertTrue(preparation.failed.isEmpty)
         let restored = ArtworkStore(root: root, session: session())
@@ -32,6 +33,10 @@ final class ServiceIntegrationTests: XCTestCase {
             }
             XCTAssertEqual(LocalResponseStub.count(for: book.coverURL!.absoluteString), 1)
         }
+        let face = try await restored.data(for: avatar, maximumPixelSize: 400, allowsNetwork: false)
+        let faceImage = try XCTUnwrap(UIImage(data: face)?.cgImage)
+        XCTAssertLessThanOrEqual(max(faceImage.width, faceImage.height), 400)
+        XCTAssertEqual(LocalResponseStub.count(for: avatar.absoluteString), 1)
     }
 
     func testCacheOnlyMissNeverDownloads() async throws {
