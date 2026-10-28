@@ -489,8 +489,6 @@ actor HardcoverClient {
                     previous: previous?.accountID == accountID ? previous?.series : nil)
                 return HardcoverLibrary(accountID: accountID, books: books, series: series)
             }
-            // Pace full pages to avoid exhausting the read API rate limit during large syncs.
-            try await Task.sleep(for: .seconds(1.1))
         }
         throw HardcoverError.incomplete
     }
@@ -504,7 +502,8 @@ actor HardcoverClient {
             })
     }
 
-    /// Fetches series names and main books in batches of 50, paced like library pages.
+    /// Fetches series names and main books in batches of 50. `send` paces each batch like
+    /// every other request.
     ///
     /// When a batch fails after earlier ones succeeded, returns the fetched series and
     /// `previous`'s copies of the series still to fetch, so a partial download never discards
@@ -516,7 +515,6 @@ actor HardcoverClient {
         let sorted = ids.sorted()
         for start in stride(from: 0, to: sorted.count, by: 50) {
             try Task.checkCancellation()
-            try await Task.sleep(for: .seconds(1.1))
             let batch = Array(sorted[start..<min(start + 50, sorted.count)])
             do {
                 let response: SeriesResponse = try await request(
