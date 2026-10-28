@@ -7,6 +7,10 @@ import plistlib
 import re
 import subprocess
 
+# Every check below is an assert, which `python3 -O` and PYTHONOPTIMIZE remove.
+if not __debug__:
+    raise SystemExit('Run without -O or PYTHONOPTIMIZE; the archive checks use assert')
+
 
 def plist(path):
     with path.open('rb') as source:
@@ -22,7 +26,7 @@ def inspect_bundle(bundle):
     sections = run('otool', '-l', str(bundle / info['CFBundleExecutable']))
     assert b'__llvm_prf' not in sections and b'__llvm_cov' not in sections, 'Release contains coverage instrumentation'
     run('codesign', '--verify', '--strict', str(bundle))
-    entitlements = plistlib.loads(run('codesign', '-d', '--entitlements', ':-', str(bundle)))
+    entitlements = plistlib.loads(run('codesign', '-d', '--entitlements', '-', '--xml', str(bundle)))
     manifest = plist(bundle / 'PrivacyInfo.xcprivacy')
     profile = plistlib.loads(run('security', 'cms', '-D', '-i', str(bundle / 'embedded.mobileprovision')))
     assert info.get('CFBundleDisplayName'), 'Missing bundle display name'
@@ -41,7 +45,7 @@ def inspect_bundle(bundle):
                for item in manifest['NSPrivacyAccessedAPITypes']}
     return info, entitlements, {
         'bundle': info['CFBundleIdentifier'],
-        'displayName': info.get('CFBundleDisplayName', info['CFBundleName']),
+        'displayName': info['CFBundleDisplayName'],
         'version': info['CFBundleShortVersionString'],
         'build': info['CFBundleVersion'],
         'minimumOS': info['MinimumOSVersion'],
