@@ -394,6 +394,8 @@ final class BookWallScene {
         selectedID = nil
         isFlyingOut = false
         guard !books.isEmpty else {
+            // Nothing falls, so the wall rests and the renderer can stop drawing.
+            isSettled = true
             onFocusFrames([:], true)
             return
         }

@@ -1,3 +1,4 @@
+import RealityKit
 import XCTest
 
 @testable import Bookworms
@@ -183,5 +184,19 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertTrue(BookWallAvailability.supports(machineIdentifier: "AppleTV11,1"))
         XCTAssertTrue(BookWallAvailability.supports(machineIdentifier: "AppleTV14,1"))
         XCTAssertFalse(BookWallAvailability.supports(machineIdentifier: "unknown"))
+    }
+
+    @MainActor
+    func testAnEmptyWallStopsDrawingOnceItsChangeIsShown() {
+        let scene = BookWallScene()
+        var settled = false
+        scene.configure(
+            prepared: BookWallPreparedWall(
+                books: [], sources: [:], designs: [:], looks: [:], drawn: [:], drawsWith: [:],
+                layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil),
+            reduceMotion: false, onFocusFrames: { _, isSettled in settled = isSettled })
+        scene.didDrawFrame()
+        XCTAssertTrue(settled)
+        XCTAssertFalse(scene.needsFrame)
     }
 }
