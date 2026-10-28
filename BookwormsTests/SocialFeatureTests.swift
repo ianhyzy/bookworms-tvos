@@ -420,6 +420,25 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
     }
 
+    func testDeniedReaderLibraryIsEmptyAndKeepsOtherSocialData() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "DeniedReader.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.deny(reader: 2)
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(
+            token: "hc_pat_fixture", readerID: 2, enabledViews: [.comparison, .friendsPicks])
+        XCTAssertNotNil(model.snapshot, "One reader's denial keeps the rest of the social data")
+        XCTAssertNotNil(model.reader(2))
+        XCTAssertTrue(model.books(for: 2).isEmpty)
+        XCTAssertFalse(model.books(for: 3).isEmpty)
+        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+        let counts = await client.counts
+        XCTAssertEqual(counts["reader2"], 1, "The empty library counts as synced for the day")
+    }
+
     func testUnfollowRemovesComparisonAndFeed() async throws {
         let suite = "SocialUnfollowTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -604,6 +623,9 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         feedFailure = denied ? HardcoverError.forbidden : URLError(.timedOut)
     }
     func unfollow() { unfollowed = true }
+    private var deniedReaders: Set<Int> = []
+    /// Answers requests for `reader`'s library with HTTP 403, as for a private account.
+    func deny(reader: Int) { deniedReaders.insert(reader) }
     func owner(token: String) async throws -> ReaderProfile {
         try authorize(token)
         counts["owner", default: 0] += 1
@@ -629,6 +651,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
     func library(user: Int, token: String) async throws -> [ReaderBook] {
         try authorize(token)
         counts["reader\(user)", default: 0] += 1
+        if deniedReaders.contains(user) { throw HardcoverError.forbidden }
         if user == 2 && holdsReaderTwo {
             await withCheckedContinuation { readerTwoGate = $0 }
         }

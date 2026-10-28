@@ -167,6 +167,16 @@ final class SocialLibraryModel {
                     return try await send(token)
                 }
             }
+            // Hardcover denying one followed reader's library leaves that library empty, as on
+            // iPhone and Mac. A denial of the owner's, Following, or Feed requests still reaches
+            // the handler below, which clears the snapshot.
+            @MainActor func readerLibrary(_ id: Int) async throws -> [ReaderBook] {
+                do {
+                    return try await authorized { try await client.library(user: id, token: $0) }
+                } catch HardcoverError.forbidden {
+                    return []
+                }
+            }
             do {
                 var current: SocialSnapshot
                 if let snapshot {
@@ -244,9 +254,7 @@ final class SocialLibraryModel {
                         owner: current.owner.id, dataset: "reader.\(readerID)", manual: manual,
                         lastSuccess: current.dates["reader.\(readerID)"])
                 {
-                    current.readerBooks[readerID] = try await authorized {
-                        try await client.library(user: readerID, token: $0)
-                    }
+                    current.readerBooks[readerID] = try await readerLibrary(readerID)
                     current.dates["reader.\(readerID)"] = now()
                     try install(current, request: request)
                 }
@@ -257,9 +265,7 @@ final class SocialLibraryModel {
                         owner: current.owner.id, dataset: "reader.\(id)", manual: manual,
                         lastSuccess: current.dates["reader.\(id)"])
                     {
-                        current.readerBooks[id] = try await authorized {
-                            try await client.library(user: id, token: $0)
-                        }
+                        current.readerBooks[id] = try await readerLibrary(id)
                         current.dates["reader.\(id)"] = now()
                         try install(current, request: request)
                     }
