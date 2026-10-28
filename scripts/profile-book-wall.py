@@ -2,8 +2,8 @@
 """Build, record, and summarize one Book Wall performance profile on the physical Apple TV.
 
 Runs unattended: wakes the Instruments connection, builds an optimized test build, drives
-the Siri Remote through `DevicePerformanceTests/testBookWallProfile`, symbolicates the trace,
-summarizes it, and reinstalls the ordinary local build.
+the Siri Remote through `DevicePerformanceTests/testBookWallProfile`, symbolicates CPU
+captures, summarizes the trace, and reinstalls the ordinary local build.
 """
 import argparse
 import importlib.util

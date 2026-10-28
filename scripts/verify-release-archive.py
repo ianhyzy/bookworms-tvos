@@ -7,7 +7,6 @@ import plistlib
 import re
 import subprocess
 
-# Every check below is an assert, which `python3 -O` and PYTHONOPTIMIZE remove.
 if not __debug__:
     raise SystemExit('Run without -O or PYTHONOPTIMIZE; the archive checks use assert')
 
