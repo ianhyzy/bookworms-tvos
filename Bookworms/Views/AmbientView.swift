@@ -101,9 +101,9 @@ struct AmbientView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .defaultFocus($exitFocused, true, priority: .userInitiated)
         .task(id: ContentVersion(bookIDs: library.books.map(\.id), socialRevision: social.revision))
         {
-            exitFocused = true
             // Availability includes a full-library intersection; reuse it until the content changes.
             let views = Self.available(library: library, social: social, preferences: preferences)
             while controller.isActive && !Task.isCancelled {

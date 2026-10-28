@@ -263,7 +263,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(disagreement.map(\.id), [3, 1, 2, 4, 5, 6])
     }
 
-    func testReviewsAreInertAndMissingReviewIsNotInvented() {
+    func testReviewsAreInertAndMissingReviewIsNotInvented() throws {
         XCTAssertNil(ReviewText.clean("  "))
         XCTAssertEqual(
             ReviewText.clean(
@@ -271,6 +271,11 @@ final class SocialFeatureTests: XCTestCase {
             "Hello & goodbye\nlink")
         let book = item(1, rating: 4, review: nil)
         XCTAssertNil(book.reviewText)
+        // The cache stores the raw review; decoding cleans it again.
+        let data = try JSONEncoder().encode(item(2, rating: 4, review: "<p>Kept &amp; clean</p>"))
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("reviewText"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(ReaderBook.self, from: data).reviewText, "Kept & clean")
     }
 
     func testViewPreferencesStayBoundedAndKeepOneSidebarView() throws {
@@ -375,9 +380,11 @@ final class SocialFeatureTests: XCTestCase {
         let token = "hc_pat_" + String(repeating: "x", count: 32)
         await model.load(token: token, readerID: 2)
         let first = await client.counts
+        let revision = model.revision
         await model.load(token: token, readerID: 2)
         let second = await client.counts
         XCTAssertEqual(first, second)
+        XCTAssertEqual(model.revision, revision, "A load with nothing due doesn't reinstall")
         XCTAssertEqual(model.shared(with: 2, limit: 20).count, 1)
         await model.load(token: token, readerID: 3)
         let third = await client.counts
@@ -416,6 +423,35 @@ final class SocialFeatureTests: XCTestCase {
         await model.load(token: token, readerID: 2, manual: true)
         XCTAssertNil(model.snapshot)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+    }
+
+    func testDeniedReaderLibraryIsEmptyAndKeepsOtherSocialData() async throws {
+        let suite = "SocialDeniedReaderTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let client = SocialFixtureClient()
+        await client.deny(reader: 2)
+        var time = Date()
+        let model = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root, now: { time })
+        await model.load(
+            token: "hc_pat_fixture", readerID: 2, enabledViews: [.comparison, .friendsPicks])
+        // Past the five-minute retry backoff, only a saved sync date keeps reader 2 from being due.
+        time += 301
+        await model.load(
+            token: "hc_pat_fixture", readerID: 2, enabledViews: [.comparison, .friendsPicks])
+        XCTAssertNotNil(model.snapshot, "One reader's denial keeps the rest of the social data")
+        XCTAssertNotNil(model.reader(2))
+        XCTAssertTrue(model.books(for: 2).isEmpty)
+        XCTAssertFalse(model.books(for: 3).isEmpty)
+        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+        let counts = await client.counts
+        XCTAssertEqual(counts["reader2"], 1, "The empty library counts as synced for the day")
     }
 
     func testUnfollowRemovesComparisonAndFeed() async throws {
@@ -499,80 +535,6 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(library.isBookReadByUser(9999))
     }
 
-    private func item(_ id: Int, rating: Double?, review: String? = nil) -> ReaderBook {
-        ReaderBook(
-            book: Book(id: id, title: "Same", author: "Fixture"), rating: rating, review: review,
-            hasSpoilers: false, finished: nil)
-    }
-}
-
-private actor SocialFixtureClient: SocialLibraryFetching {
-    enum Failure { case offline, denied }
-    var counts: [String: Int] = [:]
-    /// Every token a request sent, in order.
-    var tokens: [String] = []
-    private var rejectedToken: String?
-    /// Answers requests that send `token` with HTTP 401.
-    func reject(_ token: String) { rejectedToken = token }
-    private func authorize(_ token: String) throws {
-        tokens.append(token)
-        if token == rejectedToken { throw HardcoverError.invalidToken }
-    }
-    private var failure: Failure?
-    private var unfollowed = false
-    private var holdsReaderTwo = false
-    private var readerTwoGate: CheckedContinuation<Void, Never>?
-    /// Holds reader 2's library response until `releaseReaderTwo()`.
-    func holdReaderTwo() { holdsReaderTwo = true }
-    func releaseReaderTwo() {
-        holdsReaderTwo = false
-        readerTwoGate?.resume()
-        readerTwoGate = nil
-    }
-    private var feedFailure: Error?
-    func fail(with failure: Failure) { self.failure = failure }
-    func failFeed(denied: Bool = false) {
-        feedFailure = denied ? HardcoverError.forbidden : URLError(.timedOut)
-    }
-    func unfollow() { unfollowed = true }
-    func owner(token: String) async throws -> ReaderProfile {
-        try authorize(token)
-        counts["owner", default: 0] += 1
-        return profile(1)
-    }
-    func following(owner: Int, token: String) async throws -> [ReaderProfile] {
-        try authorize(token)
-        counts["following", default: 0] += 1
-        if let failure {
-            switch failure {
-            case .offline: throw URLError(.notConnectedToInternet)
-            case .denied: throw HardcoverError.forbidden
-            }
-        }
-        return unfollowed ? [profile(3)] : [profile(2), profile(3)]
-    }
-    func feed(users: [Int], token: String) async throws -> [FeedActivity] {
-        try authorize(token)
-        counts["feed", default: 0] += 1
-        if let feedFailure { throw feedFailure }
-        return []
-    }
-    func library(user: Int, token: String) async throws -> [ReaderBook] {
-        try authorize(token)
-        counts["reader\(user)", default: 0] += 1
-        if user == 2 && holdsReaderTwo {
-            await withCheckedContinuation { readerTwoGate = $0 }
-        }
-        return [
-            ReaderBook(
-                book: Book(id: 10, title: "Fixture", author: "Fixture"), rating: 4,
-                review: "Review", hasSpoilers: false, finished: nil)
-        ]
-    }
-    private func profile(_ id: Int) -> ReaderProfile {
-        ReaderProfile(id: id, username: "reader\(id)", name: nil, avatarURL: nil)
-    }
-
     func testFriendPicksRankUnreadBooksByFansThenRating() {
         func reader(_ id: Int) -> ReaderProfile {
             ReaderProfile(id: id, username: "r\(id)", name: "Reader \(id)", avatarURL: nil)
@@ -638,5 +600,83 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         XCTAssertEqual(index.reads[11]?.map(\.rating), [5, nil])
         XCTAssertNil(index.reads[12], "A book no friend has shows no row")
         XCTAssertEqual(Set(index.readers.map(\.id)), [2, 3, 4])
+    }
+
+    private func item(_ id: Int, rating: Double?, review: String? = nil) -> ReaderBook {
+        ReaderBook(
+            book: Book(id: id, title: "Same", author: "Fixture"), rating: rating, review: review,
+            hasSpoilers: false, finished: nil)
+    }
+}
+
+private actor SocialFixtureClient: SocialLibraryFetching {
+    enum Failure { case offline, denied }
+    var counts: [String: Int] = [:]
+    /// Every token a request sent, in order.
+    var tokens: [String] = []
+    private var rejectedToken: String?
+    /// Answers requests that send `token` with HTTP 401.
+    func reject(_ token: String) { rejectedToken = token }
+    private func authorize(_ token: String) throws {
+        tokens.append(token)
+        if token == rejectedToken { throw HardcoverError.invalidToken }
+    }
+    private var failure: Failure?
+    private var unfollowed = false
+    private var holdsReaderTwo = false
+    private var readerTwoGate: CheckedContinuation<Void, Never>?
+    /// Holds reader 2's library response until `releaseReaderTwo()`.
+    func holdReaderTwo() { holdsReaderTwo = true }
+    func releaseReaderTwo() {
+        holdsReaderTwo = false
+        readerTwoGate?.resume()
+        readerTwoGate = nil
+    }
+    private var feedFailure: Error?
+    func fail(with failure: Failure) { self.failure = failure }
+    func failFeed(denied: Bool = false) {
+        feedFailure = denied ? HardcoverError.forbidden : URLError(.timedOut)
+    }
+    func unfollow() { unfollowed = true }
+    private var deniedReaders: Set<Int> = []
+    /// Answers requests for `reader`'s library with HTTP 403, as for a private account.
+    func deny(reader: Int) { deniedReaders.insert(reader) }
+    func owner(token: String) async throws -> ReaderProfile {
+        try authorize(token)
+        counts["owner", default: 0] += 1
+        return profile(1)
+    }
+    func following(owner: Int, token: String) async throws -> [ReaderProfile] {
+        try authorize(token)
+        counts["following", default: 0] += 1
+        if let failure {
+            switch failure {
+            case .offline: throw URLError(.notConnectedToInternet)
+            case .denied: throw HardcoverError.forbidden
+            }
+        }
+        return unfollowed ? [profile(3)] : [profile(2), profile(3)]
+    }
+    func feed(users: [Int], token: String) async throws -> [FeedActivity] {
+        try authorize(token)
+        counts["feed", default: 0] += 1
+        if let feedFailure { throw feedFailure }
+        return []
+    }
+    func library(user: Int, token: String) async throws -> [ReaderBook] {
+        try authorize(token)
+        counts["reader\(user)", default: 0] += 1
+        if deniedReaders.contains(user) { throw HardcoverError.forbidden }
+        if user == 2 && holdsReaderTwo {
+            await withCheckedContinuation { readerTwoGate = $0 }
+        }
+        return [
+            ReaderBook(
+                book: Book(id: 10, title: "Fixture", author: "Fixture"), rating: 4,
+                review: "Review", hasSpoilers: false, finished: nil)
+        ]
+    }
+    private func profile(_ id: Int) -> ReaderProfile {
+        ReaderProfile(id: id, username: "reader\(id)", name: nil, avatarURL: nil)
     }
 }
