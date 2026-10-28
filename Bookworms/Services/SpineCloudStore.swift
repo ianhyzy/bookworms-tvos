@@ -314,8 +314,8 @@ struct SeriesLinkV1: Codable, Equatable, Sendable {
     var ownLook = false
     let chosenAt: Date
 
-    /// Whether the link chooses what the book draws without one: no linked series, standing
-    /// alone, or own look.
+    /// Whether the link leaves the book as it is without one, so it is deleted, not saved, as on
+    /// the iPhone and Mac.
     var changesNothing: Bool { linkedSeriesID == nil && !standsAlone && !ownLook }
 
     func isValid(accountID: String, book: Book) -> Bool {
@@ -620,54 +620,47 @@ actor SpineCloudStore {
     /// without a record, and `link`'s for a record this app can't read. A link that then changes
     /// nothing (`SeriesLinkV1.changesNothing`) deletes the book's `SeriesLinkV1` record, as the
     /// iPhone and Mac do. A save retries up to three times when another device changes the record
-    /// meanwhile. `nil` deletes the record whatever it holds.
+    /// meanwhile.
     ///
     /// Throws when CloudKit is unavailable, the save fails, or the record holds another type.
-    func setSeriesLink(_ link: SeriesLinkV1?, accountID: String, bookID: Int) async throws {
-        guard
-            link?.isValid(accountID: accountID, bookID: bookID)
-                ?? (!accountID.isEmpty && bookID > 0)
-        else {
+    func setSeriesLink(_ link: SeriesLinkV1, accountID: String, bookID: Int) async throws {
+        guard link.isValid(accountID: accountID, bookID: bookID) else {
             throw CloudStorageError.incomplete
         }
         let database = try await availableDatabase()
         let id = SpineCloudIdentity.seriesLinkRecordID(accountID: accountID, bookID: bookID)
         var stored: SeriesLinkV1?
-        if let link {
-            var done = false
-            for _ in 0..<3 where !done {
-                let record: CKRecord
-                var exists = true
-                do {
-                    record = try await database.record(for: id)
-                } catch let error as CKError where error.code == .unknownItem {
-                    record = CKRecord(recordType: "SeriesLinkV1", recordID: id)
-                    exists = false
-                }
-                guard record.recordType == "SeriesLinkV1" else {
-                    throw CloudStorageError.incomplete
-                }
-                let current = (record["payload"] as? Data)
-                    .flatMap { try? JSONDecoder().decode(SeriesLinkV1.self, from: $0) }
-                    .flatMap { $0.isValid(accountID: accountID, bookID: bookID) ? $0 : nil }
-                var merged = link
-                merged.ownLook = current?.ownLook ?? (exists && link.ownLook)
-                if merged.changesNothing {
-                    if exists { try await database.delete(id) }
-                    done = true
-                    continue
-                }
-                record["payload"] = try JSONEncoder().encode(merged) as NSData
-                do {
-                    try await database.save(record)
-                    stored = merged
-                    done = true
-                } catch let error as CKError where error.code == .serverRecordChanged {}
+        var done = false
+        for _ in 0..<3 where !done {
+            let record: CKRecord
+            var exists = true
+            do {
+                record = try await database.record(for: id)
+            } catch let error as CKError where error.code == .unknownItem {
+                record = CKRecord(recordType: "SeriesLinkV1", recordID: id)
+                exists = false
             }
-            guard done else { throw CloudStorageError.conflict }
-        } else {
-            try await database.delete(id)
+            guard record.recordType == "SeriesLinkV1" else {
+                throw CloudStorageError.incomplete
+            }
+            let current = (record["payload"] as? Data)
+                .flatMap { try? JSONDecoder().decode(SeriesLinkV1.self, from: $0) }
+                .flatMap { $0.isValid(accountID: accountID, bookID: bookID) ? $0 : nil }
+            var merged = link
+            merged.ownLook = current?.ownLook ?? (exists && link.ownLook)
+            if merged.changesNothing {
+                if exists { try await database.delete(id) }
+                done = true
+                continue
+            }
+            record["payload"] = try JSONEncoder().encode(merged) as NSData
+            do {
+                try await database.save(record)
+                stored = merged
+                done = true
+            } catch let error as CKError where error.code == .serverRecordChanged {}
         }
+        guard done else { throw CloudStorageError.conflict }
         cacheWrite(
             stored, named: id.recordName,
             to: CompanionRecordKind.seriesLinks(cacheURL: seriesLinkCacheURL))

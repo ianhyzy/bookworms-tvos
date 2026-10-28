@@ -573,7 +573,6 @@ final class SpineCloudTests: XCTestCase {
         try await store.setSeriesLink(pick(nil), accountID: "42", bookID: 7)
         let nothing = await database.payload(named: name)
         XCTAssertNil(nothing, "Choosing nothing for a book without a link saves nothing")
-        try await store.setSeriesLink(nil, accountID: "42", bookID: 7)
 
         do {
             try await store.setSeriesLink(pick(3), accountID: "43", bookID: 7)

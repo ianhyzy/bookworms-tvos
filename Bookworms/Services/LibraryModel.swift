@@ -156,9 +156,10 @@ final class LibraryModel {
     }
 
     /// Makes `seriesID` the series `book`'s details name and its spine's look follows, saved as
-    /// the book's `SeriesLinkV1` as the iPhone and Mac save it: picking the book's shortest
-    /// series deletes the link, and the link keeps the own-look choice iCloud holds
-    /// (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`). The pick shows at once.
+    /// the book's `SeriesLinkV1` as the iPhone and Mac save it: the link keeps the own-look
+    /// choice iCloud holds, and picking the book's shortest series names no series, which deletes
+    /// a link that then changes nothing (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`).
+    /// The pick shows at once.
     ///
     /// Saves run in the order of the picks; a failed save restores the earlier choice unless a
     /// later pick replaced it. A saved pick reads the companion records again

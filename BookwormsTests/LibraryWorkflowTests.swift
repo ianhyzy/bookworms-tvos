@@ -515,9 +515,9 @@ final class LibraryWorkflowTests: XCTestCase {
                 source: .hardcover, accountID: fixture.hardcoverAccountID, books: [book],
                 syncedAt: fixture.time)
         ])
-        // The links iCloud holds, which saves change as `SpineCloudStore.setSeriesLink` does.
+        // The links iCloud holds: a save replaces the link, or deletes one that changes nothing.
         var stored: [Int: SeriesLinkV1] = [:]
-        var saves: [SeriesLinkV1?] = []
+        var saves: [SeriesLinkV1] = []
         var savesFail = false
         var heldSave: ControlledLibraryResponse<Void>?
         var dependencies = fixture.dependencies()
@@ -530,7 +530,7 @@ final class LibraryWorkflowTests: XCTestCase {
             if let heldSave { try await heldSave.value() }
             if savesFail { throw CloudStorageError.unavailable }
             saves.append(link)
-            stored[bookID] = link?.changesNothing == false ? link : nil
+            stored[bookID] = link.changesNothing ? nil : link
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -554,9 +554,9 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.waitForSeriesLinkSaves()
         await model.waitForCompanionRecords()
         XCTAssertEqual(saves.count, 1)
-        XCTAssertEqual(saves.last??.linkedSeriesID, 7)
-        XCTAssertEqual(saves.last??.ownLook, false)
-        XCTAssertEqual(saves.last??.standsAlone, false)
+        XCTAssertEqual(saves.last?.linkedSeriesID, 7)
+        XCTAssertEqual(saves.last?.ownLook, false)
+        XCTAssertEqual(saves.last?.standsAlone, false)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
         // A read that starts after the save shows the link iCloud holds, such as none once the
@@ -574,7 +574,7 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.waitForSeriesLinkSaves()
         await model.waitForCompanionRecords()
         XCTAssertEqual(saves.count, 3)
-        XCTAssertEqual(saves.last??.changesNothing, true)
+        XCTAssertEqual(saves.last?.changesNothing, true)
         XCTAssertNil(stored[1])
         XCTAssertEqual(model.series(for: book)?.membership, arc)
         model.pickSeries(8, for: book)
@@ -622,14 +622,14 @@ final class LibraryWorkflowTests: XCTestCase {
                 chosenAt: fixture.time),
         ] {
             var stored: SeriesLinkV1? = iPhoneLink
-            var saves: [SeriesLinkV1?] = []
+            var saves: [SeriesLinkV1] = []
             var dependencies = fixture.dependencies()
             dependencies.sleep = { _ in }
             dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
             dependencies.fetchSeriesLinks = { _, _ in (stored.map { [1: $0] } ?? [:], true) }
             dependencies.saveSeriesLink = { link, _, _ in
                 saves.append(link)
-                stored = link?.changesNothing == false ? link : nil
+                stored = link.changesNothing ? nil : link
             }
             let model = LibraryModel(dependencies: dependencies)
             await model.start()
@@ -639,13 +639,13 @@ final class LibraryWorkflowTests: XCTestCase {
                 model.pickSeries(7, for: book)
                 await model.waitForSeriesLinkSaves()
                 await model.waitForCompanionRecords()
-                XCTAssertEqual(saves.last??.linkedSeriesID, 7)
-                XCTAssertEqual(saves.last??.ownLook, true, "A pick keeps the book's own look")
+                XCTAssertEqual(saves.last?.linkedSeriesID, 7)
+                XCTAssertEqual(saves.last?.ownLook, true, "A pick keeps the book's own look")
                 model.pickSeries(8, for: book)
                 await model.waitForSeriesLinkSaves()
                 await model.waitForCompanionRecords()
-                XCTAssertNil(saves.last??.linkedSeriesID)
-                XCTAssertEqual(saves.last??.ownLook, true)
+                XCTAssertNil(saves.last?.linkedSeriesID)
+                XCTAssertEqual(saves.last?.ownLook, true)
                 XCTAssertNotNil(stored, "The shortest series keeps a link with its own look")
             } else {
                 XCTAssertNil(model.series(for: book))
@@ -654,7 +654,7 @@ final class LibraryWorkflowTests: XCTestCase {
                 await model.waitForCompanionRecords()
                 XCTAssertEqual(
                     saves.count, 1, "Picking the shortest series replaces standing alone")
-                XCTAssertEqual(saves.last??.changesNothing, true)
+                XCTAssertEqual(saves.last?.changesNothing, true)
                 XCTAssertNil(stored)
             }
             XCTAssertEqual(model.series(for: book)?.membership, arc)
