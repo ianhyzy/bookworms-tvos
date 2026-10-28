@@ -70,7 +70,7 @@ After each read in which CloudKit answered for every design and link, `LibraryMo
 
 Saving never replaces a look (`SpineCloudStore.createSeriesLook(_:)`). When another device saved the group's look first, the Apple TV keeps that look instead. Each group's save is tried on its own: a failed save leaves that group without a look until the next read and doesn't stop the others. The looks apply together once the pass ends.
 
-Among looks from the same model tier, the first one saved decides the group. A companion run on a better tier remakes a look from Apple's on-device model or local defaults that the reader never edited (no `editedAt`): it designs the look's source book, or the group's best-ranked member for a `tvos-local-v1` look, and replaces the look's colors and type, keeping its group and creation date. The Apple TV never remakes a look; it draws the remade one after its next read. A look the reader edited is never remade this way.
+Among looks from the same model tier, the first one saved decides the group. A companion run on a better tier remakes a look from Apple's on-device model or local defaults that the reader never edited (no `editedAt`): it designs the look's source book, or the group's best-ranked member for a `tvos-local-v1` look, and replaces the look's colors and type, keeping its group and creation date and recording when in `remadeAt`. The Apple TV never remakes a look; it draws the remade one after its next read. A look the reader edited is never remade this way.
 
 ## Cover palette and contrast
 
