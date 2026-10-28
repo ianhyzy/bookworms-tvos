@@ -17,7 +17,6 @@ struct StyleColor: Codable, Hashable, Sendable {
         (max(luminance, other.luminance) + 0.05) / (min(luminance, other.luminance) + 0.05)
     }
     static let paper = StyleColor(red: 0.98, green: 0.94, blue: 0.83)
-    static let ink = StyleColor(red: 0.08, green: 0.09, blue: 0.10)
     static func seed(_ id: Int) -> UInt64 { UInt64(bitPattern: Int64(id)) &* 2_654_435_761 }
 }
 

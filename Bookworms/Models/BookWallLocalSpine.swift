@@ -169,7 +169,7 @@ enum BookWallLocalSpine {
                 return "TimesNewRomanPS-BoldMT"
             }
             if genre.contains("literary") || genre.contains("classics") {
-                return "AvenirNext-DemiBold"
+                return SpineFontPolicy.uprightFallback
             }
             if genre.contains("biography") || genre.contains("memoir") {
                 return "HelveticaNeue-Bold"
@@ -187,7 +187,7 @@ enum BookWallLocalSpine {
                 return "CourierNewPS-BoldMT"
             }
         }
-        return "AvenirNext-DemiBold"
+        return SpineFontPolicy.uprightFallback
     }
 
     /// The portable typeface nearest a genre face from `fontName(for:)`: "serif", "sans",

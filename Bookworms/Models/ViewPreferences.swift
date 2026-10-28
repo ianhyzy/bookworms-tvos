@@ -54,10 +54,7 @@ enum SpoilerPolicy: String, Codable, CaseIterable, Identifiable {
 }
 
 /// The most books a shelf, comparison row, or shared-reads view shows, and the default count.
-///
-/// Every book in a view keeps its decoded cover in memory, but an Apple TV 4K with 3 GB peaked
-/// under 80 MB with 30-book views, so memory does not constrain this. Users on older devices can
-/// lower the count in Settings.
+/// Settings can lower the count.
 enum BookLimit {
     static let maximum = 40
 }

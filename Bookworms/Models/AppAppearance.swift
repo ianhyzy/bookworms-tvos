@@ -103,13 +103,15 @@ enum AppFontStyle: String, CaseIterable, Identifiable {
 
     /// New York reads lighter than SF at the same weight, so regular serif text uses medium.
     /// Heavier weights are unchanged to preserve the heading hierarchy.
+    private var boostsRegular: Bool { self == .serif }
+
     func displayWeight(_ weight: Font.Weight) -> Font.Weight {
-        self == .serif && weight == .regular ? .medium : weight
+        boostsRegular && weight == .regular ? .medium : weight
     }
 
     func uiFont(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         let base = UIFont.systemFont(
-            ofSize: size, weight: self == .serif && weight == .regular ? .medium : weight)
+            ofSize: size, weight: boostsRegular && weight == .regular ? .medium : weight)
         let design: UIFontDescriptor.SystemDesign = self == .serif ? .serif : .default
         return UIFont(
             descriptor: base.fontDescriptor.withDesign(design) ?? base.fontDescriptor, size: size)

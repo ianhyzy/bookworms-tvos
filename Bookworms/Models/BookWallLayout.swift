@@ -141,7 +141,7 @@ struct BookWallLayout: Sendable {
         for book: Book, coverRatio: Double?, typography: BookWallLocalSpine.Typography
     ) -> Dimensions {
         let pages = Float(min(1_400, max(100, book.pages ?? 320)))
-        let seed = Float((UInt64(bitPattern: Int64(book.id)) &* 2_654_435_761) % 101) / 100
+        let seed = Float(StyleColor.seed(book.id) % 101) / 100
         // The upright height grows with the square root of page count. Matching cover width
         // to the image ratio then makes the front-board area grow with page count as well.
         // The raised floor keeps short books from reading as small next to long ones; the
