@@ -147,6 +147,14 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(place(4), "Book 4")
         XCTAssertEqual(place(2, size: nil), "Book 2")
         XCTAssertNil(place(nil))
+        XCTAssertEqual(
+            SeriesDesigns.label(of: SeriesMembership(seriesID: 1, name: "Series 1", size: 3)),
+            "Series 1", "A label without a place is the series' name")
+        var unlisted = older
+        unlisted.seriesMemberships = []
+        XCTAssertNil(
+            SeriesDesigns.shownSeries(of: unlisted, link: nil),
+            "A book Hardcover lists in no series names none")
     }
 
     func testLookKeysSplitDiscworldGroupsAndFirstAuthors() {
