@@ -1095,7 +1095,9 @@ final class BookWallScene {
         stopMotion(completed: false)
         setDetailLightLevel(0)
         idlePose = nil
-        for child in root.children { child.isEnabled = true }
+        // `setDetailLightLevel` owns the key light's enabled state, so the resting wall
+        // carries no zero-intensity light.
+        for child in root.children where child !== detailLight { child.isEnabled = true }
         for (id, pose) in restingTransforms {
             bodies[id]?.stopAllAnimations()
             bodies[id]?.transform = pose

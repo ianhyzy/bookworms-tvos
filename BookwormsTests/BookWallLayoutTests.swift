@@ -199,4 +199,13 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertTrue(settled)
         XCTAssertFalse(scene.needsFrame)
     }
+
+    @MainActor
+    func testCancelingATransitionLeavesNoUnlitPointLightEnabled() {
+        let scene = BookWallScene()
+        scene.cancelTransition()
+        let lights = scene.root.children.compactMap { $0 as? PointLight }
+        XCTAssertFalse(lights.isEmpty)
+        XCTAssertFalse(lights.contains { $0.isEnabled && $0.light.intensity == 0 })
+    }
 }
