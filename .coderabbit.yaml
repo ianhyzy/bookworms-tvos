@@ -61,7 +61,7 @@ reviews:
         - A `Task {}` assumed to leave the main actor, missing cancellation, and stale async results that can replace newer state.
         - Animations or "delight" effects that delay input, focus movement, or navigation.
 
-        Focus: the focus engine owns directional movement. Flag focus set from move-command handlers, timers, data changes, or loading completion; lost focus restoration after details; and a sidebar that Left from the leftmost item or Back cannot reach. Follow `docs/FOCUS_NAVIGATION.md`.
+        Focus: the focus engine owns directional movement. Flag focus set from move-command handlers, timers, data changes, or loading completion, other than the one request when the first artwork preparation finishes; lost focus restoration after details; and a sidebar that Left from the leftmost item or Back cannot reach. Follow `docs/FOCUS_NAVIGATION.md`.
 
         Legibility at TV distance: flag user-visible text below 23 pt (the tvOS Caption 2 size), body text well below 29 pt, and text colors likely to miss WCAG 4.5:1 contrast (3:1 for large text) against their background. Text drawn into RealityKit textures counts by its projected size on screen; when 23 pt needs a geometry change, say so instead of calling it a quick win. User-visible text uses `appFont(size:weight:)`, not `.font(.system(size:))`; Settings uses the system font. Pairs and sets of colors should complement each other.
 

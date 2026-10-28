@@ -10,7 +10,7 @@ When a focused view handles a move command and also sets focus, the focus engine
 
 ## Navigation structure
 
-The app uses a `TabView` with `.sidebarAdaptable`. Pressing Left from the leftmost content item or pressing Back opens the sidebar natively. The app never moves focus to the sidebar itself. One state handles Back itself: on a My Shelf that book details filtered by author or genre, Back clears the filter and reopens those details over the view they opened from.
+The app uses a `TabView` with `.sidebarAdaptable`. Pressing Left from the leftmost content item or pressing Back opens the sidebar natively. The app never moves focus to the sidebar itself. Two states in main content handle Back themselves. On a My Shelf that book details filtered by author or genre, Back clears the filter and reopens those details over the view they opened from. In Book Wall details, which the wall draws in main content instead of presenting, Back closes the details and returns the book to the wall.
 
 The sidebar is one list: the enabled main views, then **Ambient**, then **Settings**. Every item is a `Tab`, so the list works on tvOS 26. A private `SidebarItem` selection in [ShelfView.swift](../Bookworms/Views/ShelfView.swift) maps main views to `coordinator.current`; **Ambient** and **Settings** leave it on the last main view. **Settings** shows `SettingsView` in place, and Back returns to the sidebar. A row of section tabs in a header focus section, level with the sidebar title, chooses the section; focusing a tab shows its section. They are buttons rather than a segmented control, which keeps Left at its leading edge, so Left from the first tab opens the sidebar. Each section lays out its controls in two columns. **Spines** has no controls and fits on one screen, so Down from its tab leaves focus on the tab; `SettingsInteractionTests` counts that and the tab moves around it. **Ambient** shows a page whose **Start ambient mode** button starts playback, so moving focus through the sidebar never starts it. On tvOS 27 and later, `tvOSSidebarHeader` also shows the Hardcover profile above the list; tvOS 26 omits it because `tabViewSidebarHeader` requires tvOS 27.
 
@@ -40,7 +40,7 @@ Within a section, the focus engine picks the nearest item in the pressed directi
 
 ## Paged collections
 
-[`PagedRow`](../Bookworms/Views/ShelfView.swift) presents every horizontal collection. It keeps all items (at most 20) mounted in one horizontal `ScrollView` with `.scrollTargetBehavior(.paging)`. Because the next page's items exist, the focus engine crosses page boundaries natively. `PagedRow` pads each item so that every page spans exactly one row width, and keeps items `PagedRowLayout.edgeInset` from each edge so that focus lift and shadows are not clipped. It scrolls to the page that contains `selectedID` and never assigns focus.
+[`PagedRow`](../Bookworms/Views/ShelfView.swift) presents every horizontal collection. It keeps all items mounted (at most `BookLimit.maximum`, 40, and 20 in Feed) in one horizontal `ScrollView` with `.scrollTargetBehavior(.paging)`. Because the next page's items exist, the focus engine crosses page boundaries natively. `PagedRow` pads each item so that every page spans exactly one row width, and keeps items `PagedRowLayout.edgeInset` from each edge so that focus lift and shadows are not clipped. It scrolls to the page that contains `selectedID` and never assigns focus.
 
 [`ShelfRow`](../Bookworms/Views/ShelfView.swift) wraps `PagedRow` for book shelves. My Shelf and both Compare Shelves rows use it. Layouts that pack pages must subtract `2 * PagedRowLayout.edgeInset` from the row width, as `ShelfView` and `SocialViews` do.
 
@@ -88,7 +88,7 @@ Data changes never move focus. After the first artwork preparation, content stay
 | Replacing mounted content with a loading view after the first load | Focus is destroyed and restored elsewhere. | Keep content mounted and update it in place. |
 | Changing `.id(_:)` on a container that can hold focus | SwiftUI recreates its children and focus is lost. | Keep identity stable and change content. |
 | A sidebar item that performs an action when selected | Selection can follow focus in the sidebar, so the action can run while the user is only moving past it. | Make the item a destination page with a button, as **Ambient** does. |
-| `.onExitCommand` in main content | It blocks Back from opening the sidebar. | Let Back use its native behavior. The filtered My Shelf passes a handler only while a filter from details is active, and `nil` otherwise. |
+| `.onExitCommand` in main content | It blocks Back from opening the sidebar. | Let Back use its native behavior. The filtered My Shelf passes a handler only while a filter from details is active, and `nil` otherwise. Book Wall details handle Back only while they are open. |
 | Tests that check only the final focused element | A bounce ends on a plausible item and passes. | Use `RemoteNavigation.press(_:in:expecting:)`. |
 
 ## Testing navigation

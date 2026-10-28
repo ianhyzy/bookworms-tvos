@@ -209,7 +209,7 @@ The same scene-update subscription drives flight, camera depth, and the light fa
 Keep these dependencies together when changing motion:
 
 - `detailDestination`, `fitsMotionEnvelope`, `yawRange`, and `returnAllowance` reserve the complete model, independent drift phases, and return velocity. Frustum checks include all eight corners, the near plane, and interior yaw extrema; yaw endpoints alone are insufficient.
-- The detail pose has a fixed pitch (`detailPitchRadians`) applied after its yaw; `corners(of:at:)` includes it, so the frustum fit covers it. The current extra angular motion is only world-Y yaw. Adding animated pitch or roll requires extending the swept-volume bound and angular-velocity return correction. A fixed pose tilt is a separate design choice; it must still pass the complete projection fit and physical-TV inspection.
+- The detail pose has a fixed pitch (`detailPitchRadians`) applied before its yaw (`yaw * pitch * faceRotation`), so the book tips about its own horizontal axis instead of rolling; `corners(of:at:)` includes it, so the frustum fit covers it. The current extra angular motion is only world-Y yaw. Adding animated pitch or roll requires extending the swept-volume bound and angular-velocity return correction. A fixed pose tilt is a separate design choice; it must still pass the complete projection fit and physical-TV inspection.
 - Preserve physical proportions and use camera distance to fit. Do not hide an invalid path with model scaling, screen-edge clamps, or a smaller clipped viewport.
 - Reduced drift can let a height-limited model fit slightly closer to the camera. Compare centering and size as well as motion after changing an amplitude.
 

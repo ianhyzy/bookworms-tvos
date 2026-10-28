@@ -32,7 +32,7 @@ The current implementation transfers one archive asset when the archive changes.
 
 ## Verification
 
-Unit tests cover OPDS parsing and invalid feeds, credential-origin restrictions, stable source IDs, account-specific snapshots, merging, shelf selection and ordering, per-source daily scheduling, the archive read before a due fetch and its 10-second limit, cloud merges, persistent design recovery, worklist publication, design validation, series link and look record names and validation, create-only look saves, reads that report a failed batch or record as incomplete, and cache recovery. UI tests cover Shelf, Spines, Sources, and Storage settings. Follow the [device testing procedure](TESTING.md) to verify live services and production CloudKit.
+Unit tests cover OPDS parsing and invalid feeds, credential-origin restrictions, stable source IDs, account-specific snapshots, merging, shelf selection and ordering, per-source daily scheduling, the archive read before a due fetch and its 10-second limit, cloud merges, persistent design recovery, worklist publication, design validation, series link and look record names and validation, create-only look saves, reads that report a failed batch or record as incomplete, and cache recovery. UI tests cover Shelf, Spines, Sources, and General settings. Follow the [device testing procedure](TESTING.md) to verify live services and production CloudKit.
 
 ## References
 
