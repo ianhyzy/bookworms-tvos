@@ -4,18 +4,14 @@ import XCTest
 
 final class HardcoverAuthenticationTests: XCTestCase {
     func testAcceptsOAuthAndPersonalAccessTokens() throws {
-        for input in [
-            "hc_pat_example", "  hc_pat_example\n", "Bearer hc_pat_example",
-            "bearer  hc_pat_example", "oauth_access_token_12345", "Bearer oauth_token_abc",
+        for (input, expected) in [
+            ("hc_pat_example", "hc_pat_example"), ("  hc_pat_example\n", "hc_pat_example"),
+            ("Bearer hc_pat_example", "hc_pat_example"),
+            ("bearer  hc_pat_example", "hc_pat_example"),
+            ("oauth_access_token_12345", "oauth_access_token_12345"),
+            ("Bearer oauth_token_abc", "oauth_token_abc"),
         ] {
-            let expected: String
-            var trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.lowercased().hasPrefix("bearer ") {
-                trimmed = String(trimmed.dropFirst(7))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            expected = trimmed
-            XCTAssertEqual(try HardcoverToken(input).value, expected)
+            XCTAssertEqual(try HardcoverToken(input).value, expected, input)
         }
     }
 
@@ -107,7 +103,8 @@ final class HardcoverAuthenticationTests: XCTestCase {
 
     func testOnlyInvalidGrantWithHTTP400Or401RejectsTheRefreshToken() async {
         let cases: [(token: String, expected: HardcoverError)] = [
-            ("hc_rt_spent", .invalidToken), ("hc_rt_unknown_client", .http(401)),
+            ("hc_rt_spent", .invalidToken), ("hc_rt_spent_401", .invalidToken),
+            ("hc_rt_grant_403", .http(403)), ("hc_rt_unknown_client", .http(401)),
             ("hc_rt_html", .http(400)), ("hc_rt_numeric_error", .http(400)),
             ("hc_rt_forbidden", .http(403)), ("hc_rt_limited", .http(429)),
         ]
@@ -248,10 +245,7 @@ final class HardcoverAuthenticationTests: XCTestCase {
         let connected = await library.connect("invalid token with spaces")
         XCTAssertFalse(connected)
         XCTAssertEqual(library.books.map(\.id), ids)
-        let hasExpectedMessage =
-            library.message?.contains("invalid") == true
-            || library.message?.contains("Reconnect") == true
-        XCTAssertTrue(hasExpectedMessage)
+        XCTAssertEqual(library.message, HardcoverError.invalidToken.localizedDescription)
     }
 
     private func client() -> HardcoverClient {
@@ -265,7 +259,7 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    /// The request's form body, whether URLSession passes it as data or as a stream.
+    /// The request's body, whether URLSession passes it as data or as a stream.
     private func formBody() -> String {
         var data = request.httpBody ?? Data()
         if let stream = request.httpBodyStream {
@@ -303,18 +297,7 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
             XCTAssertEqual(
                 request.value(forHTTPHeaderField: "Content-Type"),
                 "application/x-www-form-urlencoded")
-            var bodyData = request.httpBody ?? Data()
-            if let stream = request.httpBodyStream {
-                stream.open()
-                defer { stream.close() }
-                var bytes = [UInt8](repeating: 0, count: 4096)
-                while stream.hasBytesAvailable {
-                    let count = stream.read(&bytes, maxLength: bytes.count)
-                    if count <= 0 { break }
-                    bodyData.append(contentsOf: bytes.prefix(count))
-                }
-            }
-            let bodyString = String(decoding: bodyData, as: UTF8.self)
+            let bodyString = formBody()
             let (statusCode, payload): (Int, String) = {
                 if bodyString.contains("grant_type=refresh_token") {
                     XCTAssertTrue(bodyString.contains("client_id=\(HardcoverClient.clientID)"))
@@ -327,6 +310,12 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
                     }
                     if bodyString.contains("refresh_token=hc_rt_unavailable") {
                         return (503, #"{"error":"temporarily_unavailable"}"#)
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_spent_401") {
+                        return (401, #"{"error":"invalid_grant"}"#)
+                    }
+                    if bodyString.contains("refresh_token=hc_rt_grant_403") {
+                        return (403, #"{"error":"invalid_grant"}"#)
                     }
                     if bodyString.contains("refresh_token=hc_rt_unknown_client") {
                         return (401, #"{"error":"invalid_client"}"#)
@@ -391,18 +380,8 @@ private final class AuthenticationStub: URLProtocol, @unchecked Sendable {
         switch request.value(forHTTPHeaderField: "Authorization") {
         case "Bearer hc_pat_validate", "Bearer hc_pat_pages", "Bearer hc_pat_partial":
             status = 200
-            var data = request.httpBody ?? Data()
-            if let stream = request.httpBodyStream {
-                stream.open()
-                defer { stream.close() }
-                var bytes = [UInt8](repeating: 0, count: 4096)
-                while stream.hasBytesAvailable {
-                    let count = stream.read(&bytes, maxLength: bytes.count)
-                    if count <= 0 { break }
-                    data.append(contentsOf: bytes.prefix(count))
-                }
-            }
-            let object = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let object =
+                try! JSONSerialization.jsonObject(with: Data(formBody().utf8)) as! [String: Any]
             let query = object["query"] as! String
             if request.value(forHTTPHeaderField: "Authorization") == "Bearer hc_pat_validate" {
                 XCTAssertTrue(
