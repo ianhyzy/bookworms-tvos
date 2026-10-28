@@ -198,12 +198,7 @@ def main():
     for schema in selected:
         if schema not in schemas:
             continue
-        output = args.output/(schema+'.xml')
-        if not output.exists():
-            subprocess.run(['xcrun','xctrace','export','--input',str(args.trace),'--xpath',
-                            f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]',
-                            '--output',str(output)], check=True,stdout=subprocess.DEVNULL)
-        data, resolve = rows(output)
+        data, resolve = export(args, schema)
         result['tables'][schema] = {'rows':len(data)}
         if schema in ['hitches','potential-hangs']:
             values = [int(r['duration'].text)/1e6 for r in data if 'duration' in r]
@@ -274,20 +269,6 @@ def main():
     presses = result.get('markers', {}).get('press_times_ms', [])
     if (args.output/'hitches.xml').exists():
         hitch_rows, _ = rows(args.output/'hitches.xml')
-        phases = defaultdict(dict)
-        for schema in ['hitches-updates', 'hitches-renders', 'hitches-gpu']:
-            path = args.output/(schema+'.xml')
-            if not path.exists():
-                continue
-            phase_rows, _ = rows(path)
-            for phase in phase_rows:
-                if int(phase['containment-level'].text) != 0:
-                    continue
-                key = (phase['display'].text, phase['swap-id'].text)
-                phases[key][schema] = {
-                    'start_ms': int(phase['start'].text)/1e6,
-                    'duration_ms': int(phase['duration'].text)/1e6,
-                }
         result['worst_hitches'] = []
         for row in sorted(hitch_rows, key=lambda r: int(r['duration'].text), reverse=True)[:20]:
             start = int(row['start'].text)/1e6
@@ -296,7 +277,6 @@ def main():
                 'start_ms': start, 'duration_ms': int(row['duration'].text)/1e6,
                 'preceding_press_ms': presses[preceding] if preceding >= 0 else None,
                 'swap_id': row['swap-id'].text,
-                'phases': phases.get((row['display'].text, row['swap-id'].text), {}),
                 'attribution': row.get('narrative-description', ET.Element('unknown')).text,
             })
     if presses and scenario != 'longevity' and (args.output/'hitches.xml').exists():

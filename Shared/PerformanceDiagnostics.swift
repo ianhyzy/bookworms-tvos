@@ -71,14 +71,6 @@ enum PerformanceDiagnostics {
             callbacks.reserveCapacity(Self.capacity)
         }
 
-        /// Starts a new measurement without retaining samples from an earlier presentation.
-        mutating func reset() {
-            phase = nil
-            deltas.removeAll(keepingCapacity: true)
-            callbacks.removeAll(keepingCapacity: true)
-            elapsed = 0
-        }
-
         /// Records seconds from a scene update and the app's work inside its callback.
         mutating func record(delta: TimeInterval, callbackSeconds: TimeInterval, phase: String) {
             guard PerformanceDiagnostics.enabled,

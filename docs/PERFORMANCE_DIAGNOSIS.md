@@ -30,7 +30,7 @@ Use the actual generated `.xctestrun` filename for the installed SDK. For an ord
 | --- | --- |
 | `sidebar` (default) | Moves focus to the sidebar, then traverses its items with Up and Down. |
 | `books` | Moves between books in the selected view with Left and Right. Use it as the content-navigation control. |
-| `settings` | Opens Settings from the sidebar and moves across its section picker. Native segmented selection changes the visible section during this sequence; it is not a focus-only traversal. |
+| `settings` | Opens Settings from the sidebar on its first section tab, then moves across the tabs with Right and Left. Focusing a tab shows its section, so the visible section changes during this sequence; it is not a focus-only traversal. |
 | `longevity` | Runs the sustained sequence described below. |
 | `description` | Opens details for the first My Shelf book, then opens and closes **Show more** three times, 3 seconds apart. Adds the Display instrument and marks each open and close as a `PERFORMANCE_PHASE` in `test.log`. Requires `--view 0` and a first book whose description shows **Show more**. |
 | `bookWall` | Launches directly into Book Wall with `--start-view=bookWall`, opens and closes details three times, returns to the starting book, then moves through the stacks in short bursts. Adds the Display and GPU instruments. Use `scripts/profile-book-wall.py`, which builds, records, summarizes per phase, and restores the local build. |
@@ -84,6 +84,15 @@ Open a book, leave its detail view visible, then return to the wall. Compare the
 renderer's pipeline windows with the callback measurements to distinguish rendering
 cost from app animation work. Capture screenshots separately from the measured movement. Restore the ordinary
 Release app when the investigation finishes.
+
+To inspect transition rendering frame by frame, run
+`DevicePerformanceTests/testBookWallTransitionFrames` with `--only-testing` and
+`TEST_RUNNER_VERIFY_DEVICE_PERFORMANCE=1`. It opens and closes one book while taking
+screenshots as fast as XCTest allows; it is not a timing measurement. Optional variables:
+`TEST_RUNNER_PERF_EXTRA_ARGUMENTS` adds space-separated launch arguments, such as
+`--performance-diagnostics --isolate=wall-720p`; `TEST_RUNNER_PERF_BOOK_TITLE` selects the
+book by title prefix; and `TEST_RUNNER_PERF_CAPTURE=video` takes no screenshots, for a separate
+screen recording, and runs three cycles followed by **Drop again**.
 
 ## Isolation variants
 
@@ -153,4 +162,4 @@ Restore the ordinary Release app, preserve its data, and remove only this projec
 - [Apple: UI animation hitches and the render loop](https://developer.apple.com/videos/play/tech-talks/10855/)
 - [Airbnb: Understanding and improving SwiftUI performance](https://airbnb.tech/web/understanding-and-improving-swiftui-performance/)
 
-If the SwiftUI track is empty on the device, retain that limitation and use the runner's Time Profiler + Hitches + Points of Interest recording. `--template SwiftUI` remains available for devices that supply update data. Supply `--trace-device` when the paired Apple TV's Instruments name differs from the default `Living Room`. Instruments and `devicectl` can resolve the same UDID differently; the runner uses the device ID for XCTest and the name plus current process ID for tracing.
+If the SwiftUI track is empty on the device, retain that limitation and use the runner's Time Profiler + Hitches + Points of Interest recording. `--template SwiftUI` remains available for devices that supply update data. Supply `--trace-device` when the paired Apple TV's Instruments name differs from the default `Living Room`; `scripts/profile-book-wall.py` reads it from the optional `traceDevice` key in `.local/device-build.json`. Instruments and `devicectl` can resolve the same UDID differently; the runner uses the device ID for XCTest and the name plus current process ID for tracing.
