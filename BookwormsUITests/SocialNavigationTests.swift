@@ -292,6 +292,26 @@ final class SocialNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["stop-ambient"].exists)
     }
 
+    /// The exit button has focus from `.defaultFocus`, so every direction and Back reach its
+    /// commands and stop playback instead of moving focus.
+    func testAmbientDirectionsAndBackReturnToLauncher() {
+        let app = RemoteNavigation.launch()
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        RemoteNavigation.startAmbient(app)
+        let start = app.buttons["start-ambient"]
+        let stop = app.buttons["stop-ambient"]
+        let buttons: [XCUIRemote.Button] = [.left, .right, .up, .down, .menu]
+        for (index, button) in buttons.enumerated() {
+            if index > 0 {
+                XCUIRemote.shared.press(.select)
+                XCTAssertTrue(stop.waitForExistence(timeout: 10), "Restart before \(button)")
+            }
+            XCUIRemote.shared.press(button)
+            RemoteNavigation.waitForFocus(start)
+            XCTAssertFalse(stop.exists, "\(button) stops ambient mode")
+        }
+    }
+
     func testAmbientShelfLeadsWithOnThisDay() {
         // The first sample book was finished on September 9, 2026.
         let app = RemoteNavigation.launch(arguments: ["--on-this-day-date=2027-09-09"])

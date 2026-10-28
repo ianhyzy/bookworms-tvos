@@ -435,7 +435,13 @@ final class SocialFeatureTests: XCTestCase {
         }
         let client = SocialFixtureClient()
         await client.deny(reader: 2)
-        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        var time = Date()
+        let model = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root, now: { time })
+        await model.load(
+            token: "hc_pat_fixture", readerID: 2, enabledViews: [.comparison, .friendsPicks])
+        // Past the five-minute retry backoff, only a saved sync date keeps reader 2 from being due.
+        time += 301
         await model.load(
             token: "hc_pat_fixture", readerID: 2, enabledViews: [.comparison, .friendsPicks])
         XCTAssertNotNil(model.snapshot, "One reader's denial keeps the rest of the social data")
