@@ -79,7 +79,7 @@ reviews:
 
     - path: "**/*Cloud*Store.swift"
       instructions: |
-        This code reads the CloudKit JSON contract that the iPhone and Mac app writes (`Bookworms/Models/CloudContract.swift` in bookworms-ios) and writes records in it: the `library-v1` archive, the worklist, new `SeriesLookV1` records, and the `SeriesLinkV1` record of a series the reader picks in book details, which it saves or deletes. Flag renamed or removed fields, changed coding keys, defaults, or record names, decoding that would reject records the other app writes (such as a design or look with or without the optional `provenance`), and a series-look save that could replace an existing record. Flag a series-link write that uses another record name or JSON than the iPhone's, drops a field another device set, such as `ownLook`, saves a link for the book's shortest series instead of deleting the record, or touches another account's link. The Apple TV has no spine model; the companions' model tiers and upgrades live in bookworms-ios, so flag a tvOS path that calls a model or rewrites a design.
+        This code reads the CloudKit JSON contract that the iPhone and Mac app writes (`Bookworms/Models/CloudContract.swift` in bookworms-ios) and writes records in it: the `library-v1` archive, the worklist, new `SeriesLookV1` records, and the `SeriesLinkV1` record of a series the reader picks in book details, which it saves or deletes. Flag renamed or removed fields, changed coding keys, defaults, or record names, decoding that would reject records the other app writes (such as a design or look with or without the optional `provenance`), and a series-look save that could replace an existing record. Flag a series-link write that uses another record name or JSON than the iPhone's, drops a field another device set, such as `ownLook`, names the book's shortest series instead of leaving `linkedSeriesID` empty, saves a link that holds no choice instead of deleting the record, or touches another account's link. The Apple TV has no spine model; the companions' model tiers and upgrades live in bookworms-ios, so flag a tvOS path that calls a model or rewrites a design.
 
     - path: "**/*.metal"
       instructions: |
@@ -100,8 +100,9 @@ knowledge_base:
     - repository: ianhyzy/bookworms-ios
       instructions: >-
         The iPhone and Mac companion. Its `Bookworms/Models/CloudContract.swift`
-        writes the CloudKit JSON contract that `SpineCloudStore.swift` and
-        `CloudLibraryStore.swift` read and that this repository also writes
-        for the archive, the worklist, series looks, and series links, its `Bookworms/Models/SeriesDesigns.swift`
-        follows the same series rules and tables as this repository's copy, and
-        it shares the Hardcover token-renewal rule.
+        defines the CloudKit JSON contract that `SpineCloudStore.swift` and
+        `CloudLibraryStore.swift` read; this repository also writes the archive,
+        the worklist, series looks, and series links in it. Its
+        `Bookworms/Models/SeriesDesigns.swift` follows the same series rules and
+        tables as this repository's copy, and it shares the Hardcover
+        token-renewal rule.
