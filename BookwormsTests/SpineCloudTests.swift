@@ -574,6 +574,20 @@ final class SpineCloudTests: XCTestCase {
         let nothing = await database.payload(named: name)
         XCTAssertNil(nothing, "Choosing nothing for a book without a link saves nothing")
 
+        // A link this app can't read, such as a newer version, is left as the iPhone saved it.
+        var newer = pick(3, ownLook: true, at: 180)
+        newer.version = 2
+        try await database.put(newer)
+        let unread = await database.payload(named: name)
+        for series in [4, nil] {
+            do {
+                try await store.setSeriesLink(pick(series, at: 210), accountID: "42", bookID: 7)
+                XCTFail("A pick must not replace or delete a link this app can't read")
+            } catch CloudStorageError.incomplete {}
+            let kept = await database.payload(named: name)
+            XCTAssertEqual(kept, unread)
+        }
+
         do {
             try await store.setSeriesLink(pick(3), accountID: "43", bookID: 7)
             XCTFail("A link for another account must not be saved")
@@ -649,7 +663,10 @@ final class SpineCloudTests: XCTestCase {
         await database.waitForHeldBatch()
         _ = try await store.createSeriesLook(look())
         await database.releaseHeldBatch()
-        _ = try? await lookRead.value
+        do {
+            _ = try await lookRead.value
+            XCTFail("A read that started before the save must not save its copy of the cache")
+        } catch is CancellationError {}
         let looks = try await offline.seriesLooks(accountID: "42", keys: [cityWatch]).values
         XCTAssertEqual(looks, [cityWatch: look()])
     }

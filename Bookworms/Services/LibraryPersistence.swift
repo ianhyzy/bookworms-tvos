@@ -10,7 +10,8 @@ actor LibraryPersistence {
     private var styleRevision = 0
     private var topShelfRevision = 0
     private var newestTopShelfRequest = 0
-    private var publishedTopShelf: [TopShelfBook] = []
+    /// The last snapshot written, or `nil` until a write succeeds.
+    private var publishedTopShelf: [TopShelfBook]?
     private static let log = Logger(subsystem: "gay.ian.Bookworms", category: "TopShelf")
 
     init(
@@ -60,18 +61,20 @@ actor LibraryPersistence {
     /// snapshot removes its own leftovers when no render is still pending.
     func publishTopShelf(_ books: [TopShelfBook], revision: Int) {
         guard revision >= topShelfRevision else {
-            if topShelfRevision == newestTopShelfRequest {
+            if topShelfRevision == newestTopShelfRequest, let publishedTopShelf {
                 TopShelfPoster.removeUnused(keeping: publishedTopShelf)
             }
             return
         }
         topShelfRevision = revision
-        publishedTopShelf = books
         do {
             try writeTopShelf(books)
+            publishedTopShelf = books
         } catch {
-            // A failed write leaves Top Shelf showing its last snapshot.
+            // Top Shelf keeps showing its last snapshot, so its posters stay until a write
+            // succeeds.
             Self.log.error("Top Shelf snapshot not saved: \(error.localizedDescription)")
+            return
         }
         if revision == newestTopShelfRequest { TopShelfPoster.removeUnused(keeping: books) }
     }

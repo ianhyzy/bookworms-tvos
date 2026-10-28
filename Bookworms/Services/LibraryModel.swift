@@ -829,15 +829,11 @@ final class LibraryModel {
                                 tokens, revision: self.sourceRevision)
                             return
                         }
-                    } catch HardcoverError.invalidAuthorizationCode {
-                        // Hardcover won't accept the code again; the message offers a new one.
-                        guard !Task.isCancelled else { break }
-                        self.hardcoverDeviceAuthMessage = self.readable(
-                            HardcoverError.invalidAuthorizationCode)
-                        return
                     } catch {
                         guard !Task.isCancelled else { break }
                         self.hardcoverDeviceAuthMessage = self.readable(error)
+                        // Hardcover won't accept a rejected code again; the message offers a new one.
+                        if case HardcoverError.invalidAuthorizationCode = error { return }
                     }
                 }
             } catch {

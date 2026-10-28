@@ -616,13 +616,13 @@ actor SpineCloudStore {
     /// reads.
     ///
     /// This app chooses only the series (`linkedSeriesID` and `standsAlone`), so the saved link
-    /// keeps the `ownLook` of the record CloudKit holds, which the iPhone and Mac set: none
-    /// without a record, and `link`'s for a record this app can't read. A link that then changes
-    /// nothing (`SeriesLinkV1.changesNothing`) deletes the book's `SeriesLinkV1` record, as the
-    /// iPhone and Mac do. A save retries up to three times when another device changes the record
-    /// meanwhile.
+    /// keeps the `ownLook` of the record CloudKit holds, which the iPhone and Mac set, or none
+    /// without a record. A link that then changes nothing (`SeriesLinkV1.changesNothing`) deletes
+    /// the book's `SeriesLinkV1` record, as the iPhone and Mac do. A save retries up to three
+    /// times when another device changes the record meanwhile.
     ///
-    /// Throws when CloudKit is unavailable, the save fails, or the record holds another type.
+    /// Throws when CloudKit is unavailable, the save fails, or the record holds another type or a
+    /// link this app can't read, which it leaves unchanged.
     func setSeriesLink(_ link: SeriesLinkV1, accountID: String, bookID: Int) async throws {
         guard link.isValid(accountID: accountID, bookID: bookID) else {
             throw CloudStorageError.incomplete
@@ -646,8 +646,11 @@ actor SpineCloudStore {
             let current = (record["payload"] as? Data)
                 .flatMap { try? JSONDecoder().decode(SeriesLinkV1.self, from: $0) }
                 .flatMap { $0.isValid(accountID: accountID, bookID: bookID) ? $0 : nil }
+            // Replacing a record this app can't read, such as a newer version, would drop what
+            // the iPhone or Mac saved in it.
+            if exists, current == nil { throw CloudStorageError.incomplete }
             var merged = link
-            merged.ownLook = current?.ownLook ?? (exists && link.ownLook)
+            merged.ownLook = current?.ownLook ?? false
             if merged.changesNothing {
                 if exists { try await database.delete(id) }
                 done = true
