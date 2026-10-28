@@ -28,7 +28,7 @@ Cloud sync merges sources by identity and sync date, and legacy designs by book 
 
 The companion design cache is separate from the retained API-key design store. Small legacy design collections retain a durable local preferences copy. Larger collections can exceed that budget after a successful cloud save, with a local disk copy for fast access. If iCloud is unavailable, existing local data stays usable. Account changes stop cloud syncing until the user enables storage for the new account. Turning the setting off does not delete cloud records.
 
-The current implementation transfers one archive asset when the archive changes. The entire asset is transferred when any archived data changes. The worklist, per-book designs, cover choices, series links, and series looks are separate records. CloudKit development and production environments are separate: deploy `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1` with their `payload` data fields to production before uploading a candidate that uses them.
+The current implementation transfers one archive asset when the archive changes. The entire asset is transferred when any archived data changes. The iPhone and Mac companion reads and splices the archive only while its asset is at most 50 MB; the Apple TV uploads an archive of any size and doesn't warn when it passes that limit. The worklist, per-book designs, cover choices, series links, and series looks are separate records. CloudKit development and production environments are separate: deploy `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1` with their `payload` data fields to production before uploading a candidate that uses them.
 
 ## Verification
 
