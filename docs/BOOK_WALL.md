@@ -14,7 +14,7 @@ This document describes the implemented behavior and the constraints to preserve
 | [BookWallHardcoverMesh.swift](../Bookworms/Models/BookWallHardcoverMesh.swift) | Continuous casing and shaped artwork meshes, corner profiles, bevel normals, and UV coordinates. |
 | [BookWallScene.swift](../Bookworms/Views/BookWallScene.swift) | Model assembly in `makeBook`, texture helpers, physics, camera, lights, projection, flight planning, and the shared motion clock. |
 | [BookWallView.swift](../Bookworms/Views/BookWallView.swift) | Native focus controls, transition tasks and revision guards, detail presentation, coordinate conversion, and the canvas bridge. |
-| [BookWallRenderHost.swift](../Bookworms/Views/BookWallRenderHost.swift) | Launch-only host configuration and the shared event, projection, and ambient-light adapter contract. |
+| [BookWallRenderHost.swift](../Bookworms/Views/BookWallRenderHost.swift) | Launch-only host configuration and the shared event and ambient-light adapter contract. |
 | [BookWallRendererHost.swift](../Bookworms/Views/BookWallRendererHost.swift) | `RealityRenderer` host, explicit render textures, display-link updates, and Metal presentation. |
 | [ShelfView.swift](../Bookworms/Views/ShelfView.swift), [BookDetailView.swift](../Bookworms/Views/BookDetailView.swift) | Scene lifetime, preparation trigger, full-screen background, detail-column geometry, and Back overlay. |
 
@@ -245,7 +245,7 @@ Leaving the tab, backgrounding, replacing prepared books, or resizing the viewpo
 
 Book Wall renders through `RealityRenderer`. The launch arguments below tune it for diagnosis; they have no Settings interface or persisted preference. See the [renderer results](handoffs/2026-09-30-wall-realityrenderer-results.md) for measurements and verification status.
 
-The host renders the shared `BookWallScene` root, camera, prepared models, physics, baked backdrops, shadow planes, lights, ribbon, labels, and flight planning. `BookWallView` retains native focus controls and detail presentation. The adapter provides scene events, point projection, and ambient-light changes; they do not assign focus. Attachment refreshes focus rectangles for a configured wall, and detachment cancels subscriptions and active transitions. Backdrop baking uses the host's viewport in points.
+The host renders the shared `BookWallScene` root, camera, prepared models, physics, baked backdrops, shadow planes, lights, ribbon, labels, and flight planning. `BookWallView` retains native focus controls and detail presentation. The adapter provides scene events and ambient-light changes; they do not assign focus. Attachment refreshes focus rectangles for a configured wall, and detachment cancels subscriptions and active transitions. Backdrop baking uses the host's viewport in points.
 
 `BookWallRendererHost` mounts a noninteractive, opaque `CAMetalLayer` surface in the existing `TabView` background. A display link requests 60 Hz and drives `RealityRenderer.updateAndRender` with elapsed frame time. Three frame slots bound queued work while RealityKit finishes one frame as it encodes the next. With every slot busy, a tick skips submission, and the next update advances at most two refreshes.
 

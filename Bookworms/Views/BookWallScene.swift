@@ -340,11 +340,6 @@ final class BookWallScene {
         renderHost?.subscribe(to: event, handler: handler)
     }
 
-    /// Projects into full-screen points, independently of the renderer's pixel dimensions.
-    func projectWithCamera(_ point: SIMD3<Float>) -> CGPoint? {
-        project(point, cameraDepth: camera.position.z)
-    }
-
     func updateHostViewport(size: CGSize) {
         hasUndrawnChange = true
         guard size.width > 0, size.height > 0 else { return }
@@ -1947,12 +1942,9 @@ final class BookWallScene {
     /// Projects each spine at rest with the wall's resting camera depth, whatever the current
     /// dolly, so published rectangles match `plannedFocusFrames` until the books land.
     private func projectedFrames() -> [Int: CGRect] {
-        let frames = Self.focusFrames(
+        Self.focusFrames(
             for: layout, resting: restingTransforms, cameraDepth: wallCameraDepth,
             in: renderBounds)
-        let outside = frames.values.filter { !renderBounds.contains($0) }.count
-        BookWallHostLog.write("focusFrames=\(frames.count) outsideViewport=\(outside)")
-        return frames
     }
 }
 

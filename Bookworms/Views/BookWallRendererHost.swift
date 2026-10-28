@@ -167,16 +167,9 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         surface.coordinator = self
         surface.clearError()
         isAttached = surface.window != nil
-        isApplicationActive = UIApplication.shared.applicationState == .active
         failed = false
         do {
             try prepare(scene: scene, surface: surface)
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(applicationBecameActive),
-                name: UIApplication.didBecomeActiveNotification, object: nil)
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(applicationResignedActive),
-                name: UIApplication.willResignActiveNotification, object: nil)
             let link = CADisplayLink(target: self, selector: #selector(renderFrame(_:)))
             let rate = Float(scene.hostConfiguration.preferredFramesPerSecond)
             link.preferredFrameRateRange = CAFrameRateRange(
@@ -276,10 +269,6 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         return AnyCancellable { subscription.cancel() }
     }
 
-    func project(_ point: SIMD3<Float>) -> CGPoint? {
-        scene?.projectWithCamera(point)
-    }
-
     func setAmbientExponent(_ exponent: Float) {
         renderer?.lighting.intensityExponent = exponent
     }
@@ -310,18 +299,9 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         updatePauseState()
     }
 
+    /// Follows the representable's `scenePhase`, the clock's only source of app activity.
     func setSceneActive(_ active: Bool) {
         isApplicationActive = active
-        updatePauseState()
-    }
-
-    @objc private func applicationBecameActive() {
-        isApplicationActive = true
-        updatePauseState()
-    }
-
-    @objc private func applicationResignedActive() {
-        isApplicationActive = false
         updatePauseState()
     }
 
@@ -590,7 +570,6 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         generation += 1
         displayLink?.invalidate()
         displayLink = nil
-        NotificationCenter.default.removeObserver(self)
         if let scene {
             scene.detachHost(self)
             renderer?.entities.remove(scene.root)
@@ -617,14 +596,12 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
     private enum RendererError: LocalizedError {
         case unavailableMetal
         case unavailableTexture
-        case unavailableEncoder
 
         var errorDescription: String? {
             switch self {
             case .unavailableMetal:
                 "Metal could not create a device, command queue, or render event."
             case .unavailableTexture: "Metal could not allocate the internal color texture."
-            case .unavailableEncoder: "Metal could not create the presentation encoder."
             }
         }
     }
