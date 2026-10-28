@@ -26,6 +26,20 @@ enum HardcoverConnectionPhase: Equatable {
     }
 }
 
+/// A series pick of this session (`LibraryModel.pickSeries(_:for:)`): the link it shows until a
+/// link read reflects its save.
+private struct SeriesPick {
+    let link: SeriesLinkV1?
+    /// Tells the pick from a later pick of the same book.
+    let number: Int
+    /// How many link reads had started when the pick's save finished; `nil` while it saves.
+    var savedAfterReads: Int? = nil
+
+    /// Whether link read number `read` may have missed the pick, because it started before the
+    /// pick's save finished.
+    func outlasts(read: Int) -> Bool { savedAfterReads.map { $0 >= read } ?? true }
+}
+
 @MainActor @Observable
 final class LibraryModel {
     private(set) var books: [Book] = [] {
@@ -143,9 +157,13 @@ final class LibraryModel {
 
     /// Makes `seriesID` the series `book`'s details name and its spine's look follows, saved as
     /// the book's `SeriesLinkV1` as the iPhone and Mac save it: picking the book's shortest
-    /// series deletes the link, and the link keeps its own-look choice. The pick shows at once.
+    /// series deletes the link, and the link keeps the own-look choice iCloud holds
+    /// (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`). The pick shows at once.
+    ///
     /// Saves run in the order of the picks; a failed save restores the earlier choice unless a
-    /// later pick replaced it. The sample library keeps picks in memory.
+    /// later pick replaced it. A saved pick reads the companion records again
+    /// (`queueSpineDesignRefresh(restarting:)`), so the book draws its new group's look, or the
+    /// group gets one. The sample library keeps picks in memory.
     func pickSeries(_ seriesID: Int, for book: Book) {
         guard canPickSeries(for: book) else { return }
         let accountID = isSample ? "" : activeHardcoverAccountID ?? ""
@@ -155,32 +173,50 @@ final class LibraryModel {
             linkedSeriesID: seriesID == SeriesDesigns.styleSeries(of: book, link: nil)?.id
                 ? nil : seriesID,
             ownLook: old?.ownLook == true, chosenAt: dependencies.now())
-        let link = chosen.linkedSeriesID == nil && !chosen.ownLook ? nil : chosen
+        let link = chosen.changesNothing ? nil : chosen
         guard link?.linkedSeriesID != old?.linkedSeriesID || old?.standsAlone == true else {
             return
         }
-        setPickedLink(link, for: book.id)
+        let earlierPick = pickedLinks[book.id]
+        seriesPickCount += 1
+        let number = seriesPickCount
+        seriesLinks[book.id] = link
+        pickedLinks[book.id] = SeriesPick(link: link, number: number)
+        refreshSeriesSources()
         guard !isSample else { return }
         let previous = seriesLinkSave
         seriesLinkSave = Task { [weak self] in
             await previous?.value
             guard let self else { return }
             do {
-                try await dependencies.saveSeriesLink(link, accountID, book.id)
+                try await dependencies.saveSeriesLink(chosen, accountID, book.id)
             } catch {
                 // Turning iCloud storage off or changing accounts clears the links; keep them clear.
                 guard iCloudEnabled, activeHardcoverAccountID == accountID,
-                    seriesLinks[book.id] == link
+                    pickedLinks[book.id]?.number == number
                 else { return }
-                setPickedLink(old, for: book.id)
+                // Saves run in order, so the earlier pick's save has finished.
+                seriesLinks[book.id] = old
+                pickedLinks[book.id] = earlierPick.map {
+                    SeriesPick(
+                        link: $0.link, number: $0.number,
+                        savedAfterReads: $0.savedAfterReads ?? seriesLinkReads)
+                }
+                refreshSeriesSources()
+                return
             }
+            guard pickedLinks[book.id]?.number == number else { return }
+            pickedLinks[book.id]?.savedAfterReads = seriesLinkReads
+            queueSpineDesignRefresh(restarting: true)
         }
     }
 
-    private func setPickedLink(_ link: SeriesLinkV1?, for bookID: Int) {
-        seriesLinks[bookID] = link
-        pickedLinks[bookID] = (link, dependencies.now())
-        refreshSeriesSources()
+    /// `links`, from link read number `read`, with each pick that read may have missed
+    /// (`SeriesPick.outlasts(read:)`) in place of the link it replaces.
+    private func applyingPicks(to links: [Int: SeriesLinkV1], read: Int) -> [Int: SeriesLinkV1] {
+        var values = links
+        for (id, pick) in pickedLinks where pick.outlasts(read: read) { values[id] = pick.link }
+        return values
     }
 
     /// Books finished on today's date in earlier years, for ambient mode. Prepared when the
@@ -275,10 +311,14 @@ final class LibraryModel {
     /// Look groups read them when the library is rebuilt (`refreshSeriesSources`), and details
     /// observe them through `series(for:)`, so a pick shows at once.
     private var seriesLinks: [Int: SeriesLinkV1] = [:]
-    /// This session's series picks (`pickSeries(_:for:)`), each with its time, so a CloudKit read
-    /// that started before a pick's save doesn't undo it. A read keeps a pick unless it returns a
-    /// link chosen later.
-    @ObservationIgnored private var pickedLinks: [Int: (link: SeriesLinkV1?, at: Date)] = [:]
+    /// This session's series picks (`pickSeries(_:for:)`), by book ID, so a CloudKit read that
+    /// started before a pick's save finished doesn't undo it. The first link read to start after
+    /// the save drops the pick and shows the link iCloud holds, whichever device saved it.
+    @ObservationIgnored private var pickedLinks: [Int: SeriesPick] = [:]
+    /// The picks made this session, which number each `SeriesPick`.
+    @ObservationIgnored private var seriesPickCount = 0
+    /// The link reads started this session, which number each read.
+    @ObservationIgnored private var seriesLinkReads = 0
     /// The latest series-link save, which the next one waits for.
     @ObservationIgnored private var seriesLinkSave: Task<Void, Never>?
     /// Validated series looks of the active Hardcover snapshot's look groups.
@@ -1460,15 +1500,16 @@ final class LibraryModel {
 
     /// Reads companion designs, cover choices, series links, and series looks for the active
     /// Hardcover snapshot into their local caches, then creates missing series looks
-    /// (`createMissingSeriesLooks`) when CloudKit answered for every design and link. Looks
-    /// sampled from covers also wait for a complete cover-choice read. One task runs per account
-    /// and sync date; a newer selection cancels an older one.
-    private func queueSpineDesignRefresh() {
+    /// (`createMissingSeriesLooks`) when CloudKit answered for every design, link, and look.
+    /// Looks sampled from covers also wait for a complete cover-choice read. One task runs per
+    /// account and sync date; a newer selection cancels an older one, as does `restarting`, which
+    /// a saved series pick sets because a running read may have missed its new look group.
+    private func queueSpineDesignRefresh(restarting: Bool = false) {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         guard iCloudEnabled, hardcoverEnabled, let accountID = activeHardcoverAccountID,
             let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
         else { return }
-        if let identity = spineDesignTaskIdentity, spineDesignTask != nil,
+        if !restarting, let identity = spineDesignTaskIdentity, spineDesignTask != nil,
             identity.accountID == accountID, identity.syncedAt == snapshot.syncedAt
         {
             return
@@ -1492,11 +1533,13 @@ final class LibraryModel {
             let books = snapshot.books
             let designs = try? await dependencies.fetchSpineDesigns(accountID, books)
             let choices = try? await dependencies.fetchCoverChoices(accountID, books)
+            seriesLinkReads += 1
+            let linkRead = seriesLinkReads
             let links = try? await dependencies.fetchSeriesLinks(accountID, books)
+            let shownLinks =
+                links.map { applyingPicks(to: $0.values, read: linkRead) } ?? seriesLinks
             let keys = Set(
-                books.compactMap {
-                    SeriesDesigns.lookKey(of: $0, link: (links?.values ?? seriesLinks)[$0.id])
-                })
+                books.compactMap { SeriesDesigns.lookKey(of: $0, link: shownLinks[$0.id]) })
             let looks = try? await dependencies.fetchSeriesLooks(accountID, keys.sorted())
             guard spineDesignTaskIdentity?.requestID == requestID else { return }
             // A failed or cancelled read keeps the records already shown.
@@ -1506,23 +1549,22 @@ final class LibraryModel {
                 coverChoices = choices.values
                 rebuild = true
             }
-            if var values = links?.values {
-                for (id, pick) in pickedLinks where (values[id]?.chosenAt ?? .distantPast) < pick.at
-                {
-                    values[id] = pick.link
-                }
+            if let links {
+                pickedLinks = pickedLinks.filter { $0.value.outlasts(read: linkRead) }
+                let values = applyingPicks(to: links.values, read: linkRead)
                 if values != seriesLinks {
                     seriesLinks = values
                     rebuild = true
                 }
             }
-            if let looks, looks != seriesLooks {
-                seriesLooks = looks
+            if let looks, looks.values != seriesLooks {
+                seriesLooks = looks.values
                 if !rebuild { refreshSeriesSources() }
             }
             if rebuild { rebuildLibrary() }
-            // A design or link missing from a partial read could decide a look for good.
-            if designs?.isComplete == true, links?.isComplete == true {
+            // A design or link missing from a partial read could decide a look for good, and a
+            // look missing from one would be created again.
+            if designs?.isComplete == true, links?.isComplete == true, looks?.isComplete == true {
                 await createMissingSeriesLooks(
                     of: books, accountID: accountID,
                     samplesCovers: choices?.isComplete == true, requestID: requestID)

@@ -515,17 +515,22 @@ final class LibraryWorkflowTests: XCTestCase {
                 source: .hardcover, accountID: fixture.hardcoverAccountID, books: [book],
                 syncedAt: fixture.time)
         ])
+        // The links iCloud holds, which saves change as `SpineCloudStore.setSeriesLink` does.
+        var stored: [Int: SeriesLinkV1] = [:]
         var saves: [SeriesLinkV1?] = []
         var savesFail = false
+        var heldSave: ControlledLibraryResponse<Void>?
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
         dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
-        dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
+        dependencies.fetchSeriesLinks = { _, _ in (stored, true) }
         dependencies.saveSeriesLink = { link, accountID, bookID in
             XCTAssertEqual(accountID, fixture.hardcoverAccountID)
             XCTAssertEqual(bookID, 1)
+            if let heldSave { try await heldSave.value() }
             if savesFail { throw CloudStorageError.unavailable }
             saves.append(link)
+            stored[bookID] = link?.changesNothing == false ? link : nil
         }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -535,35 +540,125 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.series(for: book)?.all, [saga, arc])
         XCTAssertEqual(model.series(for: book)?.membership, arc, "The shortest series by default")
 
+        let save = ControlledLibraryResponse<Void>("Series link save started")
+        heldSave = save
         model.pickSeries(7, for: book)
         XCTAssertEqual(model.series(for: book)?.membership, saga, "A pick shows at once")
+        await fulfillment(of: [save.started], timeout: 5)
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(
+            model.series(for: book)?.membership, saga, "A read during the save keeps the pick")
+        heldSave = nil
+        save.resolve(())
         await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
         XCTAssertEqual(saves.count, 1)
         XCTAssertEqual(saves.last??.linkedSeriesID, 7)
         XCTAssertEqual(saves.last??.ownLook, false)
         XCTAssertEqual(saves.last??.standsAlone, false)
-
-        // A read that missed the save keeps the pick.
-        await model.becameActive()
-        await model.waitForCompanionRecords()
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
-        // Picking the shortest series deletes the link.
+        // A read that starts after the save shows the link iCloud holds, such as none once the
+        // iPhone resets the book to its default series.
+        stored = [:]
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+
+        // Picking the shortest series saves a link that changes nothing, which deletes it.
+        model.pickSeries(7, for: book)
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
         model.pickSeries(8, for: book)
         await model.waitForSeriesLinkSaves()
-        XCTAssertEqual(saves.count, 2)
-        XCTAssertNil(saves.last ?? nil)
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(saves.count, 3)
+        XCTAssertEqual(saves.last??.changesNothing, true)
+        XCTAssertNil(stored[1])
         XCTAssertEqual(model.series(for: book)?.membership, arc)
         model.pickSeries(8, for: book)
         await model.waitForSeriesLinkSaves()
-        XCTAssertEqual(saves.count, 2, "Picking the shown series saves nothing")
+        XCTAssertEqual(saves.count, 3, "Picking the shown series saves nothing")
 
-        // A failed save restores the earlier choice.
+        // A failed save restores the earlier choice, which then gives way to another device's
+        // link, even one stamped by a clock behind this one.
         savesFail = true
         model.pickSeries(7, for: book)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
         await model.waitForSeriesLinkSaves()
         XCTAssertEqual(model.series(for: book)?.membership, arc)
+        stored[1] = SeriesLinkV1(
+            accountID: fixture.hardcoverAccountID, bookID: 1, linkedSeriesID: 7,
+            chosenAt: fixture.time.addingTimeInterval(-60))
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+    }
+
+    func testAPickKeepsTheBooksOwnLookAndReplacesNotInASeries() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let saga = SeriesMembership(
+            seriesID: 7, name: "Fictional Saga", position: 12, featured: true, size: 20)
+        let arc = SeriesMembership(seriesID: 8, name: "Fictional Arc", position: 2, size: 3)
+        var book = fixture.book(1)
+        book.seriesID = 7
+        book.seriesName = "Fictional Saga"
+        book.seriesMemberships = [saga, arc]
+        try fixture.save([
+            SourceSnapshot(
+                source: .hardcover, accountID: fixture.hardcoverAccountID, books: [book],
+                syncedAt: fixture.time)
+        ])
+        // iPhone edits: **This book** keeps the book's own look; **Not in a series** stands alone.
+        for iPhoneLink in [
+            SeriesLinkV1(
+                accountID: fixture.hardcoverAccountID, bookID: 1, ownLook: true,
+                chosenAt: fixture.time),
+            SeriesLinkV1(
+                accountID: fixture.hardcoverAccountID, bookID: 1, standsAlone: true,
+                chosenAt: fixture.time),
+        ] {
+            var stored: SeriesLinkV1? = iPhoneLink
+            var saves: [SeriesLinkV1?] = []
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+            dependencies.fetchSeriesLinks = { _, _ in (stored.map { [1: $0] } ?? [:], true) }
+            dependencies.saveSeriesLink = { link, _, _ in
+                saves.append(link)
+                stored = link?.changesNothing == false ? link : nil
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            if iPhoneLink.ownLook {
+                model.pickSeries(7, for: book)
+                await model.waitForSeriesLinkSaves()
+                await model.waitForCompanionRecords()
+                XCTAssertEqual(saves.last??.linkedSeriesID, 7)
+                XCTAssertEqual(saves.last??.ownLook, true, "A pick keeps the book's own look")
+                model.pickSeries(8, for: book)
+                await model.waitForSeriesLinkSaves()
+                await model.waitForCompanionRecords()
+                XCTAssertNil(saves.last??.linkedSeriesID)
+                XCTAssertEqual(saves.last??.ownLook, true)
+                XCTAssertNotNil(stored, "The shortest series keeps a link with its own look")
+            } else {
+                XCTAssertNil(model.series(for: book))
+                model.pickSeries(8, for: book)
+                await model.waitForSeriesLinkSaves()
+                await model.waitForCompanionRecords()
+                XCTAssertEqual(
+                    saves.count, 1, "Picking the shortest series replaces standing alone")
+                XCTAssertEqual(saves.last??.changesNothing, true)
+                XCTAssertNil(stored)
+            }
+            XCTAssertEqual(model.series(for: book)?.membership, arc)
+        }
     }
 
     func testFilteredShelfStillPublishesTheUnfilteredTopShelf() async throws {
@@ -1551,7 +1646,7 @@ final class LibraryWorkflowTests: XCTestCase {
         var requestedKeys: [SeriesLookKey] = []
         dependencies.fetchSeriesLooks = { _, keys in
             requestedKeys = keys
-            return [:]
+            return ([:], true)
         }
         var created: [SeriesLookV1] = []
         dependencies.createSeriesLook = { look in
@@ -1600,12 +1695,17 @@ final class LibraryWorkflowTests: XCTestCase {
         let link = SeriesLinkV1(
             accountID: fixture.hardcoverAccountID, bookID: 1, ownLook: true,
             chosenAt: fixture.time)
-        for isComplete in [false, true] {
+        // Designs, links, and looks each answered in full, or not.
+        for complete in [
+            (false, true, true), (true, false, true), (true, true, false), (true, true, true),
+        ] {
+            let isComplete = complete == (true, true, true)
             var dependencies = fixture.dependencies()
             dependencies.sleep = { _ in }
             dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
-            dependencies.fetchSpineDesigns = { _, _ in (designs, isComplete) }
-            dependencies.fetchSeriesLinks = { _, _ in ([1: link], true) }
+            dependencies.fetchSpineDesigns = { _, _ in (designs, complete.0) }
+            dependencies.fetchSeriesLinks = { _, _ in ([1: link], complete.1) }
+            dependencies.fetchSeriesLooks = { _, _ in ([:], complete.2) }
             var created: [SeriesLookV1] = []
             dependencies.createSeriesLook = { look in
                 created.append(look)
@@ -2236,7 +2336,7 @@ private final class LibraryWorkflowFixture {
         dependencies.fetchSpineDesigns = { _, _ in ([:], true) }
         dependencies.fetchCoverChoices = { _, _ in ([:], true) }
         dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
-        dependencies.fetchSeriesLooks = { _, _ in [:] }
+        dependencies.fetchSeriesLooks = { _, _ in ([:], true) }
         dependencies.createSeriesLook = { _ in
             XCTFail("Unexpected series look")
             throw URLError(.unsupportedURL)

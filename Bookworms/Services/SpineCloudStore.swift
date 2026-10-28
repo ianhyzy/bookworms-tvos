@@ -311,7 +311,7 @@ extension SeriesLookV1 {
 /// The reader's series choice for one book: a series to draw its look from, no series, or its own
 /// look instead of its series'. The iPhone and Mac app saves every kind; picking a series in this
 /// app's book details saves the first (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`).
-/// Choosing the default deletes the record.
+/// Choosing the default deletes the record (`changesNothing`).
 struct SeriesLinkV1: Codable, Equatable, Sendable {
     var version = 1
     let accountID: String
@@ -323,6 +323,10 @@ struct SeriesLinkV1: Codable, Equatable, Sendable {
     /// Whether the book draws its own design instead of its series' look.
     var ownLook = false
     let chosenAt: Date
+
+    /// Whether the link chooses what the book draws without one: no linked series, standing
+    /// alone, or own look.
+    var changesNothing: Bool { linkedSeriesID == nil && !standsAlone && !ownLook }
 
     func isValid(accountID: String, book: Book) -> Bool {
         isValid(accountID: accountID, bookID: book.id)
@@ -575,16 +579,14 @@ actor SpineCloudStore {
             subjects: Self.byID(books))
     }
 
-    /// Reads the series looks of the active books' look groups. See
-    /// `records(_:accountID:subjects:)`.
+    /// Reads the series looks of the active books' look groups, and whether CloudKit answered
+    /// for every group. See `records(_:accountID:subjects:)`.
     func seriesLooks(accountID: String, keys: [SeriesLookKey]) async throws
-        -> [SeriesLookKey: SeriesLookV1]
+        -> (values: [SeriesLookKey: SeriesLookV1], isComplete: Bool)
     {
         try await records(
             .seriesLooks(cacheURL: seriesLookCacheURL), accountID: accountID,
-            subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first })
-        )
-        .values
+            subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first }))
     }
 
     /// Saves `look` as its group's look unless another device saved one first, and returns the
@@ -614,16 +616,21 @@ actor SpineCloudStore {
             else { throw CloudStorageError.incomplete }
             saved = value
         }
-        let kind = CompanionRecordKind.seriesLooks(cacheURL: seriesLookCacheURL)
-        var cache = loadCache(kind)
-        cache[id.recordName] = saved
-        try? saveCache(cache, to: kind, generation: cacheGenerations[kind.recordType, default: 0])
+        cacheWrite(
+            saved, named: id.recordName,
+            to: CompanionRecordKind.seriesLooks(cacheURL: seriesLookCacheURL))
         return saved
     }
 
-    /// Saves `link` as its book's series choice, or deletes the book's `SeriesLinkV1` record when
-    /// `link` is `nil`, as the iPhone and Mac do, then caches the result for offline reads. The
-    /// last writer wins: a save replaces the record another device saved.
+    /// Saves `link`'s series as its book's series choice, then caches the result for offline
+    /// reads.
+    ///
+    /// This app chooses only the series (`linkedSeriesID` and `standsAlone`), so the saved link
+    /// keeps the `ownLook` of the record CloudKit holds, which the iPhone and Mac set: none
+    /// without a record, and `link`'s for a record this app can't read. A link that then changes
+    /// nothing (`SeriesLinkV1.changesNothing`) deletes the book's `SeriesLinkV1` record, as the
+    /// iPhone and Mac do. A save retries up to three times when another device changes the record
+    /// meanwhile. `nil` deletes the record whatever it holds.
     ///
     /// Throws when CloudKit is unavailable, the save fails, or the record holds another type.
     func setSeriesLink(_ link: SeriesLinkV1?, accountID: String, bookID: Int) async throws {
@@ -635,33 +642,58 @@ actor SpineCloudStore {
         }
         let database = try await availableDatabase()
         let id = SpineCloudIdentity.seriesLinkRecordID(accountID: accountID, bookID: bookID)
+        var stored: SeriesLinkV1?
         if let link {
-            let payload = try JSONEncoder().encode(link)
-            var saved = false
-            for _ in 0..<3 where !saved {
+            var done = false
+            for _ in 0..<3 where !done {
                 let record: CKRecord
+                var exists = true
                 do {
                     record = try await database.record(for: id)
                 } catch let error as CKError where error.code == .unknownItem {
                     record = CKRecord(recordType: "SeriesLinkV1", recordID: id)
+                    exists = false
                 }
                 guard record.recordType == "SeriesLinkV1" else {
                     throw CloudStorageError.incomplete
                 }
-                record["payload"] = payload as NSData
+                let current = (record["payload"] as? Data)
+                    .flatMap { try? JSONDecoder().decode(SeriesLinkV1.self, from: $0) }
+                    .flatMap { $0.isValid(accountID: accountID, bookID: bookID) ? $0 : nil }
+                var merged = link
+                merged.ownLook = current?.ownLook ?? (exists && link.ownLook)
+                if merged.changesNothing {
+                    if exists { try await database.delete(id) }
+                    done = true
+                    continue
+                }
+                record["payload"] = try JSONEncoder().encode(merged) as NSData
                 do {
                     try await database.save(record)
-                    saved = true
+                    stored = merged
+                    done = true
                 } catch let error as CKError where error.code == .serverRecordChanged {}
             }
-            guard saved else { throw CloudStorageError.conflict }
+            guard done else { throw CloudStorageError.conflict }
         } else {
             try await database.delete(id)
         }
-        let kind = CompanionRecordKind.seriesLinks(cacheURL: seriesLinkCacheURL)
+        cacheWrite(
+            stored, named: id.recordName,
+            to: CompanionRecordKind.seriesLinks(cacheURL: seriesLinkCacheURL))
+    }
+
+    /// Writes `value`, or removes it when `nil`, in `kind`'s cache under a new generation, so a
+    /// read of that type that started earlier stops (`checkCurrentGeneration`) instead of
+    /// saving its older copy of the cache over the write.
+    private func cacheWrite<Key, Subject, Value>(
+        _ value: Value?, named recordName: String, to kind: CompanionRecordKind<Key, Subject, Value>
+    ) {
+        let generation = cacheGenerations[kind.recordType, default: 0] &+ 1
+        cacheGenerations[kind.recordType] = generation
         var cache = loadCache(kind)
-        cache[id.recordName] = link
-        try? saveCache(cache, to: kind, generation: cacheGenerations[kind.recordType, default: 0])
+        cache[recordName] = value
+        try? saveCache(cache, to: kind, generation: generation)
     }
 
     private static func byID(_ books: [Book]) -> [Int: Book] {
