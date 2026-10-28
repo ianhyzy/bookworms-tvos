@@ -1409,9 +1409,11 @@ final class LibraryModel {
                     }
                     seedSchedule()
                     rebuildLibrary()
-                    // Publish from the archive this sync uploaded so the Mac can match its sync
-                    // date. A snapshot installed since then sets `cloudPending`, so the next
-                    // loop iteration uploads it and republishes, even after a failed publish.
+                    // Publish from the archive this sync uploaded, because the iPhone and Mac
+                    // companion requires the worklist's sync date to match that archive's
+                    // snapshot to within a millisecond. A snapshot installed since then sets
+                    // `cloudPending`, so the next loop iteration uploads it and republishes, even
+                    // after a failed publish.
                     if let accountID = activeHardcoverAccountID,
                         let snapshot = remote.sources.first(where: {
                             $0.source == .hardcover && $0.accountID == accountID

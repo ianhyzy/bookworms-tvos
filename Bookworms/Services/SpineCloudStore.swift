@@ -195,9 +195,11 @@ struct CoverChoiceV1: Codable, Equatable, Sendable {
 
 /// The look a group of series books draws (`SeriesLookKey`), synced so every device draws the
 /// same one. The first device to save a group's look decides it; creating one never replaces
-/// another (`SpineCloudStore.createSeriesLook(_:)`). A companion app may later remake a look
-/// that Apple's on-device model or local defaults made (`provenance`, or the `localOrigin`) and
-/// the reader never edited; Book Wall draws the remade look on its next read.
+/// another (`SpineCloudStore.createSeriesLook(_:)`). A companion app may later remake a look the
+/// reader never edited: from a better tier when Apple's on-device model or local defaults made it
+/// (`provenance`, or the `localOrigin`), or from its own tier when it awaits its font
+/// (`font:system`). A redesign the reader asks for remakes any look. Book Wall draws the remade
+/// look on its next read.
 struct SeriesLookV1: Codable, Equatable, Sendable {
     var version = 1
     let accountID: String

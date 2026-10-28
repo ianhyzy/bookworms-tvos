@@ -52,7 +52,7 @@ Small, book-specific easter eggs for readers who know the book.
 
 ### Ground rules
 
-- Match books by stable Hardcover book ID, not by title, so translations, editions, and similarly named books don't trigger the wrong effect.
+- Match a book by its author and its title, ignoring subtitles and edition notes, as `HouseOfLeaves.isNovel` does, because each edition has its own Hardcover book ID. Never match by title alone, so similarly named books don't trigger the wrong effect.
 - Keep each effect subtle and static by default. Respect Reduce Motion, and keep text legible and VoiceOver labels unchanged.
 - Use only synced data and bundled assets. A delighter must not add network calls, Keychain reads, or work during focus movement.
 
@@ -60,7 +60,7 @@ Small, book-specific easter eggs for readers who know the book.
 
 #### House of Leaves (Mark Z. Danielewski)
 
-Color the word "house" blue wherever the app shows text about the book: the title, the details page, the description, and reviews. Match the word in other languages too, as the book does. Optionally strike through "minotaur" in red.
+Extend the blue "house" that [views](../VIEWS.md) describe to the word in other languages, as the book does. Optionally strike through "minotaur" in red.
 
 #### Infinite Jest (David Foster Wallace)
 
