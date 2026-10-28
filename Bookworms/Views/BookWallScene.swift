@@ -178,7 +178,6 @@ final class BookWallScene {
     private var collisionSubscription: Cancellable?
     private var continuingCollisionSubscription: Cancellable?
     private var layout = BookWallLayout(books: [])
-    private var signature: [Book] = []
     private var preparedBodies: [Int: ModelEntity] = [:]
     private var preparedWallID: UUID?
     private var bodies: [Int: ModelEntity] = [:]
@@ -311,7 +310,7 @@ final class BookWallScene {
         continuingCollisionSubscription?.cancel()
         renderHost = host
         host.setAmbientExponent(ambientExponent)
-        if !signature.isEmpty && !isSettled { observeLandings() }
+        if !layout.slots.isEmpty && !isSettled { observeLandings() }
         if flight != nil || idlePose != nil {
             motionSubscription?.cancel()
             motionSubscription = nil
@@ -357,14 +356,12 @@ final class BookWallScene {
     ) {
         hasUndrawnChange = true
         self.onFocusFrames = onFocusFrames
-        let books = prepared.books
         guard prepared.id != preparedWallID else {
             publishFocusFrames()
             return
         }
         dropTask?.cancel()
         cancelTransition()
-        signature = books
         preparedWallID = prepared.id
         layout = prepared.layout
         shelfThickness = Self.shelfThickness(for: layout)
@@ -392,7 +389,7 @@ final class BookWallScene {
         isSettled = false
         selectedID = nil
         isFlyingOut = false
-        guard !books.isEmpty else {
+        guard !prepared.books.isEmpty else {
             isSettled = true
             onFocusFrames([:], true)
             return
@@ -1154,14 +1151,15 @@ final class BookWallScene {
         if ribbon.parent == nil { root.addChild(ribbon) }
         let front = layout.maxCoverWidth / 2
         let top = resting.translation.y - slot.collisionThickness / 2
-        while ribbonSegments.count < Self.ribbonSegmentCount {
-            let segment = ModelEntity(mesh: mesh, materials: [Self.ribbonMaterial])
-            ribbon.addChild(segment)
-            ribbonSegments.append(segment)
-        }
-        for (index, segment) in ribbonSegments.enumerated() {
-            segment.isEnabled = index < Self.ribbonSegmentCount
-            segment.model?.mesh = index == Self.ribbonSegmentCount - 1 ? tail : mesh
+        if ribbonSegments.isEmpty {
+            ribbonSegments = (0..<Self.ribbonSegmentCount)
+                .map { index in
+                    let segment = ModelEntity(
+                        mesh: index == Self.ribbonSegmentCount - 1 ? tail : mesh,
+                        materials: [Self.ribbonMaterial])
+                    ribbon.addChild(segment)
+                    return segment
+                }
         }
         ribbon.position = [
             resting.translation.x + slot.bookHeight * 0.3, top,
