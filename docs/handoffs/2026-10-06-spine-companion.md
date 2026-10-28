@@ -45,7 +45,6 @@ Both sides encode `Date` with the default `JSONEncoder` strategy (seconds since 
 3. **Deploy `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`** (each with a `payload` Bytes field) to the production CloudKit schema before any TestFlight build uses them. See [releasing](../RELEASING.md).
 4. **Design refresh cadence**: the TV refetches every design, cover-choice, series-link, and series-look record on launch, activation, and after each cloud sync. A new design or series look for a current-year book rebuilds Book Wall, even while it is on screen. Consider subscriptions with silent push, as the iPhone uses for the worklist.
 5. **Validator alignment**: decide whether the TV should adopt the iPhone's lowercase-only `coverHash` and the account ID length bound.
-6. **Live Hardcover check**: confirm that Hardcover accepts the library query's `compilation`, `books_count`, and `primary_books_count` fields. A rejected field fails the whole library query.
 
 ## Commands
 
