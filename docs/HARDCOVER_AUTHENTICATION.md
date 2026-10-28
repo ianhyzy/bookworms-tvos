@@ -27,7 +27,7 @@ Hardcover access tokens last one week. Refresh tokens last six months and work o
 - A Keychain read that fails returns no token. The app then skips the renewal or shows **Reconnect Hardcover**, but it never deletes the saved login, and the next sync that reads Keychain recovers.
 - A login without a refresh token, such as a personal access token, works until Hardcover rejects it and then shows **Reconnect Hardcover**.
 - Social sync keys its cache on the Hardcover account rather than the token, so a renewed token keeps cached social data.
-- **Disconnect Hardcover** removes both tokens from the Apple TV and sends Hardcover one request to revoke the login, so Hardcover's Authorized Apps page stops listing the Apple TV. A renewal that finishes after the disconnect also revokes the refresh token it received. The app doesn't retry a revocation that fails, for example while offline; revoke Bookworms on that page instead. A personal access token isn't revoked, since you may use it elsewhere.
+- **Disconnect Hardcover** removes both tokens from the Apple TV and sends Hardcover one request to revoke the login, so Hardcover's Authorized Apps page stops listing the Apple TV. A renewal that finishes after the disconnect also revokes the refresh token it received, and so does a sign-in whose login the Apple TV doesn't keep, such as one whose library download fails. The app doesn't retry a revocation that fails, for example while offline; revoke Bookworms on that page instead. A personal access token isn't revoked, since you may use it elsewhere.
 
 ## Verification
 

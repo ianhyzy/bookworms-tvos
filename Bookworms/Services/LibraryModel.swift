@@ -813,8 +813,6 @@ final class LibraryModel {
                             interval += .seconds(5)
                             continue
                         case .expired:
-                            self.hardcoverDeviceAuthMessage =
-                                "The code has expired. Requesting a new code…"
                             self.startHardcoverDeviceAuth()
                             return
                         case .accessDenied:
@@ -824,6 +822,7 @@ final class LibraryModel {
                         case .success(let tokens):
                             guard !self.isLoading else {
                                 // Approval consumes the code; show a retry instead of a stopped waiter.
+                                self.revokeUnsaved(tokens)
                                 self.hardcoverDeviceAuth = nil
                                 self.hardcoverDeviceAuthMessage =
                                     "A library sync is finishing. Request a new link code to connect."
@@ -837,6 +836,12 @@ final class LibraryModel {
                                 tokens, revision: self.sourceRevision)
                             return
                         }
+                    } catch HardcoverError.invalidAuthorizationCode {
+                        // Hardcover won't accept the code again; the message offers a new one.
+                        guard !Task.isCancelled else { break }
+                        self.hardcoverDeviceAuthMessage = self.readable(
+                            HardcoverError.invalidAuthorizationCode)
+                        return
                     } catch {
                         guard !Task.isCancelled else { break }
                         self.hardcoverDeviceAuthMessage = self.readable(error)
@@ -872,10 +877,17 @@ final class LibraryModel {
         return await connectValidatedToken(HardcoverTokens(accessToken: token), revision: revision)
     }
 
+    /// Validates `tokens`, downloads the account's library, and saves both. A login that isn't
+    /// saved, because the download fails, the account changes, or another source change wins,
+    /// is revoked (`revokeUnsaved(_:)`).
     private func connectValidatedToken(_ tokens: HardcoverTokens, revision: Int) async -> Bool {
         hardcoverConnectionPhase = .validatingAccount
         message = nil
-        defer { hardcoverConnectionPhase = nil }
+        var saved = false
+        defer {
+            hardcoverConnectionPhase = nil
+            if !saved { revokeUnsaved(tokens) }
+        }
         let token = tokens.accessToken
         do {
             let accountID = try await dependencies.validateHardcover(token)
@@ -894,6 +906,7 @@ final class LibraryModel {
                         hasSnapshot: hasSnapshot)
             {
                 try saveHardcoverCredential(tokens)
+                saved = true
                 hardcoverConnected = true
                 setActiveHardcoverAccountID(accountID)
                 hardcoverSessionExpired = false
@@ -921,6 +934,7 @@ final class LibraryModel {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
             guard result.accountID == accountID else { throw HardcoverError.invalidToken }
             try saveHardcoverCredential(tokens)
+            saved = true
             hardcoverConnected = true
             hardcoverSessionExpired = false
             connectionRevision += 1
@@ -935,6 +949,15 @@ final class LibraryModel {
             sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
             return false
         }
+    }
+
+    /// Ends a device-flow login that the Apple TV won't keep, in its own task, so Hardcover's
+    /// Authorized Apps page doesn't list it. A failure is ignored, as when the reader removes a
+    /// saved login (`HardcoverSession.remove()`). A personal access token has no refresh token
+    /// and isn't revoked, since the reader may use it elsewhere.
+    private func revokeUnsaved(_ tokens: HardcoverTokens) {
+        guard let refreshToken = tokens.refreshToken else { return }
+        Task { try? await dependencies.revokeHardcoverToken(refreshToken) }
     }
 
     private func saveHardcoverCredential(_ tokens: HardcoverTokens) throws {
@@ -1011,7 +1034,7 @@ final class LibraryModel {
                 sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
                 failures.append("Hardcover: " + readable(error))
                 switch error as? HardcoverError {
-                case .invalidToken, .personalAccessTokenRequired: hardcoverSessionExpired = true
+                case .invalidToken: hardcoverSessionExpired = true
                 default: break
                 }
             }

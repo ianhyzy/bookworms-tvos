@@ -1340,6 +1340,73 @@ final class LibraryWorkflowTests: XCTestCase {
             model.hardcoverDeviceAuthMessage, "Finishing the refresh must preserve retry.")
     }
 
+    func testARejectedDeviceCodeStopsPolling() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        var dependencies = fixture.dependencies()
+        dependencies.requestHardcoverDeviceAuth = {
+            HardcoverDeviceAuth(
+                deviceCode: "fixture_device_code", userCode: "TEST-CODE",
+                verificationURI: URL(string: "https://hardcover.app/link")!,
+                verificationURIComplete: URL(string: "https://hardcover.app/link?c=TESTCODE")!,
+                expiresIn: 900, interval: 1)
+        }
+        let polled = expectation(description: "Device code polled")
+        var polls = 0
+        dependencies.pollHardcoverDeviceToken = { _ in
+            polls += 1
+            if polls == 1 { polled.fulfill() }
+            throw HardcoverError.invalidAuthorizationCode
+        }
+        // Bounds the polling a regression would repeat without waiting.
+        var sleeps = 0
+        dependencies.sleep = { _ in
+            sleeps += 1
+            if sleeps > 3 { throw CancellationError() }
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.startHardcoverDeviceAuth()
+        await fulfillment(of: [polled], timeout: 5)
+        // The polling task runs on the main actor without suspending after the rejection, so it
+        // has stopped or polled again before this test resumes.
+        XCTAssertEqual(polls, 1, "Hardcover won't accept a rejected code again")
+        XCTAssertEqual(
+            model.hardcoverDeviceAuthMessage,
+            HardcoverError.invalidAuthorizationCode.errorDescription)
+        XCTAssertNotNil(model.hardcoverDeviceAuth, "The card keeps New code beside the message")
+    }
+
+    func testADeviceSignInThatIsntKeptRevokesItsLogin() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        var dependencies = fixture.dependencies()
+        dependencies.requestHardcoverDeviceAuth = {
+            HardcoverDeviceAuth(
+                deviceCode: "fixture_device_code", userCode: "TEST-CODE",
+                verificationURI: URL(string: "https://hardcover.app/link")!,
+                verificationURIComplete: URL(string: "https://hardcover.app/link?c=TESTCODE")!,
+                expiresIn: 900, interval: 1)
+        }
+        dependencies.pollHardcoverDeviceToken = { _ in .success(fixture.tokens(2)) }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        dependencies.fetchHardcover = { _, _ in throw HardcoverError.http(503) }
+        dependencies.sleep = { _ in }
+        let revoked = expectation(description: "Unsaved login revoked")
+        dependencies.revokeHardcoverToken = { token in
+            XCTAssertEqual(token, "hc_rt_fictional_2")
+            revoked.fulfill()
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.startHardcoverDeviceAuth()
+        await fulfillment(of: [revoked], timeout: 5)
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertNil(fixture.secrets[HardcoverSession.refreshAccount])
+    }
+
     func testConnectingCWASkipsTheDailyGate() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

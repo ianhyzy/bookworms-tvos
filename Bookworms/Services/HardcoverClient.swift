@@ -29,23 +29,16 @@ enum TransientRetry {
 }
 
 enum HardcoverError: LocalizedError {
-    case invalidToken, invalidAuthorizationCode, personalAccessTokenRequired
+    case invalidToken, invalidAuthorizationCode
     case insufficientScope, forbidden
     case http(Int)
     case rejected, incomplete
-    case deviceFlowDenied, deviceFlowExpired
     var errorDescription: String? {
         switch self {
         case .invalidToken:
             "The Hardcover login is invalid or expired. Reconnect in Settings."
         case .invalidAuthorizationCode:
             "Hardcover rejected this sign-in code. Select New code to try again."
-        case .deviceFlowDenied:
-            "Hardcover authorization was denied. Reconnect in Settings."
-        case .deviceFlowExpired:
-            "The linking code has expired. Generate a new code to reconnect."
-        case .personalAccessTokenRequired:
-            "Sign in with Hardcover in Settings → Sources. Legacy credentials are no longer supported. Your saved shelf is still available."
         case .insufficientScope:
             "This token needs read:me:content, read:library, and read:catalog:data. Create a token with these read permissions and reconnect."
         case .forbidden:
