@@ -421,6 +421,32 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(AppAppearance.dark.colorScheme, .dark)
     }
 
+    func testUnknownSavedChoicesKeepTheOtherPreferences() throws {
+        let saved = Data(
+            #"{"enabled":["My Shelf","Retired View","Feed"],"readerID":7,"comparisonOrder":"Retired order","sharedReadsSort":"Rating disagreement","comparisonCount":25,"ambientViews":["Book Club","Retired View"],"ambientExcludesShelf":true,"ambientMinutes":15,"sessionMinutes":60,"offeredViews":["My Shelf","Retired View"]}"#
+                .utf8)
+        let preferences = try JSONDecoder().decode(ViewPreferences.self, from: saved)
+        XCTAssertEqual(preferences.enabled, [.shelf, .following])
+        XCTAssertEqual(preferences.readerID, 7)
+        XCTAssertEqual(preferences.comparisonOrder, ViewPreferences().comparisonOrder)
+        XCTAssertEqual(preferences.sharedReadsSort, .disagreement)
+        XCTAssertEqual(preferences.comparisonCount, 25)
+        XCTAssertEqual(preferences.ambientViews, [.shared])
+        XCTAssertEqual(preferences.ambientExcludesShelf, true)
+        XCTAssertEqual(preferences.ambientMinutes, 15)
+        XCTAssertEqual(preferences.sessionMinutes, 60)
+        XCTAssertEqual(preferences.offeredViews, [.shelf])
+        XCTAssertEqual(
+            try JSONDecoder()
+                .decode(ViewPreferences.self, from: JSONEncoder().encode(preferences)),
+            preferences)
+
+        let shelf = try JSONDecoder()
+            .decode(ShelfPreferences.self, from: Data(#"{"sort":"Retired","reversed":true}"#.utf8))
+        XCTAssertEqual(shelf.sort, .dateRead)
+        XCTAssertTrue(shelf.reversed)
+    }
+
     func testShelfPaletteVariants() {
         let darkWood = ShelfPalette(isDark: true)
         XCTAssertTrue(darkWood.isWood)

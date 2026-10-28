@@ -110,6 +110,32 @@ struct ViewPreferences: Codable, Equatable {
     }
 }
 
+extension ViewPreferences {
+    /// Decodes each choice on its own. A view or option this build doesn't know, such as one an
+    /// earlier or later build saved, drops out or falls back to its default instead of discarding
+    /// every saved preference.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func value<Value: Decodable>(_ key: CodingKeys) -> Value? {
+            try? container.decodeIfPresent(Value.self, forKey: key)
+        }
+        func views(_ key: CodingKeys) -> [BookwormsView]? {
+            (value(key) as [String]?)?.compactMap(BookwormsView.init(rawValue:))
+        }
+        self.init()
+        enabled = views(.enabled) ?? enabled
+        readerID = value(.readerID)
+        comparisonOrder = value(.comparisonOrder) ?? comparisonOrder
+        sharedReadsSort = value(.sharedReadsSort) ?? sharedReadsSort
+        comparisonCount = value(.comparisonCount) ?? comparisonCount
+        ambientViews = views(.ambientViews)
+        ambientExcludesShelf = value(.ambientExcludesShelf)
+        ambientMinutes = value(.ambientMinutes) ?? ambientMinutes
+        sessionMinutes = value(.sessionMinutes) ?? sessionMinutes
+        offeredViews = views(.offeredViews)
+    }
+}
+
 @MainActor @Observable
 final class BookwormsCoordinator {
     var current = BookwormsView.shelf
