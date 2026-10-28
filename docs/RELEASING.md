@@ -122,7 +122,7 @@ Paste this text into the **Apple TV Privacy Policy** field. Update it with the p
 ```text
 Bookworms privacy policy
 
-Effective October 16, 2026. Contact: bookworms@ian.gay
+Effective October 28, 2026. Contact: bookworms@ian.gay
 Web version: ian.gay/bookworms-privacy-policy
 
 Summary
@@ -136,12 +136,12 @@ When you connect Hardcover, Bookworms saves your sign-in in the Apple TV's Keych
 
 Bookworms only reads this information and never changes your Hardcover account. Hardcover's policies govern the data Hardcover holds, including the moderation of reviews.
 
-Covers and profile photos download from the addresses Hardcover provides. Those servers receive standard connection information, such as your IP address. Your settings are stored in the app.
+Covers and profile photos download from the addresses Hardcover provides. For spine designs made by Bookworms on your iPhone or Mac, Book Wall downloads fonts from Google Fonts, which receives the names of those fonts. Each of these servers receives standard connection information, such as your IP address. Your settings are stored in the app.
 
 Where data is stored
 Downloaded information, images, and settings stay on your Apple TV. Bookworms may remove cached data when space is needed and download it again at the next sync. A troubleshooting log records the status and timing of recent requests. It excludes credentials and book content, and it never leaves your Apple TV.
 
-iCloud storage is optional and off by default. If you turn it on, Bookworms saves a copy of your library information, including your own reviews, to your private iCloud database so your Apple devices can share and restore it. The developer can't access that copy. It excludes your Hardcover sign-in, images, and social information. Apple's privacy policy governs iCloud.
+iCloud storage is optional and off by default. If you turn it on, Bookworms saves a copy of your library information, including your own reviews, to your private iCloud database so your Apple devices can share and restore it. It excludes your Hardcover sign-in, images, and social information. Bookworms on your Apple devices also shares spine designs, cover choices, and series choices in that database. The developer can't access any of it. Apple's privacy policy governs iCloud.
 
 Your choices
 - Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV and asks Hardcover to end it.
@@ -156,14 +156,14 @@ Changes
 Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new effective date.
 ```
 
-Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, iCloud storage as off by default, an iCloud copy that includes your own reviews and that your Apple devices share, and no AI or font requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. Companion spines (`BookPresentation.showsCompanionSpines`) request Google Fonts faces during Book Wall preparation; update both texts before uploading a candidate with that switch on. iCloud storage is opt-in.
+Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, Google Fonts requests for the fonts of companion spines (`BookPresentation.showsCompanionSpines`), iCloud storage as off by default, an iCloud copy that includes your own reviews and that your Apple devices share with their spine designs, cover choices, and series choices, and no AI requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
 
 ## Verify the release candidate
 
 Follow [the testing procedure](TESTING.md) and keep results with the exact candidate build:
 
 - The minimum/current simulator matrix (`python3 scripts/test-worker.py --detach --profile major`). Missing runtimes and unexpected skips block verification.
-- On Apple TV: navigation and focus, covers and shelf layout, both appearances, VoiceOver, Reduce Motion, Top Shelf, and ambient sessions.
+- On Apple TV: navigation and focus, covers and shelf layout, both appearances, Reduce Motion, Top Shelf, and ambient sessions.
 - From viewing distance on Apple TV: legible captions and headings, with no user-visible text below 23 points, in details, the series pop-up, Feed cards, and the Ambient page. Also check Book Wall's shelf label on a wall with the most columns the library produces. Where the label would letter below 23 points, the shelf front extends downward and the label grows with it. Pass when the label reads from viewing distance, sits within the shelf front, and the shelf's bottom edge stays on screen.
 - Hardcover connection, explicit sync, automatic daily limits, offline recovery, and social views with spoiler controls.
 - On a signed Apple TV, a real Hardcover sign-in and a token renewal through `api.hardcover.app/oauth2/device` and `api.hardcover.app/oauth2/token`. Tests answer these endpoints with stubs, so only a real login shows that Hardcover serves them there. Don't replay a spent refresh token to see Hardcover's reply: that revokes the login. The tests cover the reply instead.
