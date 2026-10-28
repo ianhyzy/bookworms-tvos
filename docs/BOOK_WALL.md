@@ -43,7 +43,7 @@ For *House of Leaves*, the spine and shelf label letter each "house" in its blue
 
 ## Series designs
 
-Books of one series share a spine look, as on the iPhone and Mac companions (`SeriesDesigns`, with the same rules and names):
+Books of one series share a spine look, as on the iPhone and Mac companions (`SeriesDesigns`, with the same rules):
 
 - **Style series.** Hardcover can list a book in several series. `SeriesDesigns.styleSeries(of:link:)` picks the one that decides its look: by default its shortest series, so a long series with shorter series inside it doesn't make every book look the same. Compilations, such as omnibuses, come last; then the series with the fewest books, with an unknown or one-book size last; then Hardcover's featured series; then the lower series ID. A book synced before its memberships were fetched uses its featured series. A [series link](#series-links-and-looks) replaces the default with another series, with the book's position from that membership, or with no series.
 - **Look groups.** Books share a look when they have the same look key (`SeriesDesigns.lookKey(of:link:)`): the same style series and the same first author. Authors split on ", " and compare with case and diacritics folded, letters and digits only. For long series that Hardcover doesn't split, `SeriesDesigns.subseries` also groups titles: when the style series is Discworld, books share a look only within reading-order groups such as City Watch or Witches, and a Discworld book no group names keeps its own design. The key is the series ID and a group string: the Discworld group or nothing, then `|` and the folded first author, such as `|terrypratchett` or `City Watch|terrypratchett`. `SeriesDesigns.matches(_:_:)` compares two books' keys without links.

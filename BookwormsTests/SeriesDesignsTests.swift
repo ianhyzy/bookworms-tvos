@@ -53,6 +53,17 @@ final class SeriesDesignsTests: XCTestCase {
             standsAlone: standsAlone, ownLook: ownLook, chosenAt: Date(timeIntervalSince1970: 0))
     }
 
+    func testLookGroupsLeaveOutBooksThatKeepTheirOwnLook() {
+        let books = [book(1), book(2), book(3), book(4, series: nil)]
+        let groups = SeriesDesigns.lookGroups(books, links: [2: link(2, ownLook: true)])
+        XCTAssertEqual(
+            groups.mapValues { $0.map(\.id) },
+            [SeriesLookKey(seriesID: 7, group: "|mattdinniman"): [1, 3]])
+        XCTAssertEqual(
+            SeriesDesigns.authorKeys(of: book(5, author: "Matt Dinniman, Jeff Hays")),
+            ["mattdinniman", "jeffhays"])
+    }
+
     func testStyleSeriesFollowsTheLinkElseTheShortestSeries() throws {
         var guards = book(1, series: 1018, position: 8, author: "Terry Pratchett")
         guards.seriesMemberships = [

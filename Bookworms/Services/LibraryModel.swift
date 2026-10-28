@@ -1588,14 +1588,8 @@ final class LibraryModel {
     private func createMissingSeriesLooks(
         of books: [Book], accountID: String, samplesCovers: Bool, requestID: UUID
     ) async {
-        var groups: [SeriesLookKey: [Book]] = [:]
-        for book in books where seriesLinks[book.id]?.ownLook != true {
-            if let key = SeriesDesigns.lookKey(of: book, link: seriesLinks[book.id]),
-                seriesLooks[key] == nil
-            {
-                groups[key, default: []].append(book)
-            }
-        }
+        let groups = SeriesDesigns.lookGroups(books, links: seriesLinks)
+            .filter { seriesLooks[$0.key] == nil }
         guard !groups.isEmpty else { return }
         let shown = Dictionary(
             allBooks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

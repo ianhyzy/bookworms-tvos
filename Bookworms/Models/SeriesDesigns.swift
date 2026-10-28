@@ -5,7 +5,7 @@ import Foundation
 /// (`SeriesDesigns.subseries`), and the same first author.
 struct SeriesLookKey: Hashable, Comparable, Sendable {
     let seriesID: Int
-    /// The Discworld group, or "", then "|" and the first author's `SeriesDesigns.authors(of:)`
+    /// The Discworld group, or "", then "|" and the first author's `SeriesDesigns.authorKeys(of:)`
     /// key, such as "City Watch|terrypratchett".
     let group: String
 
@@ -16,7 +16,8 @@ struct SeriesLookKey: Hashable, Comparable, Sendable {
 
 /// Decides which books in a series draw with one spine look, so a series looks alike on the
 /// shelf: the same font and colors, with only the title, author, and thickness changing. The
-/// rules and names match the iPhone companion's `SeriesDesigns`.
+/// rules match the iPhone companion's `SeriesDesigns`, and so do the names of `styleSeries`,
+/// `lookKey`, `authorKeys`, and `lookGroups`, though this app's helpers take its own types.
 ///
 /// A look group (`SeriesLookKey`) draws its synced series look (`SeriesLookV1`) when one exists.
 /// Without one, each book draws the design of the group's best-ranked book that can lend it
@@ -60,7 +61,22 @@ enum SeriesDesigns {
             subseries = group
         }
         return SeriesLookKey(
-            seriesID: series, group: subseries + "|" + (authors(of: book).first ?? ""))
+            seriesID: series, group: subseries + "|" + (authorKeys(of: book).first ?? ""))
+    }
+
+    /// Groups `books` by look key (`lookKey(of:link:)`, with `links`), leaving out books without
+    /// one and books whose link keeps their own look, as the iPhone companion's
+    /// `lookGroups(_:)` does.
+    static func lookGroups(_ books: [Book], links: [Int: SeriesLinkV1] = [:])
+        -> [SeriesLookKey: [Book]]
+    {
+        var groups: [SeriesLookKey: [Book]] = [:]
+        for book in books where links[book.id]?.ownLook != true {
+            if let key = lookKey(of: book, link: links[book.id]) {
+                groups[key, default: []].append(book)
+            }
+        }
+        return groups
     }
 
     /// Returns whether `book` and `other` share a series look: the same look group
@@ -127,7 +143,7 @@ enum SeriesDesigns {
 
     /// The book's authors in order, compared without case, diacritics, spaces, or punctuation.
     /// Libraries join several authors with ", ".
-    static func authors(of book: Book) -> [String] {
+    static func authorKeys(of book: Book) -> [String] {
         book.author.components(separatedBy: ", ")
             .map {
                 String(
@@ -200,22 +216,17 @@ enum SeriesDesigns {
     /// source maps to itself, and a book that draws its own design and lends it to no one is
     /// absent.
     ///
-    /// Each look group (`lookKey(of:link:)`, with `links`) is decided in `ranksBefore` order. A
-    /// book takes the best-ranked earlier root whose font, from `fonts`, is usable and can letter
-    /// it (`canLetter`); otherwise it is a root itself. Only a root lends its design, so no book
-    /// draws a design another book borrowed. The result doesn't depend on the order of `books`.
+    /// Each look group (`lookGroups(_:links:)`) is decided in `ranksBefore` order, so a book
+    /// whose link keeps its own look neither lends nor borrows. A book takes the best-ranked
+    /// earlier root whose font, from `fonts`, is usable and can letter it (`canLetter`);
+    /// otherwise it is a root itself. Only a root lends its design, so no book draws a design
+    /// another book borrowed. The result doesn't depend on the order of `books`.
     static func sources(
         books: [Book], fonts: [Int: String], links: [Int: SeriesLinkV1] = [:],
         canLetter: (Book, String) -> Bool = { _, _ in true }
     ) -> [Int: Int] {
         var sources: [Int: Int] = [:]
-        var groups: [SeriesLookKey: [Book]] = [:]
-        for book in books {
-            if let key = lookKey(of: book, link: links[book.id]) {
-                groups[key, default: []].append(book)
-            }
-        }
-        for books in groups.values {
+        for books in lookGroups(books, links: links).values {
             var roots: [Book] = []
             for book in books.sorted(by: { ranksBefore($0, $1, links: links) }) {
                 if let root = roots.first(where: { root in
