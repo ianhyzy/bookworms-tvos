@@ -16,8 +16,38 @@ struct ReaderBook: Codable, Identifiable, Hashable, Sendable {
     let finished: String?
     /// Hardcover likes on the review; `nil` in snapshots saved before likes were fetched.
     var likes: Int? = nil
+    /// `review` as inert display text. Sorting and view bodies read it repeatedly, so it's
+    /// cleaned once when the book is created or decoded. The social cache doesn't store it.
+    let reviewText: String?
     var id: Int { book.id }
-    var reviewText: String? { ReviewText.clean(review) }
+
+    init(
+        book: Book, rating: Double?, review: String?, hasSpoilers: Bool, finished: String?,
+        likes: Int? = nil
+    ) {
+        self.book = book
+        self.rating = rating
+        self.review = review
+        self.hasSpoilers = hasSpoilers
+        self.finished = finished
+        self.likes = likes
+        reviewText = ReviewText.clean(review)
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            book: container.decode(Book.self, forKey: .book),
+            rating: container.decodeIfPresent(Double.self, forKey: .rating),
+            review: container.decodeIfPresent(String.self, forKey: .review),
+            hasSpoilers: container.decode(Bool.self, forKey: .hasSpoilers),
+            finished: container.decodeIfPresent(String.self, forKey: .finished),
+            likes: container.decodeIfPresent(Int.self, forKey: .likes))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case book, rating, review, hasSpoilers, finished, likes
+    }
 }
 
 /// A community member's written review of a book, fetched on demand for the detail view.

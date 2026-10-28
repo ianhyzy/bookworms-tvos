@@ -263,7 +263,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(disagreement.map(\.id), [3, 1, 2, 4, 5, 6])
     }
 
-    func testReviewsAreInertAndMissingReviewIsNotInvented() {
+    func testReviewsAreInertAndMissingReviewIsNotInvented() throws {
         XCTAssertNil(ReviewText.clean("  "))
         XCTAssertEqual(
             ReviewText.clean(
@@ -271,6 +271,11 @@ final class SocialFeatureTests: XCTestCase {
             "Hello & goodbye\nlink")
         let book = item(1, rating: 4, review: nil)
         XCTAssertNil(book.reviewText)
+        // The cache stores the raw review; decoding cleans it again.
+        let data = try JSONEncoder().encode(item(2, rating: 4, review: "<p>Kept &amp; clean</p>"))
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("reviewText"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(ReaderBook.self, from: data).reviewText, "Kept & clean")
     }
 
     func testViewPreferencesStayBoundedAndKeepOneSidebarView() throws {
