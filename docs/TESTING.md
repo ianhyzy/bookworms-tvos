@@ -29,7 +29,7 @@ python3 scripts/test-local.py
 
 The runner creates a disposable Apple TV 4K simulator using the newest installed tvOS runtime. It retains the build log, `.xcresult` bundle, coverage, exported screenshots, and Markdown/JSON reports under `.local/test-results/`, then deletes only the simulator it created. Each run uses its own derived-data directory. A Local run then repeats the Book Wall navigation and offline-policy test classes on a second disposable simulator with Reduce Motion on, reusing the first build; the UI tests fail if the setting did not apply. With `--major`, this pass runs on the last runtime in the matrix and is reported as that runtime **with Reduce Motion**. It does not read 1Password or configure real accounts. Xcode and the selected tvOS runtimes must already be installed.
 
-When [simslim](https://github.com/MobAI-App/simslim) is installed (`brew install mobai-app/tap/simslim`), the runner boots each disposable simulator with `simslim on <id> --except siri,icloud`, which turns off background daemons the tests don't use and cuts the simulator's memory footprint so more simulators fit at once. Siri and iCloud services stay on for on-device models and CloudKit. Without simslim, the runner boots a stock simulator. simslim changes only the simulator it creates, never other open simulators, and `report.json` records the kept categories under `simslim`.
+When [simslim](https://github.com/MobAI-App/simslim) is installed (`brew install mobai-app/tap/simslim`), the runner boots each disposable simulator with `simslim on <id> --except siri,icloud`, which turns off background daemons the tests don't use and cuts the simulator's memory footprint so more simulators fit at once. Siri and iCloud services stay on for on-device models and CloudKit. Without simslim, or when `simslim on` fails, the runner boots a stock simulator; `report.json` then records `failed` under `simslim`. simslim changes only the simulator it creates, never other open simulators, and `report.json` records the kept categories under `simslim`.
 
 For a faster service and model check:
 
@@ -61,7 +61,7 @@ XcodeGen preserves the plans through `project.yml`. After adding Swift files, ru
 For a complete Mac-only cycle:
 
 1. Before implementation, retain a Local run against the starting source. Keep that result separate from checks of the changed code.
-2. Run focused tests while developing. Verify the runner without Xcode using `python3 -m unittest discover -s scripts -p 'test_test_local.py'`. Run `xcrun swift-format lint --strict` on each edited Swift file.
+2. Run focused tests while developing. Verify the runner and worker without Xcode using `python3 -m unittest discover -s scripts -p 'test_test_*.py'`. Run `xcrun swift-format lint --strict` on each edited Swift file.
 3. Regenerate the project if needed, finish source edits, then run `python3 scripts/test-local.py --major`. Do not edit source while it runs. Review failures before selecting any reruns.
 4. Build the ordinary simulator executable with `xcodebuild -project Bookworms.xcodeproj -scheme BookwormsDevice -configuration Release -destination 'generic/platform=tvOS Simulator' -derivedDataPath .local/release-simulator-check/DerivedData CODE_SIGNING_ALLOWED=NO build`. Save the build log. Inspect the app and embedded Top Shelf executable with `xcrun otool -l`; neither may contain `__llvm_prf*` or `__llvm_cov*` sections. This scheme uses a coverage-disabled default plan.
 5. Review coverage, accessibility results, screenshots, documentation links, and the final diff. Record any remaining checks alongside the result artifacts. Compile `BookwormsLive` with `build-for-testing` separately when changing its checks; compilation does not verify live-provider compatibility.
@@ -86,7 +86,7 @@ The runner exports stable screenshot names and `visual-review.html` for review. 
 python3 scripts/test-local.py --major --baseline-dir /absolute/path/to/approved-screenshots
 ```
 
-Organize references as `tvOS-26.0/*.png` and `tvOS-27.0/*.png`, retaining exported filenames. PNG byte comparisons flag changed images; they do not establish visual correctness. The runner never writes to the reference directory or approves a baseline. Inspect differences, accessibility findings, loaded artwork, and focus evidence before accepting visual changes. Native VoiceOver behavior and TV-distance appearance remain device checks.
+Organize references as `tvOS-26.0/*.png` and `tvOS-27.0/*.png`, plus `tvOS-27.0-reduce-motion/*.png` for the Reduce Motion pass on the last runtime, retaining exported filenames. PNG byte comparisons flag changed images; they do not establish visual correctness. The runner never writes to the reference directory or approves a baseline. Inspect differences, accessibility findings, loaded artwork, and focus evidence before accepting visual changes. Native VoiceOver behavior and TV-distance appearance remain device checks.
 
 ## Read-only live-service checks
 

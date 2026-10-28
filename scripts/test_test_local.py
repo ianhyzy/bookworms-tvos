@@ -177,6 +177,7 @@ final class DeviceTests: XCTestCase { func testDeviceOnly() {} }
     def test_method_selection_and_plan_exclusion(self):
         self.plan["testTargets"][0]["skippedTests"] = ["ExampleTests/testSecond()"]
         self.assertEqual(self.discover(), REQUIRED)
+        del self.plan["testTargets"][0]["skippedTests"]
         self.plan["testTargets"][0]["selectedTests"] = ["ExampleTests/testExample()"]
         self.assertEqual(self.discover(), REQUIRED)
 
@@ -423,12 +424,37 @@ class ExecutionTests(unittest.TestCase):
             self.assertFalse(record["simulator_deleted"])
             self.assertIn("cleanup failed", record["failures"][0])
 
+    def test_failed_simslim_falls_back_to_a_stock_boot(self):
+        device = "12345678-1234-1234-1234-123456789ABC"
+        success = subprocess.CompletedProcess([], 0, stderr="")
+
+        def checked(arguments, **kwargs):
+            if arguments[0] == "simslim":
+                raise subprocess.CalledProcessError(1, arguments)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "tvOS-27.0"
+            with mock.patch.object(runner, "mute_simulator_audio", return_value={"enabled": False}), \
+                 mock.patch.object(runner, "command_text", return_value=device), \
+                 mock.patch.object(runner.shutil, "which", return_value="/usr/local/bin/simslim"), \
+                 mock.patch.object(runner, "run", side_effect=checked) as checked_run, \
+                 mock.patch.object(runner, "inspect_results", return_value={"failures": []}), \
+                 mock.patch.object(runner.subprocess, "run", side_effect=[success] * 4) as process:
+                record = runner.execute_runtime({"version": "27.0", "identifier": "runtime"},
+                                                {"identifier": "tv"}, output, "Unit", REQUIRED)
+            self.assertEqual(record["status"], "passed")
+            self.assertEqual(record["simslim"], "failed")
+            self.assertEqual(process.call_args_list[0].args[0], ["xcrun", "simctl", "boot", device])
+            self.assertEqual(checked_run.call_args_list[-1].args[0],
+                             ["xcrun", "simctl", "bootstatus", device, "-b"])
+
     def test_offline_processes_never_inherit_bootstrap_credentials(self):
         variables = {"PATH": "/bin", "HARDCOVER_BOOTSTRAP_TOKEN": "secret",
                      "SIMCTL_CHILD_CWA_BOOTSTRAP_PASSWORD": "secret", "TEST_RUNNER_GEMINI_BOOTSTRAP_TOKEN": "secret",
                      "TEST_RUNNER_VERIFY_LIVE_SERVICES": "1", "VERIFY_LIVE_SERVICES": "1"}
         with mock.patch.dict(os.environ, variables, clear=True):
-            self.assertEqual(runner.offline_environment(), {"PATH": "/bin"})
+            # Git subprocesses also ignore the owner's global configuration.
+            self.assertEqual(runner.offline_environment(), {"PATH": "/bin", "GIT_CONFIG_GLOBAL": "/dev/null"})
 
     def test_reduce_motion_pass_selects_its_classes_and_requires_each(self):
         required = REQUIRED + ["BookwormsUITests/BookWallNavigationTests/testReplay",
@@ -450,19 +476,22 @@ class ExecutionTests(unittest.TestCase):
             required = ["BookwormsUITests/BookWallNavigationTests/testReplay",
                         "BookwormsUITests/OfflinePolicyUITests/testGuard",
                         "BookwormsTests/OfflinePolicyTests/testGuard", "BookwormsTests/OtherTests/testOther"]
-            inventory = {"runtimes": [{"isAvailable": True, "version": "27.0", "identifier": "com.apple.tvOS-27-0"}],
-                         "devicetypes": [{"identifier": "Apple-TV-4K-3rd-generation"}]}
+            inventory = {"runtimes": [
+                {"isAvailable": True, "version": version, "identifier": "com.apple.tvOS-" + version}
+                for version in ("26.0", "27.0")
+            ], "devicetypes": [{"identifier": "Apple-TV-4K-3rd-generation"}]}
             with mock.patch.object(runner, "source_identity", return_value={"sha256": "unchanged"}), \
                  mock.patch.object(runner, "command_text", return_value="Xcode test"), \
                  mock.patch.object(runner, "discover_required_tests", return_value=required), \
                  mock.patch.object(runner, "command_json", return_value=inventory), \
                  mock.patch.object(runner, "execute_runtime", side_effect=execute):
-                code = runner.main(["--runtime", "27.0", "--output", str(output)])
+                code = runner.main(["--runtime", "26.0", "--runtime", "27.0", "--output", str(output)])
             self.assertEqual(code, 0)
-            self.assertEqual(calls, [("tvOS-27.0", False, None, required),
+            self.assertEqual(calls, [("tvOS-26.0", False, None, required),
+                                     ("tvOS-27.0", False, None, required),
                                      ("tvOS-27.0-reduce-motion", True, "tvOS-27.0", required[:3])])
             saved = json.loads((output / "report.json").read_text())
-            self.assertEqual(saved["requested_runtimes"], ["27.0", "27.0 with Reduce Motion"])
+            self.assertEqual(saved["requested_runtimes"], ["26.0", "27.0", "27.0 with Reduce Motion"])
 
     def test_major_cannot_silently_be_narrowed_to_unit_or_one_runtime(self):
         with self.assertRaises(SystemExit):

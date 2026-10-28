@@ -357,6 +357,11 @@ def mute_simulator_audio():
     return {"domain": domain, "key": key, "enabled": False}
 
 
+def simulator_name(output):
+    """Names the disposable simulator for a runtime folder; the worker checks this name before deleting."""
+    return "Bookworms tests " + output.parent.name
+
+
 def execute_runtime(runtime, device_type, output, plan, required, baseline=None, reduce_motion=False,
                     derived_data=None):
     """Runs `required` tests on a new simulator, then deletes it.
@@ -370,7 +375,7 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None,
     device = None
     try:
         record["audio_output"] = mute_simulator_audio()
-        device = command_text(["xcrun", "simctl", "create", "Bookworms tests " + output.parent.name,
+        device = command_text(["xcrun", "simctl", "create", simulator_name(output),
                                device_type["identifier"], runtime["identifier"]])
         if not re.fullmatch(r"[0-9a-fA-F-]{36}", device):
             device = None
@@ -380,8 +385,15 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None,
         if shutil.which("simslim"):
             # Boots the new simulator without background daemons the tests don't use. Siri keeps
             # on-device models and icloud keeps CloudKit and account services available.
-            run(["simslim", "on", device, "--except", SIMSLIM_KEEP], capture_output=True, text=True)
-            record["simslim"] = SIMSLIM_KEEP
+            try:
+                run(["simslim", "on", device, "--except", SIMSLIM_KEEP], capture_output=True, text=True)
+                record["simslim"] = SIMSLIM_KEEP
+            except subprocess.CalledProcessError:
+                # Falls back to a stock boot. simslim may have booted the device before failing,
+                # so this boot's result is ignored; bootstatus below confirms the boot.
+                record["simslim"] = "failed"
+                subprocess.run(["xcrun", "simctl", "boot", device], capture_output=True,
+                               env=offline_environment())
         else:
             run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
         run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
@@ -523,7 +535,9 @@ def parse_arguments(argv=None):
     parser.add_argument("--runtime", action="append", help="Exact tvOS version or runtime identifier; repeat for multiple runtimes")
     parser.add_argument("--major", action="store_true", help="Run Local on every required runtime in TestPlans/runtime-matrix.json")
     parser.add_argument("--output", type=Path, help="New artifact directory outside source control; must not already exist")
-    parser.add_argument("--baseline-dir", type=Path, help="Read-only approved screenshots, organized as tvOS-VERSION/*.png")
+    parser.add_argument("--baseline-dir", type=Path,
+                        help="Read-only approved screenshots, organized as tvOS-VERSION/*.png, plus "
+                             "tvOS-VERSION-reduce-motion/*.png for the last runtime's Reduce Motion pass")
     args = parser.parse_args(argv)
     if args.major and (args.plan != "Local" or args.runtime):
         parser.error("--major requires the Local plan and configured matrix; omit --plan Unit and --runtime")
@@ -594,5 +608,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     sys.exit(main())
