@@ -136,11 +136,15 @@ final class CacheTests: XCTestCase {
 
     func testDailyRefreshDoesNotBypassClockRollback() {
         let now = Date()
-        XCTAssertFalse(
-            LibraryModel.needsRefresh(syncedAt: now.addingTimeInterval(-86399), now: now))
-        XCTAssertTrue(LibraryModel.needsRefresh(syncedAt: now.addingTimeInterval(-86400), now: now))
-        XCTAssertFalse(LibraryModel.needsRefresh(syncedAt: now.addingTimeInterval(1), now: now))
-        XCTAssertTrue(LibraryModel.needsRefresh(syncedAt: nil, now: now))
+        func isDue(syncedAt: Date?) -> Bool {
+            RefreshPolicy.isDue(
+                lastAttempt: syncedAt, lastSuccess: syncedAt, hasSnapshot: true, manual: false,
+                now: now)
+        }
+        XCTAssertFalse(isDue(syncedAt: now.addingTimeInterval(-86399)))
+        XCTAssertTrue(isDue(syncedAt: now.addingTimeInterval(-86400)))
+        XCTAssertFalse(isDue(syncedAt: now.addingTimeInterval(1)))
+        XCTAssertTrue(isDue(syncedAt: nil))
     }
 
     func testFontFittingCacheRespectsAvailableSpace() {

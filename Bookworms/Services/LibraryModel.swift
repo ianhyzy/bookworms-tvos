@@ -437,9 +437,6 @@ final class LibraryModel {
         }
     }
 
-    func restoreFonts(for books: [Book]) {
-        restoreVisibleFonts(additionalBooks: books)
-    }
     private(set) var styles: [Int: SpineStyle] = [:]
     private(set) var isLoading = false
     private(set) var hardcoverConnectionPhase: HardcoverConnectionPhase?
@@ -748,15 +745,10 @@ final class LibraryModel {
         #endif
     }
 
-    static func needsRefresh(syncedAt: Date?, now: Date = Date()) -> Bool {
-        guard let syncedAt else { return true }
-        return now.timeIntervalSince(syncedAt) >= 86400
-    }
-
-    private func restoreVisibleFonts(additionalBooks: [Book] = []) {
+    private func restoreVisibleFonts() {
         fontTask?.cancel()
         guard BookPresentation.showsGeneratedSpines else { return }
-        let ids = Set((books + additionalBooks).map(\.id))
+        let ids = Set(books.map(\.id))
         let records = ids.compactMap { aiRecords[$0] }
         fontTask = Task { [weak self] in
             for record in records {
