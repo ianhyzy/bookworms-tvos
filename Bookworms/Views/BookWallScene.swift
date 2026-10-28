@@ -210,7 +210,9 @@ final class BookWallScene {
     private var dropHeight: Float = 3
     private var dropTask: Task<Void, Never>?
     private var landedIDs: Set<Int> = []
-    private var isSettled = false
+    /// False only while books fall. A wall with nothing to drop, before preparation or
+    /// without books, rests, so the renderer can stop drawing.
+    private var isSettled = true
     /// Set by every change made from outside the scene; cleared once a frame shows it.
     private var hasUndrawnChange = true
     /// Keeps drawing until RealityKit's transform animations started by `highlight` finish.
@@ -391,7 +393,6 @@ final class BookWallScene {
         selectedID = nil
         isFlyingOut = false
         guard !books.isEmpty else {
-            // Nothing falls, so the wall rests and the renderer can stop drawing.
             isSettled = true
             onFocusFrames([:], true)
             return

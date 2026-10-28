@@ -187,8 +187,10 @@ final class BookWallLayoutTests: XCTestCase {
     }
 
     @MainActor
-    func testAnEmptyWallStopsDrawingOnceItsChangeIsShown() {
+    func testAWallWithNothingToDropStopsDrawingOnceItsChangeIsShown() {
         let scene = BookWallScene()
+        scene.didDrawFrame()
+        XCTAssertFalse(scene.needsFrame)
         var settled = false
         scene.configure(
             prepared: BookWallPreparedWall(
