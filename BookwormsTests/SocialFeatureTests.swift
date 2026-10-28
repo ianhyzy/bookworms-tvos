@@ -499,6 +499,73 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(library.isBookReadByUser(9999))
     }
 
+    func testFriendPicksRankUnreadBooksByFansThenRating() {
+        func reader(_ id: Int) -> ReaderProfile {
+            ReaderProfile(id: id, username: "r\(id)", name: "Reader \(id)", avatarURL: nil)
+        }
+        func item(_ id: Int, _ rating: Double?, finished: String? = "2026-01-01") -> ReaderBook {
+            ReaderBook(
+                book: Book(id: id, title: "Book \(id)", author: "A"), rating: rating, review: nil,
+                hasSpoilers: false, finished: finished)
+        }
+        var readBook = Book(id: 16, title: "Book 16", author: "A")
+        readBook.isRead = true
+        let markedRead = ReaderBook(
+            book: readBook, rating: 5, review: nil, hasSpoilers: false, finished: nil)
+        let snapshot = SocialSnapshot(
+            owner: reader(1), following: [reader(2), reader(3), reader(4)],
+            activities: [
+                FeedActivity(
+                    id: 1, reader: reader(4), createdAt: nil, summary: "", book: item(12, nil).book,
+                    likes: 0, rating: 4.5, review: nil, hasSpoilers: false)
+            ],
+            mine: [item(10, 5), item(13, nil, finished: nil), markedRead],
+            readerBooks: [
+                2: [
+                    item(10, 5), item(11, 4), item(12, 5), item(13, 4), item(14, 3.5), item(16, 5),
+                ],
+                3: [item(11, 5), item(12, 4)],
+                9: [item(15, 5)],
+            ])
+        let picks = FriendPick.ranked(snapshot, limit: 40)
+        XCTAssertEqual(
+            picks.map(\.id), [12, 11, 13],
+            "Read books, including those marked Read without a date, low ratings, and unfollowed "
+                + "readers are left out; Want to Read stays")
+        XCTAssertEqual(picks[0].fans.map(\.id), [2, 4, 3], "Feed ratings count as fans")
+        XCTAssertEqual(picks[1].averageRating, 4.5)
+        XCTAssertEqual(
+            FriendPick.readersToSync(snapshot, limit: 2), [4, 2],
+            "The most active readers in the feed sync first")
+    }
+
+    func testFriendReadsIndexFollowedReadersRatedFirst() {
+        func reader(_ id: Int, _ name: String) -> ReaderProfile {
+            ReaderProfile(id: id, username: "r\(id)", name: name, avatarURL: nil)
+        }
+        func item(_ id: Int, _ rating: Double?) -> ReaderBook {
+            ReaderBook(
+                book: Book(id: id, title: "Book \(id)", author: "A"), rating: rating, review: nil,
+                hasSpoilers: false, finished: nil)
+        }
+        let snapshot = SocialSnapshot(
+            owner: reader(1, "Owner"),
+            following: [reader(2, "Blair"), reader(3, "Avery"), reader(4, "Casey")],
+            readerBooks: [
+                2: [item(10, 4), item(11, nil)],
+                3: [item(10, 4), item(11, 5)],
+                4: [item(10, nil)],
+                9: [item(10, 5)],
+            ])
+        let index = FriendRead.byBook(snapshot)
+        XCTAssertEqual(
+            index.reads[10]?.map(\.reader.id), [3, 2, 4],
+            "Rated first, ties by name; readers you don't follow are left out")
+        XCTAssertEqual(index.reads[11]?.map(\.rating), [5, nil])
+        XCTAssertNil(index.reads[12], "A book no friend has shows no row")
+        XCTAssertEqual(Set(index.readers.map(\.id)), [2, 3, 4])
+    }
+
     private func item(_ id: Int, rating: Double?, review: String? = nil) -> ReaderBook {
         ReaderBook(
             book: Book(id: id, title: "Same", author: "Fixture"), rating: rating, review: review,
@@ -571,72 +638,5 @@ private actor SocialFixtureClient: SocialLibraryFetching {
     }
     private func profile(_ id: Int) -> ReaderProfile {
         ReaderProfile(id: id, username: "reader\(id)", name: nil, avatarURL: nil)
-    }
-
-    func testFriendPicksRankUnreadBooksByFansThenRating() {
-        func reader(_ id: Int) -> ReaderProfile {
-            ReaderProfile(id: id, username: "r\(id)", name: "Reader \(id)", avatarURL: nil)
-        }
-        func item(_ id: Int, _ rating: Double?, finished: String? = "2026-01-01") -> ReaderBook {
-            ReaderBook(
-                book: Book(id: id, title: "Book \(id)", author: "A"), rating: rating, review: nil,
-                hasSpoilers: false, finished: finished)
-        }
-        var readBook = Book(id: 16, title: "Book 16", author: "A")
-        readBook.isRead = true
-        let markedRead = ReaderBook(
-            book: readBook, rating: 5, review: nil, hasSpoilers: false, finished: nil)
-        let snapshot = SocialSnapshot(
-            owner: reader(1), following: [reader(2), reader(3), reader(4)],
-            activities: [
-                FeedActivity(
-                    id: 1, reader: reader(4), createdAt: nil, summary: "", book: item(12, nil).book,
-                    likes: 0, rating: 4.5, review: nil, hasSpoilers: false)
-            ],
-            mine: [item(10, 5), item(13, nil, finished: nil), markedRead],
-            readerBooks: [
-                2: [
-                    item(10, 5), item(11, 4), item(12, 5), item(13, 4), item(14, 3.5), item(16, 5),
-                ],
-                3: [item(11, 5), item(12, 4)],
-                9: [item(15, 5)],
-            ])
-        let picks = FriendPick.ranked(snapshot, limit: 40)
-        XCTAssertEqual(
-            picks.map(\.id), [12, 11, 13],
-            "Read books, including those marked Read without a date, low ratings, and unfollowed "
-                + "readers are left out; Want to Read stays")
-        XCTAssertEqual(picks[0].fans.map(\.id), [2, 4, 3], "Feed ratings count as fans")
-        XCTAssertEqual(picks[1].averageRating, 4.5)
-        XCTAssertEqual(
-            FriendPick.readersToSync(snapshot, limit: 2), [4, 2],
-            "The most active readers in the feed sync first")
-    }
-
-    func testFriendReadsIndexFollowedReadersRatedFirst() {
-        func reader(_ id: Int, _ name: String) -> ReaderProfile {
-            ReaderProfile(id: id, username: "r\(id)", name: name, avatarURL: nil)
-        }
-        func item(_ id: Int, _ rating: Double?) -> ReaderBook {
-            ReaderBook(
-                book: Book(id: id, title: "Book \(id)", author: "A"), rating: rating, review: nil,
-                hasSpoilers: false, finished: nil)
-        }
-        let snapshot = SocialSnapshot(
-            owner: reader(1, "Owner"),
-            following: [reader(2, "Blair"), reader(3, "Avery"), reader(4, "Casey")],
-            readerBooks: [
-                2: [item(10, 4), item(11, nil)],
-                3: [item(10, 4), item(11, 5)],
-                4: [item(10, nil)],
-                9: [item(10, 5)],
-            ])
-        let index = FriendRead.byBook(snapshot)
-        XCTAssertEqual(
-            index.reads[10]?.map(\.reader.id), [3, 2, 4],
-            "Rated first, ties by name; readers you don't follow are left out")
-        XCTAssertEqual(index.reads[11]?.map(\.rating), [5, nil])
-        XCTAssertNil(index.reads[12], "A book no friend has shows no row")
-        XCTAssertEqual(Set(index.readers.map(\.id)), [2, 3, 4])
     }
 }
