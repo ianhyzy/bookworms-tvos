@@ -29,7 +29,7 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(second)
         XCTAssertTrue(first.exists, "Returning from details keeps the settled wall mounted")
 
-        // Both edge columns use the full-screen projection and restore the same selected model.
+        // Details open from both edge columns, and focus returns to the same spine.
         for id in [8, 3] {
             let book = app.buttons["book-wall-\(id)"]
             RemoteNavigation.moveFocus(to: book, in: app)

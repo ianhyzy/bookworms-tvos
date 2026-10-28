@@ -118,6 +118,10 @@ final class SocialNavigationTests: XCTestCase {
         }
         let enteredID = entered.identifier
         RemoteNavigation.waitForFocus(upper.buttons[enteredID])
+        // Observe the settle window so a late second focus update is counted.
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Focus settles")],
+            timeout: RemoteNavigation.settleWindow)
         XCTAssertEqual(RemoteNavigation.transitions(app), before.map { $0 + 1 })
         XCTAssertEqual(
             RemoteNavigation.visibleButtons(app, prefix: "book-", in: lower).map(\.identifier),
@@ -228,8 +232,8 @@ final class SocialNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
         RemoteNavigation.openSettings(app)
         XCTAssertTrue(app.staticTexts["comparison-limit"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["choose-reader"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["Comparison order"].exists)
+        XCTAssertFalse(app.buttons["reader-picker-menu"].exists)
+        XCTAssertFalse(app.buttons["comparison-order-options"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["Ambient view interval"].exists)
         XCTAssertFalse(
             app.descendants(matching: .any)["ambient-view-following"].exists,
@@ -240,6 +244,7 @@ final class SocialNavigationTests: XCTestCase {
         let app = RemoteNavigation.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
         RemoteNavigation.selectView("Ambient", in: app)
+        let shelf = app.descendants(matching: .any)["ambient-view-shelf"].firstMatch
         let review = app.descendants(matching: .any)["ambient-view-yearInReview"].firstMatch
         let following = app.descendants(matching: .any)["ambient-view-following"].firstMatch
         let comparison = app.descendants(matching: .any)["ambient-view-comparison"].firstMatch
@@ -250,11 +255,13 @@ final class SocialNavigationTests: XCTestCase {
         XCTAssertFalse(
             app.descendants(matching: .any)["ambient-view-bookWall"].exists,
             "Book Wall is not offered in ambient mode")
+        XCTAssertLessThan(shelf.frame.minY, review.frame.minY)
         XCTAssertLessThan(review.frame.minY, following.frame.minY)
         XCTAssertLessThan(following.frame.minY, comparison.frame.minY)
         XCTAssertLessThan(comparison.frame.minY, shared.frame.minY)
         XCTAssertLessThan(shared.frame.minY, picks.frame.minY)
-        RemoteNavigation.moveFocus(to: review, in: app)
+        RemoteNavigation.moveFocus(to: shelf, in: app)
+        RemoteNavigation.press(.down, in: app, expecting: review)
         RemoteNavigation.press(.down, in: app, expecting: following)
         RemoteNavigation.press(.down, in: app, expecting: comparison)
         RemoteNavigation.press(.down, in: app, expecting: shared)
@@ -321,9 +328,7 @@ final class SocialNavigationTests: XCTestCase {
         RemoteNavigation.press(.left, in: app, expecting: second)
         RemoteNavigation.press(.left, in: app, expecting: first)
         XCUIRemote.shared.press(.left)
-        let leftContent = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hasFocus == false"), object: first)
-        XCTAssertEqual(XCTWaiter.wait(for: [leftContent], timeout: 3), .completed)
+        RemoteNavigation.waitForSidebarFocus("Friends' Picks", in: app)
         XCTAssertNil(RemoteNavigation.focused(app, prefix: "book-"))
         RemoteNavigation.press(.right, in: app, expecting: first)
         capture(app, name: "Friends' Picks")

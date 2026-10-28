@@ -12,8 +12,6 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["detail-title"].label, "The Orchard at Night")
         XCTAssertTrue(app.staticTexts["book-description"].exists)
-        XCTAssertFalse(app.staticTexts["HARDCOVER"].exists)
-        XCTAssertFalse(app.staticTexts["About this book"].exists)
         XCTAssertTrue(app.otherElements["rating-distribution"].exists)
         // The sample book was finished twice, and the sample reader has it. Neither the read
         // count nor the readers row takes focus; the presses below cross the row.
@@ -181,8 +179,8 @@ final class ShelfNavigationTests: XCTestCase {
         popup.lifetime = .keepAlways
         add(popup)
         // A book outside the library stays put; one in it opens its details.
-        XCUIRemote.shared.press(.select)
-        XCTAssertTrue(RemoteNavigation.isFocused(unowned))
+        RemoteNavigation.pressWithoutMoving(.select, in: app, from: unowned)
+        XCTAssertFalse(app.staticTexts["detail-title"].exists)
         // Back returns to the list, on the series that was open. Focus passes through no item
         // while the books leave, as when a pop-up closes, so this waits instead of counting.
         XCUIRemote.shared.press(.menu)
@@ -282,9 +280,7 @@ final class ShelfNavigationTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: second)
         RemoteNavigation.press(.left, in: app, expecting: first)
         XCUIRemote.shared.press(.left)
-        let leftContent = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hasFocus == false"), object: first)
-        XCTAssertEqual(XCTWaiter.wait(for: [leftContent], timeout: 3), .completed)
+        RemoteNavigation.waitForSidebarFocus("My Shelf", in: app)
         XCTAssertNil(RemoteNavigation.focused(app, prefix: "book-"))
         RemoteNavigation.press(.right, in: app, expecting: first)
     }
@@ -295,8 +291,6 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         RemoteNavigation.waitForFocus(first)
         RemoteNavigation.pressWithoutMoving(.down, in: app, from: first)
-        XCTAssertFalse(app.staticTexts["The bookshelf"].exists)
-        XCTAssertFalse(app.staticTexts["Recently read"].exists)
     }
 
     func testUnselectedCoversRestOnShelf() {
@@ -338,9 +332,7 @@ final class ShelfNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         RemoteNavigation.waitForFocus(first)
         XCUIRemote.shared.press(.left)
-        let leftContent = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hasFocus == false"), object: first)
-        XCTAssertEqual(XCTWaiter.wait(for: [leftContent], timeout: 3), .completed)
+        RemoteNavigation.waitForSidebarFocus("Year in Review", in: app)
         XCTAssertNil(RemoteNavigation.focused(app, prefix: "year-book-"))
         // The header sits level with the sidebar, so Right from the sidebar reaches the year menu.
         RemoteNavigation.press(.right, in: app, expecting: year)

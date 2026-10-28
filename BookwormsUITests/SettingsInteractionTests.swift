@@ -13,11 +13,6 @@ final class SettingsInteractionTests: XCTestCase {
         return app
     }
 
-    /// Moves toward `element` in either column, as a user would.
-    private func moveDown(to element: XCUIElement) {
-        RemoteNavigation.moveFocus(to: element, in: XCUIApplication())
-    }
-
     /// Text containing `text`, such as a date inside the reading line.
     private func text(containing text: String, in app: XCUIApplication) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
@@ -26,7 +21,7 @@ final class SettingsInteractionTests: XCTestCase {
     func testDateFormatChangesAcrossViewsAndPersists() {
         let app = openSettings("General")
         let picker = app.descendants(matching: .any)["date-format-picker"].firstMatch
-        moveDown(to: picker)
+        RemoteNavigation.moveFocus(to: picker, in: app)
         XCTAssertEqual(picker.value as? String, "Jan 01, 2026")
         // The formats are a menu; choose the ISO format from it.
         XCUIRemote.shared.press(.select)
@@ -75,7 +70,7 @@ final class SettingsInteractionTests: XCTestCase {
         let disconnect = app.buttons["Disconnect Hardcover"]
         XCTAssertTrue(disconnect.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["book-limit"].exists)
-        moveDown(to: disconnect)
+        RemoteNavigation.moveFocus(to: disconnect, in: app)
         XCUIRemote.shared.press(.select)
         let connect = app.buttons["Connect Hardcover"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
@@ -153,7 +148,7 @@ final class SettingsInteractionTests: XCTestCase {
         let app = openSettings()
         let fewer = app.buttons["fewer-books"]
         // The count sits at the top of the right column.
-        moveDown(to: fewer)
+        RemoteNavigation.moveFocus(to: fewer, in: app)
         XCUIRemote.shared.press(.select)
         XCTAssertEqual(app.staticTexts["book-limit"].label, "35")
         XCUIRemote.shared.press(.right)
@@ -185,7 +180,7 @@ final class SettingsInteractionTests: XCTestCase {
     func testCloudStorageToggleStopsManualSync() {
         let app = openSettings("General")
         let toggle = app.descendants(matching: .any)["icloud-storage"].firstMatch
-        moveDown(to: toggle)
+        RemoteNavigation.moveFocus(to: toggle, in: app)
         // iCloud storage starts off.
         XCTAssertFalse(app.buttons["Sync iCloud now"].isEnabled)
         XCUIRemote.shared.press(.select)
@@ -198,25 +193,37 @@ final class SettingsInteractionTests: XCTestCase {
     func testWoodBackgroundToggleCanBeFocusedAndToggled() {
         let app = openSettings("General")
         let toggle = app.descendants(matching: .any)["wood-background-toggle"].firstMatch
-        moveDown(to: toggle)
-        XCTAssertTrue(RemoteNavigation.isFocused(toggle))
-        XCUIRemote.shared.press(.select)
-        XCUIRemote.shared.press(.select)
-        XCTAssertTrue(RemoteNavigation.isFocused(toggle))
+        RemoteNavigation.moveFocus(to: toggle, in: app)
+        // VoiceOver reads the toggle's state from its value or selected trait.
+        let state = { "\(String(describing: toggle.value)) \(toggle.isSelected)" }
+        let initial = state()
+        // Each Select flips the state and leaves focus on the toggle.
+        for expectsInitial in [false, true] {
+            XCUIRemote.shared.press(.select)
+            let flipped = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in (state() == initial) == expectsInitial },
+                object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [flipped], timeout: 5), .completed)
+            RemoteNavigation.waitForFocus(toggle)
+        }
     }
 
     func testFontStylePickerCanBeFocusedAndToggled() {
         let app = openSettings("General")
         let picker = app.descendants(matching: .any)["font-style-picker"].firstMatch
-        moveDown(to: picker)
-        for _ in 0..<2 {
-            if app.buttons["Serif"].hasFocus { break }
+        RemoteNavigation.moveFocus(to: picker, in: app)
+        let serif = app.buttons["Serif"]
+        let sans = app.buttons["Sans-serif"]
+        for _ in 0..<2 where !RemoteNavigation.isFocused(serif) {
             XCUIRemote.shared.press(.left)
         }
-        XCTAssertTrue(app.buttons["Serif"].hasFocus)
+        RemoteNavigation.waitForFocus(serif)
         XCUIRemote.shared.press(.right)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(app.buttons["Sans-serif"].hasFocus)
+        let chosen = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isSelected == true"), object: sans)
+        XCTAssertEqual(XCTWaiter.wait(for: [chosen], timeout: 5), .completed)
+        RemoteNavigation.waitForFocus(sans)
     }
 
     func testProgressBarsMenuReachesNeighborsAndBackOpensSidebarAfterAChoice() {
@@ -225,7 +232,7 @@ final class SettingsInteractionTests: XCTestCase {
         RemoteNavigation.openSettings(app)
         let picker = app.descendants(matching: .any)["shelf-progress"].firstMatch
         let sort = app.descendants(matching: .any)["shelf-sort"].firstMatch
-        moveDown(to: picker)
+        RemoteNavigation.moveFocus(to: picker, in: app)
         XCTAssertEqual(picker.value as? String, "Vertical")
         RemoteNavigation.press(.up, in: app, expecting: sort)
         RemoteNavigation.press(.down, in: app, expecting: picker)
@@ -265,9 +272,7 @@ final class SettingsInteractionTests: XCTestCase {
         XCTAssertTrue(views.waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(views)
         XCUIRemote.shared.press(.left)
-        let leftTabs = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hasFocus == false"), object: views)
-        XCTAssertEqual(XCTWaiter.wait(for: [leftTabs], timeout: 3), .completed)
+        RemoteNavigation.waitForSidebarFocus("Settings", in: app)
         XCTAssertFalse(
             tabs.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists)
         RemoteNavigation.press(.right, in: app, expecting: views)
