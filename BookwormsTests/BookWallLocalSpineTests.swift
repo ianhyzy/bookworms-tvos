@@ -89,7 +89,7 @@ final class BookWallLocalSpineTests: XCTestCase {
                 XCTAssertEqual(SpineView.stamps(book), thickness >= 32)
             }
         }
-        // Without variety, a 721-page book is 28.2 mm thick, which rounds to 28 mm.
+        // Without variety, a 721-page book is 28.7 mm thick, which rounds to 28 mm.
         let thicknesses = (1...200)
             .map { SpineView.thickness(of: Book(id: $0, title: "B", author: "A", pages: 721)) }
         XCTAssertEqual(thicknesses.min(), 28)

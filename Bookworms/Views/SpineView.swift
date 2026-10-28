@@ -122,7 +122,7 @@ struct SpineView: View {
     }
 
     /// The book's thickness in millimeters, as the iPhone companion's `BookShape` sizes it:
-    /// 7 mm at 100 pages plus 0.35 mm a page, up to 40 mm, thickened by none, half, or all of
+    /// 7 mm at 100 pages plus 0.035 mm a page, up to 40 mm, thickened by none, half, or all of
     /// 25 percent as the book's ID decides, and rounded to 4 mm. Page counts count from 100 to
     /// 1,400, and a book without one counts as 320 pages. The arithmetic follows the
     /// companion's single-precision decimeters, so both apps round a borderline book alike.
