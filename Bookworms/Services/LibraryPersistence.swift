@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Serializes local snapshot writes away from the UI actor and discards superseded requests.
 actor LibraryPersistence {
@@ -10,6 +11,7 @@ actor LibraryPersistence {
     private var topShelfRevision = 0
     private var newestTopShelfRequest = 0
     private var publishedTopShelf: [TopShelfBook] = []
+    private static let log = Logger(subsystem: "gay.ian.Bookworms", category: "TopShelf")
 
     init(
         sourceStore: SourceLibraryStore, styleCacheURL: URL,
@@ -41,9 +43,9 @@ actor LibraryPersistence {
         guard revision >= styleRevision else { return nil }
         styleRevision = revision
         let data = try JSONEncoder().encode(records)
-        try? FileManager.default.createDirectory(
+        try FileManager.default.createDirectory(
             at: styleCacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: styleCacheURL, options: .atomic)
+        try data.write(to: styleCacheURL, options: .atomic)
         return data
     }
 
@@ -65,7 +67,12 @@ actor LibraryPersistence {
         }
         topShelfRevision = revision
         publishedTopShelf = books
-        try? writeTopShelf(books)
+        do {
+            try writeTopShelf(books)
+        } catch {
+            // A failed write leaves Top Shelf showing its last snapshot.
+            Self.log.error("Top Shelf snapshot not saved: \(error.localizedDescription)")
+        }
         if revision == newestTopShelfRequest { TopShelfPoster.removeUnused(keeping: books) }
     }
 }
