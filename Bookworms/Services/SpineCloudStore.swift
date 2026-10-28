@@ -87,22 +87,12 @@ struct SpineDesignV1: Codable, Equatable, Sendable {
     }
 
     /// The model that made the design and its tier, best 3, named as the iPhone and Mac name it
-    /// (`SpineDesignV1.madeBy` and `tier` in the iOS app), from the design alone, so every device
-    /// credits the same model: "Google Gemini (gemini-3.8-flash)" for
+    /// (`SpineDesignV1.madeBy` and `tier` in the iOS app), from the design's `modelToken` alone,
+    /// so every device credits the same model: "Google Gemini (gemini-3.8-flash)" for
     /// "model:google/gemini-3.8-flash", or "Private Cloud Compute", "Apple on-device model", or
     /// "Default styling".
-    ///
-    /// The `model:` token decides, else the generator: any `ios-pcc-` version is Private Cloud
-    /// Compute, the retired Mac companion's `mac-foundation-models-` versions are Apple's
-    /// on-device model, also with a `model:local` token, and any other generator, such as Book
-    /// Wall's `tvos-local-v1` series looks, is default styling.
     var madeBy: (name: String, tier: Int) {
-        let isCompanion = generatorVersion.hasPrefix("mac-foundation-models-")
-        let token =
-            modelToken.map { isCompanion && $0 == "model:local" ? "model:apple/on-device" : $0 }
-            ?? (generatorVersion.hasPrefix("ios-pcc-")
-                ? nil : isCompanion ? "model:apple/on-device" : "model:local")
-        switch token {
+        switch modelToken {
         case nil: return ("Private Cloud Compute", 3)
         case "model:apple/on-device": return ("Apple on-device model", 1)
         case "model:local": return ("Default styling", 0)

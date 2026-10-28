@@ -273,10 +273,23 @@ extension SpineDesignV1 {
     /// keep.
     var hasReaderEdits: Bool { hasReaderColors || hasReaderFont }
 
-    /// The first `model:` token of `provenance`, which names the companion's model tier, such
-    /// as "model:apple/on-device". Private Cloud Compute's designs have none.
+    /// The `provenance` token that names the model that made the design, such as
+    /// "model:apple/on-device", as the iPhone and Mac read it (`SpineDesignV1.modelToken` in the
+    /// iOS app), so a look copied from the design records the same tier on every device.
+    ///
+    /// Without a `model:` token, the generator decides: `nil`, for Private Cloud Compute, from
+    /// any `ios-pcc-` version, whose Private Cloud Compute designs record none;
+    /// "model:apple/on-device" from any version of the retired Mac companion's generator
+    /// (`mac-foundation-models-`); and "model:local" from any other generator, such as Book
+    /// Wall's `tvos-local-v1` looks. The Mac companion used no other model, so its "model:local"
+    /// token also reads as "model:apple/on-device".
     var modelToken: String? {
-        provenance?.split(separator: " ").first { $0.hasPrefix("model:") }.map(String.init)
+        let isCompanion = generatorVersion.hasPrefix("mac-foundation-models-")
+        if let token = provenance?.split(separator: " ").first(where: { $0.hasPrefix("model:") }) {
+            return isCompanion && token == "model:local" ? "model:apple/on-device" : String(token)
+        }
+        if generatorVersion.hasPrefix("ios-pcc-") { return nil }
+        return isCompanion ? "model:apple/on-device" : "model:local"
     }
 }
 

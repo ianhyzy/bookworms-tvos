@@ -338,6 +338,35 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(madeBy(nil, generator: SeriesLookV1.localOrigin), "Default styling")
     }
 
+    /// Mirrors the iPhone companion's `SpineDesignV1.modelToken`, so a look copied from a design
+    /// records the same tier whichever device creates it.
+    func testALookRecordsItsDesignsTierAsTheIPhoneReadsIt() {
+        func look(_ provenance: String?, generator: String) -> String? {
+            let design = SpineDesignV1(
+                version: 1, accountID: "account", bookID: 1,
+                workItemHash: String(repeating: "a", count: 64),
+                coverHash: String(repeating: "b", count: 64), generatorVersion: generator,
+                generatedAt: Date(timeIntervalSince1970: 0), backgroundHex: "#1F3A5A",
+                foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+                uppercase: false, provenance: provenance)
+            return SeriesLookV1(
+                key: SeriesLookKey(seriesID: 7, group: "|mattdinniman"), design: design,
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            )
+            .provenance
+        }
+        XCTAssertNil(look(nil, generator: "ios-pcc-v2"), "Private Cloud Compute records none")
+        XCTAssertEqual(look(nil, generator: "mac-foundation-models-v1"), "model:apple/on-device")
+        XCTAssertEqual(
+            look("model:local", generator: "mac-foundation-models-v2"), "model:apple/on-device")
+        XCTAssertEqual(look(nil, generator: "other-generator-v1"), "model:local")
+        XCTAssertEqual(
+            look("font:system", generator: "other-generator-v1"), "model:local font:system")
+        XCTAssertEqual(
+            look("model:google/gemini-3.8-flash", generator: "ios-pcc-v2"),
+            "model:google/gemini-3.8-flash")
+    }
+
     /// **Settings → Spines** counts the design each book draws: its series look, with the look's
     /// model, else its series source's design, else its own, and the books that draw none.
     func testSpineSettingsCountTheDesignEachBookDraws() {
