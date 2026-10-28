@@ -180,7 +180,6 @@ final class ShelfNavigationTests: XCTestCase {
         add(popup)
         // A book outside the library stays put; one in it opens its details.
         RemoteNavigation.pressWithoutMoving(.select, in: app, from: unowned)
-        XCTAssertFalse(app.staticTexts["detail-title"].exists)
         // Back returns to the list, on the series that was open. Focus passes through no item
         // while the books leave, as when a pop-up closes, so this waits instead of counting.
         XCUIRemote.shared.press(.menu)

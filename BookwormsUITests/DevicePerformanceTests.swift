@@ -54,8 +54,8 @@ final class DevicePerformanceTests: XCTestCase {
         let settings = scenario == "settings"
         let sidebar = scenario == "sidebar"
         if sidebar { RemoteNavigation.focusSidebarItem(viewTitles[0], in: app) }
-        // Settings starts on its first tab. Blocks of four Right and four Left presses then stay
-        // inside the five tabs; Left from the first tab would open the sidebar.
+        // Start on the first of Settings' five tabs, so blocks of four Right and four Left presses
+        // stay inside the tab bar; Left from the first tab would open the sidebar.
         if settings { RemoteNavigation.openSettings(app, section: "Views") }
         let description = scenario == "description"
         if description {

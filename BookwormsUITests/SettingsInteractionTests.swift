@@ -252,14 +252,9 @@ final class SettingsInteractionTests: XCTestCase {
             predicate: NSPredicate(format: "value == %@", "Don't show"), object: picker)
         XCTAssertEqual(XCTWaiter.wait(for: [chosen], timeout: 5), .completed)
         RemoteNavigation.waitForFocus(picker)
+        // Back after a menu choice opens the sidebar instead of leaving the app.
         XCUIRemote.shared.press(.menu)
-        let sidebar = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in RemoteNavigation.hasFocus(labeled: "Settings", in: app)
-            },
-            object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [sidebar], timeout: 5), .completed,
-            "Back after a menu choice opens the sidebar")
+        RemoteNavigation.waitForSidebarFocus("Settings", in: app)
         XCTAssertEqual(app.state, .runningForeground)
     }
 
