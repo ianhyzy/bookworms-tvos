@@ -43,6 +43,9 @@ struct BookWallRendererView: UIViewRepresentable {
 final class BookWallRendererSurface: UIView {
     override class var layerClass: AnyClass { CAMetalLayer.self }
 
+    /// Dark wood that fills the surface until the scene's backdrop texture arrives.
+    static let clearColor = UIColor(red: 0.16, green: 0.11, blue: 0.08, alpha: 1)
+
     // UIView constructs this layer from layerClass, so the cast follows that invariant.
     var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
     weak var coordinator: BookWallRendererCoordinator?
@@ -50,7 +53,7 @@ final class BookWallRendererSurface: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor(red: 0.16, green: 0.11, blue: 0.08, alpha: 1)
+        backgroundColor = Self.clearColor
         isOpaque = true
         isUserInteractionEnabled = false
         metalLayer.isOpaque = true
@@ -249,7 +252,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
             scene.hostConfiguration.antialiasingEnabled ? .multisample4X : .none
         realityRenderer.cameraSettings.isToneMappingEnabled = true
         realityRenderer.cameraSettings.colorBackground = .color(
-            UIColor(red: 0.16, green: 0.11, blue: 0.08, alpha: 1).cgColor)
+            BookWallRendererSurface.clearColor.cgColor)
         realityRenderer.extendedDynamicRangeOutput = false
         realityRenderer.lighting.resource = scene.environmentResource
         realityRenderer.lighting.intensityExponent = scene.ambientExponent

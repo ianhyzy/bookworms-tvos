@@ -35,7 +35,7 @@ struct BookWallHostConfiguration {
         let requested = sizes[value("wall-internal") ?? diagnosticSize] ?? renderSize
         internalSize = requested.width <= renderSize.width ? requested : renderSize
         preferredFramesPerSecond = value("wall-fps") == "30" ? 30 : 60
-        // 4× multisampling smooths the drifting book's edges at no measured cost on Apple TV.
+        // 4× multisampling smooths the drifting book's edges.
         antialiasingEnabled = value("wall-antialiasing") != "off"
     }
 }
