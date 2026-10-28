@@ -2,7 +2,7 @@
 
 Book Wall draws spine artwork on Apple TV, from a [companion design](#companion-designs) when the book has one and from local metadata otherwise. It does not call an AI service. It may use the existing artwork store to fetch the selected cover before sampling that image locally. A book without a usable cover still gets a deterministic, readable spine. A book whose cover URL produced no image is downloaded again 30 seconds after preparation, as on the shelf; if the cover arrives, the book's spine, casing, and cover artwork change in place without another fall, and its slot keeps the proportions it was laid out with.
 
-This document describes the implemented behavior and the constraints to preserve when changing it. See the [development handoff](handoffs/2026-09-29-book-wall.md) for work in progress and evidence locations, and [Book Wall checks](TESTING.md#book-wall-checks) for device verification.
+This document describes the implemented behavior and the constraints to preserve when changing it. See the [development handoff](handoffs/2026-09-29-book-wall.md) for verification boundaries and where to store evidence, and [Book Wall checks](TESTING.md#book-wall-checks) for device verification.
 
 ## Implementation map
 
@@ -243,11 +243,11 @@ Leaving the tab, backgrounding, replacing prepared books, or resizing the viewpo
 
 ## Renderer host
 
-Book Wall renders through `RealityRenderer`. The launch arguments below tune it for diagnosis; they have no Settings interface or persisted preference. See the [renderer results](handoffs/2026-09-30-wall-realityrenderer-results.md) for measurements and verification status.
+Book Wall renders through `RealityRenderer`. The launch arguments below tune it for diagnosis; they have no Settings interface or persisted preference. Keep measurements with their run artifacts; see [performance diagnosis](PERFORMANCE_DIAGNOSIS.md#book-wall-motion).
 
 The host renders the shared `BookWallScene` root, camera, prepared models, physics, baked backdrops, shadow planes, lights, ribbon, labels, and flight planning. `BookWallView` retains native focus controls and detail presentation. The adapter provides scene events, point projection, and ambient-light changes; they do not assign focus. Attachment refreshes focus rectangles for a configured wall, and detachment cancels subscriptions and active transitions. Backdrop baking uses the host's viewport in points.
 
-`BookWallRendererHost` mounts a noninteractive, opaque `CAMetalLayer` surface in the existing `TabView` background. A display link requests 60 Hz and drives `RealityRenderer.updateAndRender` with elapsed frame time. Three frame slots bound queued work while RealityKit finishes one frame as it encodes the next. With every slot busy, a tick skips submission, and the next update advances at most two refreshes.
+`BookWallRendererView` mounts a noninteractive, opaque `CAMetalLayer` surface (`BookWallRendererSurface`) in the existing `TabView` background, and `BookWallRendererCoordinator` drives it. A display link requests 60 Hz and drives `RealityRenderer.updateAndRender` with elapsed frame time. Three frame slots bound queued work while RealityKit finishes one frame as it encodes the next. With every slot busy, a tick skips submission, and the next update advances at most two refreshes.
 
 RealityRenderer renders into each slot's own texture. When the slot's Metal event reports the frame's GPU work finished, a background queue takes a drawable, draws the texture into it (bilinear when the internal size is smaller; MetalFX is not implemented), presents it, and releases the slot when that pass completes. Rendering straight into drawables, and presenting from RealityRenderer's scheduling callback, dropped the fading wall and other later passes on Apple TV during flights; the Simulator did not show it. Holding a drawable from the start of each frame instead held the renderer near 36 fps. Generation checks prevent old completions from changing a recreated host. GPU completion does not prove when a frame reached the display. The presentation shader (`BookWallPresentation.metal`) compiles with the app, so opening the wall compiles no shaders.
 

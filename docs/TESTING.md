@@ -172,7 +172,7 @@ For resolution diagnostics, compare `--wall-internal=900` (1600 × 900) and `--w
 
 Repeat the manual Book Wall checks, including Reduce Motion, interrupted flights, sidebar reentry, labels, ribbon, shadows, and idle return. Log missing rendering or a renderer error as a failure or gap. A fatal renderer error detaches the adapter and cancels active flights; check that an opening attempt fails without hanging, then leave and reenter Book Wall to recreate the host.
 
-Follow [performance diagnosis](PERFORMANCE_DIAGNOSIS.md) for authorized Apple TV profiles with matched scripted input and recording overhead. Compare at least two runs of each configuration. If 1080p misses the target, check frame overlap and skipped ticks before testing a smaller internal resolution. Keep configured cadence, GPU completion, actual presented frames, and Simulator visual evidence separate. Store dated results in the run artifacts and the renderer result handoff.
+Follow [performance diagnosis](PERFORMANCE_DIAGNOSIS.md) for authorized Apple TV profiles with matched scripted input and recording overhead. Compare at least two runs of each configuration. If 1080p misses the target, check frame overlap and skipped ticks before testing a smaller internal resolution. Keep configured cadence, GPU completion, actual presented frames, and Simulator visual evidence separate. Store dated results in the run artifacts.
 
 ## Social and ambient checks
 
