@@ -1049,11 +1049,14 @@ final class LibraryModel {
         switch source {
         case .hardcover:
             activeHardcoverSnapshot() != nil && activeHardcoverAccountID != nil
-        case .cwa:
-            sourceSnapshots.contains {
-                $0.source == .cwa && $0.accountID == cwaConfiguration.identity
-            }
+        case .cwa: activeCWASnapshot() != nil
         }
+    }
+
+    /// The snapshot of the configured CWA account, which decides CWA's schedule; another CWA
+    /// account's snapshot never does.
+    private func activeCWASnapshot() -> SourceSnapshot? {
+        sourceSnapshots.first { $0.source == .cwa && $0.accountID == cwaConfiguration.identity }
     }
 
     /// Whether an automatic check of `source` is due.
@@ -1072,7 +1075,8 @@ final class LibraryModel {
                 !password.isEmpty
             else { throw SourceError.invalidCredentials }
             if sourceSnapshots.contains(where: { $0.source == .cwa }) {
-                try schedule.begin(.cwa, now: dependencies.now())
+                // The reader asked for this connection, so new login details skip the daily gate.
+                try schedule.begin(.cwa, now: dependencies.now(), manual: true)
             } else {
                 // A failed first connection has no library to sync; allow corrected login details.
                 schedule.seed(.cwa, date: dependencies.now())
@@ -1102,8 +1106,7 @@ final class LibraryModel {
         guard let last = schedule.lastAttempt(source) else { return "Not synced yet" }
         let successful =
             source == .hardcover
-            ? activeHardcoverSnapshot()?.syncedAt
-            : sourceSnapshots.first { $0.source == source }?.syncedAt
+            ? activeHardcoverSnapshot()?.syncedAt : activeCWASnapshot()?.syncedAt
         let next = successful.map { $0.addingTimeInterval(86400) } ?? last.addingTimeInterval(300)
         return next > dependencies.now()
             ? "Next check: " + dateFormat.string(from: next) + " · "
@@ -1253,9 +1256,7 @@ final class LibraryModel {
         if let snapshot = activeHardcoverSnapshot() {
             schedule.seed(.hardcover, date: snapshot.syncedAt)
         }
-        if let snapshot = sourceSnapshots.first(where: {
-            $0.source == .cwa && $0.accountID == cwaConfiguration.identity
-        }) {
+        if let snapshot = activeCWASnapshot() {
             schedule.seed(.cwa, date: snapshot.syncedAt)
         }
     }

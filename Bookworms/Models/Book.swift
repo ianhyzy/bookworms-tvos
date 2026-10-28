@@ -98,7 +98,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         return book
     }
 
-    var isHardcoverBook: Bool { sources?.contains(.hardcover) ?? (id < 1_000_000_000_000_000) }
+    var isHardcoverBook: Bool {
+        sources?.contains(.hardcover) ?? (id < CWAConfiguration.firstBookID)
+    }
 
     /// The book's permanent Hardcover page, or `nil` for a book Hardcover doesn't list.
     var hardcoverURL: URL? { isHardcoverBook ? HardcoverLink.book(id) : nil }

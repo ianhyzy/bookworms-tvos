@@ -43,6 +43,22 @@ final class SourceLibraryTests: XCTestCase {
         }
     }
 
+    func testOPDSSkipsABookWithoutFilesAndKeepsTheRest() throws {
+        let data = Data(
+            #"""
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><id>urn:uuid:files</id><title>With Files</title>
+                <link rel="http://opds-spec.org/acquisition" href="/opds/download/1/epub"/>
+              </entry>
+              <entry><id>urn:uuid:empty</id><title>Metadata Only</title></entry>
+            </feed>
+            """#
+            .utf8)
+        let feed = try OPDSFeed.parse(
+            data, url: URL(string: "https://example.com/opds/new")!, server: "https://example.com")
+        XCTAssertEqual(feed.books.map(\.title), ["With Files"])
+    }
+
     func testTitleAndAuthorSortsCompareNumbersByValue() {
         let books = [
             Book(id: 1, title: "Volume 10", author: "Writer 10"),

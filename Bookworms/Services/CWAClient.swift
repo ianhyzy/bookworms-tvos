@@ -48,8 +48,9 @@ actor CWAClient {
             url = feed.next
             if url != nil { try await Task.sleep(for: .milliseconds(200)) }
         }
-        return Array(
-            Dictionary(books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }).values)
+        // Keep the feed's order, so the same book wins a merge of duplicates on every sync.
+        var seen = Set<Int>()
+        return books.filter { seen.insert($0.id).inserted }
     }
 
     func request(_ url: URL, configuration: CWAConfiguration, password: String) async throws -> Data
@@ -167,9 +168,11 @@ private final class OPDSParser: NSObject, XMLParserDelegate {
             }
         }
         if elementName == "entry", let item = entry {
-            if item.id.isEmpty || item.title.isEmpty || !item.acquisition {
+            if item.id.isEmpty || item.title.isEmpty {
                 invalidEntry = true
-            } else {
+            } else if item.acquisition {
+                // A book without files has no acquisition link. Skipping it keeps one such
+                // book from failing the whole catalog.
                 books.append(
                     Book(
                         id: CWAConfiguration.bookID(server: server, identifier: item.id),

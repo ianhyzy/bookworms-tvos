@@ -32,11 +32,15 @@ struct CWAConfiguration: Codable, Equatable, Sendable {
 
     var identity: String { "\(server.trimmingCharacters(in: .whitespacesAndNewlines))/\(username)" }
 
+    /// The lowest CWA book ID. CWA IDs take a separate positive range above Hardcover's, which
+    /// keeps Hardcover IDs and deep links, so a book's ID tells its source
+    /// (`Book.isHardcoverBook`).
+    static let firstBookID = 1_000_000_000_000_000
+
     static func bookID(server: String, identifier: String) -> Int {
-        // Reserve a separate positive range, preserving existing Hardcover IDs and deep links.
         let digest = SHA256.hash(data: Data("cwa:\(server):\(identifier)".utf8))
         let value = digest.prefix(6).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-        return Int(value) + 1_000_000_000_000_000
+        return Int(value) + firstBookID
     }
 }
 

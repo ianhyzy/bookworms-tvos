@@ -1340,6 +1340,46 @@ final class LibraryWorkflowTests: XCTestCase {
             model.hardcoverDeviceAuthMessage, "Finishing the refresh must preserve retry.")
     }
 
+    func testConnectingCWASkipsTheDailyGate() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "cwaEnabled")
+        fixture.secrets["cwa-password"] = "fictional-original"
+        try fixture.save([fixture.snapshot(.cwa, books: [fixture.book(2)])])
+        var dependencies = fixture.dependencies()
+        var requestedPasswords: [String] = []
+        dependencies.fetchCWA = { _, password in
+            requestedPasswords.append(password)
+            return [fixture.book(3)]
+        }
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(requestedPasswords.isEmpty, "The snapshot synced today isn't due")
+        let connected = await model.connectCWA(
+            fixture.configuration, password: "fictional-replacement")
+        XCTAssertTrue(connected, "A changed password connects within a day of the last sync")
+        XCTAssertEqual(requestedPasswords, ["fictional-replacement"])
+        XCTAssertEqual(fixture.secrets["cwa-password"], "fictional-replacement")
+    }
+
+    func testCWAStatusFollowsTheActiveAccountsSnapshot() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([
+            SourceSnapshot(
+                source: .cwa, accountID: "https://other.invalid/fixture",
+                books: [fixture.book(2)], syncedAt: fixture.time)
+        ])
+        fixture.defaults.set(fixture.time.addingTimeInterval(-1000), forKey: "syncAttempt.cwa")
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        let model = LibraryModel(dependencies: fixture.dependencies())
+        await model.start()
+        XCTAssertNil(
+            model.sourceStatus(.cwa),
+            "Another account's sync today doesn't push the active account's check to tomorrow")
+    }
+
     func testRejectedCWAReplacementRetainsAccountAndCredential() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
