@@ -3,7 +3,8 @@ import Foundation
 
 /// Keeps the physics view on Apple TV 4K (2nd generation) and newer hardware.
 enum BookWallAvailability {
-    static var isSupported: Bool {
+    /// Read once: the hardware model can't change while the app runs.
+    static let isSupported: Bool = {
         #if targetEnvironment(simulator)
             true
         #else
@@ -17,7 +18,7 @@ enum BookWallAvailability {
             }
             return supports(machineIdentifier: String(cString: bytes))
         #endif
-    }
+    }()
 
     static func supports(machineIdentifier: String) -> Bool {
         guard machineIdentifier.hasPrefix("AppleTV"),

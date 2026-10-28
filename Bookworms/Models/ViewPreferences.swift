@@ -32,13 +32,13 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     /// in Review has a static ambient presentation.
     var supportsAmbient: Bool { self != .bookWall }
 
-    static var availableCases: [Self] {
-        allCases.filter { $0 != .bookWall || BookWallAvailability.isSupported }
+    static let availableCases = allCases.filter {
+        $0 != .bookWall || BookWallAvailability.isSupported
     }
 
     /// Views shown in the sidebar until the user changes them. Book Wall is opt-in through
     /// **Settings → Views**.
-    static var defaultCases: [Self] { availableCases.filter { $0 != .bookWall } }
+    static let defaultCases = availableCases.filter { $0 != .bookWall }
 }
 
 enum SharedReadsSort: String, Codable, CaseIterable, Identifiable {
