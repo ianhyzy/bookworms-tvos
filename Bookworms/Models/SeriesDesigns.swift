@@ -243,8 +243,8 @@ enum SeriesDesigns {
         return sources
     }
 
-    /// The text a spine letters for `book`, for glyph checks: its title and author, uppercased
-    /// when the design draws in capitals.
+    /// The text a Book Wall spine letters for `book`, for glyph checks: its full title, subtitle
+    /// included, and its author, uppercased when the design draws in capitals.
     static func lettering(of book: Book, uppercase: Bool = false) -> String {
         let text = book.title + " " + book.author
         return uppercase ? text.uppercased() : text
