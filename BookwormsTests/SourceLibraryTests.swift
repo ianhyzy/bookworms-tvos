@@ -221,8 +221,10 @@ final class SourceLibraryTests: XCTestCase {
     func testDropDateIsTheFirstDayASyncFindsTheBookOnDidNotFinish() throws {
         // Noon on 2025-08-14 in this device's time zone, written as Hardcover writes
         // `updated_at`, with and without fractional seconds, so the day is the same anywhere.
+        // The Gregorian calendar keeps 2025 meaning 2025 under any device calendar.
         let noon = try XCTUnwrap(
-            Calendar.current.date(from: DateComponents(year: 2025, month: 8, day: 14, hour: 12)))
+            Calendar(identifier: .gregorian)
+                .date(from: DateComponents(year: 2025, month: 8, day: 14, hour: 12)))
         func stamp(_ options: ISO8601DateFormatter.Options) -> String {
             ISO8601DateFormatter.string(from: noon, timeZone: .current, formatOptions: options)
         }
