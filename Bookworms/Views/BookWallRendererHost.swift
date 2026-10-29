@@ -43,6 +43,9 @@ struct BookWallRendererView: UIViewRepresentable {
 final class BookWallRendererSurface: UIView {
     override class var layerClass: AnyClass { CAMetalLayer.self }
 
+    /// Dark wood that fills the surface until the scene's backdrop texture arrives.
+    static let clearColor = UIColor(red: 0.16, green: 0.11, blue: 0.08, alpha: 1)
+
     // UIView constructs this layer from layerClass, so the cast follows that invariant.
     var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
     weak var coordinator: BookWallRendererCoordinator?
@@ -50,7 +53,7 @@ final class BookWallRendererSurface: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor(red: 0.16, green: 0.11, blue: 0.08, alpha: 1)
+        backgroundColor = Self.clearColor
         isOpaque = true
         isUserInteractionEnabled = false
         metalLayer.isOpaque = true
@@ -167,16 +170,9 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         surface.coordinator = self
         surface.clearError()
         isAttached = surface.window != nil
-        isApplicationActive = UIApplication.shared.applicationState == .active
         failed = false
         do {
             try prepare(scene: scene, surface: surface)
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(applicationBecameActive),
-                name: UIApplication.didBecomeActiveNotification, object: nil)
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(applicationResignedActive),
-                name: UIApplication.willResignActiveNotification, object: nil)
             let link = CADisplayLink(target: self, selector: #selector(renderFrame(_:)))
             let rate = Float(scene.hostConfiguration.preferredFramesPerSecond)
             link.preferredFrameRateRange = CAFrameRateRange(
@@ -256,7 +252,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
             scene.hostConfiguration.antialiasingEnabled ? .multisample4X : .none
         realityRenderer.cameraSettings.isToneMappingEnabled = true
         realityRenderer.cameraSettings.colorBackground = .color(
-            UIColor(red: 0.16, green: 0.11, blue: 0.08, alpha: 1).cgColor)
+            BookWallRendererSurface.clearColor.cgColor)
         realityRenderer.extendedDynamicRangeOutput = false
         realityRenderer.lighting.resource = scene.environmentResource
         realityRenderer.lighting.intensityExponent = scene.ambientExponent
@@ -274,10 +270,6 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         }
         let subscription = renderer.subscribe(to: event, handler)
         return AnyCancellable { subscription.cancel() }
-    }
-
-    func project(_ point: SIMD3<Float>) -> CGPoint? {
-        scene?.projectWithCamera(point)
     }
 
     func setAmbientExponent(_ exponent: Float) {
@@ -310,18 +302,9 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         updatePauseState()
     }
 
+    /// Follows the representable's `scenePhase`, the clock's only source of app activity.
     func setSceneActive(_ active: Bool) {
         isApplicationActive = active
-        updatePauseState()
-    }
-
-    @objc private func applicationBecameActive() {
-        isApplicationActive = true
-        updatePauseState()
-    }
-
-    @objc private func applicationResignedActive() {
-        isApplicationActive = false
         updatePauseState()
     }
 
@@ -423,19 +406,20 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
             nonisolated(unsafe) let texture = slot.colorTexture
             nonisolated(unsafe) let queue = commandQueue
             nonisolated(unsafe) let pipeline = presentationPipeline
-            let release: @Sendable (String?) -> Void = { [weak self] failure in
+            let release: @Sendable (FrameOutcome) -> Void = { [weak self] outcome in
                 let completedAt = CACurrentMediaTime()
                 Task { @MainActor [weak self] in
                     self?
                         .completeFrame(
                             slot, generation: currentGeneration, completedAt: completedAt,
-                            failure: failure)
+                            outcome: outcome)
                 }
             }
             slot.event.notify(presentListener, atValue: serial) { _, _ in
+                // A drawable can time out, so this frame may never reach the screen.
                 guard let drawable = layer.nextDrawable(), let buffer = queue.makeCommandBuffer()
                 else {
-                    release(nil)
+                    release(.dropped)
                     return
                 }
                 buffer.label = "Book Wall present \(serial)"
@@ -444,7 +428,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
                 pass.colorAttachments[0].loadAction = .dontCare
                 pass.colorAttachments[0].storeAction = .store
                 guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else {
-                    release("Metal could not create the presentation encoder.")
+                    release(.failed("Metal could not create the presentation encoder."))
                     return
                 }
                 encoder.setRenderPipelineState(pipeline)
@@ -455,8 +439,10 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
                 buffer.addCompletedHandler { completed in
                     release(
                         completed.status == .error
-                            ? completed.error?.localizedDescription ?? "Metal presentation failed."
-                            : nil)
+                            ? .failed(
+                                completed.error?.localizedDescription
+                                    ?? "Metal presentation failed.")
+                            : .presented)
                 }
                 buffer.commit()
             }
@@ -479,10 +465,18 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         }
     }
 
+    /// How a submitted frame's presentation ended.
+    private enum FrameOutcome: Sendable {
+        case presented
+        /// No drawable or command buffer was available, so the frame never reached the screen.
+        case dropped
+        case failed(String)
+    }
+
     /// Releases one frame's resources on the main actor. GPU completion is not presentation.
     private func completeFrame(
         _ slot: FrameSlot, generation completedGeneration: UInt64,
-        completedAt: CFTimeInterval, failure: String?
+        completedAt: CFTimeInterval, outcome: FrameOutcome
     ) {
         guard generation == completedGeneration, slot.submittedAt != nil else { return }
         #if BOOKWORMS_DIAGNOSTICS
@@ -497,9 +491,14 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
             }
         #endif
         slot.submittedAt = nil
-        if let failure {
-            fail(failure)
-        } else if !failed && !publishedInitialFocusFrames {
+        if case .failed(let message) = outcome {
+            fail(message)
+            return
+        }
+        // `renderFrame` already marked the dropped frame's changes as drawn, so a still wall
+        // would keep showing the frame before them.
+        if case .dropped = outcome { scene?.setNeedsFrame() }
+        if !failed && !publishedInitialFocusFrames {
             publishedInitialFocusFrames = true
             Self.log("BookWallRendererGPU completed")
             scene?.refreshHostFocusFrames()
@@ -574,7 +573,6 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         generation += 1
         displayLink?.invalidate()
         displayLink = nil
-        NotificationCenter.default.removeObserver(self)
         if let scene {
             scene.detachHost(self)
             renderer?.entities.remove(scene.root)
@@ -601,14 +599,12 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
     private enum RendererError: LocalizedError {
         case unavailableMetal
         case unavailableTexture
-        case unavailableEncoder
 
         var errorDescription: String? {
             switch self {
             case .unavailableMetal:
                 "Metal could not create a device, command queue, or render event."
             case .unavailableTexture: "Metal could not allocate the internal color texture."
-            case .unavailableEncoder: "Metal could not create the presentation encoder."
             }
         }
     }

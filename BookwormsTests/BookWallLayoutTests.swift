@@ -1,3 +1,4 @@
+import RealityKit
 import XCTest
 
 @testable import Bookworms
@@ -183,5 +184,30 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertTrue(BookWallAvailability.supports(machineIdentifier: "AppleTV11,1"))
         XCTAssertTrue(BookWallAvailability.supports(machineIdentifier: "AppleTV14,1"))
         XCTAssertFalse(BookWallAvailability.supports(machineIdentifier: "unknown"))
+    }
+
+    @MainActor
+    func testAWallWithNothingToDropStopsDrawingOnceItsChangeIsShown() {
+        let scene = BookWallScene()
+        scene.didDrawFrame()
+        XCTAssertFalse(scene.needsFrame)
+        var settled = false
+        scene.configure(
+            prepared: BookWallPreparedWall(
+                books: [], sources: [:], designs: [:], looks: [:], drawn: [:], drawsWith: [:],
+                layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil),
+            reduceMotion: false, onFocusFrames: { _, isSettled in settled = isSettled })
+        scene.didDrawFrame()
+        XCTAssertTrue(settled)
+        XCTAssertFalse(scene.needsFrame)
+    }
+
+    @MainActor
+    func testCancelingATransitionLeavesNoUnlitPointLightEnabled() {
+        let scene = BookWallScene()
+        scene.cancelTransition()
+        let lights = scene.root.children.compactMap { $0 as? PointLight }
+        XCTAssertFalse(lights.isEmpty)
+        XCTAssertFalse(lights.contains { $0.isEnabled && $0.light.intensity == 0 })
     }
 }

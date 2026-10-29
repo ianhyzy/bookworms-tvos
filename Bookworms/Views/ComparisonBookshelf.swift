@@ -18,7 +18,6 @@ struct ComparisonBookshelf: View {
     let onFocus: (Int) -> Void
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("woodBackground") private var woodBackground = true
-    private let styles: [Int: SpineStyle] = [:]
     @State private var pages: [ShelfPage] = []
     @State private var activity = InteractionActivity()
     private var palette: ShelfPalette {
@@ -32,7 +31,7 @@ struct ComparisonBookshelf: View {
                     library: library, pages: pages, rowHeight: rowHeight, palette: palette,
                     entryBookID: state.selectedID, entryColumn: column,
                     focusRequest: focusRequest,
-                    presentationStyles: styles, activatesOnAppear: activatesOnAppear,
+                    presentationStyles: [:], activatesOnAppear: activatesOnAppear,
                     emptySpacePhoto: emptySpacePhoto,
                     onFocus: { id in
                         guard let id else { return }

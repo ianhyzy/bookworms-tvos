@@ -90,10 +90,11 @@ final class BookWallScene {
     /// The wall's lighting is baked into the backdrop image rather than lit live; a
     /// full-screen lit surface cost more GPU time than the rest of the scene. The factors
     /// scale each color channel of the wall image, which is shown without tone mapping.
-    /// They were fitted to Simulator captures of the live-lit wall: a warm point light 3.3 units in front of the wall
-    /// behind the stacks (the pool), the shelf light's faint wash, and the environment.
-    /// The pool and base were then softened from that fit: a 40 percent lower, wider pool over
-    /// a 6 percent brighter wall.
+    /// They start from a fit to Simulator captures of a live-lit version of the wall: a warm
+    /// point light 3.3 units in front of the wall behind the stacks (the pool), the shelf
+    /// light's faint wash, and the environment. Relative to that fit, the pool is 40 percent
+    /// lower and wider and the base 6 percent brighter. `wall-raw-backdrop` shows the unlit
+    /// image for refitting.
     private static let restingWallLight = BookWallBackdropBake.Lighting(
         base: [0.390, 0.351, 0.296], pool: [0.504, 0.408, 0.245], wash: [0.200, 0.156, 0.128])
     /// The pool is centered this far above the stacks' center, with the falloff of a point
@@ -103,6 +104,8 @@ final class BookWallScene {
     private static let poolHeightOffset: Float = 0.5
     private static let poolLightDistance: Float = 3.3
     private static let poolGlowDistance: Float = 5
+    /// How far the shelf extends beyond the deepest cover, front and back together.
+    private static let shelfDepthAllowance: Float = 0.55
     private static let washHeightOffset: Float = 11.9
     private static let washLightDistance: Float = 33
     /// With details open, the dimmed environment and the distant key light leave the wall
@@ -155,7 +158,6 @@ final class BookWallScene {
     private var ribbonSegments: [ModelEntity] = []
     private var ribbonSubscription: Cancellable?
     private var ribbonElapsed: Float = 0
-    private var ribbonCount = 0
     private var ribbonVisible = false
     private let shelfLabel = ModelEntity()
     private var labels: [Int: BookWallShelfLabel.Prepared] = [:]
@@ -176,7 +178,6 @@ final class BookWallScene {
     private var collisionSubscription: Cancellable?
     private var continuingCollisionSubscription: Cancellable?
     private var layout = BookWallLayout(books: [])
-    private var signature: [Book] = []
     private var preparedBodies: [Int: ModelEntity] = [:]
     private var preparedWallID: UUID?
     private var bodies: [Int: ModelEntity] = [:]
@@ -208,7 +209,9 @@ final class BookWallScene {
     private var dropHeight: Float = 3
     private var dropTask: Task<Void, Never>?
     private var landedIDs: Set<Int> = []
-    private var isSettled = false
+    /// False only while books fall. A wall with nothing to drop, before preparation or
+    /// without books, rests, so the renderer can stop drawing.
+    private var isSettled = true
     /// Set by every change made from outside the scene; cleared once a frame shows it.
     private var hasUndrawnChange = true
     /// Keeps drawing until RealityKit's transform animations started by `highlight` finish.
@@ -307,7 +310,7 @@ final class BookWallScene {
         continuingCollisionSubscription?.cancel()
         renderHost = host
         host.setAmbientExponent(ambientExponent)
-        if !signature.isEmpty && !isSettled { observeLandings() }
+        if !layout.slots.isEmpty && !isSettled { observeLandings() }
         if flight != nil || idlePose != nil {
             motionSubscription?.cancel()
             motionSubscription = nil
@@ -340,11 +343,6 @@ final class BookWallScene {
         renderHost?.subscribe(to: event, handler: handler)
     }
 
-    /// Projects into full-screen points, independently of the renderer's pixel dimensions.
-    func projectWithCamera(_ point: SIMD3<Float>) -> CGPoint? {
-        project(point, cameraDepth: camera.position.z)
-    }
-
     func updateHostViewport(size: CGSize) {
         hasUndrawnChange = true
         guard size.width > 0, size.height > 0 else { return }
@@ -358,14 +356,12 @@ final class BookWallScene {
     ) {
         hasUndrawnChange = true
         self.onFocusFrames = onFocusFrames
-        let books = prepared.books
-        guard books != signature || prepared.id != preparedWallID else {
+        guard prepared.id != preparedWallID else {
             publishFocusFrames()
             return
         }
         dropTask?.cancel()
         cancelTransition()
-        signature = books
         preparedWallID = prepared.id
         layout = prepared.layout
         shelfThickness = Self.shelfThickness(for: layout)
@@ -393,7 +389,8 @@ final class BookWallScene {
         isSettled = false
         selectedID = nil
         isFlyingOut = false
-        guard !books.isEmpty else {
+        guard !prepared.books.isEmpty else {
+            isSettled = true
             onFocusFrames([:], true)
             return
         }
@@ -403,7 +400,6 @@ final class BookWallScene {
     }
 
     /// Reuses prepared hardcover models and textures for another fall.
-    @discardableResult
     func replayFall(reduceMotion: Bool) -> Bool {
         hasUndrawnChange = true
         guard isSettled, !isFlyingOut, !bodies.isEmpty else { return false }
@@ -669,7 +665,7 @@ final class BookWallScene {
         let area = visibleArea(in: bounds)
         let focal = focalLength(in: bounds)
         var depth: Float = 1
-        let front = (layout.slots.map(\.coverWidth).max() ?? 0.8) / 2
+        let front = layout.maxCoverWidth / 2
         for slot in layout.slots {
             for y in [
                 BookWallLayout.floorY - shelfThickness - 0.06,
@@ -685,7 +681,8 @@ final class BookWallScene {
         }
         let shelfHalfWidth = layout.totalWidth / 2 + 0.7
         for x in [-shelfHalfWidth, shelfHalfWidth] {
-            let corner = SIMD3<Float>(x, BookWallLayout.floorY - shelfThickness, front + 0.275)
+            let corner = SIMD3<Float>(
+                x, BookWallLayout.floorY - shelfThickness, front + shelfDepthAllowance / 2)
             depth = max(
                 depth, requiredCameraDepth(for: corner, in: area, of: bounds, focal: focal))
         }
@@ -712,7 +709,7 @@ final class BookWallScene {
     static func labelPoints(for layout: BookWallLayout, shelfThickness: Float) -> Float {
         let cameraDepth = wallCameraDepth(
             fitting: layout, shelfThickness: shelfThickness, in: screenBounds)
-        let shelfFront = (layout.slots.map(\.coverWidth).max() ?? 0.8) / 2 + 0.275
+        let shelfFront = layout.maxCoverWidth / 2 + shelfDepthAllowance / 2
         let letterSize =
             BookWallShelfLabel.height * BookWallShelfLabel.letterShare * shelfThickness
             / minimumShelfThickness
@@ -833,7 +830,7 @@ final class BookWallScene {
         #endif
         body.stopAllAnimations()
         body.transform = start
-        let stackFront = (layout.slots.map(\.coverWidth).max() ?? slot.coverWidth) / 2 + 0.02
+        let stackFront = layout.maxCoverWidth / 2 + 0.02
         let radius =
             simd_length(
                 SIMD3<Float>(
@@ -1093,7 +1090,9 @@ final class BookWallScene {
         stopMotion(completed: false)
         setDetailLightLevel(0)
         idlePose = nil
-        for child in root.children { child.isEnabled = true }
+        // `setDetailLightLevel` owns the key light's enabled state, so the resting wall
+        // carries no zero-intensity light.
+        for child in root.children where child !== detailLight { child.isEnabled = true }
         for (id, pose) in restingTransforms {
             bodies[id]?.stopAllAnimations()
             bodies[id]?.transform = pose
@@ -1107,7 +1106,7 @@ final class BookWallScene {
 
     private static let ribbonWidth: Float = 0.28
     private static let ribbonSegmentLength: Float = 0.21
-    /// A fixed visible length of about two typical spines' thickness (1.32 units).
+    /// A fixed visible length of about two typical spines' thickness.
     private static let ribbonSegmentCount = 5
     private static let ribbonSlideTime: Float = 0.55
     private static let ribbonSettleTime: Float = 1.0
@@ -1150,17 +1149,17 @@ final class BookWallScene {
             let tail = Self.ribbonTailMesh, !PerformanceDiagnostics.isolates("wall-no-ribbon")
         else { return }
         if ribbon.parent == nil { root.addChild(ribbon) }
-        let front = (layout.slots.map(\.coverWidth).max() ?? slot.coverWidth) / 2
+        let front = layout.maxCoverWidth / 2
         let top = resting.translation.y - slot.collisionThickness / 2
-        ribbonCount = Self.ribbonSegmentCount
-        while ribbonSegments.count < ribbonCount {
-            let segment = ModelEntity(mesh: mesh, materials: [Self.ribbonMaterial])
-            ribbon.addChild(segment)
-            ribbonSegments.append(segment)
-        }
-        for (index, segment) in ribbonSegments.enumerated() {
-            segment.isEnabled = index < ribbonCount
-            segment.model?.mesh = index == ribbonCount - 1 ? tail : mesh
+        if ribbonSegments.isEmpty {
+            ribbonSegments = (0..<Self.ribbonSegmentCount)
+                .map { index in
+                    let segment = ModelEntity(
+                        mesh: index == Self.ribbonSegmentCount - 1 ? tail : mesh,
+                        materials: [Self.ribbonMaterial])
+                    ribbon.addChild(segment)
+                    return segment
+                }
         }
         ribbon.position = [
             resting.translation.x + slot.bookHeight * 0.3, top,
@@ -1196,7 +1195,7 @@ final class BookWallScene {
         let pulledOut = min(1, max(0, 1 + t / Self.pullOutDuration))
         contactShadow.components.set(
             OpacityComponent(opacity: Self.contactShadowOpacity * pulledOut))
-        let length = Float(ribbonCount) * Self.ribbonSegmentLength
+        let length = Float(Self.ribbonSegmentCount) * Self.ribbonSegmentLength
         let slide = Self.smootherstep(t / Self.ribbonSlideTime)
         // Path distance of the ribbon's top below the anchor; negative is inside the book.
         let offset = -length * (1 - slide)
@@ -1205,7 +1204,7 @@ final class BookWallScene {
             ? 0 : t < Self.ribbonSlideTime ? 1 : exp(-(t - Self.ribbonSlideTime) / 0.15)
         var point = SIMD3<Float>.zero
         var started = false
-        for index in 0..<ribbonCount {
+        for index in 0..<Self.ribbonSegmentCount {
             let segment = ribbonSegments[index]
             let top = offset + Float(index) * Self.ribbonSegmentLength
             guard top + Self.ribbonSegmentLength > 0 else {
@@ -1314,7 +1313,7 @@ final class BookWallScene {
     /// the backdrops with it, so the frame stays filled throughout a flight.
     private func fitBackdrop() {
         guard renderBounds.width > 0, renderBounds.height > 0 else { return }
-        let shelfDepth = (layout.slots.map(\.coverWidth).max() ?? 0.8) + 0.55
+        let shelfDepth = layout.maxCoverWidth + Self.shelfDepthAllowance
         backdropDistance = wallCameraDepth + shelfDepth / 2 + Self.backdropGap
         placeBackdrops()
         bakeWall()
@@ -1467,7 +1466,7 @@ final class BookWallScene {
         let height = Self.contactShadowHeight
         // The light comes from the right, so the shadow falls a little to the left.
         let shift = height * Self.topLightDirection.x / Self.topLightDirection.y
-        let front = (layout.slots.map(\.coverWidth).max() ?? slot.coverWidth) / 2
+        let front = layout.maxCoverWidth / 2
         let top = belowResting.translation.y + below.collisionThickness / 2
         contactShadow.position =
             SIMD3<Float>((left + right) / 2 - shift, top - height / 2, front + 0.012)
@@ -1672,8 +1671,8 @@ final class BookWallScene {
 
     private func installShelf() {
         let half = layout.totalWidth / 2
-        let depth = layout.slots.map(\.coverWidth).max() ?? 0.8
-        let shelfSize = SIMD3<Float>(half * 2 + 1.4, shelfThickness, depth + 0.55)
+        let shelfSize = SIMD3<Float>(
+            half * 2 + 1.4, shelfThickness, layout.maxCoverWidth + Self.shelfDepthAllowance)
         let shelfColor = BookWallShelfLabel.wood.uiColor
         let shelfMaterial: any RealityKit.Material
         if PerformanceDiagnostics.isolates("wall-unlit-shelf") {
@@ -1902,7 +1901,7 @@ final class BookWallScene {
         let seed = Float((UInt64(bitPattern: Int64(slot.book.id)) &* 1_103_515_245) % 100) / 100
         // Spines sit flush on one front plane. Centered books of different depths would put
         // deeper spines nearer the camera, where they hide part of the book above or below.
-        let front = (layout.slots.map(\.coverWidth).max() ?? slot.coverWidth) / 2
+        let front = layout.maxCoverWidth / 2
         return [slot.x + (seed - 0.5) * 0.18, slot.restingY, front - slot.coverWidth / 2]
     }
 
@@ -1943,16 +1942,20 @@ final class BookWallScene {
     /// Projects each spine at rest with the wall's resting camera depth, whatever the current
     /// dolly, so published rectangles match `plannedFocusFrames` until the books land.
     private func projectedFrames() -> [Int: CGRect] {
-        let frames = Self.focusFrames(
+        Self.focusFrames(
             for: layout, resting: restingTransforms, cameraDepth: wallCameraDepth,
             in: renderBounds)
-        let outside = frames.values.filter { !renderBounds.contains($0) }.count
-        BookWallHostLog.write("focusFrames=\(frames.count) outsideViewport=\(outside)")
-        return frames
     }
 }
 
-/// Keeps source art intact and blends only a narrow, synthesized casing bleed.
+extension BookWallLayout {
+    /// The deepest book's cover width. Spines sit flush at half of it, and the shelf's depth
+    /// follows it.
+    fileprivate var maxCoverWidth: Float { slots.map(\.coverWidth).max() ?? 0.8 }
+}
+
+/// Fits source art to the front board with a narrow, synthesized casing bleed. Only the joint
+/// fold covers source art.
 enum BookWallCoverTexture {
     /// How far the fold reaches onto the front board from the joint: 3 mm at Book Wall's
     /// scale, where a book about 4 units long stands for one about 20 cm long.
@@ -1963,7 +1966,7 @@ enum BookWallCoverTexture {
     static func make(
         image: CGImage, slot: BookWallLayout.Slot, cloth: StyleColor, edgeColors: [StyleColor]
     ) -> CGImage? {
-        let edgeColor = cloth.uiColor
+        let clothColor = cloth.uiColor
         let size = CGSize(width: 512, height: CGFloat(slot.bookHeight / slot.coverWidth) * 512)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -1971,7 +1974,7 @@ enum BookWallCoverTexture {
         return UIGraphicsImageRenderer(size: size, format: format)
             .image { context in
                 let cg = context.cgContext
-                edgeColor.setFill()
+                clothColor.setFill()
                 cg.fill(CGRect(origin: .zero, size: size))
                 let source = CGSize(width: image.width, height: image.height)
                 let margin = CGSize(width: size.width * 0.003, height: size.height * 0.003)
@@ -1986,7 +1989,8 @@ enum BookWallCoverTexture {
                     width: source.width * scale, height: source.height * scale)
                 UIImage(cgImage: image).draw(in: imageRect)
                 // Repeat the actual outer pixel row or column into the tiny new margin, then
-                // fade only that margin into the case. No tint or gradient touches source art.
+                // fade only that margin into the case. Apart from the joint fold below, no tint
+                // or gradient touches source art.
                 if let top = image.cropping(
                     to: CGRect(x: 0, y: 0, width: image.width, height: 1))
                 {
@@ -1997,7 +2001,7 @@ enum BookWallCoverTexture {
                             width: imageRect.width, height: margin.height),
                         start: CGPoint(x: 0, y: imageRect.minY),
                         end: CGPoint(x: 0, y: imageRect.minY - margin.height),
-                        caseColor: edgeColor, context: cg)
+                        caseColor: clothColor, context: cg)
                 }
                 if let right = image.cropping(
                     to: CGRect(x: image.width - 1, y: 0, width: 1, height: image.height))
@@ -2009,7 +2013,7 @@ enum BookWallCoverTexture {
                             width: margin.width, height: imageRect.height),
                         start: CGPoint(x: imageRect.maxX, y: 0),
                         end: CGPoint(x: imageRect.maxX + margin.width, y: 0),
-                        caseColor: edgeColor, context: cg)
+                        caseColor: clothColor, context: cg)
                 }
                 if let bottom = image.cropping(
                     to: CGRect(x: 0, y: image.height - 1, width: image.width, height: 1))
@@ -2021,7 +2025,7 @@ enum BookWallCoverTexture {
                             width: imageRect.width, height: margin.height),
                         start: CGPoint(x: 0, y: imageRect.maxY),
                         end: CGPoint(x: 0, y: imageRect.maxY + margin.height),
-                        caseColor: edgeColor, context: cg)
+                        caseColor: clothColor, context: cg)
                 }
                 if let left = image.cropping(
                     to: CGRect(x: 0, y: 0, width: 1, height: image.height))
@@ -2033,7 +2037,7 @@ enum BookWallCoverTexture {
                             width: margin.width, height: imageRect.height),
                         start: CGPoint(x: imageRect.minX, y: 0),
                         end: CGPoint(x: imageRect.minX - margin.width, y: 0),
-                        caseColor: edgeColor, context: cg)
+                        caseColor: clothColor, context: cg)
                 }
                 // The artwork's left edge is the joint (`BookWallHardcoverMesh.coverSurface`).
                 let fold = CGRect(

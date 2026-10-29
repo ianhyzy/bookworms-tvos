@@ -7,7 +7,6 @@ import UIKit
 protocol BookWallRenderHost: AnyObject {
     func subscribe<E: RealityKit.Event>(to event: E.Type, handler: @escaping (E) -> Void)
         -> Cancellable
-    func project(_ point: SIMD3<Float>) -> CGPoint?
     func setAmbientExponent(_ exponent: Float)
 }
 
@@ -36,14 +35,7 @@ struct BookWallHostConfiguration {
         let requested = sizes[value("wall-internal") ?? diagnosticSize] ?? renderSize
         internalSize = requested.width <= renderSize.width ? requested : renderSize
         preferredFramesPerSecond = value("wall-fps") == "30" ? 30 : 60
-        // 4× multisampling smooths the drifting book's edges at no measured cost on Apple TV.
+        // 4× multisampling smooths the drifting book's edges.
         antialiasingEnabled = value("wall-antialiasing") != "off"
-    }
-}
-
-/// Records prototype surface facts without logging library content or credentials.
-enum BookWallHostLog {
-    static func write(_ message: String) {
-        FileHandle.standardError.write(Data(("BookWallHost " + message + "\n").utf8))
     }
 }
