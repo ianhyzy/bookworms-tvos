@@ -389,11 +389,11 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None,
                 run(["simslim", "on", device, "--except", SIMSLIM_KEEP], capture_output=True, text=True)
                 record["simslim"] = SIMSLIM_KEEP
             except subprocess.CalledProcessError:
-                # Falls back to a stock boot. simslim may have booted the device before failing,
-                # so this boot's result is ignored; bootstatus below confirms the boot.
+                # simslim may have persisted some disables before failing, and `simctl erase` keeps
+                # them. `simslim off` re-enables every daemon and boots the stock simulator; if it
+                # fails too, the run fails rather than testing a partly slimmed simulator.
                 record["simslim"] = "failed"
-                subprocess.run(["xcrun", "simctl", "boot", device], capture_output=True,
-                               env=offline_environment())
+                run(["simslim", "off", device], capture_output=True, text=True)
         else:
             run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
         run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)

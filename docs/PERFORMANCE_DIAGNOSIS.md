@@ -86,7 +86,7 @@ cost from app animation work. Capture screenshots separately from the measured m
 Release app when the investigation finishes.
 
 To inspect transition rendering frame by frame, run
-`DevicePerformanceTests/testBookWallTransitionFrames` with `--only-testing` and
+`BookwormsUITests/DevicePerformanceTests/testBookWallTransitionFrames` with `--only-testing` and
 `TEST_RUNNER_VERIFY_DEVICE_PERFORMANCE=1`. It opens and closes one book while taking
 screenshots as fast as XCTest allows; it is not a timing measurement. Optional variables:
 `TEST_RUNNER_PERF_EXTRA_ARGUMENTS` adds space-separated launch arguments, such as

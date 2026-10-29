@@ -429,7 +429,7 @@ class ExecutionTests(unittest.TestCase):
         success = subprocess.CompletedProcess([], 0, stderr="")
 
         def checked(arguments, **kwargs):
-            if arguments[0] == "simslim":
+            if arguments[:2] == ["simslim", "on"]:
                 raise subprocess.CalledProcessError(1, arguments)
 
         with tempfile.TemporaryDirectory() as directory:
@@ -439,14 +439,34 @@ class ExecutionTests(unittest.TestCase):
                  mock.patch.object(runner.shutil, "which", return_value="/usr/local/bin/simslim"), \
                  mock.patch.object(runner, "run", side_effect=checked) as checked_run, \
                  mock.patch.object(runner, "inspect_results", return_value={"failures": []}), \
-                 mock.patch.object(runner.subprocess, "run", side_effect=[success] * 4) as process:
+                 mock.patch.object(runner.subprocess, "run", side_effect=[success] * 3):
                 record = runner.execute_runtime({"version": "27.0", "identifier": "runtime"},
                                                 {"identifier": "tv"}, output, "Unit", REQUIRED)
             self.assertEqual(record["status"], "passed")
             self.assertEqual(record["simslim"], "failed")
-            self.assertEqual(process.call_args_list[0].args[0], ["xcrun", "simctl", "boot", device])
-            self.assertEqual(checked_run.call_args_list[-1].args[0],
-                             ["xcrun", "simctl", "bootstatus", device, "-b"])
+            self.assertEqual([call.args[0] for call in checked_run.call_args_list[-2:]],
+                             [["simslim", "off", device], ["xcrun", "simctl", "bootstatus", device, "-b"]])
+
+    def test_failed_simslim_restore_fails_the_run(self):
+        device = "12345678-1234-1234-1234-123456789ABC"
+        success = subprocess.CompletedProcess([], 0, stderr="")
+
+        def checked(arguments, **kwargs):
+            if arguments[0] == "simslim":
+                raise subprocess.CalledProcessError(1, arguments)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "tvOS-27.0"
+            with mock.patch.object(runner, "mute_simulator_audio", return_value={"enabled": False}), \
+                 mock.patch.object(runner, "command_text", return_value=device), \
+                 mock.patch.object(runner.shutil, "which", return_value="/usr/local/bin/simslim"), \
+                 mock.patch.object(runner, "run", side_effect=checked), \
+                 mock.patch.object(runner.subprocess, "run", side_effect=[success] * 2) as process:
+                record = runner.execute_runtime({"version": "27.0", "identifier": "runtime"},
+                                                {"identifier": "tv"}, output, "Unit", REQUIRED)
+            self.assertEqual(record["status"], "failed")
+            self.assertTrue(record["simulator_deleted"])
+            self.assertEqual(process.call_args_list[-1].args[0], ["xcrun", "simctl", "delete", device])
 
     def test_offline_processes_never_inherit_bootstrap_credentials(self):
         variables = {"PATH": "/bin", "HARDCOVER_BOOTSTRAP_TOKEN": "secret",

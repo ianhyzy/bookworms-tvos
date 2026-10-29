@@ -430,8 +430,7 @@ final class ScenarioNavigationTests: XCTestCase {
             capture(app, "scenario-\(scenario)-shelf")
             try audit(app)
             // The partial scenario's error belongs to CWA, whose Settings status is hidden while
-            // `BookPresentation.offersCWA` is false. Check it again when CWA returns: "CWA rejected
-            // the login. Use a local CWA account with OPDS access."
+            // `BookPresentation.offersCWA` is false. Check it again when CWA returns.
             if scenario != "empty" && scenario != "partial" {
                 RemoteNavigation.openSettings(app)
                 let error: String
