@@ -1445,6 +1445,47 @@ final class LibraryWorkflowTests: XCTestCase {
             "The saved access token keeps the refresh token that renews it")
     }
 
+    func testARefusedRefreshTokenSaveNeverRemovesAnUnreadableLogin() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 604_800)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.requestHardcoverDeviceAuth = {
+            HardcoverDeviceAuth(
+                deviceCode: "fixture_device_code", userCode: "TEST-CODE",
+                verificationURI: URL(string: "https://hardcover.app/link")!,
+                verificationURIComplete: URL(string: "https://hardcover.app/link?c=TESTCODE")!,
+                expiresIn: 900, interval: 1)
+        }
+        dependencies.pollHardcoverDeviceToken = { _ in .success(fixture.tokens(2)) }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        // A failed read returns nil like a missing item, and Keychain refuses the new refresh
+        // token, so the saved one is never replaced.
+        dependencies.readCredential = { account in
+            account == HardcoverSession.refreshAccount ? nil : fixture.secrets[account]
+        }
+        dependencies.saveCredential = { _, _ in throw CredentialStore.CredentialError.saveFailed }
+        var removed: [String] = []
+        dependencies.removeCredential = { account in
+            removed.append(account)
+            fixture.secrets.removeValue(forKey: account)
+        }
+        dependencies.sleep = { _ in }
+        let revoked = expectation(description: "Unsaved login revoked")
+        dependencies.revokeHardcoverToken = { token in
+            XCTAssertEqual(token, "hc_rt_fictional_2")
+            revoked.fulfill()
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.startHardcoverDeviceAuth()
+        await fulfillment(of: [revoked], timeout: 5)
+        XCTAssertFalse(removed.contains(HardcoverSession.refreshAccount))
+        XCTAssertEqual(fixture.secrets[HardcoverSession.accessAccount], "hc_at_fictional_1")
+        XCTAssertEqual(fixture.secrets[HardcoverSession.refreshAccount], "hc_rt_fictional_1")
+    }
+
     func testConnectingCWASkipsTheDailyGate() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
