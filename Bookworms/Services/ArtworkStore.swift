@@ -85,9 +85,11 @@ actor ArtworkStore {
     private let usesSavedCWAConfiguration: Bool
     private var pendingDownloads: [URL: Task<Data, Error>] = [:]
     private var failedDownloads: [URL: Date] = [:]
-    /// Set by each new library download. The next `prefetch` prunes once when it finishes, so
-    /// preparing many covers doesn't list and measure both cache directories after each one.
-    private var needsPrune = false
+    /// Set by each new library download, and at launch so each launch trims the cache once.
+    /// `prefetch` prunes once when it finishes, so preparing many covers doesn't list and measure
+    /// both cache directories after each one. Other downloads prune once their burst settles.
+    private var needsPrune = true
+    private var activePrefetches = 0
     nonisolated let imageCache: CoverImageCache
     private static let log = Logger(subsystem: "gay.ian.Bookworms", category: "Artwork")
 
@@ -224,7 +226,10 @@ actor ArtworkStore {
             return original
         }
         pendingDownloads[url] = task
-        defer { pendingDownloads[url] = nil }
+        defer {
+            pendingDownloads[url] = nil
+            if needsPrune, pendingDownloads.isEmpty, activePrefetches == 0 { prune() }
+        }
         do {
             let data = try await task.value
             failedDownloads[url] = nil
@@ -361,9 +366,11 @@ actor ArtworkStore {
     /// Reads each cover's dimensions from its header without decoding pixels; views decode the
     /// size they display. Books without a cover URL are not reported as failed.
     func prefetch(books: [Book], avatarURLs: [URL]) async -> Preparation {
+        activePrefetches += 1
+        defer { activePrefetches -= 1 }
         var result = Preparation()
         for start in stride(from: 0, to: books.count, by: 4) {
-            guard !Task.isCancelled else { return result }
+            guard !Task.isCancelled else { break }
             let batch = Array(books[start..<min(start + 4, books.count)])
             await withTaskGroup(of: (Book, Double?, Bool).self) { group in
                 for book in batch where !book.coverURLs.isEmpty {
