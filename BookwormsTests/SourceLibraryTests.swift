@@ -216,6 +216,50 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(SeriesInfo.positionLabel(2.5), "#2.5")
     }
 
+    /// The iPhone app's drop-date cases (`HardcoverTests`), so both apps write the same day into
+    /// `library-v1`.
+    func testDropDateIsTheFirstDayASyncFindsTheBookOnDidNotFinish() throws {
+        // Noon on 2025-08-14 in this device's time zone, written as Hardcover writes
+        // `updated_at`, with and without fractional seconds, so the day is the same anywhere.
+        let noon = try XCTUnwrap(
+            Calendar.current.date(from: DateComponents(year: 2025, month: 8, day: 14, hour: 12)))
+        func stamp(_ options: ISO8601DateFormatter.Options) -> String {
+            ISO8601DateFormatter.string(from: noon, timeZone: .current, formatOptions: options)
+        }
+        let fractional = stamp([.withInternetDateTime, .withFractionalSeconds])
+        let cases: [(status: Int, updatedAt: String?, previous: String?, expected: String?)] = [
+            (5, fractional, nil, "2025-08-14"),
+            (5, stamp(.withInternetDateTime), nil, "2025-08-14"),
+            // A later edit of the entry doesn't move the day an earlier sync saved.
+            (5, fractional, "2025-01-02", "2025-01-02"),
+            // Leaving Did Not Finish clears it.
+            (3, fractional, "2025-01-02", nil),
+            (5, nil, nil, nil),
+        ]
+        let rows = cases.enumerated()
+            .map { index, row in
+                let book = #""book": {"id": \#(index + 1), "title": "Book \#(index + 1)"}"#
+                let updated = row.updatedAt.map { #", "updated_at": "\#($0)""# } ?? ""
+                return #"{"id": \#(index + 100), "status_id": \#(row.status), \#(book)\#(updated)}"#
+            }
+        let decoded = try JSONDecoder()
+            .decode([UserBook].self, from: Data("[\(rows.joined(separator: ","))]".utf8))
+        var previous: [Int: Book] = [:]
+        for (index, row) in cases.enumerated() {
+            previous[index + 1] = row.previous.map {
+                Book(
+                    id: index + 1, title: "Book \(index + 1)", author: "Unknown author",
+                    statusID: 5, dropped: $0)
+            }
+        }
+        let books = HardcoverClient.normalize(decoded, previous: previous)
+        XCTAssertEqual(books.count, cases.count)
+        for (index, row) in cases.enumerated() {
+            XCTAssertEqual(
+                books.first { $0.id == index + 1 }?.dropped, row.expected, "Book \(index + 1)")
+        }
+    }
+
     func testLibraryRowsCarrySeriesNamesIntoTheCloudArchive() throws {
         let json = #"""
             [{"id": 100, "status_id": 3, "last_read_date": "2026-03-01",

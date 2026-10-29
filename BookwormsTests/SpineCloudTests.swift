@@ -444,6 +444,22 @@ final class SpineCloudTests: XCTestCase {
                 .isValid(accountID: "42", key: cityWatch))
     }
 
+    func testSeriesLookEditAndRemakeDatesDecodeAndMustBeFinite() throws {
+        let json = #"""
+            {"version": 1, "accountID": "42", "seriesID": 1018,
+             "group": "City Watch|terrypratchett", "sourceBookID": 123, "origin": "ios-pcc-v2",
+             "createdAt": 801000000, "editedAt": 801000060, "remadeAt": 801000120,
+             "backgroundHex": "#1A2B3C", "foregroundHex": "#F0E0D0", "accentHex": "#C0A060",
+             "typeface": "serif", "weight": 700, "uppercase": false}
+            """#
+        var decoded = try JSONDecoder().decode(SeriesLookV1.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.editedAt, Date(timeIntervalSinceReferenceDate: 801_000_060))
+        XCTAssertEqual(decoded.remadeAt, Date(timeIntervalSinceReferenceDate: 801_000_120))
+        XCTAssertTrue(decoded.isValid(accountID: "42", key: cityWatch))
+        decoded.remadeAt = Date(timeIntervalSince1970: .infinity)
+        XCTAssertFalse(decoded.isValid(accountID: "42", key: cityWatch))
+    }
+
     func testSeriesLookProvenanceDecodesWhenPresentAndFollowsTheDesignRule() throws {
         let fields = #"""
             "version": 1, "accountID": "42", "seriesID": 1018,
