@@ -1,9 +1,7 @@
 import copy
 import importlib.util
-import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +11,7 @@ spec = importlib.util.spec_from_file_location("worker", Path(__file__).with_name
 w = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(w)
 GUARD = "BookwormsTests/OfflinePolicyTests/testWorkerBuildRejectsUnexpectedNetworkAndCredentials"
+UI_GUARD = "BookwormsUITests/OfflinePolicyUITests/testOfflineGuardSurvivesAppRelaunch"
 
 
 def report():
@@ -23,9 +22,23 @@ def report():
                   "simulator_deleted": True, "tests": {GUARD: {"result": "Passed"}}, "failures": []}]}
 
 
+def local_report():
+    """A Local run: the full pass, then a Reduce Motion pass with its own required tests."""
+    d = report()
+    d["required_tests"] = [GUARD, UI_GUARD, "BookwormsTests/OtherTests/testOther"]
+    d["requested_runtimes"] = ["27.0", "27.0 with Reduce Motion"]
+    d["runs"][0]["tests"] = {test: {"result": "Passed"} for test in d["required_tests"]}
+    reduced = copy.deepcopy(d["runs"][0])
+    reduced["requested_runtime"] = "27.0 with Reduce Motion"
+    reduced["required_tests"] = [GUARD, UI_GUARD]
+    reduced["tests"] = {test: {"result": "Passed"} for test in reduced["required_tests"]}
+    d["runs"].append(reduced)
+    return d
+
+
 class WorkerTests(unittest.TestCase):
-    def handoff(self, value=None, code=0, problem=None):
-        return w.make_handoff(report() if value is None else value, "unit", code, Path("/tmp/run"), problem)
+    def handoff(self, value=None, code=0, problem=None, profile="unit"):
+        return w.make_handoff(report() if value is None else value, profile, code, Path("/tmp/run"), problem)
 
     def test_clean_pass_and_bounded_markdown(self):
         h = self.handoff()
@@ -48,9 +61,32 @@ class WorkerTests(unittest.TestCase):
             with self.subTest(report=d):
                 self.assertNotEqual(self.handoff(d)["status"], "passed")
 
+    def test_local_profile_requires_ui_guard_and_per_run_tests(self):
+        self.assertEqual(self.handoff(local_report(), profile="local")["status"], "passed")
+        cases = []
+        # The Reduce Motion pass lists every test it ran but lacks the UI guard.
+        d = local_report(); d["runs"][1]["required_tests"] = [GUARD]; d["runs"][1]["tests"] = {GUARD: {"result": "Passed"}}; cases.append(d)
+        d = local_report(); d["runs"][1]["tests"]["BookwormsTests/OtherTests/testOther"] = {"result": "Passed"}; cases.append(d)
+        for d in cases:
+            with self.subTest(report=d):
+                self.assertNotEqual(self.handoff(d, profile="local")["status"], "passed")
+
     def test_malformed_and_missing_reports(self):
         for value in [[], {}, {"runs": [None]}, {"runs": [{"tests": []}]}]:
             self.assertEqual(self.handoff(value, 2)["status"], "blocked")
+        # A finished report from a runner that exited 0 is still rejected for its shape.
+        for run in [None, {"tests": []}, {"tests": {}, "summary": []}, {"tests": {}, "failures": "text"}]:
+            with self.subTest(run=run):
+                handoff = self.handoff(dict(report(), runs=[run]), 0)
+                self.assertNotEqual(handoff["status"], "passed")
+                self.assertIn("Malformed runner report", handoff["failures"])
+
+    def test_worker_deleted_simulator_is_not_reported_as_leaked(self):
+        d = report(); d["runs"][0]["simulator_deleted"] = False
+        self.assertIn("Owned simulator cleanup is incomplete", self.handoff(d)["failures"])
+        handoff = w.make_handoff(d, "unit", 0, Path("/tmp/run"), removed=["test"])
+        self.assertNotIn("Owned simulator cleanup is incomplete", handoff["failures"])
+        self.assertTrue(handoff["runs"][0]["simulator_deleted"])
 
     def test_blocked_runtime(self):
         d = report(); d["status"] = "blocked"; d["runs"][0]["status"] = "blocked"
@@ -84,6 +120,36 @@ class WorkerTests(unittest.TestCase):
             w.NoRedirect().redirect_request(None)
         with self.assertRaises(ValueError):
             w.local_request("https://example.com")
+        # The opener replaces the default redirect handler and ignores proxy settings.
+        handlers = []
+
+        def build_opener(*arguments):
+            handlers.extend(arguments)
+            raise OSError("stop before connecting")
+
+        with patch.object(w.urllib.request, "build_opener", side_effect=build_opener):
+            with self.assertRaises(OSError):
+                w.local_request("/api/v1/models")
+        self.assertTrue(any(isinstance(h, w.NoRedirect) for h in handlers))
+        proxies = [h for h in handlers if isinstance(h, w.urllib.request.ProxyHandler)]
+        self.assertEqual([h.proxies for h in proxies], [{}])
+
+    def test_summary_schema_allows_only_supplied_test_identifiers(self):
+        failed = report(); failed["runs"][0]["tests"][GUARD]["result"] = "Failed"
+        handoff = self.handoff(failed)
+        requests = []
+
+        def respond(path, body=None, timeout=120):
+            if path == "/api/v1/models":
+                return {"models": [{"loaded_instances": [{"id": w.MODEL, "config": {"context_length": 8192, "parallel": 1}}]}]}
+            requests.append(body)
+            return {"choices": [{"finish_reason": "length", "message": {"content": ""}}]}
+
+        with patch.object(w, "local_request", side_effect=respond), self.assertRaises(ValueError):
+            w.summarize(handoff)
+        schema = requests[0]["response_format"]["json_schema"]["schema"]
+        tests = schema["properties"]["groups"]["items"]["properties"]["tests"]
+        self.assertEqual(tests["items"]["enum"], [GUARD])
 
     def test_environment_scrub(self):
         with patch.dict(os.environ, {"TEST_RUNNER_VERIFY_DEVICE_SOCIAL": "1", "SIMCTL_CHILD_HARDCOVER_BOOTSTRAP_TOKEN": "secret", "OPENAI_API_KEY": "secret"}):
@@ -95,9 +161,11 @@ class WorkerTests(unittest.TestCase):
     def test_concurrent_worker_is_blocked(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(w, "ROOT", Path(folder)):
             base = Path(folder) / ".local/test-worker"; base.mkdir(parents=True)
-            with (base / "worker.lock").open("a") as lock:
+            with (base / "worker.lock").open("a") as lock, patch.object(w.subprocess, "Popen") as spawn:
                 w.fcntl.flock(lock, w.fcntl.LOCK_EX | w.fcntl.LOCK_NB)
                 self.assertEqual(w.main([]), 2)
+                self.assertEqual(w.main(["--detach"]), 2)
+                spawn.assert_not_called()
 
     def test_mute_preflight_writes_only_device_hub_preference(self):
         with patch.object(Path, "is_file", return_value=True), patch.object(Path, "read_bytes", return_value=b"enableAudioOutput_tvOS"), patch.object(w.runner, "command_text", side_effect=["/Applications/Xcode.app/Contents/Developer", "0"]), patch.object(w.runner, "run") as run:

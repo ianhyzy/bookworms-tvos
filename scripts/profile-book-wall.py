@@ -2,8 +2,8 @@
 """Build, record, and summarize one Book Wall performance profile on the physical Apple TV.
 
 Runs unattended: wakes the Instruments connection, builds an optimized test build, drives
-the Siri Remote through `DevicePerformanceTests/testBookWallProfile`, symbolicates the trace,
-summarizes it, and reinstalls the ordinary local build.
+the Siri Remote through `DevicePerformanceTests/testBookWallProfile`, symbolicates CPU
+captures, summarizes the trace, and reinstalls the ordinary local build.
 """
 import argparse
 import importlib.util
@@ -103,7 +103,7 @@ def main():
     parser.add_argument('--diagnostics', action='store_true',
                         help='Build with BOOKWORMS_DIAGNOSTICS into .build-profile-diagnostics and '
                              'launch with --performance-diagnostics')
-    parser.add_argument('--variant', help='Isolation such as wall-no-shadow; implies --diagnostics')
+    parser.add_argument('--variant', help='Isolation such as wall-720p; implies --diagnostics')
     parser.add_argument('--wall-antialiasing', choices=['off', 'on'], default='on',
                         help='Book Wall antialiasing (default: on)')
     parser.add_argument('--capture-set', choices=['full', 'display', 'cpu'], default='display',

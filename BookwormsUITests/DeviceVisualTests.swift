@@ -19,23 +19,24 @@ final class DeviceVisualTests: XCTestCase {
             let last = app.buttons["book-\(lastID)"]
             let next = app.buttons["book-\(nextID)"]
             XCTAssertTrue(next.waitForExistence(timeout: 30))
-            XCTAssertTrue(next.hasFocus)
+            // The requested page's first book takes focus after the shelf appears.
+            RemoteNavigation.waitForFocus(next)
             for _ in 0..<2 {
                 XCUIRemote.shared.press(.left)
                 XCTAssertTrue(last.waitForExistence(timeout: 10))
-                print("Arrival focus diagnostics:", last.value ?? "unavailable")
-                let arrived = XCTNSPredicateExpectation(
-                    predicate: NSPredicate(format: "hasFocus == true"), object: last)
-                XCTAssertEqual(XCTWaiter.wait(for: [arrived], timeout: 10), .completed)
-                Thread.sleep(forTimeInterval: 1)
+                RemoteNavigation.waitForFocus(last, timeout: 10)
+                // Focus must stay on arrival, not bounce after the page changes.
+                _ = XCTWaiter.wait(
+                    for: [XCTestExpectation(description: "Focus settles")],
+                    timeout: RemoteNavigation.settleWindow)
                 XCTAssertTrue(last.hasFocus)
                 XCUIRemote.shared.press(.right)
                 XCTAssertTrue(next.waitForExistence(timeout: 10))
-                XCTAssertTrue(next.hasFocus)
+                RemoteNavigation.waitForFocus(next)
             }
             XCUIRemote.shared.press(.left)
             XCTAssertTrue(last.waitForExistence(timeout: 10))
-            XCTAssertTrue(last.hasFocus)
+            RemoteNavigation.waitForFocus(last)
             let shelf = XCTAttachment(screenshot: app.screenshot())
             shelf.name = "Real shelf with optical typography and backward focus"
             shelf.lifetime = .keepAlways

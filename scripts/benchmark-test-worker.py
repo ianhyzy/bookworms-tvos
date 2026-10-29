@@ -13,19 +13,23 @@ LMS = Path.home() / ".lmstudio/bin/lms"
 
 
 def main():
-    output = w.ROOT / ".local/test-worker-benchmark" / time.strftime("%Y%m%d-%H%M%S")
-    output.mkdir(parents=True)
     reports = []
     for path in (w.ROOT / ".local/test-results").glob("*/report.json"):
         try:
             reports.append((path, json.loads(path.read_text())))
         except (ValueError, OSError):
             pass
-    passed = next((p, d) for p, d in reports if d.get("status") == "passed")
-    failed = next((p, d) for p, d in reports if any(t.get("result") == "Failed" for r in d.get("runs", []) for t in r.get("tests", {}).values()))
-    incomplete = next((p, d) for p, d in reports if not any(r.get("tests") for r in d.get("runs", [])))
+    passed = next(((p, d) for p, d in reports if d.get("status") == "passed"), None)
+    failed = next(((p, d) for p, d in reports if any(t.get("result") == "Failed" for r in d.get("runs", []) for t in r.get("tests", {}).values())), None)
+    incomplete = next(((p, d) for p, d in reports if not any(r.get("tests") for r in d.get("runs", []))), None)
+    selected = [("pass", passed, "passed"), ("assertion", failed, "failed"), ("incomplete", incomplete, "blocked")]
+    for name, found, _ in selected:
+        if found is None:
+            raise SystemExit(f"No saved report for the {name} case under .local/test-results")
+    output = w.ROOT / ".local/test-worker-benchmark" / time.strftime("%Y%m%d-%H%M%S")
+    output.mkdir(parents=True)
     cases = []
-    for name, (path, report), status in [("pass", passed, "passed"), ("assertion", failed, "failed"), ("incomplete", incomplete, "blocked")]:
+    for name, (path, report), status in selected:
         failures = report.get("failures", []) + [f for run in report.get("runs", []) for f in run.get("failures", [])]
         if status == "blocked":
             failures = ["Incomplete verification: no test outcomes available."] + failures
@@ -34,7 +38,7 @@ def main():
     (output / "cases.json").write_text(json.dumps(cases, indent=2) + "\n")
     inventory = w.local_request("/api/v1/models")
     (output / "models-before.json").write_text(json.dumps(inventory, indent=2) + "\n")
-    # Only idle local instances may be unloaded to make room for Xcode.
+    # Only idle instances may be unloaded, to make room for the candidate models.
     ps = json.loads(subprocess.check_output([str(LMS), "ps", "--json"], text=True))
     if any(m.get("status") != "idle" or m.get("queued", 0) for m in ps):
         raise SystemExit("Blocked: model is serving another request")

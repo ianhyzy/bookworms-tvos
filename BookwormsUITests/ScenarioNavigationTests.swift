@@ -27,12 +27,6 @@ final class ScenarioNavigationTests: XCTestCase {
         return app
     }
 
-    private func waitForFocus(
-        _ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line
-    ) {
-        RemoteNavigation.waitForFocus(element, file: file, line: line)
-    }
-
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
@@ -107,25 +101,17 @@ final class ScenarioNavigationTests: XCTestCase {
         return try probe(app)
     }
 
-    private func openSettings(_ app: XCUIApplication) {
-        RemoteNavigation.openSettings(app)
-    }
-
-    private func moveFocus(to element: XCUIElement) {
-        RemoteNavigation.moveFocus(to: element, in: XCUIApplication())
-    }
-
     private func openWelcomeHardcover(_ app: XCUIApplication) throws {
         let connect = app.buttons["welcome-connect-hardcover"]
         XCTAssertTrue(connect.waitForExistence(timeout: 15))
-        waitForFocus(connect)
+        RemoteNavigation.waitForFocus(connect)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
         _ = try waitForProbe(app) {
             ($0["network"] as? [String: Any])?["heldAuthorization"] as? Int == 1
         }
         // **New code** is the card's only control, so focus must reach it without a press.
-        waitForFocus(app.buttons["hardcover-new-code"])
+        RemoteNavigation.waitForFocus(app.buttons["hardcover-new-code"])
     }
 
     /// **New code** is the card's only control while a code shows, so no press moves focus.
@@ -178,7 +164,7 @@ final class ScenarioNavigationTests: XCTestCase {
         let connect = app.buttons["welcome-connect-hardcover"]
         let sample = app.buttons["welcome-sample-library"]
         XCTAssertTrue(welcome.waitForExistence(timeout: 15))
-        waitForFocus(connect)
+        RemoteNavigation.waitForFocus(connect)
         XCTAssertEqual(connect.label, "Connect Hardcover")
         XCTAssertEqual(sample.label, "Explore sample library")
         RemoteNavigation.pressWithoutMoving(.up, in: app, from: connect)
@@ -210,7 +196,7 @@ final class ScenarioNavigationTests: XCTestCase {
         let app = launch("welcome", focusProbe: true)
         let connect = app.buttons["welcome-connect-hardcover"]
         XCTAssertTrue(connect.waitForExistence(timeout: 15))
-        waitForFocus(connect)
+        RemoteNavigation.waitForFocus(connect)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.images["hardcover-token-qr"].exists)
@@ -257,7 +243,7 @@ final class ScenarioNavigationTests: XCTestCase {
         let app = launch("welcome-error", focusProbe: true)
         let connect = app.buttons["welcome-connect-hardcover"]
         XCTAssertTrue(connect.waitForExistence(timeout: 15))
-        waitForFocus(connect)
+        RemoteNavigation.waitForFocus(connect)
         XCUIRemote.shared.press(.select)
         _ = try waitForProbe(app) {
             ($0["network"] as? [String: Any])?["heldAuthorization"] as? Int == 1
@@ -277,7 +263,7 @@ final class ScenarioNavigationTests: XCTestCase {
         capture(app, "scenario-welcome-download-error")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
-        waitForFocus(connect)
+        RemoteNavigation.waitForFocus(connect)
         RemoteNavigation.press(.down, in: app, expecting: app.buttons["welcome-sample-library"])
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
@@ -310,7 +296,7 @@ final class ScenarioNavigationTests: XCTestCase {
             let app = launch(appearance: appearance)
             let first = app.buttons["book-1"]
             XCTAssertTrue(first.waitForExistence(timeout: 20))
-            waitForFocus(first)
+            RemoteNavigation.waitForFocus(first)
             let initial = try probe(app)
             XCTAssertEqual(initial["sourceCalls"] as? Int, 1)
             let network = try XCTUnwrap(initial["network"] as? [String: Any])
@@ -324,7 +310,7 @@ final class ScenarioNavigationTests: XCTestCase {
             for id in 1...6 {
                 let book = app.buttons["book-\(id)"]
                 XCTAssertTrue(book.waitForExistence(timeout: 5))
-                waitForFocus(book)
+                RemoteNavigation.waitForFocus(book)
                 XCTAssertGreaterThan(book.frame.width, 0)
                 XCTAssertLessThanOrEqual(book.frame.maxX, app.frame.maxX)
                 XCUIRemote.shared.press(.select)
@@ -338,7 +324,7 @@ final class ScenarioNavigationTests: XCTestCase {
                 if id == 1 || id == 4 { try audit(app) }
                 XCUIRemote.shared.press(.menu)
                 XCTAssertTrue(book.waitForExistence(timeout: 5))
-                waitForFocus(book)
+                RemoteNavigation.waitForFocus(book)
                 if id < 6 { XCUIRemote.shared.press(.right) }
             }
             let final = try probe(app)
@@ -358,7 +344,7 @@ final class ScenarioNavigationTests: XCTestCase {
         }
         XCTAssertEqual((pending["network"] as? [String: Any])?["heldArtwork"] as? Int, 1)
         XCTAssertFalse(app.buttons["book-1"].exists)
-        openSettings(app)
+        RemoteNavigation.openSettings(app)
         XCTAssertTrue(app.staticTexts["book-limit"].exists)
         capture(app, "scenario-held-artwork-settings")
         command("release-artwork", app: app)
@@ -373,19 +359,19 @@ final class ScenarioNavigationTests: XCTestCase {
         let first = app.buttons["book-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         try probe(app)
-        waitForFocus(first)
+        RemoteNavigation.waitForFocus(first)
         RemoteNavigation.focusSidebarItem("My Shelf", in: app)
         XCUIRemote.shared.press(.right)
-        waitForFocus(first)
+        RemoteNavigation.waitForFocus(first)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.images["detail-cover"].waitForExistence(timeout: 5))
         XCUIRemote.shared.press(.menu)
-        waitForFocus(first)
+        RemoteNavigation.waitForFocus(first)
         let completed = try probe(app)
         XCTAssertEqual((completed["network"] as? [String: Any])?["heldArtwork"] as? Int, 0)
         XCTAssertEqual(completed["sourceCalls"] as? Int, 1)
         for _ in 1...5 { XCUIRemote.shared.press(.right) }
-        waitForFocus(app.buttons["book-6"])
+        RemoteNavigation.waitForFocus(app.buttons["book-6"])
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.images["detail-cover"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["detail-title"].label, "The Last Observatory")
@@ -398,15 +384,11 @@ final class ScenarioNavigationTests: XCTestCase {
     func testSettingsReverseVisibleBooksAndPersistAcrossRelaunch() throws {
         let app = launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
-        openSettings(app)
-        moveFocus(to: app.buttons["shelf-sort"])
+        RemoteNavigation.openSettings(app)
+        RemoteNavigation.moveFocus(to: app.buttons["shelf-sort"], in: app)
         XCUIRemote.shared.press(.right)
         let reverse = app.descendants(matching: .any)["Reverse order"].firstMatch
-        XCTAssertTrue(
-            reverse.hasFocus
-                || reverse.descendants(matching: .any)
-                    .matching(NSPredicate(format: "hasFocus == true")).count > 0
-        )
+        RemoteNavigation.waitForFocus(reverse)
         XCUIRemote.shared.press(.select)
         capture(app, "scenario-settings-reversed")
         try audit(app)
@@ -417,7 +399,7 @@ final class ScenarioNavigationTests: XCTestCase {
         let restored = launch(preserve: true)
         let last = restored.buttons["book-8"]
         XCTAssertTrue(last.waitForExistence(timeout: 20))
-        waitForFocus(last)
+        RemoteNavigation.waitForFocus(last)
         XCTAssertEqual(try probe(restored)["bookIDs"] as? [Int], Array((1...8).reversed()))
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(restored.staticTexts["detail-title"].waitForExistence(timeout: 5))
@@ -450,14 +432,12 @@ final class ScenarioNavigationTests: XCTestCase {
             // The partial scenario's error belongs to CWA, whose Settings status is hidden while
             // `BookPresentation.offersCWA` is false. Check it again when CWA returns.
             if scenario != "empty" && scenario != "partial" {
-                openSettings(app)
+                RemoteNavigation.openSettings(app)
                 let error: String
                 switch scenario {
                 case "offline":
                     error =
                         "The network connection is unavailable. Check Apple TV's connection and try again."
-                case "partial":
-                    error = "CWA rejected the login. Use a local CWA account with OPDS access."
                 default:
                     error =
                         "The Hardcover login is invalid or expired. Reconnect in Settings."
@@ -483,15 +463,15 @@ final class ScenarioNavigationTests: XCTestCase {
     func testAppearanceChangesAndPersistsAcrossRelaunch() throws {
         let app = launch(appearance: "dark", settingsTab: "General")
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
-        openSettings(app)
+        RemoteNavigation.openSettings(app)
         let picker = app.descendants(matching: .any)["appearance-picker"].firstMatch
-        moveFocus(to: picker)
+        RemoteNavigation.moveFocus(to: picker, in: app)
         for _ in 0..<3 {
             if app.buttons["System"].hasFocus { break }
             XCUIRemote.shared.press(.left)
         }
         XCUIRemote.shared.press(.right)
-        waitForFocus(app.buttons["Light"])
+        RemoteNavigation.waitForFocus(app.buttons["Light"])
         XCUIRemote.shared.press(.select)
         RemoteNavigation.showShelf(app)
         XCTAssertEqual(try probe(app)["appearance"] as? String, "light")
@@ -506,8 +486,9 @@ final class ScenarioNavigationTests: XCTestCase {
     func testSourceEnablementChangesVisibleShelfWithoutSyncAndPersists() throws {
         let app = launch(settingsTab: "Sources")
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
-        openSettings(app)
-        moveFocus(to: app.descendants(matching: .any)["Hardcover"].firstMatch)
+        RemoteNavigation.openSettings(app)
+        RemoteNavigation.moveFocus(
+            to: app.descendants(matching: .any)["Hardcover"].firstMatch, in: app)
         XCUIRemote.shared.press(.select)
         RemoteNavigation.showShelf(app)
         XCTAssertTrue(app.buttons["choose-sources"].waitForExistence(timeout: 5))
@@ -518,8 +499,9 @@ final class ScenarioNavigationTests: XCTestCase {
         let restored = launch(preserve: true, settingsTab: "Sources")
         XCTAssertTrue(restored.buttons["choose-sources"].waitForExistence(timeout: 20))
         XCTAssertEqual(try probe(restored)["sourceCalls"] as? Int, 0)
-        openSettings(restored)
-        moveFocus(to: restored.descendants(matching: .any)["Hardcover"].firstMatch)
+        RemoteNavigation.openSettings(restored)
+        RemoteNavigation.moveFocus(
+            to: restored.descendants(matching: .any)["Hardcover"].firstMatch, in: restored)
         XCUIRemote.shared.press(.select)
         RemoteNavigation.showShelf(restored)
         XCTAssertTrue(restored.buttons["book-1"].waitForExistence(timeout: 10))
@@ -536,14 +518,14 @@ final class ScenarioNavigationTests: XCTestCase {
         let app = launch(focusProbe: true)
         let first = app.buttons["book-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 20))
-        waitForFocus(first)
+        RemoteNavigation.waitForFocus(first)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(
             app.descendants(matching: .any)["detail-hardcover-code"].waitForExistence(timeout: 5))
         let back = app.buttons["back-to-shelf"]
         let author = app.buttons["detail-author"]
         let reviews = app.buttons["community-reviews"]
-        waitForFocus(back)
+        RemoteNavigation.waitForFocus(back)
         RemoteNavigation.press(.right, in: app, expecting: author)
         RemoteNavigation.press(.left, in: app, expecting: back)
         RemoteNavigation.press(.right, in: app, expecting: author)
@@ -553,7 +535,7 @@ final class ScenarioNavigationTests: XCTestCase {
         RemoteNavigation.press(.left, in: app, expecting: back)
         capture(app, "scenario-detail-hardcover-code")
         XCUIRemote.shared.press(.menu)
-        waitForFocus(first)
+        RemoteNavigation.waitForFocus(first)
     }
 
     /// The profile QR code toggle needs a connected account, so this runs on the scenario
@@ -591,7 +573,7 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(advanced["ambient"] as? Bool, true)
         XCTAssertEqual(advanced["idleTimerDisabled"] as? Bool, true)
         XCUIRemote.shared.press(.select)
-        waitForFocus(app.buttons["start-ambient"])
+        RemoteNavigation.waitForFocus(app.buttons["start-ambient"])
         XCTAssertFalse(app.staticTexts["detail-title"].exists)
         let stopped = try probe(app)
         XCTAssertEqual(stopped["ambient"] as? Bool, false)

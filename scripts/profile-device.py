@@ -44,7 +44,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--app', type=Path, help='Override with an ordinary Release baseline app')
     parser.add_argument('--diagnostics', action='store_true')
-    parser.add_argument('--variant', help='Isolation name, such as glass, background, or wall-no-shadow; join several with +')
+    parser.add_argument('--variant', help='Isolation name, such as glass, background, or wall-720p; join several with +')
     parser.add_argument('--wall-antialiasing', choices=['off', 'on'], default='on')
     parser.add_argument('--sequence', choices=['full', 'details'], default='full',
                         help='Book Wall input: every phase, or only opening and closing details')
@@ -137,8 +137,11 @@ def main():
             (resolution for variant, resolution in [
                 ('wall-720p', '720p'), ('wall-900p', '900p'),
             ] if variant in variants), '1080p')
-        manifest['presses'] = ('open from sidebar; 12 bursts of 2-4 presses at 80 ms inside the stacks; '
-                               '3 select/menu cycles; phases in test.log as PERFORMANCE_PHASE')
+        manifest['presses'] = 'direct launch (--start-view=bookWall); 3 select/menu cycles'
+        if args.sequence == 'full':
+            manifest['presses'] += ('; reposition; 12 bursts of 2-4 presses at 80 ms inside the stacks; '
+                                    '24 Play/Pause presses as a control; 6 moves 2 s apart')
+        manifest['presses'] += '; phases in test.log as PERFORMANCE_PHASE'
     target = config['TestConfigurations'][0]['TestTargets'][0]
     test_bundle = Path(target['TestBundlePath'].replace('__TESTHOST__', target['TestHostPath']))
     test_info = plistlib.loads((test_bundle/'Info.plist').read_bytes())

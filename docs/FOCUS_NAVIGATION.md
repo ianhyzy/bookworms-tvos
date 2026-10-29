@@ -103,7 +103,7 @@ UI tests launch the app with `--focus-probe`. In Debug simulator builds, this in
 - `visibleButtons(_:prefix:in:)` returns fully visible items from left to right, because offscreen pages are mounted too.
 - `open(_:arguments:)` launches on My Shelf and selects a view from the sidebar, which is how users reach every other view. Use it for view-entry tests. `launch(view:arguments:)` opens a view directly with `--start-view=`, which also adds that view to the sidebar if it was turned off; initial focus on that path can land in the header or sidebar, so do not use it to test entry focus. `selectView`, `focusSidebarItem`, and `openSettings` navigate through the sidebar.
 - `moveFocus(to:in:)` presses toward a target from the focused element, changing columns before moving vertically. From the Settings section bar it presses Down first, because Left or Right would switch sections. Use it in two-column layouts such as Settings and the Ambient page.
-- `hasFocus(labeled:in:)` checks sidebar rows and menu items by label, because they report focus on a container rather than on the element a name query returns.
+- `hasFocus(labeled:in:)` checks sidebar rows and menu items by label, because they report focus on a container rather than on the element a name query returns. `waitForSidebarFocus(_:in:)` waits for a sidebar row to take focus this way, as after Left from a view's leading edge or Back.
 
 The settle window is an observation period for late focus updates, not synchronization. Do not shorten it to speed up a test or lengthen it to make a failing test pass.
 

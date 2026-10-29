@@ -12,14 +12,10 @@ enum RemoteNavigation {
     /// passing state.
     static let settleWindow: TimeInterval = 1
 
-    static func launch(
-        view: String? = nil, arguments: [String] = [], resetSettings: Bool = true
-    ) -> XCUIApplication {
+    static func launch(view: String? = nil, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments =
-            (resetSettings ? ["--reset-test-settings"] : []) + [
-                "--sample-library", "--focus-probe",
-            ]
+            ["--reset-test-settings", "--sample-library", "--focus-probe"]
             + arguments + (view.map { ["--start-view=\($0)"] } ?? [])
         app.launch()
         return app
@@ -168,9 +164,8 @@ enum RemoteNavigation {
     }
 
     private static let sidebarItems = [
-        "My Shelf", "Year in Review", "Feed", "Compare Shelves", "Book Club", "Book Wall",
-        "Ambient",
-        "Settings",
+        "My Shelf", "Year in Review", "Feed", "Compare Shelves", "Book Club", "Friends' Picks",
+        "Book Wall", "Ambient", "Settings",
     ]
 
     /// Opens the view named `title` from the sidebar and enters its content.
@@ -277,20 +272,32 @@ enum RemoteNavigation {
         selectView("My Shelf", in: app, file: file, line: line)
     }
 
-    /// Opens the Ambient sidebar item and starts playback with its **Start** button.
+    /// Opens the Ambient sidebar item and starts playback with its **Start ambient mode** button.
     static func startAmbient(
         _ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
     ) {
         selectView("Ambient", in: app, file: file, line: line)
         let start = app.buttons["start-ambient"]
         XCTAssertTrue(start.waitForExistence(timeout: 5), file: file, line: line)
-        // Start sits below the interval and session pickers.
+        // Start ambient mode sits below both columns.
         if hasFocus(labeled: "Ambient", in: app) { XCUIRemote.shared.press(.right) }
         for _ in 0..<4 where !isFocused(start) { XCUIRemote.shared.press(.down) }
         waitForFocus(start, file: file, line: line)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(
             app.buttons["stop-ambient"].waitForExistence(timeout: 10), file: file, line: line)
+    }
+
+    /// Waits for the sidebar row titled `title` to take focus, as after Left from a view's leading
+    /// edge.
+    static func waitForSidebarFocus(
+        _ title: String, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in hasFocus(labeled: title, in: app) }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [focused], timeout: 5), .completed,
+            "Expected focus on the \(title) sidebar row", file: file, line: line)
     }
 
     /// Whether the focused element is labeled `name` or contains an element labeled `name`.

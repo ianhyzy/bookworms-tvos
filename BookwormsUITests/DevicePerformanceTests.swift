@@ -54,11 +54,9 @@ final class DevicePerformanceTests: XCTestCase {
         let settings = scenario == "settings"
         let sidebar = scenario == "sidebar"
         if sidebar { RemoteNavigation.focusSidebarItem(viewTitles[0], in: app) }
-        if settings {
-            RemoteNavigation.openSettings(app)
-            for _ in 0..<6 { XCUIRemote.shared.press(.up) }
-            for _ in 0..<6 { XCUIRemote.shared.press(.left) }
-        }
+        // Start on the first of Settings' five tabs, so blocks of four Right and four Left presses
+        // stay inside the tab bar; Left from the first tab would open the sidebar.
+        if settings { RemoteNavigation.openSettings(app, section: "Views") }
         let description = scenario == "description"
         if description {
             // My Shelf opens with focus on its first book; open its details.
@@ -92,7 +90,7 @@ final class DevicePerformanceTests: XCTestCase {
         for repetition in 0..<(description ? 0 : repetitions) {
             print("PERFORMANCE_RUN_\(repetition)")
             for index in 0..<40 {
-                let forward = (index / (settings ? 5 : 4)).isMultiple(of: 2)
+                let forward = (index / 4).isMultiple(of: 2)
                 let direction: XCUIRemote.Button =
                     sidebar ? (forward ? .down : .up) : (forward ? .right : .left)
                 XCUIRemote.shared.press(direction)
@@ -103,7 +101,9 @@ final class DevicePerformanceTests: XCTestCase {
         // Query accessibility only after the measured intervals.
         if settings {
             RemoteNavigation.showShelf(app)
-            XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 10))
+            XCTAssertTrue(
+                app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-'"))
+                    .firstMatch.waitForExistence(timeout: 10))
         } else if scenario == "books" {
             XCTAssertTrue(
                 app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-'"))

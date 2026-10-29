@@ -33,10 +33,10 @@ Apple distinguishes real-time request processing from retained collection. Gener
 
 ## Local verification
 
-Regenerate the project with `xcodegen generate`, then archive the Release scheme. Run:
+Regenerate the project with `xcodegen generate`, then archive Release with the `BookwormsDevice` scheme. Run:
 
 ```sh
-python3 scripts/verify-release-archive.py PATH_TO_ARCHIVE
+python3 scripts/verify-release-archive.py PATH_TO_ARCHIVE --expected-version X.Y.Z --expected-build N
 ```
 
 The script checks embedded manifests, signature validity, entitlements, versions, deployment target, assets, and extension packaging. It does not contact App Store Connect or validate provider retention policies.

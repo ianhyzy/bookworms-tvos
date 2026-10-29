@@ -42,14 +42,18 @@ The script needs `.local/device-build.json` (`device`, `team`, optional `traceDe
    TV stays offline.
 2. Builds `BookwormsDevice` Release for testing with coverage off and dSYMs into `.build-profile`.
 3. Runs `scripts/profile-device.py --scenario bookWall`, which runs
-   `DevicePerformanceTests/testBookWallProfile`. Setup (launch, wait for preparation, focus the
-   **Book Wall** sidebar item) happens before Instruments attaches by process ID. The measured
-   sequence then opens Book Wall, waits 10 seconds for the fall, navigates in 12 short bursts,
-   selects and returns three times, presses Play/Pause 24 times as a control, and moves focus every
-   2 seconds (`slow-navigate`). It makes no accessibility queries until the end.
-4. Symbolicates the trace with the matching dSYM, writes `summary.json`, deletes the trace, its
-   exported tables, and the 1–2 GB kernel-trace buffer that `xctrace` leaves in the Mac's
-   temporary folder, removes the UI-test runner, and reinstalls the local build.
+   `DevicePerformanceTests/testBookWallProfile`. Setup happens before Instruments attaches by
+   process ID: the test launches straight into Book Wall with `--start-view=bookWall`, waits for
+   preparation and the fall, presses Down until a spine has focus, returns to the first column's
+   bottom book, and prints `PERFORMANCE_READY`. The measured sequence then selects and returns
+   three times (`select-N`, `return-N`). With the default `--sequence full`, it then moves back to
+   the starting book (`reposition`), navigates in 12 short bursts (`navigate`), presses Play/Pause
+   24 times as a control (`control`), and moves focus every 2 seconds (`slow-navigate`). It makes
+   no accessibility queries until the end.
+4. For the `full` and `cpu` capture sets, symbolicates the trace with the matching dSYM. Then it
+   writes `summary.json`, deletes the trace, its exported tables, and the 1–2 GB kernel-trace
+   buffer that `xctrace` leaves in the Mac's temporary folder, removes the UI-test runner, and
+   reinstalls the local build.
 
 Wait for the background task to finish; do not poll.
 
