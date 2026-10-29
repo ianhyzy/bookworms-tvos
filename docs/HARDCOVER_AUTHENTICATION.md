@@ -13,7 +13,7 @@ The OAuth configuration uses:
 
 The GraphQL API endpoint is `https://api.hardcover.app/v1/graphql`, with `Authorization: Bearer <token>`. HTTP 401 indicates an invalid or expired credential. HTTP 403 with `insufficient_scope` asks the user to reconnect with the required read permissions; other 403 responses report denied access without incorrectly calling the token expired.
 
-When connecting or updating login, the app exchanges the approved device code for an access token and refresh token and validates the account before saving to Keychain. Between scheduled syncs, credential rotation validates the account without refetching the entire library. A rejected connection preserves the displayed shelf and saved credential.
+When connecting or updating login, the app exchanges the approved device code for an access token and refresh token and validates the account before saving to Keychain. Between scheduled syncs, credential rotation validates the account without refetching the entire library. A rejected connection preserves the displayed shelf and saved credential. If Keychain refuses the new login, the previous login stays saved.
 
 ## Token renewal
 

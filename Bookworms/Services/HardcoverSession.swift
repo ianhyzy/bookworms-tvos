@@ -44,10 +44,25 @@ final class HardcoverSession {
     }
 
     /// Saves a new login in place of the previous one, including its refresh token, if any.
+    /// Reads Keychain.
+    ///
+    /// A save that throws keeps the previous login. `write(_:issued:)` replaces the refresh token
+    /// before the access token, so a refused access token puts the previous refresh token back,
+    /// and the access token still in Keychain keeps the refresh token that renews it.
     func save(_ tokens: HardcoverTokens) throws {
+        let previousRefreshToken = dependencies.readCredential(Self.refreshAccount)
+        do {
+            try write(tokens, issued: dependencies.now())
+        } catch {
+            if let previousRefreshToken {
+                try? dependencies.saveCredential(previousRefreshToken, Self.refreshAccount)
+            } else {
+                dependencies.removeCredential(Self.refreshAccount)
+            }
+            throw error
+        }
         generation += 1
         unsaved = nil
-        try write(tokens, issued: dependencies.now())
     }
 
     /// Removes the saved login and revokes it at Hardcover, so Hardcover's Authorized Apps page
