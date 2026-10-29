@@ -9,8 +9,8 @@ import UIKit
 /// sync, and reviews share each renewal. The Top Shelf extension reads only its snapshot.
 ///
 /// Every method that reads Keychain runs at a sync or credential boundary, never on focus or
-/// remote input. A Keychain read that fails returns no token; nothing here deletes a login
-/// because of it.
+/// remote input. A Keychain read that fails returns no token. Only a save that Keychain partly
+/// refuses can then lose part of a login; see `save(_:)`.
 @MainActor
 final class HardcoverSession {
     static let accessAccount = "hardcover-token"
@@ -44,10 +44,31 @@ final class HardcoverSession {
     }
 
     /// Saves a new login in place of the previous one, including its refresh token, if any.
+    /// Reads Keychain.
+    ///
+    /// A save that throws keeps the previous login, with one exception. A refused refresh token
+    /// leaves Keychain as it was, so nothing is restored: a failed read returns `nil` like a
+    /// missing token, and removing on that `nil` could delete a refresh token that still works. A
+    /// refused access token puts the previous refresh token back, so the access token still in
+    /// Keychain keeps the refresh token that renews it. With no previous token to restore,
+    /// because none was saved or it couldn't be read and is already replaced or removed, the new
+    /// one is removed; the caller revokes it. That unread previous refresh token is the
+    /// exception: it is lost, and the previous access token works until Hardcover rejects it.
     func save(_ tokens: HardcoverTokens) throws {
+        let previousRefreshToken = dependencies.readCredential(Self.refreshAccount)
+        try writeRefreshToken(of: tokens)
+        do {
+            try writeAccessToken(of: tokens, issued: dependencies.now())
+        } catch {
+            if let previousRefreshToken {
+                try? dependencies.saveCredential(previousRefreshToken, Self.refreshAccount)
+            } else {
+                dependencies.removeCredential(Self.refreshAccount)
+            }
+            throw error
+        }
         generation += 1
         unsaved = nil
-        try write(tokens, issued: dependencies.now())
     }
 
     /// Removes the saved login and revokes it at Hardcover, so Hardcover's Authorized Apps page
@@ -172,11 +193,22 @@ final class HardcoverSession {
 
     /// Saves the refresh token first, since it's the part that can't be recovered.
     private func write(_ tokens: HardcoverTokens, issued: Date) throws {
+        try writeRefreshToken(of: tokens)
+        try writeAccessToken(of: tokens, issued: issued)
+    }
+
+    /// Replaces the saved refresh token, or removes it when `tokens` has none. A throw leaves the
+    /// saved token as it was.
+    private func writeRefreshToken(of tokens: HardcoverTokens) throws {
         if let refreshToken = tokens.refreshToken {
             try dependencies.saveCredential(refreshToken, Self.refreshAccount)
         } else {
             dependencies.removeCredential(Self.refreshAccount)
         }
+    }
+
+    /// Saves the access token and its renewal date.
+    private func writeAccessToken(of tokens: HardcoverTokens, issued: Date) throws {
         try dependencies.saveCredential(tokens.accessToken, Self.accessAccount)
         if let renewal = Self.renewalDate(of: tokens, issued: issued) {
             dependencies.defaults.set(renewal, forKey: Self.renewalKey)
