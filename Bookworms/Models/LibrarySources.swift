@@ -155,7 +155,7 @@ struct ShelfPreferences: Codable, Equatable {
         self.init(
             collection: try container.decodeIfPresent(ShelfCollection.self, forKey: .collection)
                 ?? .all,
-            sort: try container.decodeIfPresent(ShelfSort.self, forKey: .sort) ?? .dateRead,
+            sort: (try? container.decodeIfPresent(ShelfSort.self, forKey: .sort)) ?? .dateRead,
             reversed: try container.decodeIfPresent(Bool.self, forKey: .reversed) ?? false,
             progressStyle: (try? container.decodeIfPresent(
                 ProgressStyle.self, forKey: .progressStyle)) ?? .vertical)

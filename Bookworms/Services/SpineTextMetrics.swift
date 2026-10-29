@@ -65,7 +65,7 @@ enum SpineTextMetrics {
                 height: min(maximumHeight, dimensions.height + 8))
         }
         // Extremely long titles may need a little more thickness after exhausting shelf height.
-        // ShelfLayout includes this adjustment when packing pages, so wider books cannot overlap.
+        // `BookPresentation.pages` packs with this adjustment, so wider books cannot overlap.
         let maximumWidth = max(
             natural.width,
             min(

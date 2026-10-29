@@ -32,13 +32,13 @@ enum BookwormsView: String, Codable, CaseIterable, Identifiable {
     /// in Review has a static ambient presentation.
     var supportsAmbient: Bool { self != .bookWall }
 
-    static var availableCases: [Self] {
-        allCases.filter { $0 != .bookWall || BookWallAvailability.isSupported }
+    static let availableCases = allCases.filter {
+        $0 != .bookWall || BookWallAvailability.isSupported
     }
 
     /// Views shown in the sidebar until the user changes them. Book Wall is opt-in through
     /// **Settings → Views**.
-    static var defaultCases: [Self] { availableCases.filter { $0 != .bookWall } }
+    static let defaultCases = availableCases.filter { $0 != .bookWall }
 }
 
 enum SharedReadsSort: String, Codable, CaseIterable, Identifiable {
@@ -54,10 +54,7 @@ enum SpoilerPolicy: String, Codable, CaseIterable, Identifiable {
 }
 
 /// The most books a shelf, comparison row, or shared-reads view shows, and the default count.
-///
-/// Every book in a view keeps its decoded cover in memory, but an Apple TV 4K with 3 GB peaked
-/// under 80 MB with 30-book views, so memory does not constrain this. Users on older devices can
-/// lower the count in Settings.
+/// Settings can lower the count.
 enum BookLimit {
     static let maximum = 40
 }
@@ -107,6 +104,32 @@ struct ViewPreferences: Codable, Equatable {
         comparisonCount = min(BookLimit.maximum, max(1, comparisonCount))
         if ![5, 10, 15].contains(ambientMinutes) { ambientMinutes = 10 }
         if ![0, 30, 60, 120].contains(sessionMinutes) { sessionMinutes = 0 }
+    }
+}
+
+extension ViewPreferences {
+    /// Decodes each choice on its own. A view or option this build doesn't know, such as one an
+    /// earlier or later build saved, drops out or falls back to its default instead of discarding
+    /// every saved preference.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func value<Value: Decodable>(_ key: CodingKeys) -> Value? {
+            try? container.decodeIfPresent(Value.self, forKey: key)
+        }
+        func views(_ key: CodingKeys) -> [BookwormsView]? {
+            (value(key) as [String]?)?.compactMap(BookwormsView.init(rawValue:))
+        }
+        self.init()
+        enabled = views(.enabled) ?? enabled
+        readerID = value(.readerID)
+        comparisonOrder = value(.comparisonOrder) ?? comparisonOrder
+        sharedReadsSort = value(.sharedReadsSort) ?? sharedReadsSort
+        comparisonCount = value(.comparisonCount) ?? comparisonCount
+        ambientViews = views(.ambientViews)
+        ambientExcludesShelf = value(.ambientExcludesShelf)
+        ambientMinutes = value(.ambientMinutes) ?? ambientMinutes
+        sessionMinutes = value(.sessionMinutes) ?? sessionMinutes
+        offeredViews = views(.offeredViews)
     }
 }
 

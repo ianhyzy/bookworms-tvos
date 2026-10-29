@@ -44,7 +44,11 @@ struct BookwormsApp: App {
                     guard NSClassFromString("XCTestCase") == nil else { return }
                     await library.start()
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .CKAccountChanged)) { _ in
+                // CloudKit can post this on a background queue, and the model is main-actor state.
+                .onReceive(
+                    NotificationCenter.default.publisher(for: .CKAccountChanged)
+                        .receive(on: DispatchQueue.main)
+                ) { _ in
                     library.cloudAccountChanged()
                 }
         }

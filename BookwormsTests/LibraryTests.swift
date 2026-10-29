@@ -40,18 +40,9 @@ final class LibraryTests: XCTestCase {
     func testShelfDistributionAnchorsEdgesAndSharesGaps() {
         let widths: [CGFloat] = [120, 200, 80, 160]
         let available: CGFloat = 1000
-        let centers = widths.indices.map {
-            ShelfLayout.center(at: $0, widths: widths, availableWidth: available)
-        }
-        XCTAssertEqual(centers[0] - widths[0] / 2, 0, accuracy: 0.001)
-        XCTAssertEqual(centers[3] + widths[3] / 2, available, accuracy: 0.001)
-        let gaps = (1..<widths.count)
-            .map {
-                centers[$0] - widths[$0] / 2 - centers[$0 - 1] - widths[$0 - 1] / 2
-            }
-        XCTAssertEqual(gaps[0], gaps[1], accuracy: 0.001)
-        XCTAssertEqual(gaps[1], gaps[2], accuracy: 0.001)
-        XCTAssertEqual(ShelfLayout.center(at: 0, widths: [120], availableWidth: available), 500)
+        let gap = ShelfLayout.distributedGap(widths: widths, availableWidth: available)
+        XCTAssertEqual(widths.reduce(0, +) + 3 * gap, available, accuracy: 0.001)
+        XCTAssertEqual(ShelfLayout.distributedGap(widths: [120], availableWidth: available), 0)
         XCTAssertEqual(ShelfLayout.distributedGap(widths: [], availableWidth: available), 0)
         XCTAssertEqual(
             ShelfLayout.distributedGap(widths: [400, 582], availableWidth: available), 18)
@@ -173,9 +164,12 @@ final class LibraryTests: XCTestCase {
         XCTAssertNil(result.last?.finished)
     }
 
-    func testSparseShelfDoesNotStretchAndPaginationPreservesOrder() {
+    @MainActor func testSparseShelfDoesNotStretchAndPaginationPreservesOrder() {
         let books = SampleLibrary.books
-        let pages = ShelfLayout.plan(for: books, width: 560, rowHeight: 500)
+        let styles = Dictionary(
+            uniqueKeysWithValues: books.map { ($0.id, SpineStyle.fallback(for: $0)) })
+        let pages = BookPresentation.pages(
+            books: books, styles: styles, coverRatios: [:], width: 560, rowHeight: 500)
         XCTAssertEqual(pages.flatMap { $0.books }.map(\.id), books.map(\.id))
         for page in pages {
             let width = page.dimensions.values.reduce(CGFloat(0)) { $0 + $1.width }
@@ -419,6 +413,32 @@ final class LibraryTests: XCTestCase {
         XCTAssertNil(AppAppearance.system.colorScheme)
         XCTAssertEqual(AppAppearance.light.colorScheme, .light)
         XCTAssertEqual(AppAppearance.dark.colorScheme, .dark)
+    }
+
+    func testUnknownSavedChoicesKeepTheOtherPreferences() throws {
+        let saved = Data(
+            #"{"enabled":["My Shelf","Retired View","Feed"],"readerID":7,"comparisonOrder":"Retired order","sharedReadsSort":"Rating disagreement","comparisonCount":25,"ambientViews":["Book Club","Retired View"],"ambientExcludesShelf":true,"ambientMinutes":15,"sessionMinutes":60,"offeredViews":["My Shelf","Retired View"]}"#
+                .utf8)
+        let preferences = try JSONDecoder().decode(ViewPreferences.self, from: saved)
+        XCTAssertEqual(preferences.enabled, [.shelf, .following])
+        XCTAssertEqual(preferences.readerID, 7)
+        XCTAssertEqual(preferences.comparisonOrder, ViewPreferences().comparisonOrder)
+        XCTAssertEqual(preferences.sharedReadsSort, .disagreement)
+        XCTAssertEqual(preferences.comparisonCount, 25)
+        XCTAssertEqual(preferences.ambientViews, [.shared])
+        XCTAssertEqual(preferences.ambientExcludesShelf, true)
+        XCTAssertEqual(preferences.ambientMinutes, 15)
+        XCTAssertEqual(preferences.sessionMinutes, 60)
+        XCTAssertEqual(preferences.offeredViews, [.shelf])
+        XCTAssertEqual(
+            try JSONDecoder()
+                .decode(ViewPreferences.self, from: JSONEncoder().encode(preferences)),
+            preferences)
+
+        let shelf = try JSONDecoder()
+            .decode(ShelfPreferences.self, from: Data(#"{"sort":"Retired","reversed":true}"#.utf8))
+        XCTAssertEqual(shelf.sort, .dateRead)
+        XCTAssertTrue(shelf.reversed)
     }
 
     func testShelfPaletteVariants() {
