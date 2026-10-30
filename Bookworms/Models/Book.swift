@@ -18,6 +18,14 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     var finishedDates: [String]? = nil
     var rating: Double?
     var format: String?
+    /// The format of the reader's Hardcover edition as Hardcover records it
+    /// (`editions.edition_format`), such as "Hardcover" or "Mass Market Paperback": the first of
+    /// the newest finished read's edition and the library entry's edition that names a hardcover
+    /// or paperback (`HardcoverClient.namesPrintBinding(_:)`), else the edition that `format` and
+    /// `pages` describe. No app draws it while every book draws as a hardcover; the Apple TV keeps
+    /// it in the iCloud archive for the iPhone and Mac's unused likely binding. Snapshots saved
+    /// before it was fetched decode it as `nil` until the next sync.
+    var editionFormat: String? = nil
     var seriesID: Int?
     /// The book's position in `seriesID`, such as 3 for the third book. Companion works can have
     /// fractional positions.

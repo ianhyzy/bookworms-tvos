@@ -298,10 +298,10 @@ actor HardcoverClient {
                     image { url width height }
                   }
                 }
-                edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
+                edition { id pages audio_seconds edition_format image { url width height } reading_format { format } language { code2 } }
                 user_book_reads(where: {finished_at: {_is_null: false}},
                   order_by: [{finished_at: desc}, {id: desc}]) {
-                  finished_at edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
+                  finished_at edition { id pages audio_seconds edition_format image { url width height } reading_format { format } language { code2 } }
                 }
                 current_read: user_book_reads(where: {finished_at: {_is_null: true}},
                   order_by: [{id: desc}], limit: 1) {
@@ -722,6 +722,20 @@ actor HardcoverClient {
         return text.isEmpty ? nil : text
     }
 
+    /// Whether a Hardcover edition format names a hardcover or a paperback, such as "Library
+    /// Binding" or "Mass Market Paperback".
+    ///
+    /// A port of the keywords of the iPhone app's `BookBinding(editionFormat:)`. Either app can
+    /// upload the shared iCloud snapshot, so both must pick the same `editionFormat`.
+    static func namesPrintBinding(_ format: String) -> Bool {
+        let format = format.lowercased()
+        return [
+            "paperback", "softcover", "soft cover", "hardcover", "hardback", "hard cover",
+            "library binding",
+        ]
+        .contains { format.contains($0) }
+    }
+
     /// Turns library rows into books, one per Hardcover book, leaving out books the reader marked
     /// **Ignored**. `previous` holds the account's books from its last sync, by ID, whose covers
     /// stay fixed unless an upgrade applies
@@ -738,6 +752,10 @@ actor HardcoverClient {
             let read = row.userBookReads?.first
             let finishes = (row.userBookReads ?? []).compactMap(\.finishedAt).sorted(by: >)
             let edition = read?.edition ?? row.edition
+            // A newer audiobook or ebook read doesn't hide a print edition on the library entry.
+            let editionFormat =
+                [read?.edition, row.edition].compactMap { $0?.editionFormat }
+                .first(where: Self.namesPrintBinding) ?? edition?.editionFormat
             let author = (source.cachedContributors ?? [])
                 .filter {
                     $0.contribution == nil || $0.contribution == "Author"
@@ -761,6 +779,7 @@ actor HardcoverClient {
                 finished: finishes.first ?? row.lastReadDate,
                 finishedDates: finishes.isEmpty ? nil : finishes, rating: row.rating,
                 format: edition?.readingFormat?.format,
+                editionFormat: editionFormat,
                 seriesID: membership?.series?.id,
                 seriesPosition: membership?.position,
                 seriesName: seriesName?.isEmpty == false ? seriesName : nil,
@@ -924,6 +943,8 @@ struct Edition: Decodable, Sendable {
     let id: Int
     let pages: Int?
     var audioSeconds: Int? = nil
+    /// Only the reader's own library query asks for it.
+    var editionFormat: String? = nil
     let image: CoverImage?
     let readingFormat: ReadingFormat?
     var language: Language? = nil
@@ -931,6 +952,7 @@ struct Edition: Decodable, Sendable {
         case id
         case pages
         case audioSeconds = "audio_seconds"
+        case editionFormat = "edition_format"
         case image
         case readingFormat = "reading_format"
         case language
