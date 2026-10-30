@@ -51,14 +51,14 @@ enum SpineTextMetrics {
 
     /// `book`'s lettering on a spine of `dimensions`, from a bounded cache. The title stops at
     /// its first colon, as on the iPhone.
-    static func lettering(for book: Book, style: SpineStyle, dimensions: SpineDimensions)
-        -> SpineLettering
-    {
+    static func lettering(
+        for book: Book, style: SpineStyle, dimensions: SpineDimensions, maximumLines: Int = 3
+    ) -> SpineLettering {
         lettering(
             title: style.uppercase ? book.spineTitle.uppercased() : book.spineTitle,
             author: SpineView.shortAuthor(book.author), fontName: style.fontName,
             length: letteredLength(for: book, height: dimensions.height),
-            thickness: dimensions.width)
+            thickness: dimensions.width, maximumLines: maximumLines)
     }
 
     private struct Key: Hashable {
@@ -67,24 +67,36 @@ enum SpineTextMetrics {
         let font: String?
         let length: CGFloat
         let thickness: CGFloat
+        let maximumLines: Int
     }
     private static var letterings: [Key: SpineLettering] = [:]
 
-    /// `title` and `author` lettered in `length` along a spine `thickness` across.
+    /// `title` and `author` lettered in `length` along a spine `thickness` across, in at most
+    /// `maximumLines` title lines. A third line applies only when two lines can't reach
+    /// `minimumTitleSize`.
     static func lettering(
-        title: String, author: String, fontName: String, length: CGFloat, thickness: CGFloat
+        title: String, author: String, fontName: String, length: CGFloat, thickness: CGFloat,
+        maximumLines: Int = 3
     ) -> SpineLettering {
         let resolved = UIFont(name: fontName, size: minimumTitleSize)?.fontName
         let key = Key(
-            title: title, author: author, font: resolved, length: length, thickness: thickness)
+            title: title, author: author, font: resolved, length: length, thickness: thickness,
+            maximumLines: maximumLines)
         if let saved = letterings[key] { return saved }
         let measurement = PerformanceDiagnostics.begin("TypographyMiss")
         defer { measurement.end() }
-        let result = LetteringRule(
-            fontName: resolved, title: title, author: author, length: length,
-            thickness: thickness
-        )
-        .lettering()
+        func rule(_ lines: Int) -> SpineLettering {
+            LetteringRule(
+                fontName: resolved, title: title, author: author, length: length,
+                thickness: thickness, maximumLines: lines
+            )
+            .lettering()
+        }
+        var result = rule(min(maximumLines, 2))
+        if maximumLines > 2, result.titleSize < minimumTitleSize {
+            let threeLines = rule(maximumLines)
+            if threeLines.titleSize > result.titleSize { result = threeLines }
+        }
         if letterings.count >= 4096 { letterings.removeAll(keepingCapacity: true) }
         letterings[key] = result
         return result
@@ -101,6 +113,9 @@ enum SpineTextMetrics {
     private static var savedDimensions: [DimensionsKey: SpineDimensions] = [:]
 
     /// Uses spare shelf height when a title cannot reach `minimumTitleSize`.
+    ///
+    /// Growth measures the title on one or two lines, so a spine lengthens, then thickens,
+    /// before its title takes a third line.
     static func readableDimensions(
         for book: Book, style: SpineStyle,
         natural: SpineDimensions, rowHeight: CGFloat
@@ -118,8 +133,8 @@ enum SpineTextMetrics {
                 rowHeight,
                 natural.width * ShelfLayout.slendernessRange.upperBound))
         var dimensions = natural
-        while lettering(for: book, style: style, dimensions: dimensions).titleSize
-            < minimumTitleSize,
+        while lettering(for: book, style: style, dimensions: dimensions, maximumLines: 2)
+            .titleSize < minimumTitleSize,
             dimensions.height < maximumHeight
         {
             dimensions = SpineDimensions(
@@ -133,8 +148,8 @@ enum SpineTextMetrics {
             min(
                 rowHeight * ShelfLayout.widthRange.upperBound,
                 dimensions.height / ShelfLayout.slendernessRange.lowerBound))
-        while lettering(for: book, style: style, dimensions: dimensions).titleSize
-            < minimumTitleSize,
+        while lettering(for: book, style: style, dimensions: dimensions, maximumLines: 2)
+            .titleSize < minimumTitleSize,
             dimensions.width < maximumWidth
         {
             dimensions = SpineDimensions(
@@ -171,6 +186,7 @@ private struct LetteringRule {
     let title: String
     let author: String
     let length: CGFloat
+    let maximumLines: Int
     let inset: CGFloat
     /// The row's height and the title's starting size.
     let box: CGFloat
@@ -182,11 +198,15 @@ private struct LetteringRule {
     /// The row's width between the insets.
     let width: CGFloat
 
-    init(fontName: String?, title: String, author: String, length: CGFloat, thickness: CGFloat) {
+    init(
+        fontName: String?, title: String, author: String, length: CGFloat, thickness: CGFloat,
+        maximumLines: Int
+    ) {
         self.fontName = fontName
         self.title = title
         self.author = author
         self.length = length
+        self.maximumLines = maximumLines
         inset = length * 0.035 + thickness * 0.25
         box = thickness * 0.88
         spacing = thickness * 0.3
@@ -268,12 +288,13 @@ private struct LetteringRule {
     }
 
     /// The title's largest size and its lines in `width`: one line or two, whichever is
-    /// larger, and three only when neither reaches the minimum. Lines break between words
-    /// alone, so a title without spaces, such as a Chinese one, keeps to one line.
+    /// larger, and three, where `maximumLines` allows, only when neither reaches the minimum.
+    /// Lines break between words alone, so a title without spaces, such as a Chinese one,
+    /// keeps to one line.
     private func titleFit(_ width: CGFloat) -> (lines: [String], size: CGFloat) {
         let words = title.split(separator: " ").map(String.init)
         var best = fit(words, into: 1, width: width)
-        for count in 2...3 where words.count >= count {
+        for count in 2...3 where words.count >= count && count <= maximumLines {
             if count == 3 && best.size >= SpineTextMetrics.minimumTitleSize { break }
             let candidate = fit(words, into: count, width: width)
             if candidate.size > best.size { best = candidate }
@@ -304,11 +325,13 @@ private struct LetteringRule {
     private static func breaks(_ words: ArraySlice<String>, into count: Int) -> [[String]] {
         guard count > 1 else { return [[words.joined(separator: " ")]] }
         guard words.count >= count else { return [] }
-        return (words.startIndex + 1...words.endIndex - count + 1).flatMap { end in
-            breaks(words[end...], into: count - 1).map {
-                [words[..<end].joined(separator: " ")] + $0
+        return (words.startIndex + 1...words.endIndex - count + 1)
+            .flatMap { end in
+                breaks(words[end...], into: count - 1)
+                    .map {
+                        [words[..<end].joined(separator: " ")] + $0
+                    }
             }
-        }
     }
 
     private func fits(_ lines: [String], size: CGFloat, width: CGFloat) -> Bool {
