@@ -298,10 +298,10 @@ actor HardcoverClient {
                     image { url width height }
                   }
                 }
-                edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
+                edition { id pages audio_seconds edition_format image { url width height } reading_format { format } language { code2 } }
                 user_book_reads(where: {finished_at: {_is_null: false}},
                   order_by: [{finished_at: desc}, {id: desc}]) {
-                  finished_at edition { id pages audio_seconds image { url width height } reading_format { format } language { code2 } }
+                  finished_at edition { id pages audio_seconds edition_format image { url width height } reading_format { format } language { code2 } }
                 }
                 current_read: user_book_reads(where: {finished_at: {_is_null: true}},
                   order_by: [{id: desc}], limit: 1) {
@@ -761,6 +761,7 @@ actor HardcoverClient {
                 finished: finishes.first ?? row.lastReadDate,
                 finishedDates: finishes.isEmpty ? nil : finishes, rating: row.rating,
                 format: edition?.readingFormat?.format,
+                editionFormat: edition?.editionFormat,
                 seriesID: membership?.series?.id,
                 seriesPosition: membership?.position,
                 seriesName: seriesName?.isEmpty == false ? seriesName : nil,
@@ -924,6 +925,8 @@ struct Edition: Decodable, Sendable {
     let id: Int
     let pages: Int?
     var audioSeconds: Int? = nil
+    /// Only the reader's own library query asks for it.
+    var editionFormat: String? = nil
     let image: CoverImage?
     let readingFormat: ReadingFormat?
     var language: Language? = nil
@@ -931,6 +934,7 @@ struct Edition: Decodable, Sendable {
         case id
         case pages
         case audioSeconds = "audio_seconds"
+        case editionFormat = "edition_format"
         case image
         case readingFormat = "reading_format"
         case language

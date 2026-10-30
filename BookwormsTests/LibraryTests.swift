@@ -62,6 +62,27 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(result.first?.format, "Audiobook")
     }
 
+    func testReaderEditionFormatIsKeptForTheCompanionArchive() throws {
+        let json = """
+            [{"id":9,"book":{"id":1,"title":"Picked"},
+              "edition":{"id":10,"edition_format":"Hardcover","reading_format":{"format":"Read"}},
+              "user_book_reads":[{"finished_at":"2026-09-09","edition":{"id":11,"edition_format":"Mass Market Paperback","reading_format":{"format":"Read"}}}]},
+             {"id":10,"book":{"id":2,"title":"No edition"}}]
+            """
+        let books = HardcoverClient.normalize(
+            try JSONDecoder().decode([UserBook].self, from: Data(json.utf8)))
+        // The newest finished read's edition, like `format` and `pages`.
+        let picked = try XCTUnwrap(books.first { $0.id == 1 })
+        XCTAssertEqual(picked.editionFormat, "Mass Market Paperback")
+        XCTAssertNil(try XCTUnwrap(books.first { $0.id == 2 }).editionFormat)
+        // It survives the Apple TV's archive re-encoding, and older snapshots decode without it.
+        let reencoded = try JSONDecoder().decode(Book.self, from: JSONEncoder().encode(picked))
+        XCTAssertEqual(reencoded.editionFormat, "Mass Market Paperback")
+        let older = try JSONDecoder()
+            .decode(Book.self, from: Data(#"{"id":3,"title":"Old","author":"Author"}"#.utf8))
+        XCTAssertNil(older.editionFormat)
+    }
+
     func testEveryFinishedReadIsKeptNewestFirst() throws {
         let json = """
             [{"id":9,"last_read_date":"2026-09-09","status_id":3,
