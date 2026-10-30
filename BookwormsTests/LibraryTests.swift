@@ -67,14 +67,35 @@ final class LibraryTests: XCTestCase {
             [{"id":9,"book":{"id":1,"title":"Picked"},
               "edition":{"id":10,"edition_format":"Hardcover","reading_format":{"format":"Read"}},
               "user_book_reads":[{"finished_at":"2026-09-09","edition":{"id":11,"edition_format":"Mass Market Paperback","reading_format":{"format":"Read"}}}]},
-             {"id":10,"book":{"id":2,"title":"No edition"}}]
+             {"id":10,"book":{"id":2,"title":"No edition"}},
+             {"id":11,"book":{"id":4,"title":"Listened"},
+              "edition":{"id":12,"edition_format":"Paperback","reading_format":{"format":"Read"}},
+              "user_book_reads":[{"finished_at":"2026-09-10","edition":{"id":13,"edition_format":"Audible Audio","reading_format":{"format":"Listened"}}}]},
+             {"id":12,"book":{"id":5,"title":"Ebook"},
+              "edition":{"id":14,"edition_format":"Kindle Edition","reading_format":{"format":"Ebook"}}}]
             """
         let books = HardcoverClient.normalize(
             try JSONDecoder().decode([UserBook].self, from: Data(json.utf8)))
-        // The newest finished read's edition, like `format` and `pages`.
+        // When both editions name a binding, the newest finished read's wins.
         let picked = try XCTUnwrap(books.first { $0.id == 1 })
         XCTAssertEqual(picked.editionFormat, "Mass Market Paperback")
         XCTAssertNil(try XCTUnwrap(books.first { $0.id == 2 }).editionFormat)
+        // A newer audiobook read doesn't hide the library entry's print edition, and a book
+        // without one keeps its edition's format.
+        let listened = try XCTUnwrap(books.first { $0.id == 4 })
+        XCTAssertEqual(listened.editionFormat, "Paperback")
+        XCTAssertEqual(listened.format, "Listened")
+        XCTAssertEqual(books.first { $0.id == 5 }?.editionFormat, "Kindle Edition")
+        // The same formats as the iPhone app's `BookBinding(editionFormat:)` tests.
+        for format in [
+            "Hardcover", "Hardback", "Library Binding", "Paperback", "Mass Market Paperback",
+            "Trade Paperback", "softcover",
+        ] {
+            XCTAssertTrue(HardcoverClient.namesPrintBinding(format), format)
+        }
+        for format in ["", "Ebook", "Kindle Edition", "Audiobook", "Audible Audio", "Audio CD"] {
+            XCTAssertFalse(HardcoverClient.namesPrintBinding(format), format)
+        }
         // It survives the Apple TV's archive re-encoding, and older snapshots decode without it.
         let reencoded = try JSONDecoder().decode(Book.self, from: JSONEncoder().encode(picked))
         XCTAssertEqual(reencoded.editionFormat, "Mass Market Paperback")
