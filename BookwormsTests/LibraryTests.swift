@@ -93,7 +93,9 @@ final class LibraryTests: XCTestCase {
         ] {
             XCTAssertTrue(HardcoverClient.namesPrintBinding(format), format)
         }
-        for format in ["", "Ebook", "Kindle Edition", "Audiobook", "Audible Audio", "Audio CD"] {
+        for format in [
+            "", "Ebook", "Kindle Edition", "Audiobook", "Audible Audio", "Audio CD", "Board book",
+        ] {
             XCTAssertFalse(HardcoverClient.namesPrintBinding(format), format)
         }
         // It survives the Apple TV's archive re-encoding, and older snapshots decode without it.
