@@ -5,20 +5,15 @@ struct SpineView: View {
     let book: Book
     let style: SpineStyle
     let dimensions: SpineDimensions
+    /// The lettering `SpineTextMetrics.lettering(for:style:dimensions:)` measured when the
+    /// shelf's pages were prepared. The view draws it as measured.
+    let lettering: SpineLettering
     let isFocused: Bool
-    // Font registration changes outside SwiftUI; this value invalidates the resolved lettering.
-    var fontRevision: Int = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let width = dimensions.width
         let height = dimensions.height
-        let title = style.uppercase ? book.spineTitle.uppercased() : book.spineTitle
-        // Account for outer padding and explicit gaps before rotating the text.
-        let textLength = SpineTextMetrics.textLength(for: book, height: height)
-        let textHeight = width - SpineTextMetrics.crossSpinePadding
-        let typography = SpineTextMetrics.typography(
-            for: book, style: style, dimensions: dimensions)
         let corner = Self.cornerRadius(thickness: width)
         ZStack {
             // Shadow the book shape only; shadowing the text layers creates costly offscreen passes.
@@ -33,49 +28,21 @@ struct SpineView: View {
                     .padding(.horizontal, width * 0.1)
             }
             VStack(spacing: 0) {
-                Spacer().frame(height: 13)
-                HStack(spacing: textLength * 0.03) {
-                    VStack(spacing: 4) {
-                        spineTitle(title)
-                            .font(
-                                SpineTextMetrics.font(
-                                    name: style.fontName, size: typography.titleSize)
-                            )
-                            .textRenderer(SpineTextRenderer(fontSize: typography.titleSize))
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let subtitle = book.spineSubtitle {
-                            Text(subtitle)
-                                .font(
-                                    .system(
-                                        size: SpineTextMetrics.fittedSize(
-                                            subtitle, fontName: nil, maximum: 20,
-                                            width: typography.titleLength - 2
-                                                * SpineTextMetrics.titleEndPadding,
-                                            height: textHeight * 0.26))
-                                )
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(.horizontal, SpineTextMetrics.titleEndPadding)
-                    .frame(width: typography.titleLength, height: textHeight)
-                    SpineAuthorText(
-                        text: book.author, fontName: style.fontName,
-                        fontSize: typography.authorSize, width: typography.authorLength,
-                        height: textHeight, color: style.foreground.color)
-                }
-                .multilineTextAlignment(.center)
-                .frame(width: textLength, height: textHeight)
-                .rotationEffect(.degrees(90))
-                .frame(width: width, height: textLength)
+                // Lettered lying flat, head on the left, then turned to read top to bottom.
+                letteringRow
+                    .frame(width: lettering.length, height: width)
+                    .rotationEffect(.degrees(90))
+                    .frame(width: width, height: lettering.length)
                 if book.format != nil {
                     Image(systemName: book.formatSymbol)
-                        .appFont(size: 18)
-                        .frame(height: 18)
-                        .padding(.top, 24)
+                        .appFont(size: SpineTextMetrics.formatIconSize)
+                        .frame(height: SpineTextMetrics.formatIconSize)
+                        .padding(
+                            .bottom,
+                            SpineTextMetrics.formatIconRoom - SpineTextMetrics.formatIconSize)
                 }
             }
             .foregroundStyle(style.foreground.color)
-            .padding(.vertical, 20)
         }
         .frame(width: width, height: height)
         .overlay {
@@ -83,6 +50,34 @@ struct SpineView: View {
         }
         .scaleEffect(isFocused && !reduceMotion ? 1.045 : 1, anchor: .bottom)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
+    }
+
+    /// The title at the head end and the author at the tail end, at their measured sizes.
+    /// Measured text sizes itself (`fixedSize`), so SwiftUI never rewraps or scales it.
+    private var letteringRow: some View {
+        HStack(spacing: 0) {
+            spineTitle(lettering.title)
+                .font(SpineTextMetrics.font(name: lettering.fontName, size: lettering.titleSize))
+                .textRenderer(SpineTextRenderer(fontSize: lettering.titleSize))
+                .multilineTextAlignment(.leading)
+                .fixedSize()
+                .frame(width: lettering.titleWidth, alignment: .leading)
+            Spacer(minLength: 0)
+            authorText
+                .font(SpineTextMetrics.font(name: lettering.fontName, size: lettering.authorSize))
+                .textRenderer(SpineTextRenderer(fontSize: lettering.authorSize))
+                .multilineTextAlignment(.trailing)
+                .frame(width: lettering.authorWidth, alignment: .trailing)
+        }
+        .padding(.horizontal, lettering.inset)
+    }
+
+    @ViewBuilder private var authorText: some View {
+        if lettering.authorFits {
+            Text(verbatim: lettering.author).fixedSize()
+        } else {
+            Text(verbatim: lettering.author).lineLimit(1).truncationMode(.tail)
+        }
     }
 
     /// The corner radius of a spine `thickness` points across: nearly square, as a flat cloth
@@ -187,5 +182,72 @@ struct SpineView: View {
         guard HouseOfLeaves.isNovel(book) else { return Text(verbatim: title) }
         let lettering = HouseOfLeaves.lettering(on: style.background, ink: style.foreground)
         return HouseOfLeaves.text(title, blue: lettering.blue.color)
+    }
+
+    // The author forms below are the iPhone and Mac app's (`SpineView` in
+    // `ios/Bookworms/Views/SpineView.swift`). Keep the two copies the same.
+
+    /// Shortens a long contributor list to its first name, since a spine has little room.
+    static func shortAuthor(_ author: String) -> String {
+        let names = author.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard names.count > 2 || (names.count == 2 && author.count > 32), let first = names.first
+        else { return author }
+        return first + " et al."
+    }
+
+    /// Words that belong to the surname that follows them, such as "Le" in "Ursula K. Le Guin".
+    private nonisolated static let surnameParticles: Set<String> = [
+        "al", "bin", "da", "de", "del", "della", "der", "di", "du", "el", "la", "le", "st.",
+        "ten", "ter", "van", "von",
+    ]
+    /// Words that follow a surname, such as "Jr." in "Walter M. Miller Jr.".
+    private nonisolated static let nameSuffixes: Set<String> = [
+        "jr.", "jr", "sr.", "sr", "ii", "iii", "iv",
+    ]
+
+    /// `author` with each name shortened to its surname, such as "Le Guin" for "Ursula K. Le
+    /// Guin" or "Gaiman, Pratchett" for "Neil Gaiman, Terry Pratchett", keeping the "et al."
+    /// that `shortAuthor(_:)` adds. Returns `nil` when no name has a shorter form.
+    nonisolated static func surname(_ author: String) -> String? {
+        let (names, others) = names(of: author)
+        let surnames = names.map(lastName)
+        guard surnames != names else { return nil }
+        return surnames.joined(separator: ", ") + others
+    }
+
+    /// `author` on two lines: a pair of names one over the other, or one name broken before
+    /// its surname, such as "David Foster" over "Wallace". Returns `nil` for anything else.
+    nonisolated static func twoLines(_ author: String) -> String? {
+        let (names, others) = names(of: author)
+        if names.count == 2 { return names[0] + ",\n" + names[1] + others }
+        guard let name = names.first, names.count == 1 else { return nil }
+        let surname = lastName(name)
+        guard name.hasSuffix(surname) else { return nil }
+        let given = name.dropLast(surname.count).trimmingCharacters(in: .whitespaces)
+        return given.isEmpty ? nil : given + "\n" + surname + others
+    }
+
+    /// The names in `author`, and " et al." when `shortAuthor(_:)` ended it with that.
+    private nonisolated static func names(of author: String) -> (names: [String], others: String) {
+        let others = " et al."
+        let hasOthers = author.hasSuffix(others)
+        let names = author.dropLast(hasOthers ? others.count : 0).split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        return (names, hasOthers ? others : "")
+    }
+
+    /// One name's surname, with the particles before it and any suffix after it, or the whole
+    /// name when it is a single word.
+    private nonisolated static func lastName(_ name: String) -> String {
+        var words = name.split(separator: " ").map(String.init)
+        guard words.count > 1 else { return name }
+        var surname = [words.removeLast()]
+        if nameSuffixes.contains(surname[0].lowercased()), words.count > 1 {
+            surname.insert(words.removeLast(), at: 0)
+        }
+        while words.count > 1, let word = words.last, surnameParticles.contains(word.lowercased()) {
+            surname.insert(words.removeLast(), at: 0)
+        }
+        return surname.joined(separator: " ")
     }
 }

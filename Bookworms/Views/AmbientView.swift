@@ -302,10 +302,10 @@ struct AmbientView: View {
                 ) {
                     ForEach(page.books) { book in
                         if let dimensions = page.dimensions[book.id] {
-                            if let style = styles[book.id] {
+                            if let style = styles[book.id], let lettering = page.letterings[book.id] {
                                 SpineView(
                                     book: book, style: style, dimensions: dimensions,
-                                    isFocused: false, fontRevision: library.fontRevision)
+                                    lettering: lettering, isFocused: false)
                             } else {
                                 CoverView(
                                     book: book, standsOnShelf: true,

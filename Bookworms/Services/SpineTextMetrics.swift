@@ -1,31 +1,93 @@
 import SwiftUI
 import UIKit
 
+/// The lettering a shelf spine draws: the title's lines, the author's form, their sizes, and
+/// their widths, in a spine lying flat with its head on the left.
+///
+/// `SpineTextMetrics.lettering(for:style:dimensions:)` measures it when shelf pages are
+/// prepared, and `SpineView` draws it as measured, so neither focus changes nor view updates
+/// measure text.
+struct SpineLettering: Equatable {
+    /// The PostScript name of the face it was measured in, or `nil` for the system font, which
+    /// stands in for a face that wasn't registered at the time.
+    let fontName: String?
+    /// The title's lines, joined by line breaks. Lines break only between words.
+    let title: String
+    let titleSize: CGFloat
+    let titleWidth: CGFloat
+    /// The author's form: the name on one line, on two lines joined by a line break, or the
+    /// surname.
+    let author: String
+    let authorSize: CGFloat
+    let authorWidth: CGFloat
+    /// Whether `author` fits `authorWidth` whole. A surname too long for its room truncates.
+    let authorFits: Bool
+    /// The length along the spine that the lettering takes: the spine's length less the format
+    /// icon's room at the tail.
+    let length: CGFloat
+    /// The margin at each end of `length`.
+    let inset: CGFloat
+}
+
+/// Measures shelf spine lettering by the iPhone and Mac app's rule, with the Apple TV's
+/// minimum sizes.
 @MainActor
 enum SpineTextMetrics {
+    /// The smallest title the shelf aims for. `readableDimensions` lengthens, then thickens, a
+    /// spine whose title would letter smaller.
     static let minimumTitleSize: CGFloat = 23
-    static let titleEndPadding: CGFloat = 4
-    static let crossSpinePadding: CGFloat = 22
+    /// The smallest author size. Only a surname too long for the author's widest room truncates.
+    static let minimumAuthorSize: CGFloat = 16
+    /// How much larger than the author the title stays, where the author's minimum allows.
+    static let titleLead: CGFloat = 4
+    static let formatIconSize: CGFloat = 18
+    /// The tail length the format icon takes: the icon and its margin from the spine's end.
+    static let formatIconRoom: CGFloat = 38
 
-    static func textLength(for book: Book, height: CGFloat) -> CGFloat {
-        height - (book.format == nil ? 53 : 95)
+    /// The length along a spine `height` long that `book`'s lettering takes.
+    static func letteredLength(for book: Book, height: CGFloat) -> CGFloat {
+        max(0, height - (book.format == nil ? 0 : formatIconRoom))
     }
 
-    static func typography(for book: Book, style: SpineStyle, dimensions: SpineDimensions)
-        -> Typography
+    /// `book`'s lettering on a spine of `dimensions`, from a bounded cache. The title stops at
+    /// its first colon, as on the iPhone.
+    static func lettering(for book: Book, style: SpineStyle, dimensions: SpineDimensions)
+        -> SpineLettering
     {
-        typography(
+        lettering(
             title: style.uppercase ? book.spineTitle.uppercased() : book.spineTitle,
-            author: book.author, fontName: style.fontName,
-            length: textLength(for: book, height: dimensions.height),
-            height: dimensions.width - crossSpinePadding,
-            maximumTitle: min(58, dimensions.width * 0.72),
-            maximumAuthor: min(22, dimensions.width * 0.32), hasSubtitle: book.spineSubtitle != nil,
-            visualScale: SpineFontProfile.sizeScale(fontName: style.fontName, text: book.author),
-            titleVisualScale: SpineFontProfile.sizeScale(
-                fontName: style.fontName,
-                text: style.uppercase ? book.spineTitle.uppercased() : book.spineTitle),
-            compactAuthor: true)
+            author: SpineView.shortAuthor(book.author), fontName: style.fontName,
+            length: letteredLength(for: book, height: dimensions.height),
+            thickness: dimensions.width)
+    }
+
+    private struct Key: Hashable {
+        let title: String
+        let author: String
+        let font: String?
+        let length: CGFloat
+        let thickness: CGFloat
+    }
+    private static var letterings: [Key: SpineLettering] = [:]
+
+    /// `title` and `author` lettered in `length` along a spine `thickness` across.
+    static func lettering(
+        title: String, author: String, fontName: String, length: CGFloat, thickness: CGFloat
+    ) -> SpineLettering {
+        let resolved = UIFont(name: fontName, size: minimumTitleSize)?.fontName
+        let key = Key(
+            title: title, author: author, font: resolved, length: length, thickness: thickness)
+        if let saved = letterings[key] { return saved }
+        let measurement = PerformanceDiagnostics.begin("TypographyMiss")
+        defer { measurement.end() }
+        let result = LetteringRule(
+            fontName: resolved, title: title, author: author, length: length,
+            thickness: thickness
+        )
+        .lettering()
+        if letterings.count >= 4096 { letterings.removeAll(keepingCapacity: true) }
+        letterings[key] = result
+        return result
     }
 
     private struct DimensionsKey: Hashable {
@@ -38,7 +100,7 @@ enum SpineTextMetrics {
     }
     private static var savedDimensions: [DimensionsKey: SpineDimensions] = [:]
 
-    /// Uses spare shelf height when a main title cannot reach the legibility target.
+    /// Uses spare shelf height when a title cannot reach `minimumTitleSize`.
     static func readableDimensions(
         for book: Book, style: SpineStyle,
         natural: SpineDimensions, rowHeight: CGFloat
@@ -56,7 +118,7 @@ enum SpineTextMetrics {
                 rowHeight,
                 natural.width * ShelfLayout.slendernessRange.upperBound))
         var dimensions = natural
-        while typography(for: book, style: style, dimensions: dimensions).titleSize
+        while lettering(for: book, style: style, dimensions: dimensions).titleSize
             < minimumTitleSize,
             dimensions.height < maximumHeight
         {
@@ -71,7 +133,7 @@ enum SpineTextMetrics {
             min(
                 rowHeight * ShelfLayout.widthRange.upperBound,
                 dimensions.height / ShelfLayout.slendernessRange.lowerBound))
-        while typography(for: book, style: style, dimensions: dimensions).titleSize
+        while lettering(for: book, style: style, dimensions: dimensions).titleSize
             < minimumTitleSize,
             dimensions.width < maximumWidth
         {
@@ -85,159 +147,181 @@ enum SpineTextMetrics {
         return dimensions
     }
 
-    private struct Key: Hashable {
+    /// The face `SpineLettering.fontName` names, at `size`, or the system font.
+    static func font(name: String?, size: CGFloat) -> Font {
+        Font(uiFont(name: name, size: size))
+    }
+
+    static func uiFont(name: String?, size: CGFloat) -> UIFont {
+        name.flatMap { UIFont(name: $0, size: size) }
+            ?? UIFont.systemFont(ofSize: size, weight: .medium)
+    }
+}
+
+/// The iPhone and Mac app's spine lettering rule (`SpineView.lettering(length:thickness:)` and
+/// its `SpineLettering` layout, in `ios/Bookworms/Views/SpineView.swift`), measured with UIKit
+/// so the shelf can size books before it draws them. Keep the shares the same in both apps.
+///
+/// The Apple TV adds its safeguards: authors letter at 16 points or more, the title stays 4
+/// points larger than the author where that minimum allows, and a title takes a third line
+/// only when one or two lines can't reach 23 points.
+@MainActor
+private struct LetteringRule {
+    let fontName: String?
+    let title: String
+    let author: String
+    let length: CGFloat
+    let inset: CGFloat
+    /// The row's height and the title's starting size.
+    let box: CGFloat
+    let spacing: CGFloat
+    let authorShare: CGFloat
+    let authorCap: CGFloat
+    let least: CGFloat
+    let large: CGFloat
+    /// The row's width between the insets.
+    let width: CGFloat
+
+    init(fontName: String?, title: String, author: String, length: CGFloat, thickness: CGFloat) {
+        self.fontName = fontName
+        self.title = title
+        self.author = author
+        self.length = length
+        inset = length * 0.035 + thickness * 0.25
+        box = thickness * 0.88
+        spacing = thickness * 0.3
+        authorShare = length * 0.24
+        authorCap = length * 0.4
+        least = max(
+            SpineTextMetrics.minimumAuthorSize, min(length * 0.04, max(7, thickness * 0.275)))
+        large = max(least, min(length * 0.04, thickness * 0.5))
+        width = max(0, length - 2 * inset)
+    }
+
+    struct Author {
         let text: String
-        let fontName: String?
-        let maximum: CGFloat
+        let size: CGFloat
         let width: CGFloat
-        let height: CGFloat
-        let preferSingleLine: Bool
-    }
-    private static var values: [Key: CGFloat] = [:]
-
-    // Resolve the same UIKit face used for measurement, including newly registered fonts.
-    static func font(name: String, size: CGFloat) -> Font {
-        Font(UIFont(name: name, size: size) ?? UIFont.systemFont(ofSize: size, weight: .medium))
+        let fits: Bool
     }
 
-    static func fittedSize(
-        _ text: String, fontName: String?, maximum: CGFloat, width: CGFloat, height: CGFloat,
-        preferSingleLine: Bool = false
-    ) -> CGFloat {
-        let resolvedFont = fontName.flatMap { UIFont(name: $0, size: maximum)?.fontName }
-        let key = Key(
-            text: text, fontName: resolvedFont, maximum: maximum, width: width,
-            height: height, preferSingleLine: preferSingleLine)
-        if let saved = values[key] { return saved }
-        let measurement = PerformanceDiagnostics.begin("TypographyMiss")
-        defer { measurement.end() }
-        let result = measure(
-            text, fontName: resolvedFont, maximum: maximum, width: width, height: height,
-            preferSingleLine: preferSingleLine)
-        if values.count >= 1024 { values.removeAll(keepingCapacity: true) }
-        values[key] = result
-        return result
+    struct Row {
+        let title: (lines: [String], size: CGFloat)
+        let titleWidth: CGFloat
+        let author: Author
     }
 
-    struct Typography {
-        let titleSize: CGFloat
-        let authorSize: CGFloat
-        let titleLength: CGFloat
-        let authorLength: CGFloat
+    func lettering() -> SpineLettering {
+        // The author's large forms apply only where the title loses no size to them and stays
+        // at least 1.4 times their size. The 1% absorbs the half-point size grid.
+        let largeRow = row(large: true, least: least)
+        var chosen = row(large: false, least: least)
+        if largeRow.title.size >= 0.99 * chosen.title.size,
+            largeRow.title.size >= 1.4 * large
+        {
+            chosen = largeRow
+        }
+        let lead = max(
+            SpineTextMetrics.minimumAuthorSize, chosen.title.size - SpineTextMetrics.titleLead)
+        if chosen.author.size > lead { chosen = row(large: false, least: lead) }
+        return SpineLettering(
+            fontName: fontName, title: chosen.title.lines.joined(separator: "\n"),
+            titleSize: chosen.title.size, titleWidth: chosen.titleWidth,
+            author: chosen.author.text, authorSize: chosen.author.size,
+            authorWidth: chosen.author.width, authorFits: chosen.author.fits, length: length,
+            inset: inset)
     }
 
-    /// Fits both labels, favoring a four-point title lead without sacrificing author readability.
-    static func typography(
-        title: String, author: String, fontName: String, length: CGFloat,
-        height: CGFloat, maximumTitle: CGFloat, maximumAuthor: CGFloat, hasSubtitle: Bool,
-        visualScale: CGFloat = 1, titleVisualScale: CGFloat? = nil, compactAuthor: Bool = false
-    ) -> Typography {
-        let titleHeight = height * (hasSubtitle ? 0.68 : 1)
-        func fit(titleFraction: CGFloat, singleLine: Bool) -> Typography {
-            let titleLength = length * titleFraction
-            let authorLength = length * (0.97 - titleFraction)
-            let scale = min(1.06, max(0.94, visualScale))
-            let titleScale = min(1.03, max(0.97, titleVisualScale ?? (1 + (scale - 1) / 2)))
-            func adjusted(
-                _ text: String, maximum: CGFloat, width: CGFloat, height: CGFloat,
-                singleLine: Bool, scale: CGFloat, floor: CGFloat, isAuthor: Bool = false
-            ) -> CGFloat {
-                func fit(_ maximum: CGFloat) -> CGFloat {
-                    if isAuthor && compactAuthor {
-                        return SpineAuthorLayout.fittedSize(
-                            text, fontName: fontName,
-                            maximum: min(
-                                maximum,
-                                fittedSize(
-                                    text, fontName: fontName, maximum: maximum,
-                                    width: width, height: height)), width: width, height: height)
-                    }
-                    return fittedSize(
-                        text, fontName: fontName, maximum: maximum,
-                        width: width, height: height, preferSingleLine: singleLine)
+    /// The row with the author's large forms allowed or not, and its smaller forms at `least`.
+    ///
+    /// The title gets the width its one line needs at the box's size first. The author gets
+    /// the rest, at least `authorShare`, or its surname's width if that is wider, and at most
+    /// `authorCap`, but no more than its form needs, and the title takes back what it leaves.
+    private func row(large: Bool, least: CGFloat) -> Row {
+        let free = max(0, width - spacing)
+        let surname = widest([SpineView.surname(author) ?? author], size: least)
+        let share = max(authorShare, min(authorCap, surname))
+        let offered = min(
+            authorCap, max(min(share, free), free - widest([title], size: box)))
+        let author = self.author(in: offered, large: large, least: least)
+        let used = min(offered, author.width)
+        return Row(title: titleFit(free - used), titleWidth: free - used, author: author)
+    }
+
+    /// The author's first form that fits `width` and the box: on one line, on two, and as the
+    /// surname, at the large size where `large` allows, then at `least`. Failing those, the
+    /// surname at `least`, truncated.
+    private func author(in width: CGFloat, large: Bool, least: CGFloat) -> Author {
+        let forms = [author, SpineView.twoLines(author), SpineView.surname(author)]
+            .compactMap { $0 }
+        for size in large ? [self.large, least] : [least] {
+            for form in forms {
+                let lines = form.components(separatedBy: "\n")
+                if fits(lines, size: size, width: width) {
+                    return Author(
+                        text: form, size: size, width: widest(lines, size: size), fits: true)
                 }
-                let fitted = fit(maximum)
-                // Shrinking never crosses an existing legibility floor; growth must fit the box.
-                if scale < 1 { return max(min(floor, fitted), fitted * scale) }
-                guard scale > 1 else { return fitted }
-                let enlarged = fit(min(maximum * scale, fitted * scale))
-                // A different half-point search grid must not make an enlargement shrink text.
-                return max(fitted, enlarged)
-            }
-            return Typography(
-                titleSize: adjusted(
-                    title, maximum: maximumTitle,
-                    width: titleLength - 2 * titleEndPadding, height: titleHeight,
-                    singleLine: singleLine, scale: titleScale, floor: minimumTitleSize),
-                authorSize: adjusted(
-                    author, maximum: maximumAuthor,
-                    width: authorLength, height: height, singleLine: false, scale: scale, floor: 16,
-                    isAuthor: true),
-                titleLength: titleLength, authorLength: authorLength)
-        }
-
-        var best = fit(titleFraction: 0.75, singleLine: true)
-        let originalAuthorSize = best.authorSize
-        let target = max(minimumTitleSize, originalAuthorSize + 4)
-        if best.titleSize >= target { return best }
-
-        // Try wrapping and borrowing unused author space before reducing either label.
-        // A short candidate list keeps focus updates cheap and reuses the measurement cache.
-        for fraction: CGFloat in [0.75, 0.78, 0.81, 0.84] {
-            let candidate = fit(titleFraction: fraction, singleLine: false)
-            guard candidate.authorSize >= min(16, originalAuthorSize) else { continue }
-            if candidate.titleSize > best.titleSize { best = candidate }
-            if best.titleSize >= target { return best }
-        }
-
-        // Sixteen points is a soft author floor: never shrink an already smaller label further.
-        // If the spine is too narrow, readability takes priority over the four-point difference.
-        let authorSize = min(best.authorSize, max(16, best.titleSize - 4))
-        return Typography(
-            titleSize: best.titleSize, authorSize: authorSize,
-            titleLength: best.titleLength, authorLength: best.authorLength)
-    }
-
-    private static func nextSmallerSize(_ size: CGFloat) -> CGFloat {
-        // Fractional starting sizes must still test the exact legibility target before going below it.
-        if size > minimumTitleSize && size - 0.5 < minimumTitleSize { return minimumTitleSize }
-        return size - 0.5
-    }
-
-    static func measure(
-        _ text: String, fontName: String?, maximum: CGFloat, width: CGFloat,
-        height: CGFloat, preferSingleLine: Bool
-    ) -> CGFloat {
-        // Prefer one line only when it needs modest shrinking; otherwise use the available width.
-        if preferSingleLine {
-            var size = maximum
-            while size >= maximum * 0.75 {
-                let font =
-                    fontName.flatMap { UIFont(name: $0, size: size) }
-                    ?? UIFont.systemFont(ofSize: size, weight: .medium)
-                let bounds = (text as NSString).size(withAttributes: [.font: font])
-                if bounds.width <= width * 0.96 && bounds.height <= height * 0.9 { return size }
-                size = nextSmallerSize(size)
             }
         }
-        var size = maximum
-        while size > 8 {
-            let font =
-                fontName.flatMap { UIFont(name: $0, size: size) }
-                ?? UIFont.systemFont(ofSize: size, weight: .medium)
-            let attributes: [NSAttributedString.Key: Any] = [.font: font]
-            let bounds = (text as NSString)
-                .boundingRect(
-                    with: CGSize(width: width, height: 10000),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes,
-                    context: nil)
-            let longestWord =
-                text.split(whereSeparator: \.isWhitespace)
-                .map { (String($0) as NSString).size(withAttributes: attributes).width }.max() ?? 0
-            if bounds.height <= height * 0.9 && longestWord <= width * 0.96 { return size }
-            size = nextSmallerSize(size)
-        }
-        return size
+        return Author(
+            text: SpineView.surname(author) ?? author, size: least, width: width, fits: false)
     }
 
+    /// The title's largest size and its lines in `width`: one line or two, whichever is
+    /// larger, and three only when neither reaches the minimum. Lines break between words
+    /// alone, so a title without spaces, such as a Chinese one, keeps to one line.
+    private func titleFit(_ width: CGFloat) -> (lines: [String], size: CGFloat) {
+        let words = title.split(separator: " ").map(String.init)
+        var best = fit(words, into: 1, width: width)
+        for count in 2...3 where words.count >= count {
+            if count == 3 && best.size >= SpineTextMetrics.minimumTitleSize { break }
+            let candidate = fit(words, into: count, width: width)
+            if candidate.size > best.size { best = candidate }
+        }
+        return best
+    }
+
+    /// The largest size on the half-point grid, at most the box's, at which `words` fit
+    /// `count` lines in `width` and the box, broken where the widest line is narrowest.
+    private func fit(_ words: [String], into count: Int, width: CGFloat) -> (
+        lines: [String], size: CGFloat
+    ) {
+        let candidates = Self.breaks(words[...], into: count)
+        let lines =
+            candidates.min { widest($0, size: box) < widest($1, size: box) } ?? [title]
+        let lineHeight = font(box).lineHeight / box
+        let widestLine = widest(lines, size: box)
+        var size = min(
+            box, box / (CGFloat(count) * lineHeight),
+            widestLine > 0 ? box * width / widestLine : box)
+        size = (size * 2).rounded(.down) / 2
+        // Fonts with optical sizes don't scale exactly; confirm at the size drawn.
+        while size > 0.5, !fits(lines, size: size, width: width) { size -= 0.5 }
+        return (lines, size)
+    }
+
+    /// Every way to break `words` into `count` lines of whole words.
+    private static func breaks(_ words: ArraySlice<String>, into count: Int) -> [[String]] {
+        guard count > 1 else { return [[words.joined(separator: " ")]] }
+        guard words.count >= count else { return [] }
+        return (words.startIndex + 1...words.endIndex - count + 1).flatMap { end in
+            breaks(words[end...], into: count - 1).map {
+                [words[..<end].joined(separator: " ")] + $0
+            }
+        }
+    }
+
+    private func fits(_ lines: [String], size: CGFloat, width: CGFloat) -> Bool {
+        widest(lines, size: size) <= width
+            && CGFloat(lines.count) * font(size).lineHeight <= box
+    }
+
+    private func widest(_ lines: [String], size: CGFloat) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font(size)]
+        return lines.map { ($0 as NSString).size(withAttributes: attributes).width }.max() ?? 0
+    }
+
+    private func font(_ size: CGFloat) -> UIFont {
+        SpineTextMetrics.uiFont(name: fontName, size: size)
+    }
 }

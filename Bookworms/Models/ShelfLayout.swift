@@ -9,6 +9,8 @@ struct ShelfPage: Identifiable {
     let id: Int
     let books: [Book]
     let dimensions: [Int: SpineDimensions]
+    /// The lettering of each book drawn as a spine, measured with its dimensions.
+    var letterings: [Int: SpineLettering] = [:]
 }
 
 enum ShelfLayout {

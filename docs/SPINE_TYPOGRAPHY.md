@@ -1,21 +1,25 @@
 # Spine typography
 
-Spine titles target at least 23 points. The fitter first wraps the main title and borrows label space, then increases book height within the shelf bounds. If height is insufficient, it increases width within the existing book-shape limits. Page packing includes these adjusted dimensions. Unusually long unbreakable text can still exceed the bounded layout; subtitles retain their separate sizing policy.
+Shelf spines letter by the iPhone and Mac app's rule (`SpineView.lettering(length:thickness:)` and its `SpineLettering` layout in that app), with the Apple TV's minimum sizes. `SpineTextMetrics` in [SpineTextMetrics.swift](../Bookworms/Services/SpineTextMetrics.swift) measures the rule with UIKit. Keep the shares and the author forms the same in both apps; each copy names the other.
 
-Font matching preserves the cover's selected family. Apparent-size adjustment compares the font's x-height with the system font for mixed-case labels, or cap height for uppercase labels. Partial normalization preserves differences between faces. Ink density supplies a smaller secondary adjustment; its five buckets measure visual weight, not reading ability. Final adjustments are bounded to 6% for authors and 3% for titles, and cannot shrink a title across its minimum.
+The spine reads top to bottom: the title at the head, the author at the tail, both centered across the spine. A book with a format reserves the format icon's room at the tail (`formatIconRoom`, 38 points) before lettering the rest of the length. In that lettered length:
 
-Author names use Core Text shaping and word wrapping. Each line is positioned using its actual glyph bounds, with a visible gap of 12% of the font size (at least 2 points). This avoids font-wide blank space reserved for unused accents or flourishes. It preserves kerning and ligatures instead of changing tracking in connected scripts. Author labels use their own fitting bounds; the 23-point title target does not apply to author labels or subtitles.
+- Each end keeps a margin of 3.5% of the length plus 25% of the thickness. The title and author share a box 88% of the thickness tall, 30% of the thickness apart.
+- The title stops at its first colon; the shelf spine draws no subtitle. It starts at the box's size, with no other cap, and shrinks on a half-point grid to the largest size that fits on one line or two, whichever is larger. Lines break only between words, at the break whose widest line is narrowest, so no word splits and a title without spaces keeps to one line. A title takes a third line only when one or two lines can't reach 23 points.
+- The title first claims the width its one line needs at the box's size. The author gets the rest: at least 24% of the length, or its surname's width at the minimum size if that is wider, at most 40%, and no more than its form needs. The title takes back what the author leaves.
+- The author lists the first name and "et al." for more than two names, or for two names longer than 32 characters. It takes the first form that fits: the name on one line, on two lines (two names one over the other, or one name broken before its surname), then the surname alone. Its large size, half the thickness, applies only where the title loses no size to it and stays at least 1.4 times its size; otherwise it letters at a little over a quarter of the thickness. Both sizes stop at 4% of the length and never fall below 16 points. The author is trailing-aligned.
+- The title stays at least 4 points larger than the author: the author drops to the title's size less 4 points, but not below 16 points. A surname too long for the author's widest room truncates with an ellipsis; no other form truncates.
 
-UIKit supplies fonts at their rendered point size, retaining native optical sizing when a custom font supports it. Static fonts have no optical-size or grade axes to adjust.
+Titles target at least 23 points. When a title would letter smaller, `readableDimensions` lengthens the spine within the shelf's height and the book-shape bounds, then thickens it. Page packing uses the adjusted dimensions. Unusually long unbreakable text can still fall below 23 points in the bounded layout.
 
-Page layouts, per-book dimensions, fitted sizes, shaped author lines, and ink measurements are cached. Page-layout cache keys include book metadata, style choices, geometry, and font-registration revision. Focus and idle-control changes reuse the layout.
+Lettering is measured once, when shelf pages are prepared (`BookPresentation.pages`), and carried in `ShelfPage.letterings`. `SpineView` draws each measured line at its measured size and face, without rewrapping or scaling, so focus changes and view updates never measure text. A face registered after preparation draws once the pages are prepared again for the new font revision; until then the spine draws the face it was measured in. Page layouts, per-book dimensions, and letterings are cached in bounded caches keyed by text, resolved face, and geometry.
+
+UIKit supplies fonts at their rendered point size, retaining native optical sizing when a custom font supports it. The fitter confirms each size by measuring at that size.
 
 ## Design references
 
 - [Apple typography guidance](https://developer.apple.com/design/human-interface-guidelines/typography): tvOS minimum sizes and testing custom fonts at viewing distance.
 - [Apple: The details of UI typography](https://developer.apple.com/videos/play/wwdc2020/10175/): native optical sizing, tracking, and leading.
-- [W3C font-size-adjust](https://www.w3.org/TR/css-fonts-5/#font-size-adjust-prop): apparent-size normalization using x-height or cap height.
-- [Adobe: Using Type in Design](https://blog.adobe.com/en/publish/2018/01/11/using-type-design-avoid-common-mistakes): preserve connections in script fonts and allow sufficient space between lines.
 
 ## Shelf controls and focus
 

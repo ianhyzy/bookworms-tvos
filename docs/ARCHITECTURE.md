@@ -1,6 +1,6 @@
 # Architecture
 
-Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the shelf, settings, and details. UIKit and Core Text measure and render the retained spine implementation. Generated-spine views and AI provider generation remain disabled. No companion rendering service is required. Optional iPhone and Mac companions prepare spine design records in private CloudKit. On supported Apple TV models, Book Wall draws a book's spine from its companion design when one exists and otherwise generates the spine texture from genre metadata and the selected cover image. See [Book Wall models, animation, and local spines](BOOK_WALL.md).
+Bookworms is a Swift 6 application for tvOS 26 and later. SwiftUI provides the shelf, settings, and details. UIKit measures the retained shelf spine lettering, which SwiftUI draws. Generated-spine views and AI provider generation remain disabled. No companion rendering service is required. Optional iPhone and Mac companions prepare spine design records in private CloudKit. On supported Apple TV models, Book Wall draws a book's spine from its companion design when one exists and otherwise generates the spine texture from genre metadata and the selected cover image. See [Book Wall models, animation, and local spines](BOOK_WALL.md).
 
 ## Components
 
