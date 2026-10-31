@@ -27,11 +27,14 @@ struct QRCodeView: View {
         .aspectRatio(1, contentMode: .fit)
         .task(id: url) {
             let text = url.absoluteString
-            image =
+            let drawn =
                 await Task.detached(priority: .userInitiated) {
                     QRCodeRenderer.shared.image(for: text)
                 }
                 .value
+            // The detached render outlives this task, so an older URL's code can finish last.
+            guard !Task.isCancelled else { return }
+            image = drawn
         }
         .accessibilityElement()
         .accessibilityAddTraits(.isImage)
