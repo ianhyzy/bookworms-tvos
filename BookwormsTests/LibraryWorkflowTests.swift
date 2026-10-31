@@ -1762,6 +1762,33 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(model.cloudStatus.contains("Local data is retained"))
     }
 
+    func testBookWallWaitsForTheLaunchCompanionRead() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        let (held, release) = AsyncStream.makeStream(of: Void.self)
+        dependencies.fetchSpineDesigns = { _, _ in
+            for await _ in held {}
+            return ([:], true)
+        }
+
+        let offline = LibraryModel(dependencies: dependencies)
+        await offline.start()
+        XCTAssertTrue(offline.hasReadCompanionRecords, "No read runs with iCloud storage off")
+
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.hasLoadedLibrarySnapshot)
+        XCTAssertFalse(model.hasReadCompanionRecords)
+        release.finish()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.hasReadCompanionRecords)
+    }
+
     func testCompanionCoverChoiceLeadsDisplayedCoversWithoutChangingDesignInputs() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

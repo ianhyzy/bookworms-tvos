@@ -245,6 +245,10 @@ final class LibraryModel {
         return preferences
     }
     private(set) var hasLoadedLibrarySnapshot = false
+    /// Whether launch's companion record read has applied, or no read will run, as with iCloud
+    /// storage off. Book Wall waits for it, so its first preparation includes the companion
+    /// designs and series looks instead of preparing every spine again when they arrive.
+    private(set) var hasReadCompanionRecords = false
     /// The connected Hardcover account's permanent profile link, for the profile code in ambient
     /// mode. `nil` without a connected, enabled account.
     var hardcoverProfileURL: URL? {
@@ -641,6 +645,8 @@ final class LibraryModel {
         spineDesignTask?.cancel()
         spineDesignTask = nil
         spineDesignTaskIdentity = nil
+        // Book Wall stops waiting for the cancelled read; a later read rebuilds it.
+        hasReadCompanionRecords = true
     }
 
     func start() async {
@@ -662,6 +668,7 @@ final class LibraryModel {
         {
             showSample()
             hasLoadedLibrarySnapshot = true
+            hasReadCompanionRecords = true
             return
         }
         aiRecords = dependencies.styleStore.load()
@@ -717,6 +724,7 @@ final class LibraryModel {
         } else {
             cloudStatus = "iCloud storage is off."
         }
+        if spineDesignTask == nil { hasReadCompanionRecords = true }
         #if DEBUG
             if dependencies.allowLaunchOverrides,
                 let token = ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"]
@@ -1586,6 +1594,7 @@ final class LibraryModel {
                 if !rebuild { refreshSeriesSources() }
             }
             if rebuild { rebuildLibrary() }
+            hasReadCompanionRecords = true
             // A design or link missing from a partial read could decide a look for good, and a
             // look missing from one would be created again.
             if designs?.isComplete == true, links?.isComplete == true, looks?.isComplete == true {
@@ -1660,6 +1669,7 @@ final class LibraryModel {
         pickedLinks = [:]
         seriesLooks = [:]
         refreshSeriesSources()
+        hasReadCompanionRecords = true
         let requestID = UUID()
         spineDesignTaskIdentity = ("", .distantPast, requestID)
         spineDesignTask = Task { [weak self] in

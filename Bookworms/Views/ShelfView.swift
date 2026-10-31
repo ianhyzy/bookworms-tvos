@@ -85,7 +85,7 @@ struct ShelfView: View {
             }
         }
         return BookWallPreparationKey(
-            loaded: library.hasLoadedLibrarySnapshot,
+            loaded: library.hasLoadedLibrarySnapshot && library.hasReadCompanionRecords,
             enabled: coordinator.preferences.orderedViews.contains(.bookWall),
             books: books, sources: sources, designs: designs, looks: looks,
             retry: bookWallPreparationRetry)
@@ -477,7 +477,7 @@ struct ShelfView: View {
                 } else {
                     ProgressView()
                     Text(
-                        library.hasLoadedLibrarySnapshot
+                        library.hasLoadedLibrarySnapshot && library.hasReadCompanionRecords
                             ? "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
                             : "Loading your library…"
                     )
