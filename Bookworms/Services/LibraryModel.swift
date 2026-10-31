@@ -735,6 +735,15 @@ final class LibraryModel {
             }
         }
         rebuildLibrary()
+        #if DEBUG
+            // `--example-profile` opens the bundled example profile in place of the welcome, for
+            // device checks and captures, when no source is connected and no library is saved.
+            if dependencies.allowLaunchOverrides,
+                ProcessInfo.processInfo.arguments.contains("--example-profile")
+            {
+                await showExample()
+            }
+        #endif
         hasLoadedLibrarySnapshot = true
         if !hardcoverEnabled { queueSpineCachePrune() }
         if cloudSyncSuppressedForWelcome, !shouldOfferWelcome {
