@@ -15,17 +15,22 @@ final class SeriesDesignsTests: XCTestCase {
         return book
     }
 
+    private func sameLook(_ book: Book, _ other: Book) -> Bool {
+        guard let key = SeriesDesigns.lookKey(of: book, link: nil) else { return false }
+        return key == SeriesDesigns.lookKey(of: other, link: nil)
+    }
+
     func testBooksMatchOnTheSameSeriesAndFirstAuthor() {
         let carl = book(1)
-        XCTAssertTrue(SeriesDesigns.matches(carl, book(2, author: "matt dinnimán")))
-        XCTAssertTrue(SeriesDesigns.matches(carl, book(3, author: "Matt Dinniman, Jeff Hays")))
+        XCTAssertTrue(sameLook(carl, book(2, author: "matt dinnimán")))
+        XCTAssertTrue(sameLook(carl, book(3, author: "Matt Dinniman, Jeff Hays")))
         XCTAssertFalse(
-            SeriesDesigns.matches(carl, book(3, author: "Jeff Hays, Matt Dinniman")),
+            sameLook(carl, book(3, author: "Jeff Hays, Matt Dinniman")),
             "Only the first author counts, so a look group has one key")
-        XCTAssertTrue(SeriesDesigns.matches(carl, book(4, author: "Matt  Dinniman.")))
-        XCTAssertFalse(SeriesDesigns.matches(carl, book(5, author: "Someone Else")))
-        XCTAssertFalse(SeriesDesigns.matches(carl, book(6, series: 8)))
-        XCTAssertFalse(SeriesDesigns.matches(book(7, series: nil), book(8, series: nil)))
+        XCTAssertTrue(sameLook(carl, book(4, author: "Matt  Dinniman.")))
+        XCTAssertFalse(sameLook(carl, book(5, author: "Someone Else")))
+        XCTAssertFalse(sameLook(carl, book(6, series: 8)))
+        XCTAssertFalse(sameLook(book(7, series: nil), book(8, series: nil)))
     }
 
     func testDiscworldBooksShareADesignOnlyWithinTheirGroup() {
@@ -33,16 +38,16 @@ final class SeriesDesignsTests: XCTestCase {
             book(id, series: 1018, author: "Terry Pratchett", title: title)
         }
         let guards = discworld(1, "Guards! Guards!")
-        XCTAssertTrue(SeriesDesigns.matches(guards, discworld(2, "THUD")))
-        XCTAssertTrue(SeriesDesigns.matches(guards, discworld(3, "Night Watch: A Discworld Novel")))
-        XCTAssertFalse(SeriesDesigns.matches(guards, discworld(4, "Mort")))
+        XCTAssertTrue(sameLook(guards, discworld(2, "THUD")))
+        XCTAssertTrue(sameLook(guards, discworld(3, "Night Watch: A Discworld Novel")))
+        XCTAssertFalse(sameLook(guards, discworld(4, "Mort")))
         XCTAssertTrue(
-            SeriesDesigns.matches(
+            sameLook(
                 discworld(5, "The Science of Discworld II: The Globe"),
                 discworld(6, "The Science of Discworld")))
         // A book no group names keeps its own design.
         let maurice = discworld(7, "The Amazing Maurice and His Educated Rodents")
-        XCTAssertFalse(SeriesDesigns.matches(maurice, discworld(8, "The Amazing Maurice")))
+        XCTAssertFalse(sameLook(maurice, discworld(8, "The Amazing Maurice")))
     }
 
     private func link(

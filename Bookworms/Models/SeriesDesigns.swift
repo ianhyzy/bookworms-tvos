@@ -79,13 +79,6 @@ enum SeriesDesigns {
         return groups
     }
 
-    /// Returns whether `book` and `other` share a series look: the same look group
-    /// (`lookKey(of:link:)`) without links.
-    static func matches(_ book: Book, _ other: Book) -> Bool {
-        guard let key = lookKey(of: book, link: nil) else { return false }
-        return key == lookKey(of: other, link: nil)
-    }
-
     /// Groups within long series that Hardcover does not record, keyed by Hardcover series ID
     /// and then by `titleKey(_:)`: each group shares a design instead of the whole series.
     /// Books of a listed series that no group names keep their own designs.
