@@ -1790,7 +1790,7 @@ final class BookWallScene {
     /// must ask the scene for a frame afterward.
     static func applyArtwork(
         to body: ModelEntity, style: BookWallLocalSpine.Style, spine: TextureResource,
-        cover: TextureResource
+        cover: TextureResource?
     ) {
         let materials: [String: any RealityKit.Material] = [
             casingName: caseMaterial(style),

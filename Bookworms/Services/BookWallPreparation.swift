@@ -44,7 +44,7 @@ final class BookWallPreparation {
     private(set) var coverRevision = 0
     /// Books with a cover URL whose cover the wall was prepared without: wall books, and
     /// series sources outside the wall whose cover sets their series-mates' colors.
-    private var missingCovers: [Book] = []
+    @ObservationIgnored private var missingCovers: [Book] = []
     private let rasterizer = BookWallRasterizer()
 
     func isReady(
@@ -193,8 +193,8 @@ final class BookWallPreparation {
     /// Downloads missing covers again after 30 seconds, as the shelf does after a failure. A
     /// recovered cover replaces the materials in place of its book and of every wall book that
     /// draws in its series design, since the source's cover sets their colors; each slot keeps
-    /// the proportions it was laid out with. Covers that still fail wait for the next
-    /// preparation pass.
+    /// the proportions it was laid out with. A redrawn book without a cover of its own keeps its
+    /// plain board in the new colors. Covers that still fail wait for the next preparation pass.
     private func retryMissingCovers(in wall: BookWallPreparedWall, fontStyle: AppFontStyle)
         async
     {
@@ -219,21 +219,22 @@ final class BookWallPreparation {
         var restored = recovered.subtracting(wall.layout.slots.map(\.book.id))
         for slot in redrawn {
             guard !Task.isCancelled, prepared?.id == wall.id else { return }
-            guard let body = wall.bodies[slot.book.id],
-                let cover = try? await ArtworkStore.shared.detailImage(
-                    for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
-            else { continue }
+            guard let body = wall.bodies[slot.book.id] else { continue }
+            let cover = try? await ArtworkStore.shared.detailImage(
+                for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             let source = await sourceStyle(
                 for: slot.book, drawsWith: wall.drawsWith, designs: wall.drawn, cache: &styles)
             let images = await rasterizer.render(
                 slot: slot, cover: cover, source: source, design: wall.drawn[slot.book.id],
                 fontStyle: fontStyle)
-            guard let coverImage = images.cover,
-                let spine = try? await images.spineMips?.texture(),
-                let coverTexture = try? await TextureResource.generate(
-                    from: coverImage, options: .init(semantic: .color)),
-                !Task.isCancelled, prepared?.id == wall.id
-            else { continue }
+            guard let spine = try? await images.spineMips?.texture() else { continue }
+            var coverTexture: TextureResource?
+            if let coverImage = images.cover {
+                coverTexture = try? await TextureResource.generate(
+                    from: coverImage, options: .init(semantic: .color))
+                guard coverTexture != nil else { continue }
+            }
+            guard !Task.isCancelled, prepared?.id == wall.id else { continue }
             BookWallScene.applyArtwork(
                 to: body, style: images.style, spine: spine, cover: coverTexture)
             restored.insert(slot.book.id)
@@ -309,9 +310,9 @@ extension BookWallPreparation {
     /// weight. A network failure stops further downloads until the next preparation, so an
     /// unreachable host delays the wall by at most one request timeout.
     ///
-    /// A face counts as registered only at the requested weight: a stand-in family's face of
-    /// that weight, or the design's own face by name. A family's registered Regular face, for
-    /// example, does not stand in for its Bold.
+    /// The design's own face counts as registered only by name, so a family's registered Regular
+    /// face, for example, does not stand in for its Bold. A stand-in family counts as registered
+    /// with any face, since each one ships a single weight (`SpineFontPolicy.standInFamilies`).
     fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
         var requested = Set<String>()
         for design in designs {
@@ -321,8 +322,7 @@ extension BookWallPreparation {
             let registered =
                 SpineFontPolicy.standInFamily(for: name) == nil
                 ? UIFont(name: SpineFontPolicy.allowedFontName(name), size: 12) != nil
-                : GoogleFontLibrary.registeredFace(family: family, nearest: weight)
-                    .map(GoogleFontLibrary.cssWeight) == weight
+                : GoogleFontLibrary.registeredFace(family: family, nearest: weight) != nil
             guard !registered else { continue }
             guard requested.insert("\(family):\(weight)").inserted else { continue }
             guard !Task.isCancelled else { return }
