@@ -42,6 +42,10 @@ struct LibraryDependencies {
     var syncCloud: @MainActor (CloudLibraryArchive) async throws -> CloudLibraryArchive = {
         try await CloudLibraryStore.shared.sync($0)
     }
+    /// The signed-in iCloud user's record name, or `nil` when it can't be read.
+    var cloudUserRecordName: @MainActor () async -> String? = {
+        await CloudLibraryStore.shared.userRecordName()
+    }
     var readSpineWorklist: @MainActor () async throws -> SpineWorklistV1? = {
         try await SpineCloudStore.shared.worklist()
     }

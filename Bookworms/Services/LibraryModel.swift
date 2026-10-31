@@ -1387,7 +1387,19 @@ final class LibraryModel {
         #endif
     }
 
-    func cloudAccountChanged() {
+    /// The iCloud user that the last successful sync used (`cloudAccountChanged()`).
+    static let cloudUserKey = "iCloudUserRecordName"
+
+    /// Handles `CKAccountChanged`, which CloudKit also posts when the same account's state
+    /// changes. Storage stays on while the signed-in user is the one the last sync used;
+    /// otherwise, including when the user can't be read, it turns off.
+    func cloudAccountChanged() async {
+        if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey),
+            await dependencies.cloudUserRecordName() == previous
+        {
+            return
+        }
+        dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
         cloudBacked = false
         iCloudEnabled = false
         if !hardcoverConnected {
@@ -1419,6 +1431,7 @@ final class LibraryModel {
                 do {
                     let archive = CloudLibraryArchive(sources: sourceSnapshots, designs: aiRecords)
                     let remote = try await dependencies.syncCloud(archive)
+                    let cloudUser = await dependencies.cloudUserRecordName()
                     // Disabling storage or changing accounts invalidates even uncancellable replies.
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return
@@ -1447,6 +1460,9 @@ final class LibraryModel {
                         setActiveHardcoverAccountID(worklist.accountID)
                     }
                     cloudBacked = true
+                    if let cloudUser {
+                        dependencies.defaults.set(cloudUser, forKey: Self.cloudUserKey)
+                    }
                     do {
                         let savedSourceRevision = try await saveSources()
                         guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {

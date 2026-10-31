@@ -49,7 +49,7 @@ struct BookwormsApp: App {
                     NotificationCenter.default.publisher(for: .CKAccountChanged)
                         .receive(on: DispatchQueue.main)
                 ) { _ in
-                    library.cloudAccountChanged()
+                    Task { await library.cloudAccountChanged() }
                 }
         }
     }

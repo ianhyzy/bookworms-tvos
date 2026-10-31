@@ -2247,6 +2247,34 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(fixture.defaults.string(forKey: "activeHardcoverAccountID"), "other-account")
     }
 
+    /// CloudKit posts `CKAccountChanged` for the same account too; only another user, or one
+    /// that can't be read, turns iCloud storage off.
+    func testCloudAccountChangeKeepsStorageForTheSameUser() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { $0 }
+        var user: String? = "_fictional_user_1"
+        dependencies.cloudUserRecordName = { user }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            fixture.defaults.string(forKey: LibraryModel.cloudUserKey), "_fictional_user_1")
+
+        await model.cloudAccountChanged()
+        XCTAssertTrue(model.iCloudEnabled)
+
+        user = "_fictional_user_2"
+        await model.cloudAccountChanged()
+        XCTAssertFalse(model.iCloudEnabled)
+        XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+    }
+
     func testCloudAccountChangeRejectsOldReplyAfterNewSyncCompletes() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -2273,7 +2301,7 @@ final class LibraryWorkflowTests: XCTestCase {
             oldFinished.fulfill()
         }
         await fulfillment(of: [waiting], timeout: 5)
-        model.cloudAccountChanged()
+        await model.cloudAccountChanged()
         model.iCloudEnabled = true
         await fulfillment(of: [current.started], timeout: 5)
         current.resolve(

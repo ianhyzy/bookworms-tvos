@@ -87,6 +87,16 @@ actor CloudLibraryStore {
 
     init(database: (any CloudLibraryDatabase)? = nil) { self.database = database }
 
+    /// The signed-in iCloud user's record name, or `nil` when it can't be read.
+    func userRecordName() async -> String? {
+        #if targetEnvironment(simulator)
+            return nil
+        #else
+            return try? await CKContainer(identifier: "iCloud.gay.ian.Bookworms").userRecordID()
+                .recordName
+        #endif
+    }
+
     func sync(_ local: CloudLibraryArchive) async throws -> CloudLibraryArchive {
         let database: any CloudLibraryDatabase
         if let supplied = self.database {
