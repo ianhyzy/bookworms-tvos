@@ -272,6 +272,19 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertFalse(retry.exists)
     }
 
+    func testRetryKeepsFocusWhileTheRendererFailsAgain() {
+        let app = launchWithWall(arguments: ["--test-fail-book-wall-renderer=2"])
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        let retry = app.buttons["book-wall-retry"]
+        RemoteNavigation.press(.select, in: app, expecting: retry)
+        // The second connection fails too, so the press leaves focus on Retry.
+        RemoteNavigation.pressWithoutMoving(.select, in: app, from: retry)
+        XCTAssertFalse(app.buttons["book-wall-8"].exists, "A stopped wall offers no spines")
+        RemoteNavigation.press(.select, in: app, expecting: app.buttons["book-wall-8"])
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
+        XCTAssertFalse(retry.exists)
+    }
+
     private func launchWithWall(arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments =

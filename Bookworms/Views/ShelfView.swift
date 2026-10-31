@@ -213,8 +213,6 @@ struct ShelfView: View {
                     BookWallRendererView(
                         scene: bookWallScene, status: wallRenderer, isCovered: showsDetailFilter
                     )
-                    // A new surface connects a new renderer.
-                    .id(wallRenderer.attempt)
                     .accessibilityHidden(true)
                     .allowsHitTesting(false)
                 }

@@ -48,13 +48,15 @@ struct BookWallRendererView: UIViewRepresentable {
 final class BookWallRendererStatus {
     /// The renderer's error, or nil while it runs.
     var failure: String?
-    /// Identifies the renderer's surface. Retry replaces the surface, which connects a new
-    /// renderer; a reconnect that fails again sets `failure` and waits for the next Retry.
-    private(set) var attempt = 0
+    /// The renderer that reports here, which `retry()` reconnects.
+    @ObservationIgnored fileprivate weak var host: BookWallRendererCoordinator?
 
-    func retry() {
-        failure = nil
-        attempt += 1
+    /// Connects a new renderer on the current surface before returning, so the press that
+    /// calls this knows whether the wall runs again. Returns `true` when it does. A renderer
+    /// that fails again sets `failure` and waits for the next Retry.
+    func retry() -> Bool {
+        host?.reconnect()
+        return failure == nil
     }
 }
 
@@ -169,6 +171,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         self.scene = scene
         self.surface = surface
         surface.coordinator = self
+        status?.host = self
         if status?.failure != nil { status?.failure = nil }
         isAttached = surface.window != nil
         failed = false
@@ -186,6 +189,13 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         } catch {
             fail(error.localizedDescription)
         }
+    }
+
+    /// Replaces the renderer on the current surface, as a new surface would.
+    func reconnect() {
+        guard let scene, let surface else { return }
+        dispose()
+        connect(scene: scene, surface: surface)
     }
 
     private func prepare(scene: BookWallScene, surface: BookWallRendererSurface) throws {
@@ -207,11 +217,9 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
             }
         #endif
         #if DEBUG && targetEnvironment(simulator)
-            // Scenario hook: fails the first connection so UI tests can reach Retry.
-            if ProcessInfo.processInfo.arguments.contains("--test-fail-book-wall-renderer"),
-                !Self.failedForScenario
-            {
-                Self.failedForScenario = true
+            // Scenario hook: fails the first connections so UI tests can reach Retry.
+            if Self.failuresForScenario > 0 {
+                Self.failuresForScenario -= 1
                 throw RendererError.unavailableMetal
             }
         #endif
@@ -272,7 +280,16 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
     }
 
     #if DEBUG && targetEnvironment(simulator)
-        private static var failedForScenario = false
+        /// `--test-fail-book-wall-renderer` fails the first connection;
+        /// `--test-fail-book-wall-renderer=N` fails the first N.
+        private static var failuresForScenario: Int = {
+            let arguments = ProcessInfo.processInfo.arguments
+            let prefix = "--test-fail-book-wall-renderer="
+            if let argument = arguments.first(where: { $0.hasPrefix(prefix) }) {
+                return Int(argument.dropFirst(prefix.count)) ?? 0
+            }
+            return arguments.contains("--test-fail-book-wall-renderer") ? 1 : 0
+        }()
     #endif
 
     func subscribe<E: RealityKit.Event>(

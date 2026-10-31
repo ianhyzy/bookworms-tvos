@@ -124,9 +124,11 @@ struct BookWallView: View {
                                 .multilineTextAlignment(.center)
                         }
                         Button("Retry") {
-                            rendererStatus.retry()
-                            // The press is an entry event, so focus moves to the book the wall
-                            // enters at, and Retry leaves once focus is there.
+                            // Retry reconnects before it returns. A renderer that fails again
+                            // leaves focus on Retry. A wall that runs again is an entry event,
+                            // so focus moves to the book the wall enters at, and Retry leaves
+                            // once focus is there. An empty wall has no book to focus.
+                            guard rendererStatus.retry(), let entryID else { return }
                             isRetrying = true
                             focusedBook = entryID
                         }
