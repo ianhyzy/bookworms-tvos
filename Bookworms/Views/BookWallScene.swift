@@ -716,6 +716,15 @@ final class BookWallScene {
         return letterSize * focalLength(in: screenBounds) / (cameraDepth - shelfFront)
     }
 
+    /// The resting wall's scale at its spine plane on the 1920 × 1080-point screen, in points
+    /// per scene unit. `BookWallPreparation` letters spines at this scale, so the shelf's point
+    /// sizes, such as its 23-point title floor, hold on the Apple TV screen.
+    static func spinePointsPerUnit(for layout: BookWallLayout) -> Float {
+        let cameraDepth = wallCameraDepth(
+            fitting: layout, shelfThickness: shelfThickness(for: layout), in: screenBounds)
+        return focalLength(in: screenBounds) / (cameraDepth - layout.maxCoverWidth / 2)
+    }
+
     /// Spine rectangles for `layout` at rest, in full-screen points for `viewport`.
     ///
     /// Needs neither a renderer nor a configured scene, so `BookWallView` mounts its focus
@@ -845,9 +854,16 @@ final class BookWallScene {
         for _ in 0..<16 {
             if let destination = detailDestination(
                 for: slot, detailFrame: detailFrame,
-                cameraDepth: cameraDepth, reduceMotion: reduceMotion),
-                destination.translation.z >= clear.translation.z
+                cameraDepth: cameraDepth, reduceMotion: reduceMotion)
             {
+                // The destination keeps its distance from the camera, so the camera moves
+                // back, in its usual steps, until the destination clears the stacks, without
+                // spending tries on a large book with a wide board.
+                guard destination.translation.z >= clear.translation.z else {
+                    let shortfall = clear.translation.z - destination.translation.z
+                    cameraDepth += (shortfall / 1.5).rounded(.up) * 1.5
+                    continue
+                }
                 let frames = flightPath(
                     from: start, clear: clear, destination: destination, cameraDepth: cameraDepth)
                 let amplitude = idleTranslationAmplitude(at: destination, cameraDepth: cameraDepth)
@@ -2355,51 +2371,119 @@ enum BookWallSpineTexture {
     /// proportions on thick books.
     static let pixelsPerUnit: CGFloat = 420
     /// The share of the spine's thickness that the cover's fold covers from the front joint.
-    /// It ends before the lettering, so the lettering's contrast check against the flat cloth
-    /// still holds.
+    /// It fades out within the lettering's margin and the headroom above its first line's
+    /// letters, so the lettering's contrast check against the flat cloth still holds.
     static let foldShare: CGFloat = 0.09
 
-    /// Draws the lettering on a transparent image the size of the spine plane
-    /// (`spineWallWidth` by `spineWallHeight`), within the centered lettered area
-    /// (`spineFaceWidth` by `spineFaceHeight`). The image's top edge is the front board's.
-    static func make(for slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style) -> CGImage? {
-        let book = slot.book
+    /// Draws `slot`'s lettering on a transparent image the size of the spine plane
+    /// (`spineWallWidth` by `spineWallHeight`), lying flat with the head on the left and the
+    /// front board's edge at the top, as the shelf's `SpineView` draws it before turning it
+    /// upright: the title at the head end, the author at the tail end, and the format icon in
+    /// the room at the tail, reading in the lettering's direction.
+    ///
+    /// `slot.lettering` was measured in points at the wall's viewing scale, so the image
+    /// draws in those points, scaled to `pixelsPerUnit`, and every glyph and margin keeps the
+    /// place the rule measured for it. `fontStyle` sets the icon's weight, as `appFont` does on
+    /// the shelf.
+    static func make(
+        for slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style,
+        fontStyle: AppFontStyle = .serif
+    ) -> CGImage? {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
         let size = CGSize(
             width: (CGFloat(slot.spineWallWidth) * pixelsPerUnit).rounded(),
             height: (CGFloat(slot.spineWallHeight) * pixelsPerUnit).rounded())
-        let face = CGSize(
-            width: CGFloat(slot.spineFaceWidth) * pixelsPerUnit,
-            height: CGFloat(slot.spineFaceHeight) * pixelsPerUnit)
-        let origin = CGPoint(
-            x: (size.width - face.width) / 2, y: (size.height - face.height) / 2)
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        let image = renderer.image { _ in
-            let inset: CGFloat = max(18, face.width * 0.045)
-            let left: CGFloat = origin.x + inset * 1.6
-            let textWidth: CGFloat = face.width - inset * 3.2
-            let descriptor = style.typography.font(size: 40).fontDescriptor
-            let titleTop: CGFloat = origin.y + face.height * BookWallLayout.titleTop
-            let titleBounds = CGRect(
-                x: left, y: titleTop, width: textWidth,
-                height: face.height * BookWallLayout.titleShare)
-            drawText(
-                style.typography.title(for: book), of: book, style: style,
-                descriptor: descriptor, in: titleBounds,
-                maximumSize: Int(face.height),
-                minimumSize: Int(BookWallLayout.minimumTitleFontSize))
-            let authorBounds = CGRect(
-                x: left, y: titleBounds.maxY, width: textWidth,
-                height: face.height * BookWallLayout.authorShare)
-            drawText(
-                book.author, of: book, style: style,
-                descriptor: descriptor, in: authorBounds,
-                maximumSize: Int(face.height * BookWallLayout.authorShare),
-                minimumSize: Int(BookWallLayout.minimumAuthorFontSize))
-        }
+        let points = CGFloat(slot.pointsPerUnit)
+        let length = CGFloat(slot.spineWallWidth) * points
+        let thickness = CGFloat(slot.spineWallHeight) * points
+        let image = UIGraphicsImageRenderer(size: size, format: format)
+            .image { context in
+                context.cgContext.scaleBy(x: size.width / length, y: size.height / thickness)
+                draw(slot.lettering, of: slot.book, style: style, thickness: thickness)
+                if slot.book.format != nil {
+                    drawFormatIcon(
+                        for: slot.book, ink: style.foreground, fontStyle: fontStyle,
+                        pixelsPerPoint: size.height / thickness,
+                        center: CGPoint(
+                            x: SpineTextMetrics.formatIconCenter(height: length),
+                            y: thickness / 2))
+                }
+            }
         return image.cgImage
+    }
+
+    /// Draws `lettering` in a row `thickness` points across, as `SpineView`'s lettering row
+    /// lays it out: each block centered across the row, the title's lines from the head-end
+    /// inset, and the author's lines aligned to the tail-end inset. An author that doesn't
+    /// fit whole truncates at its tail.
+    private static func draw(
+        _ lettering: SpineLettering, of book: Book, style: BookWallLocalSpine.Style,
+        thickness: CGFloat
+    ) {
+        let ink = style.foreground.uiColor
+        let titleFont = style.typography.font(size: lettering.titleSize)
+        let titleLines = lettering.title.components(separatedBy: "\n")
+        var y = (thickness - CGFloat(titleLines.count) * titleFont.lineHeight) / 2
+        for line in titleLines {
+            HouseOfLeaves.attributed(
+                line, of: book, attributes: [.font: titleFont, .foregroundColor: ink],
+                lettering: HouseOfLeaves.lettering(on: style.background, ink: style.foreground)
+            )
+            .draw(at: CGPoint(x: lettering.inset, y: y))
+            y += titleFont.lineHeight
+        }
+        let authorFont = style.typography.font(size: lettering.authorSize)
+        let tail = lettering.length - lettering.inset
+        guard lettering.authorFits else {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
+            paragraph.alignment = .right
+            (lettering.author as NSString)
+                .draw(
+                    in: CGRect(
+                        x: tail - lettering.authorWidth,
+                        y: (thickness - authorFont.lineHeight) / 2, width: lettering.authorWidth,
+                        height: authorFont.lineHeight),
+                    withAttributes: [
+                        .font: authorFont, .foregroundColor: ink, .paragraphStyle: paragraph,
+                    ])
+            return
+        }
+        let attributes: [NSAttributedString.Key: Any] = [.font: authorFont, .foregroundColor: ink]
+        let authorLines = lettering.author.components(separatedBy: "\n")
+        y = (thickness - CGFloat(authorLines.count) * authorFont.lineHeight) / 2
+        for line in authorLines {
+            let width = (line as NSString).size(withAttributes: attributes).width
+            (line as NSString).draw(at: CGPoint(x: tail - width, y: y), withAttributes: attributes)
+            y += authorFont.lineHeight
+        }
+    }
+
+    /// Draws `book`'s format symbol upright in a spine lying flat, centered on `center`, at the
+    /// shelf's icon size. The context is scaled to points; the symbol is made at the texture's
+    /// `pixelsPerPoint` and drawn unscaled, since a symbol drawn into a scaled context comes
+    /// out as a magnified bitmap.
+    private static func drawFormatIcon(
+        for book: Book, ink: StyleColor, fontStyle: AppFontStyle, pixelsPerPoint: CGFloat,
+        center: CGPoint
+    ) {
+        let configuration = UIImage.SymbolConfiguration(
+            font: fontStyle.uiFont(size: SpineTextMetrics.formatIconSize * pixelsPerPoint))
+        guard
+            let symbol = UIImage(systemName: book.formatSymbol, withConfiguration: configuration)?
+                .withTintColor(ink.uiColor, renderingMode: .alwaysOriginal),
+            let context = UIGraphicsGetCurrentContext()
+        else { return }
+        context.saveGState()
+        context.scaleBy(x: 1 / pixelsPerPoint, y: 1 / pixelsPerPoint)
+        symbol.draw(
+            in: CGRect(
+                x: center.x * pixelsPerPoint - symbol.size.width / 2,
+                y: center.y * pixelsPerPoint - symbol.size.height / 2,
+                width: symbol.size.width, height: symbol.size.height))
+        context.restoreGState()
     }
 
     /// Composites the lettering over flat cloth, for an opaque, lit spine surface: the cloth's
@@ -2496,68 +2580,5 @@ enum BookWallSpineTexture {
         context.drawLinearGradient(
             gradient, start: start, end: end,
             options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-    }
-
-    /// Draws `text` in the largest size from `minimumSize` to `maximumSize` that fits `bounds`,
-    /// wrapping words onto more lines as needed, so thick spines letter larger.
-    private static func drawText(
-        _ text: String, of book: Book, style: BookWallLocalSpine.Style,
-        descriptor: UIFontDescriptor, in bounds: CGRect, maximumSize: Int, minimumSize: Int
-    ) {
-        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard !words.isEmpty else { return }
-        var chosenFont = UIFont(descriptor: descriptor, size: CGFloat(minimumSize))
-        var chosenLines = wrappedLines(words, font: chosenFont, width: bounds.width)
-        var lower = minimumSize
-        var upper = max(minimumSize, maximumSize)
-        // A larger font cannot fit when a smaller one already overflows. Search for the
-        // largest size that fits the bounds, so thick spines get large lettering, without
-        // measuring every intermediate point size.
-        while lower <= upper {
-            let size = lower + (upper - lower) / 2
-            let font = UIFont(descriptor: descriptor, size: CGFloat(size))
-            let lines = wrappedLines(words, font: font, width: bounds.width)
-            if CGFloat(lines.count) * font.lineHeight <= bounds.height,
-                lines.allSatisfy({ lineWidth($0, font: font) <= bounds.width })
-            {
-                chosenFont = font
-                chosenLines = lines
-                lower = size + 1
-            } else {
-                upper = size - 1
-            }
-        }
-        let firstY = bounds.midY - CGFloat(chosenLines.count) * chosenFont.lineHeight / 2
-        for (index, line) in chosenLines.enumerated() {
-            HouseOfLeaves.attributed(
-                line, of: book,
-                attributes: [.font: chosenFont, .foregroundColor: style.foreground.uiColor],
-                lettering: HouseOfLeaves.lettering(on: style.background, ink: style.foreground)
-            )
-            .draw(
-                at: CGPoint(
-                    x: bounds.midX - lineWidth(line, font: chosenFont) / 2,
-                    y: firstY + CGFloat(index) * chosenFont.lineHeight))
-        }
-    }
-
-    private static func wrappedLines(_ words: [String], font: UIFont, width: CGFloat) -> [String] {
-        var lines: [String] = []
-        var current = ""
-        for word in words {
-            let candidate = current.isEmpty ? word : "\(current) \(word)"
-            if !current.isEmpty, lineWidth(candidate, font: font) > width {
-                lines.append(current)
-                current = word
-            } else {
-                current = candidate
-            }
-        }
-        if !current.isEmpty { lines.append(current) }
-        return lines
-    }
-
-    private static func lineWidth(_ line: String, font: UIFont) -> CGFloat {
-        (line as NSString).size(withAttributes: [.font: font]).width
     }
 }

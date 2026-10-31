@@ -1,14 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// The lettering a shelf spine draws: the title's lines, the author's form, their sizes, and
-/// their widths, in a spine lying flat with its head on the left.
+/// The lettering a spine draws: the title's lines, the author's form, their sizes, and their
+/// widths, in points, in a spine lying flat with its head on the left.
 ///
-/// `SpineTextMetrics.lettering(for:style:dimensions:)` measures it when shelf pages are
-/// prepared, and `SpineView` draws it as measured, so neither focus changes nor view updates
-/// measure text.
-struct SpineLettering: Equatable {
-    /// The PostScript name of the face it was measured in, or `nil` for the system font, which
+/// The shelf measures it when its pages are prepared
+/// (`SpineTextMetrics.lettering(for:style:dimensions:)`) and `SpineView` draws it; Book Wall
+/// measures it when it lays out the wall (`BookWallLayout`) and `BookWallSpineTexture` draws
+/// it. Neither focus changes nor view updates measure text.
+struct SpineLettering: Equatable, Sendable {
+    /// The PostScript name of the face it was measured in, or `nil` for a system face, which
     /// stands in for a face that wasn't registered at the time.
     let fontName: String?
     /// The title's lines, joined by line breaks. Lines break only between words.
@@ -29,34 +30,51 @@ struct SpineLettering: Equatable {
     let inset: CGFloat
 }
 
-/// Measures shelf spine lettering by the iPhone and Mac app's rule, with the Apple TV's
-/// minimum sizes.
+/// Measures spine lettering by the iPhone and Mac app's rule, with the Apple TV's minimum
+/// sizes, for every view that draws a spine: the shelf, Ambient, and Book Wall.
 @MainActor
 enum SpineTextMetrics {
     /// The smallest title the shelf aims for. `readableDimensions` lengthens, then thickens, a
     /// spine whose title would letter smaller.
-    static let minimumTitleSize: CGFloat = 23
+    nonisolated static let minimumTitleSize: CGFloat = 23
     /// The smallest author size. Only a surname too long for the author's widest room truncates.
-    static let minimumAuthorSize: CGFloat = 16
+    nonisolated static let minimumAuthorSize: CGFloat = 16
     /// How much larger than the author the title stays, where the author's minimum allows.
-    static let titleLead: CGFloat = 4
-    static let formatIconSize: CGFloat = 18
+    nonisolated static let titleLead: CGFloat = 4
+    nonisolated static let formatIconSize: CGFloat = 18
     /// The tail length the format icon takes: the icon and its margin from the spine's end.
-    static let formatIconRoom: CGFloat = 38
+    nonisolated static let formatIconRoom: CGFloat = 38
 
     /// The length along a spine `height` long that `book`'s lettering takes.
-    static func letteredLength(for book: Book, height: CGFloat) -> CGFloat {
+    nonisolated static func letteredLength(for book: Book, height: CGFloat) -> CGFloat {
         max(0, height - (book.format == nil ? 0 : formatIconRoom))
     }
 
-    /// `book`'s lettering on a spine of `dimensions`, from a bounded cache. The title stops at
-    /// its first colon, as on the iPhone.
+    /// The format icon's center along a spine `height` long, lying flat with its head on the
+    /// left, so it reads in the lettering's direction. It sits in the room `letteredLength`
+    /// leaves at the tail.
+    nonisolated static func formatIconCenter(height: CGFloat) -> CGFloat {
+        height - (formatIconRoom - formatIconSize) - formatIconSize / 2
+    }
+
+    /// The spine's title and author as every view letters them: the title up to its first
+    /// colon, as on the iPhone, in capitals when `uppercase`, and the author shortened by
+    /// `SpineView.shortAuthor(_:)`.
+    nonisolated static func text(of book: Book, uppercase: Bool) -> (title: String, author: String)
+    {
+        (
+            uppercase ? book.spineTitle.uppercased() : book.spineTitle,
+            SpineView.shortAuthor(book.author)
+        )
+    }
+
+    /// `book`'s lettering on a spine of `dimensions`, from a bounded cache.
     static func lettering(
         for book: Book, style: SpineStyle, dimensions: SpineDimensions, maximumLines: Int = 3
     ) -> SpineLettering {
-        lettering(
-            title: style.uppercase ? book.spineTitle.uppercased() : book.spineTitle,
-            author: SpineView.shortAuthor(book.author), fontName: style.fontName,
+        let spine = text(of: book, uppercase: style.uppercase)
+        return lettering(
+            title: spine.title, author: spine.author, fontName: style.fontName,
             length: letteredLength(for: book, height: dimensions.height),
             thickness: dimensions.width, maximumLines: maximumLines)
     }
@@ -85,9 +103,33 @@ enum SpineTextMetrics {
         if let saved = letterings[key] { return saved }
         let measurement = PerformanceDiagnostics.begin("TypographyMiss")
         defer { measurement.end() }
+        let result = measure(
+            title: title, author: author, fontName: resolved,
+            font: { uiFont(name: resolved, size: $0) }, length: length, thickness: thickness,
+            maximumLines: maximumLines)
+        if letterings.count >= 4096 { letterings.removeAll(keepingCapacity: true) }
+        letterings[key] = result
+        return result
+    }
+
+    /// `title` and `author` lettered in `length` along a spine `thickness` across, in at most
+    /// `maximumLines` title lines, in `font` at each size. `fontName` names the face in the
+    /// result. Uncached, and safe off the main actor, so Book Wall measures while it prepares.
+    nonisolated static func measure(
+        title: String, author: String, fontName: String?, font: @escaping (CGFloat) -> UIFont,
+        length: CGFloat, thickness: CGFloat, maximumLines: Int = 3
+    ) -> SpineLettering {
+        // The rule asks for the same few sizes many times.
+        var fonts: [CGFloat: UIFont] = [:]
+        let cachedFont = { (size: CGFloat) -> UIFont in
+            if let saved = fonts[size] { return saved }
+            let made = font(size)
+            fonts[size] = made
+            return made
+        }
         func rule(_ lines: Int) -> SpineLettering {
             LetteringRule(
-                fontName: resolved, title: title, author: author, length: length,
+                fontName: fontName, font: cachedFont, title: title, author: author, length: length,
                 thickness: thickness, maximumLines: lines
             )
             .lettering()
@@ -97,8 +139,6 @@ enum SpineTextMetrics {
             let threeLines = rule(maximumLines)
             if threeLines.titleSize > result.titleSize { result = threeLines }
         }
-        if letterings.count >= 4096 { letterings.removeAll(keepingCapacity: true) }
-        letterings[key] = result
         return result
     }
 
@@ -167,7 +207,7 @@ enum SpineTextMetrics {
         Font(uiFont(name: name, size: size))
     }
 
-    static func uiFont(name: String?, size: CGFloat) -> UIFont {
+    nonisolated static func uiFont(name: String?, size: CGFloat) -> UIFont {
         name.flatMap { UIFont(name: $0, size: size) }
             ?? UIFont.systemFont(ofSize: size, weight: .medium)
     }
@@ -180,9 +220,9 @@ enum SpineTextMetrics {
 /// The Apple TV adds its safeguards: authors letter at 16 points or more, the title stays 4
 /// points larger than the author where that minimum allows, and a title takes a third line
 /// only when one or two lines can't reach 23 points.
-@MainActor
 private struct LetteringRule {
     let fontName: String?
+    let makeFont: (CGFloat) -> UIFont
     let title: String
     let author: String
     let length: CGFloat
@@ -199,10 +239,11 @@ private struct LetteringRule {
     let width: CGFloat
 
     init(
-        fontName: String?, title: String, author: String, length: CGFloat, thickness: CGFloat,
-        maximumLines: Int
+        fontName: String?, font: @escaping (CGFloat) -> UIFont, title: String, author: String,
+        length: CGFloat, thickness: CGFloat, maximumLines: Int
     ) {
         self.fontName = fontName
+        makeFont = font
         self.title = title
         self.author = author
         self.length = length
@@ -344,7 +385,5 @@ private struct LetteringRule {
         return lines.map { ($0 as NSString).size(withAttributes: attributes).width }.max() ?? 0
     }
 
-    private func font(_ size: CGFloat) -> UIFont {
-        SpineTextMetrics.uiFont(name: fontName, size: size)
-    }
+    private func font(_ size: CGFloat) -> UIFont { makeFont(size) }
 }

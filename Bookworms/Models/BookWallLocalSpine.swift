@@ -53,8 +53,6 @@ enum BookWallLocalSpine {
             }
             return fontName.flatMap { UIFont(name: $0, size: size) }
         }
-
-        func title(for book: Book) -> String { uppercase ? book.title.uppercased() : book.title }
     }
 
     /// The companion design's face, or the genre face without one. A design in a face the type

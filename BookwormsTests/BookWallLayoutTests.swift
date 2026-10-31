@@ -1,4 +1,5 @@
 import RealityKit
+import SwiftUI
 import XCTest
 
 @testable import Bookworms
@@ -138,6 +139,166 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertEqual(
             CGFloat(image.width) / CGFloat(image.height),
             CGFloat(slot.spineWallWidth) / CGFloat(slot.spineWallHeight), accuracy: 0.03)
+    }
+
+    /// The shelf and Book Wall make the same lettering decision for a spine of the same frame
+    /// in the same face. A power-of-two scale keeps the frame exact in scene units.
+    @MainActor
+    func testBookWallLettersASpineAsTheShelfDoesAtTheSameFrame() {
+        let books = [
+            Book(id: 7, title: "Dune: Deluxe Edition", author: "Frank Herbert", pages: 600),
+            Book(
+                id: 446730, title: "The Dungeon Anarchist's Cookbook", author: "Matt Dinniman",
+                format: "Ebook"),
+            Book(
+                id: 3, title: "Good Omens", author: "Neil Gaiman, Terry Pratchett",
+                format: "Audiobook"),
+        ]
+        let points: Float = 64
+        for book in books {
+            for (thickness, length): (CGFloat, CGFloat) in [(48, 320), (82, 262), (64, 448)] {
+                for uppercase in [false, true] {
+                    var style = SpineStyle.fallback(for: book)
+                    style.fontName = "Georgia-Bold"
+                    style.uppercase = uppercase
+                    let shelf = SpineTextMetrics.lettering(
+                        for: book, style: style,
+                        dimensions: SpineDimensions(width: thickness, height: length))
+                    let wall = BookWallLayout.lettering(
+                        for: book,
+                        typography: BookWallLocalSpine.Typography(
+                            fontName: "Georgia-Bold", uppercase: uppercase),
+                        length: Float(length) / points, thickness: Float(thickness) / points,
+                        pointsPerUnit: points)
+                    XCTAssertEqual(wall, shelf, book.title)
+                }
+            }
+        }
+    }
+
+    /// Each slot carries the lettering the shelf would measure at the slot's frame in points,
+    /// in the book's genre face.
+    @MainActor
+    func testWallSlotsCarryTheShelfsLetteringAtTheirFrame() {
+        let books = Array(SampleLibrary.books.prefix(12))
+        let layout = BookWallLayout(books: books, pointsPerUnit: 64)
+        for slot in layout.slots {
+            var style = SpineStyle.fallback(for: slot.book)
+            style.fontName = BookWallLocalSpine.fontName(for: slot.book)
+            let shelf = SpineTextMetrics.lettering(
+                for: slot.book, style: style,
+                dimensions: SpineDimensions(
+                    width: CGFloat(slot.spineThickness * 64),
+                    height: CGFloat(slot.bookHeight * 64)))
+            XCTAssertEqual(slot.lettering, shelf, slot.book.title)
+        }
+    }
+
+    /// Book Wall grows a spine until its title reaches the shelf's 23-point floor at the wall's
+    /// viewing scale, so a wall seen from farther away gives the same title a larger spine.
+    func testWallSpinesGrowTowardTheTitleFloorAtTheirViewingScale() throws {
+        let book = Book(
+            id: 2, title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", pages: 300)
+        let near = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 90).slots.first)
+        XCTAssertGreaterThanOrEqual(near.lettering.titleSize, SpineTextMetrics.minimumTitleSize)
+        let natural = try XCTUnwrap(
+            BookWallLayout(
+                books: [Book(id: 2, title: "Dune", author: "Ursula K. Le Guin", pages: 300)],
+                pointsPerUnit: 90
+            )
+            .slots.first)
+        XCTAssertGreaterThan(
+            near.bookHeight * near.spineThickness, natural.bookHeight * natural.spineThickness)
+        let far = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 70).slots.first)
+        XCTAssertGreaterThan(
+            far.bookHeight * far.spineThickness, near.bookHeight * near.spineThickness)
+        XCTAssertLessThanOrEqual(far.bookHeight, BookWallLayout.maximumBookLength)
+    }
+
+    /// The wall's viewing scale is largest when the screen's height frames it, and falls as
+    /// wider walls frame from farther away.
+    @MainActor
+    func testViewingScaleFallsAsTheWallWidens() {
+        func wall(_ count: Int) -> BookWallLayout {
+            BookWallLayout(
+                books: (1...count)
+                    .map { Book(id: $0, title: "Book \($0)", author: "Author", pages: 1_400) })
+        }
+        let narrow = BookWallScene.spinePointsPerUnit(for: wall(8))
+        let wide = BookWallScene.spinePointsPerUnit(for: wall(50))
+        XCTAssertLessThanOrEqual(narrow, BookWallLayout.nominalPointsPerUnit + 1)
+        XCTAssertGreaterThan(narrow, BookWallLayout.nominalPointsPerUnit - 3)
+        XCTAssertLessThan(wide, narrow * 0.8)
+    }
+
+    /// The bounds of `image`'s pixels lighter than 0.6 in every channel within `region`.
+    private func inkBounds(_ image: CGImage, in region: CGRect) throws -> CGRect {
+        let width = image.width
+        let height = image.height
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(
+            CGContext(
+                data: &data, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var bounds = CGRect.null
+        for y in Int(region.minY)..<min(height, Int(region.maxY)) {
+            for x in Int(region.minX)..<min(width, Int(region.maxX)) {
+                let offset = (y * width + x) * 4
+                if (0..<3).allSatisfy({ data[offset + $0] > 153 }) {
+                    bounds = bounds.union(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+        }
+        return bounds
+    }
+
+    /// The format icon turns with the lettering: on the upright shelf spine it lies on its
+    /// side, as the lettering does, and on the flat Book Wall texture, which reads left to
+    /// right, it stands upright. The iPad symbol is taller than it is wide.
+    @MainActor
+    func testFormatIconReadsInTheLetteringsDirection() throws {
+        let symbol = try XCTUnwrap(UIImage(systemName: "ipad"))
+        XCTAssertGreaterThan(symbol.size.height, symbol.size.width)
+        let book = Book(id: 11, title: "Dune", author: "Frank Herbert", pages: 200, format: "Ebook")
+        let cloth = StyleColor(red: 0.1, green: 0.15, blue: 0.3)
+
+        var style = SpineStyle.fallback(for: book)
+        style.background = cloth
+        style.foreground = .paper
+        let dimensions = SpineDimensions(width: 60, height: 420)
+        let renderer = ImageRenderer(
+            content: SpineView(
+                book: book, style: style, dimensions: dimensions,
+                lettering: SpineTextMetrics.lettering(
+                    for: book, style: style, dimensions: dimensions),
+                isFocused: false))
+        renderer.scale = 1
+        let shelf = try XCTUnwrap(renderer.cgImage)
+        let room = SpineTextMetrics.formatIconRoom
+        let shelfIcon = try inkBounds(
+            shelf, in: CGRect(x: 0, y: 420 - room, width: 60, height: room))
+        XCTAssertFalse(shelfIcon.isNull)
+        XCTAssertGreaterThan(shelfIcon.width, shelfIcon.height, "The shelf icon lies on its side")
+
+        let slot = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 64).slots.first)
+        let wall = try XCTUnwrap(
+            BookWallSpineTexture.make(
+                for: slot,
+                style: BookWallLocalSpine.Style(
+                    background: cloth, foreground: .paper,
+                    typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
+        let scale = BookWallSpineTexture.pixelsPerUnit / 64
+        let wallIcon = try inkBounds(
+            wall,
+            in: CGRect(
+                x: CGFloat(wall.width) - room * scale, y: 0, width: room * scale,
+                height: CGFloat(wall.height)))
+        XCTAssertFalse(wallIcon.isNull)
+        XCTAssertGreaterThan(wallIcon.height, wallIcon.width, "The flat texture's icon is upright")
+        // The icon is the shelf's, scaled to the texture.
+        XCTAssertEqual(wallIcon.height / scale, shelfIcon.width, accuracy: 2)
     }
 
     @MainActor

@@ -27,21 +27,23 @@ struct SpineView: View {
                 Self.stampedBands(on: style.background, length: height, thickness: width)
                     .padding(.horizontal, width * 0.1)
             }
-            VStack(spacing: 0) {
-                // Lettered lying flat, head on the left, then turned to read top to bottom.
+            // Lettered lying flat, head on the left, then turned to read top to bottom. The
+            // format icon turns with the lettering, so it reads in the same direction.
+            HStack(spacing: 0) {
                 letteringRow
                     .frame(width: lettering.length, height: width)
-                    .rotationEffect(.degrees(90))
-                    .frame(width: width, height: lettering.length)
                 if book.format != nil {
                     Image(systemName: book.formatSymbol)
                         .appFont(size: SpineTextMetrics.formatIconSize)
-                        .frame(height: SpineTextMetrics.formatIconSize)
+                        .frame(width: SpineTextMetrics.formatIconSize)
                         .padding(
-                            .bottom,
+                            .trailing,
                             SpineTextMetrics.formatIconRoom - SpineTextMetrics.formatIconSize)
                 }
             }
+            .frame(width: height, height: width, alignment: .leading)
+            .rotationEffect(.degrees(90))
+            .frame(width: width, height: height)
             .foregroundStyle(style.foreground.color)
         }
         .frame(width: width, height: height)
@@ -188,7 +190,7 @@ struct SpineView: View {
     // `ios/Bookworms/Views/SpineView.swift`). Keep the two copies the same.
 
     /// Shortens a long contributor list to its first name, since a spine has little room.
-    static func shortAuthor(_ author: String) -> String {
+    nonisolated static func shortAuthor(_ author: String) -> String {
         let names = author.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         guard names.count > 2 || (names.count == 2 && author.count > 32), let first = names.first
         else { return author }

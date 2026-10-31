@@ -109,8 +109,23 @@ final class BookWallPreparation {
         let preparation = await ArtworkStore.shared.prefetch(
             books: books + outside.values.sorted { $0.id < $1.id }, avatarURLs: [])
         guard !Task.isCancelled else { return }
-        let layout = BookWallLayout(
-            books: books, coverRatios: preparation.ratios, typographies: typographies)
+        // Spines letter in points at the wall's viewing scale, which its layout sets: a wider
+        // wall frames from farther away. A layout grown at one scale can frame a little
+        // farther, so it is laid out again at the scale it shows at, up to three more times,
+        // until the two agree to within 1%.
+        var scale = BookWallLayout.nominalPointsPerUnit
+        var layout = await rasterizer.layout(
+            books: books, coverRatios: preparation.ratios, typographies: typographies,
+            pointsPerUnit: scale)
+        for _ in 0..<3 {
+            let shown = BookWallScene.spinePointsPerUnit(for: layout)
+            guard abs(shown - scale) > scale * 0.01, !Task.isCancelled else { break }
+            scale = shown
+            layout = await rasterizer.layout(
+                books: books, coverRatios: preparation.ratios, typographies: typographies,
+                pointsPerUnit: scale)
+        }
+        guard !Task.isCancelled else { return }
         var styles: [Int: BookWallLocalSpine.Style] = [:]
         var bodies: [Int: ModelEntity] = [:]
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
@@ -336,6 +351,18 @@ actor BookWallRasterizer {
         let label: CGImage?
     }
 
+    /// Lays out the wall and measures its lettering here, off the main actor.
+    func layout(
+        books: [Book], coverRatios: [Int: Double],
+        typographies: [Int: BookWallLocalSpine.Typography], pointsPerUnit: Float
+    ) -> BookWallLayout {
+        let measurement = PerformanceDiagnostics.begin("BookWallLayout")
+        defer { measurement.end() }
+        return BookWallLayout(
+            books: books, coverRatios: coverRatios, typographies: typographies,
+            pointsPerUnit: pointsPerUnit)
+    }
+
     func style(for book: Book, cover: CGImage?, design: SpineDesignV1?)
         -> BookWallLocalSpine.Style
     {
@@ -359,7 +386,7 @@ actor BookWallRasterizer {
         }
         let label = BookWallShelfLabel.make(
             "\(slot.book.title) · \(slot.book.author)", book: slot.book, style: fontStyle)
-        let spine = BookWallSpineTexture.make(for: slot, style: style)
+        let spine = BookWallSpineTexture.make(for: slot, style: style, fontStyle: fontStyle)
             .flatMap {
                 BookWallSpineTexture.filled(
                     $0, book: slot.book, cloth: style.background, edgeColors: edge)
