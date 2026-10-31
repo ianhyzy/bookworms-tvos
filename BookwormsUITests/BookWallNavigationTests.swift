@@ -254,17 +254,40 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(app.buttons["book-wall-8"])
     }
 
-    private func openWall(companionDesigns: Bool = false) -> XCUIApplication {
+    func testRetryAfterRendererErrorRestoresTheWall() {
+        let app = launchWithWall(arguments: ["--test-fail-book-wall-renderer"])
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        let retry = app.buttons["book-wall-retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["book-wall-8"].exists, "A stopped wall offers no spines")
+        let sidebar = app.staticTexts["Book Wall"].firstMatch
+        RemoteNavigation.press(.select, in: app, expecting: retry)
+        RemoteNavigation.press(.left, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: retry)
+        RemoteNavigation.press(.menu, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: retry)
+        // Only the first connection fails, so Retry brings the wall back.
+        RemoteNavigation.press(.select, in: app, expecting: app.buttons["book-wall-8"])
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
+        XCTAssertFalse(retry.exists)
+    }
+
+    private func launchWithWall(arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = [
-            "--test-scenario=artwork", "--start-view=shelf", "--test-enable-book-wall",
-            "--focus-probe",
-            "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-        ]
-        if companionDesigns { app.launchArguments.append("--test-companion-designs") }
+        app.launchArguments =
+            [
+                "--test-scenario=artwork", "--start-view=shelf", "--test-enable-book-wall",
+                "--focus-probe",
+                "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            ] + arguments
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
+        return app
+    }
+
+    private func openWall(companionDesigns: Bool = false) -> XCUIApplication {
+        let app = launchWithWall(arguments: companionDesigns ? ["--test-companion-designs"] : [])
         // The scenario enables Book Wall; enter it through the native sidebar, as a viewer does.
         // The spines exist in the tab's first render, so Select moves focus once, straight to
         // the entry book.

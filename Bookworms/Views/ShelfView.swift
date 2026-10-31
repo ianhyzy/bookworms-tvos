@@ -33,6 +33,7 @@ struct ShelfView: View {
     @State private var presentationStyles: [Int: SpineStyle] = [:]
     @State private var socialReturnRevision = 0
     @State private var bookWallScene = BookWallScene()
+    @State private var wallRenderer = BookWallRendererStatus()
     @State private var bookWallPreparation = BookWallPreparation()
     @State private var bookWallPreparationRetry = 0
     @State private var wallDetail = BookWallDetailState()
@@ -209,9 +210,13 @@ struct ShelfView: View {
                     WoodBackground(palette: palette)
                     // The opaque shelf a detail filter shows covers the wall, which keeps its
                     // last frame and stops drawing until Back reveals it.
-                    BookWallRendererView(scene: bookWallScene, isCovered: showsDetailFilter)
-                        .accessibilityHidden(true)
-                        .allowsHitTesting(false)
+                    BookWallRendererView(
+                        scene: bookWallScene, status: wallRenderer, isCovered: showsDetailFilter
+                    )
+                    // A new surface connects a new renderer.
+                    .id(wallRenderer.attempt)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
                 }
                 .ignoresSafeArea()
                 .task(
@@ -809,7 +814,8 @@ struct ShelfView: View {
                         {
                             BookWallView(
                                 library: library, coordinator: coordinator, scene: bookWallScene,
-                                prepared: prepared, viewportFrame: wallViewportFrame,
+                                rendererStatus: wallRenderer, prepared: prepared,
+                                viewportFrame: wallViewportFrame,
                                 isActive: sidebarItem == .view(.bookWall),
                                 reviewLoader: reviewLoader(for:),
                                 onShowShelf: { showDetailFilter($1, from: $0) },

@@ -6,6 +6,7 @@ struct BookWallView: View {
     let library: LibraryModel
     let coordinator: BookwormsCoordinator
     let scene: BookWallScene
+    let rendererStatus: BookWallRendererStatus
     let prepared: BookWallPreparedWall
     let viewportFrame: CGRect
     let isActive: Bool
@@ -114,7 +115,20 @@ struct BookWallView: View {
                 // Spine targets exist from the tab's first render at each book's resting
                 // position and stay mounted while books fall. Opening details waits for the
                 // books to settle.
-                if detailBook == nil && !isReturning {
+                if let failure = rendererStatus.failure, detailBook == nil, !isReturning {
+                    // Retry runs only on a press, so a lasting error can't loop.
+                    VStack(spacing: 40) {
+                        Text("Book Wall could not continue.\n\(failure)")
+                            .appFont(size: 28)
+                            .multilineTextAlignment(.center)
+                        Button("Retry", action: rendererStatus.retry)
+                            .buttonStyle(.glass)
+                            .accessibilityIdentifier("book-wall-retry")
+                    }
+                    .padding(.horizontal, 120)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .focusSection()
+                } else if detailBook == nil && !isReturning {
                     ZStack(alignment: .topLeading) {
                         ForEach(books) { book in
                             if let frame = spineFrames[book.id] {
@@ -174,6 +188,7 @@ struct BookWallView: View {
                     #endif
                 }
                 if hasSettledOnce && !books.isEmpty && detailBook == nil
+                    && rendererStatus.failure == nil
                     && !(isReturning && PerformanceDiagnostics.isolates("wall-late-replay"))
                     && !PerformanceDiagnostics.isolates("wall-no-replay")
                 {
@@ -191,7 +206,7 @@ struct BookWallView: View {
                     .padding(.trailing, 80)
                     .focusSection()
                 }
-                if detailBook == nil {
+                if detailBook == nil && rendererStatus.failure == nil {
                     VStack(alignment: .leading, spacing: 8) {
                         if books.isEmpty {
                             Text("Books finished this year will appear here.")
