@@ -607,6 +607,11 @@ struct BookReviewsView: View {
         .task {
             do {
                 reviews = try await load()
+            } catch HardcoverError.invalidToken {
+                // Settings states the problem beside its Reconnect button; here, say where it is.
+                failure =
+                    HardcoverError.invalidToken.localizedDescription
+                    + " Reconnect in Settings → Sources."
             } catch {
                 failure = error.localizedDescription
             }

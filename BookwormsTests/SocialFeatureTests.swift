@@ -425,6 +425,31 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
     }
 
+    /// Settings → Sources shows the status beside Reconnect Hardcover, so it names neither
+    /// Settings nor raw scopes, and a rejected login doesn't blame social permissions.
+    func testRejectedLoginAndMissingPermissionExplainThemselvesPlainly() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SocialStatus.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.reject("hc_at_fixture_old")
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(
+            token: "hc_at_fixture_old", readerID: 2,
+            renewToken: { _ in throw HardcoverError.invalidToken })
+        XCTAssertEqual(model.status, "The Hardcover login is invalid or expired.")
+
+        let scoped = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root.appending(path: "scope"))
+        await client.fail(with: .scope)
+        await scoped.load(token: "hc_at_fixture_new", readerID: 2)
+        XCTAssertTrue(scoped.status.contains("permission to see the readers you follow"))
+        for status in [model.status, scoped.status] {
+            XCTAssertFalse(status.contains("Settings"), status)
+            XCTAssertFalse(status.contains("read:"), status)
+        }
+    }
+
     func testDeniedReaderLibraryIsEmptyAndKeepsOtherSocialData() async throws {
         let suite = "SocialDeniedReaderTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -610,7 +635,7 @@ final class SocialFeatureTests: XCTestCase {
 }
 
 private actor SocialFixtureClient: SocialLibraryFetching {
-    enum Failure { case offline, denied }
+    enum Failure { case offline, denied, scope }
     var counts: [String: Int] = [:]
     /// Every token a request sent, in order.
     var tokens: [String] = []
@@ -653,6 +678,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
             switch failure {
             case .offline: throw URLError(.notConnectedToInternet)
             case .denied: throw HardcoverError.forbidden
+            case .scope: throw HardcoverError.insufficientScope
             }
         }
         return unfollowed ? [profile(3)] : [profile(2), profile(3)]

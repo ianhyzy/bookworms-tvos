@@ -35,12 +35,14 @@ enum HardcoverError: LocalizedError {
     case rejected, incomplete
     var errorDescription: String? {
         switch self {
+        // Settings shows these beside its Reconnect button, so they state the problem without
+        // saying where to go. Views outside Settings add that themselves.
         case .invalidToken:
-            "The Hardcover login is invalid or expired. Reconnect in Settings."
+            "The Hardcover login is invalid or expired."
         case .invalidAuthorizationCode:
             "Hardcover rejected this sign-in code. Select New code to try again."
         case .insufficientScope:
-            "This token needs read:me:content, read:library, and read:catalog:data. Create a token with these read permissions and reconnect."
+            "Hardcover didn't give Bookworms permission to read your library. Reconnect Hardcover to allow it."
         case .forbidden:
             "Hardcover denied access to this request. Your saved shelf is unchanged."
         case .http(429):

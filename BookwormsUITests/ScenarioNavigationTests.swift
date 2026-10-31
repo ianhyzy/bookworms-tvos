@@ -439,8 +439,7 @@ final class ScenarioNavigationTests: XCTestCase {
                     error =
                         "The network connection is unavailable. Check Apple TV's connection and try again."
                 default:
-                    error =
-                        "The Hardcover login is invalid or expired. Reconnect in Settings."
+                    error = "The Hardcover login is invalid or expired."
                 }
                 XCTAssertTrue(app.staticTexts[error].waitForExistence(timeout: 5))
                 // A rejected login must be reconnected before syncing again, and its error

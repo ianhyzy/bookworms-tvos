@@ -402,7 +402,10 @@ struct SettingsView: View {
                 if let status = library.sourceStatus(.hardcover, dateFormat: dateFormat) {
                     note(status)
                 }
-                note(social.status).accessibilityIdentifier("social-status")
+                // A rejected login fails social sync too; the Hardcover status covers both.
+                if !library.hardcoverSessionExpired {
+                    note(social.status).accessibilityIdentifier("social-status")
+                }
             } trailing: {
                 if BookPresentation.offersCWA {
                     Toggle("Calibre Web Automated", isOn: $library.cwaEnabled)

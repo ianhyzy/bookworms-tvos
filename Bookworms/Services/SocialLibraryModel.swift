@@ -38,7 +38,7 @@ final class SocialLibraryModel {
         presentation = SocialPresentation(snapshot: snapshot, preferences: presentationPreferences)
         presentationRevision += 1
     }
-    private(set) var status = "Connect Hardcover in Sources to use social views."
+    private(set) var status = "Connect Hardcover to use social views."
     private(set) var isLoading = false
     private(set) var revision = 0
     @ObservationIgnored private let client: any SocialLibraryFetching
@@ -93,7 +93,7 @@ final class SocialLibraryModel {
             identity = nil
             snapshot = nil
             isLoading = false
-            status = "Connect Hardcover in Sources to use social views."
+            status = "Connect Hardcover to use social views."
             return
         }
         let socialViews = enabledViews.filter(\.isSocial)
@@ -288,8 +288,17 @@ final class SocialLibraryModel {
                     }
                     snapshot = nil
                     revision += 1
+                    // Only Settings → Sources shows this, beside Reconnect Hardcover. A rejected
+                    // login gets the library's message rather than one blaming social access.
                     status =
-                        "Hardcover social access was denied. Reconnect with read:social and read:users as well as the library read permissions, then select Sync now in Settings → Sources."
+                        switch error {
+                        case HardcoverError.insufficientScope:
+                            "Bookworms needs permission to see the readers you follow. Reconnect Hardcover to allow it."
+                        case HardcoverError.invalidToken:
+                            HardcoverError.invalidToken.localizedDescription
+                        default:
+                            "Hardcover denied access to social data."
+                        }
                 default:
                     status =
                         "Social data could not refresh. Cached data is retained. "
