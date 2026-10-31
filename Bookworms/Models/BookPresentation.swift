@@ -19,8 +19,9 @@ enum BookPresentation {
     /// the layout that places it remain.
     nonisolated static let showsShelfPhotos = false
 
-    static func usesSpine(hasSavedKey: Bool, hasDesign: Bool, fontAvailable: Bool) -> Bool {
-        hasSavedKey && hasDesign && fontAvailable
+    /// Whether a book with a saved design draws it rather than its cover.
+    static func usesSpine(hasSavedKey: Bool, fontAvailable: Bool) -> Bool {
+        hasSavedKey && fontAvailable
     }
 
     /// Keep the whole shelf in cover mode until every displayed book has a usable design.

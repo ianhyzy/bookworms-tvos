@@ -356,7 +356,7 @@ final class LibraryModel {
         let font = aiRecords[book.id].flatMap { UIFont(name: $0.style.fontName, size: 23) }
         guard let record = aiRecords[book.id],
             BookPresentation.usesSpine(
-                hasSavedKey: savedAIKeyAvailable, hasDesign: true, fontAvailable: font != nil)
+                hasSavedKey: savedAIKeyAvailable, fontAvailable: font != nil)
         else { return nil }
         var style = styles[book.id] ?? record.style
         // A registered face with the italic trait or a slant never renders, whatever its name.

@@ -176,15 +176,11 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(counts["feed"], 2)
     }
 
-    func testCoverPolicyRequiresSavedKeyDesignAndAvailableFont() {
+    func testCoverPolicyRequiresSavedKeyAndAvailableFont() {
         for key in [false, true] {
-            for design in [false, true] {
-                for font in [false, true] {
-                    XCTAssertEqual(
-                        BookPresentation.usesSpine(
-                            hasSavedKey: key, hasDesign: design, fontAvailable: font),
-                        key && design && font)
-                }
+            for font in [false, true] {
+                XCTAssertEqual(
+                    BookPresentation.usesSpine(hasSavedKey: key, fontAvailable: font), key && font)
             }
         }
     }
