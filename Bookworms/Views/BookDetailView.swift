@@ -137,7 +137,7 @@ struct BookDetailView: View {
                         }
                         Group {
                             if showsCover {
-                                CoverView(book: book)
+                                CoverView(book: book, imageIdentifier: "detail-cover")
                             } else {
                                 Color.clear.accessibilityHidden(true)
                             }

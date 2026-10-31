@@ -80,7 +80,7 @@ final class DeviceSocialTests: XCTestCase {
         RemoteNavigation.startAmbient(app)
         capture(app, "Live ambient")
         XCUIRemote.shared.press(.select)
-        XCTAssertFalse(app.buttons["stop-ambient"].exists)
+        XCTAssertTrue(app.buttons["stop-ambient"].waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["detail-title"].exists)
     }
 }
