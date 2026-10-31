@@ -55,7 +55,6 @@ struct ShelfView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.scenePhase) private var scenePhase
-    private var controlsVisible: Bool { activity.controlsVisible }
     private var wallBooks: [Book] {
         let year = Calendar.current.component(.year, from: .now)
         return library.readingYears.first { $0.year == year }?.books ?? []
@@ -269,10 +268,6 @@ struct ShelfView: View {
                     }
                 }
             #endif
-            .onChange(of: canHideControls, initial: true) {
-                activity.scheduleHiding(allowed: canHideControls)
-            }
-            .onDisappear { activity.scheduleHiding(allowed: false) }
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
@@ -587,12 +582,6 @@ struct ShelfView: View {
                     renewToken: library.renewHardcoverToken(rejected:))
             }
         }
-    }
-
-    private var canHideControls: Bool {
-        (shelfFocus.hasFocus || coordinator.current != .shelf) && !voiceOver
-            && !library.books.isEmpty && isShowingMainView && selectedBook == nil
-            && !ambient.isActive && !isWelcomePresented
     }
 
     private func recordActivity() {
