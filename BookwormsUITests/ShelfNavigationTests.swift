@@ -17,9 +17,6 @@ final class ShelfNavigationTests: XCTestCase {
         // count nor the readers row takes focus; the presses below cross the row.
         XCTAssertEqual(app.staticTexts["detail-read-count"].label, "Read 2 times")
         XCTAssertTrue(app.descendants(matching: .any)["detail-friend-reads"].exists)
-        XCTAssertFalse(
-            app.descendants(matching: .any)["detail-hardcover-code"].exists,
-            "Fictional sample books have no Hardcover page")
         let back = app.buttons["back-to-shelf"]
         let reviews = app.buttons["community-reviews"]
         let author = app.buttons["detail-author"]

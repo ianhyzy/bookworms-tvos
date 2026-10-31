@@ -110,9 +110,6 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         sources?.contains(.hardcover) ?? (id < CWAConfiguration.firstBookID)
     }
 
-    /// The book's permanent Hardcover page, or `nil` for a book Hardcover doesn't list.
-    var hardcoverURL: URL? { isHardcoverBook ? HardcoverLink.book(id) : nil }
-
     var spineTitle: String { title.components(separatedBy: ":").first ?? title }
 
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
@@ -203,7 +200,6 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
 /// Permanent Hardcover web links by ID. Hardcover redirects them to the current page, so they
 /// keep working when a slug or username changes.
 enum HardcoverLink {
-    static func book(_ id: Int) -> URL { URL(string: "https://hardcover.app/id/books/\(id)")! }
     static func user(_ id: Int) -> URL { URL(string: "https://hardcover.app/id/user/\(id)")! }
 }
 

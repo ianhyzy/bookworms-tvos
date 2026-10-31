@@ -352,9 +352,7 @@ struct ShelfView: View {
                         lastFocusedID = chosen.id
                         selectedBook = chosen
                     },
-                    friendReads: social.presentation.friendReads[book.id] ?? [],
-                    // Sample books are fictional, so their IDs aren't their Hardcover pages.
-                    hardcoverURL: library.isSample ? nil : book.hardcoverURL
+                    friendReads: social.presentation.friendReads[book.id] ?? []
                 )
                 .appTypography()
                 .id(book.id)

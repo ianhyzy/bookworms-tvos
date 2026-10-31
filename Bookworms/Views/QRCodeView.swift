@@ -6,11 +6,11 @@ import SwiftUI
 /// guest can follow up on Hardcover without typing.
 ///
 /// `QRCodeRenderer` draws the code off the main actor when the view appears or its URL changes,
-/// and keeps recent codes, so reopening details reuses them. Focus changes never draw a code.
+/// and keeps recent codes, so showing a code again reuses it. Focus changes never draw a code.
 struct QRCodeView: View {
-    /// The side of a book or profile code. Every Hardcover book and profile link encodes as a
-    /// code 37 modules wide with its quiet zone, so this is four points per module, and modules
-    /// stay whole pixels at 1080p.
+    /// The side of a profile code. Every Hardcover profile link encodes as a code 37 modules
+    /// wide with its quiet zone, so this is four points per module, and modules stay whole pixels
+    /// at 1080p.
     static let linkSide: CGFloat = 148
 
     let url: URL

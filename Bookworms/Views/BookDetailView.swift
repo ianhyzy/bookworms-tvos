@@ -40,9 +40,6 @@ struct BookDetailView: View {
     var onOpenBook: ((Book) -> Void)?
     /// Followed readers with this book in their synced libraries, shown with their ratings.
     var friendReads: [FriendRead] = []
-    /// The book's Hardcover page, shown as a QR code under the cover. Book Wall details, which
-    /// reserve the column for the 3D book, leave it out.
-    var hardcoverURL: URL?
     @State private var showsSeries = false
     /// The series book chosen in the pop-up, opened after the pop-up finishes closing so that one
     /// presentation never starts while another is still dismissing.
@@ -69,8 +66,7 @@ struct BookDetailView: View {
         onPickSeries: ((Int) -> Void)? = nil,
         libraryBook: @escaping (Int) -> Book? = { _ in nil },
         onOpenBook: ((Book) -> Void)? = nil,
-        friendReads: [FriendRead] = [],
-        hardcoverURL: URL? = nil
+        friendReads: [FriendRead] = []
     ) {
         self.book = book
         self.style = style
@@ -84,7 +80,6 @@ struct BookDetailView: View {
         self.libraryBook = libraryBook
         self.onOpenBook = onOpenBook
         self.friendReads = friendReads
-        self.hardcoverURL = hardcoverURL
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
@@ -150,15 +145,6 @@ struct BookDetailView: View {
                         Spacer(minLength: 0)
                     }
                     .frame(width: coverColumnWidth)
-                    // An overlay, so the code takes the space below the cover without moving it.
-                    // It reaches halfway into the bottom padding, still inside the TV safe area,
-                    // to leave a gap below the cover.
-                    .overlay(alignment: .bottom) {
-                        if showsCover, let hardcoverURL {
-                            hardcoverCode(hardcoverURL)
-                                .offset(y: BookDetailCoverLayout.verticalPadding / 2)
-                        }
-                    }
                     .focusSection()
                     // Two sibling sections, not nested ones: the header starts level with Back, so
                     // Right from Back reaches the header (the author button, or the histogram when
@@ -366,20 +352,6 @@ struct BookDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// A QR code for the book's Hardcover page with a caption beside it. It isn't focusable.
-    private func hardcoverCode(_ url: URL) -> some View {
-        HStack(spacing: 18) {
-            QRCodeView(url: url).frame(width: QRCodeView.linkSide, height: QRCodeView.linkSide)
-                .clipShape(.rect(cornerRadius: 10))
-            Text("Scan to open\non Hardcover")
-                .appFont(size: 23).foregroundStyle(.detailCaption)
-                .fixedSize()
-                .accessibilityHidden(true)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("detail-hardcover-code")
     }
 
     /// Followed readers who have the book, each with their photo and rating. It isn't focusable:
