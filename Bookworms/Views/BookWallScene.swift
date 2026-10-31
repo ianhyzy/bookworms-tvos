@@ -2379,7 +2379,7 @@ enum BookWallSpineTexture {
     /// (`spineWallWidth` by `spineWallHeight`), lying flat with the head on the left and the
     /// front board's edge at the top, as the shelf's `SpineView` draws it before turning it
     /// upright: the title at the head end, the author at the tail end, and the format icon in
-    /// the room at the tail, upright on screen.
+    /// the room at the tail, turned as the shelf's upright icon turns when its spine lies flat.
     ///
     /// `slot.lettering` was measured in points at the wall's viewing scale, so the image
     /// draws in those points, scaled to `pixelsPerUnit`, and every glyph and margin keeps the
@@ -2466,12 +2466,13 @@ enum BookWallSpineTexture {
         }
     }
 
-    /// Draws `book`'s format symbol upright in a spine lying flat, centered on `center`, at the
-    /// shelf's icon size, in the hierarchical rendering `SpineView` draws it in, so the Ebook
-    /// symbol's screen keeps its faint fill. The symbol stands upright on screen, as the shelf's
-    /// does, rather than turning with the flat spine. The context is scaled to points; the symbol
-    /// is made at the texture's `pixelsPerPoint` and drawn unscaled, since a symbol drawn into a
-    /// scaled context comes out as a magnified bitmap.
+    /// Draws `book`'s format symbol centered on `center`, at the shelf's icon size, in the
+    /// hierarchical rendering `SpineView` draws it in, so the Ebook symbol's screen keeps its
+    /// faint fill. The shelf draws the symbol upright on a standing spine; this spine lies with
+    /// its head on the left, so the symbol turns a quarter turn counterclockwise, its top toward
+    /// the head. The context is scaled to points; the symbol is made at the texture's
+    /// `pixelsPerPoint` and drawn unscaled, since a symbol drawn into a scaled context comes out
+    /// as a magnified bitmap.
     private static func drawFormatIcon(
         for book: Book, ink: StyleColor, fontStyle: AppFontStyle, pixelsPerPoint: CGFloat,
         center: CGPoint
@@ -2487,10 +2488,11 @@ enum BookWallSpineTexture {
         else { return }
         context.saveGState()
         context.scaleBy(x: 1 / pixelsPerPoint, y: 1 / pixelsPerPoint)
+        context.translateBy(x: center.x * pixelsPerPoint, y: center.y * pixelsPerPoint)
+        context.rotate(by: -.pi / 2)
         symbol.draw(
             in: CGRect(
-                x: center.x * pixelsPerPoint - symbol.size.width / 2,
-                y: center.y * pixelsPerPoint - symbol.size.height / 2,
+                x: -symbol.size.width / 2, y: -symbol.size.height / 2,
                 width: symbol.size.width, height: symbol.size.height))
         context.restoreGState()
     }

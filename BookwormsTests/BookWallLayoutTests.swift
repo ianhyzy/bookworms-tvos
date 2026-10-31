@@ -317,12 +317,12 @@ final class BookWallLayoutTests: XCTestCase {
         return (shelf, shelfIcon, wall, wallIcon, scale)
     }
 
-    /// The format icon stands upright on screen in both views: on the standing shelf spine, as a
-    /// printed spine's icon does, and on Book Wall's flat texture, rather than turning with the
-    /// flat spine. The headphones' band faces up in both. Down the symbol's axis, the band has
-    /// ink, and the gap between the ear cups has none.
+    /// The format icon stands upright on the standing shelf spine, as a printed spine's icon
+    /// does, and the flat Book Wall texture draws it as that spine laid flat with its head on
+    /// the left: the headphones' band faces up on the shelf and toward the head, left, on the
+    /// wall. Down the symbol's axis, the band has ink, and the gap between the ear cups has none.
     @MainActor
-    func testFormatIconStandsUprightInBothViews() throws {
+    func testFormatIconStandsUprightOnTheStandingSpine() throws {
         let book = Book(
             id: 11, title: "Dune", author: "Frank Herbert", pages: 200, format: "Audiobook")
         XCTAssertEqual(book.formatSymbol, "headphones")
@@ -330,31 +330,31 @@ final class BookWallLayoutTests: XCTestCase {
         func ink(_ bytes: ArraySlice<UInt8>) -> Double {
             bytes.prefix(3).allSatisfy { $0 > 153 } ? 1 : 0
         }
-        /// The ink in the top and bottom thirds of `icon`'s vertical axis, `width` wide.
-        func ends(of image: CGImage, icon: CGRect, width: CGFloat) throws -> (
-            top: Double, bottom: Double
-        ) {
-            let axis = CGRect(
-                x: icon.midX - width / 2, y: icon.minY, width: width, height: icon.height)
-            return (
-                try coverage(
-                    image, in: axis.divided(atDistance: icon.height / 3, from: .minYEdge).slice,
-                    ink: ink),
-                try coverage(
-                    image, in: axis.divided(atDistance: icon.height / 3, from: .maxYEdge).slice,
-                    ink: ink)
-            )
-        }
 
-        let shelf = try ends(of: icons.shelf, icon: icons.shelfIcon, width: 2)
-        XCTAssertGreaterThan(shelf.top, 0, "The shelf icon's band faces up")
-        XCTAssertEqual(shelf.bottom, 0, "The shelf icon's ear cups face down")
-        let wall = try ends(of: icons.wall, icon: icons.wallIcon, width: 6)
-        XCTAssertGreaterThan(wall.top, 0, "The texture's icon band faces up")
-        XCTAssertEqual(wall.bottom, 0, "The texture's icon ear cups face down")
-        // The icon is the shelf's, scaled to the texture.
-        XCTAssertEqual(icons.wallIcon.width / icons.scale, icons.shelfIcon.width, accuracy: 2)
-        XCTAssertEqual(icons.wallIcon.height / icons.scale, icons.shelfIcon.height, accuracy: 2)
+        let shelf = icons.shelfIcon
+        let shelfAxis = CGRect(x: shelf.midX - 1, y: shelf.minY, width: 2, height: shelf.height)
+        let top = try coverage(
+            icons.shelf,
+            in: shelfAxis.divided(atDistance: shelf.height / 3, from: .minYEdge).slice, ink: ink)
+        let bottom = try coverage(
+            icons.shelf,
+            in: shelfAxis.divided(atDistance: shelf.height / 3, from: .maxYEdge).slice, ink: ink)
+        XCTAssertGreaterThan(top, 0, "The shelf icon's band faces up")
+        XCTAssertEqual(bottom, 0, "The shelf icon's ear cups face down")
+
+        let wall = icons.wallIcon
+        let wallAxis = CGRect(x: wall.minX, y: wall.midY - 3, width: wall.width, height: 6)
+        let left = try coverage(
+            icons.wall, in: wallAxis.divided(atDistance: wall.width / 3, from: .minXEdge).slice,
+            ink: ink)
+        let right = try coverage(
+            icons.wall, in: wallAxis.divided(atDistance: wall.width / 3, from: .maxXEdge).slice,
+            ink: ink)
+        XCTAssertGreaterThan(left, 0, "The texture's icon band faces the head")
+        XCTAssertEqual(right, 0, "The texture's icon ear cups face the tail")
+        // The icon is the shelf's, turned and scaled to the texture.
+        XCTAssertEqual(wall.width / icons.scale, shelf.height, accuracy: 2)
+        XCTAssertEqual(wall.height / icons.scale, shelf.width, accuracy: 2)
     }
 
     /// Both views draw the format icon in the same rendering mode, so the Ebook symbol's screen
