@@ -2575,8 +2575,9 @@ private final class LibraryWorkflowFixture {
 }
 
 /// The example profile: loading its folder, keeping it read-only, and leaving it. Fixtures are
-/// fictional; tests never load the bundled profile.
-extension LibraryWorkflowTests {
+/// fictional; tests never load the bundled profile. It shares this file's fixture.
+@MainActor
+final class ExampleProfileWorkflowTests: XCTestCase {
     private func exampleDesign(for book: Book, accountID: String = ExampleProfile.accountID)
         -> SpineDesignV1
     {
