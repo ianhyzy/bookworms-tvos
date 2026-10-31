@@ -822,9 +822,11 @@ final class BookWallScene {
         return amplitude * positionWeight + maximumSpeed * blendDuration * velocityWeight
     }
 
-    /// Pulls straight out of the stack before turning, with one clock for book and camera.
+    /// Pulls straight out of the stack before turning, with one clock for book and camera. With
+    /// `animated` false, the book and camera jump to the detail pose, as with Reduce Motion, but
+    /// the pose still leaves room for the idle sway.
     func flyToDetail(
-        _ book: Book, detailFrame: CGRect, reduceMotion: Bool
+        _ book: Book, detailFrame: CGRect, reduceMotion: Bool, animated: Bool = true
     ) async -> Bool {
         hasUndrawnChange = true
         guard !Task.isCancelled, isSettled, !isFlyingOut,
@@ -907,7 +909,7 @@ final class BookWallScene {
         selectedID = book.id
         flightFrames = frames
         placeDetailLight(at: destination.pose.translation)
-        if reduceMotion {
+        if reduceMotion || !animated {
             body.transform = destination.pose
             setCameraDepth(destination.cameraDepth)
             setDetailLightLevel(1)

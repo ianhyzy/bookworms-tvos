@@ -171,6 +171,47 @@ final class BookWallNavigationTests: XCTestCase {
         }
     }
 
+    /// Back from the shelf that wall details filtered returns straight to those details: the
+    /// book appears in place without flying out again, and Back takes focus.
+    func testBackFromDetailFilterReturnsToDetailsWithoutAnotherFlight() {
+        let app = openWall()
+        let book = app.buttons["book-wall-8"]
+        RemoteNavigation.waitForFocus(book)
+        XCUIRemote.shared.press(.select)
+        let title = app.staticTexts["detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let back = app.buttons["back-to-shelf"]
+        RemoteNavigation.waitForFocus(back)
+        let flights = app.staticTexts["book-wall-flight-probe"]
+        XCTAssertEqual(flights.label, "1")
+        let author = app.buttons["detail-author"]
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["clear-shelf-filter"].waitForExistence(timeout: 5))
+        let shelfBook = app.buttons["book-8"]
+        RemoteNavigation.waitForFocus(shelfBook)
+
+        let before = RemoteNavigation.transitions(app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertEqual(title.label, "Winter in the Orchard")
+        RemoteNavigation.waitForFocus(back)
+        // Observe a full settle window so a late update or flight is counted.
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Details settle")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertEqual(flights.label, "1", "Back from the filter flew the book out again")
+        XCTAssertTrue(RemoteNavigation.isFocused(back))
+        XCTAssertFalse(app.buttons["clear-shelf-filter"].exists)
+        // The tab switch and the details' Back take four updates, as many as the flight's return
+        // took, so skipping the flight adds none.
+        XCTAssertEqual(RemoteNavigation.transitions(app), before.map { $0 + 4 })
+
+        // Back again closes the details onto the same spine.
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(book)
+    }
+
     func testRendererExposesBookDescriptionsAndAccessibleDetails() throws {
         let app = openWall()
         for id in 1...8 {

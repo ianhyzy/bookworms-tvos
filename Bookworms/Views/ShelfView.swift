@@ -666,7 +666,8 @@ struct ShelfView: View {
     }
 
     /// Reopens the details that filtered My Shelf, over the view they opened from, and clears the
-    /// filter. `nil` without such a filter, so Back keeps opening the sidebar.
+    /// filter. The details appear without their opening animation, since Back returns to them.
+    /// `nil` without such a filter, so Back keeps opening the sidebar.
     // ponytail: one level of history; after chained filters, Back reopens the latest origin.
     private var returnToFilterOrigin: (() -> Void)? {
         guard let origin = filterOrigin, library.shelfFilter != nil else { return nil }
@@ -682,7 +683,9 @@ struct ShelfView: View {
                 coordinator.wallSelection = origin.book.id
                 wallDetail.requestedBookID = origin.book.id
             } else {
-                selectedBook = origin.book
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { selectedBook = origin.book }
             }
         }
     }

@@ -156,13 +156,13 @@ struct BookWallView: View {
                     // thread for the whole animation, which delayed the wall's frames.
                     .transition(.identity)
                     // Back from a shelf that these details filtered reopens them here, once the
-                    // books have settled.
+                    // books have settled. The reader is returning to details, not opening them,
+                    // so the book appears in place without flying out again.
                     .task(id: isSettled ? detailState.requestedBookID : nil) {
                         guard isSettled, let id = detailState.requestedBookID else { return }
                         detailState.requestedBookID = nil
                         guard let book = books.first(where: { $0.id == id }) else { return }
-                        openDetail(
-                            book, detailFrame: detailFrame)
+                        openDetail(book, detailFrame: detailFrame, animated: false)
                     }
                     #if DEBUG && targetEnvironment(simulator)
                         // Scenario hook: opens the entry book once so Simulator captures can
@@ -237,6 +237,11 @@ struct BookWallView: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("book-wall-design-probe")
+                    Text(String(detailState.flights))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-flight-probe")
                 #endif
             }
         }
@@ -307,7 +312,8 @@ struct BookWallView: View {
         let isActive: Bool
     }
 
-    private func openDetail(_ book: Book, detailFrame: CGRect) {
+    /// Flies `book` out to its details, or with `animated` false, shows it there at once.
+    private func openDetail(_ book: Book, detailFrame: CGRect, animated: Bool = true) {
         guard isActive, isSettled, openingBookID == nil, detailBook == nil, !isReturning,
             viewportFrame.width > 0, viewportFrame.height > 0
         else { return }
@@ -317,9 +323,12 @@ struct BookWallView: View {
         openingFailed = false
         coordinator.wallSelection = book.id
         onActivity()
+        #if DEBUG && targetEnvironment(simulator)
+            if animated { detailState.flights += 1 }
+        #endif
         transitionTask = Task { @MainActor in
             let completed = await scene.flyToDetail(
-                book, detailFrame: detailFrame, reduceMotion: reduceMotion)
+                book, detailFrame: detailFrame, reduceMotion: reduceMotion, animated: animated)
             guard !Task.isCancelled, transitionRevision == revision else { return }
             openingBookID = nil
             transitionTask = nil
@@ -333,7 +342,7 @@ struct BookWallView: View {
             // The wall has already faded in the scene; the text fades in after the book lands.
             detailState.frame = detailFrame.offsetBy(
                 dx: viewportFrame.minX, dy: viewportFrame.minY)
-            withAnimation(detailFade) {
+            withAnimation(animated ? detailFade : nil) {
                 detailBook = book
                 detailState.isPresented = true
             }
@@ -399,4 +408,9 @@ final class BookWallDetailState {
     var requestedBookID: Int?
     /// The open details' frame in global coordinates, which positions the Back overlay.
     var frame = CGRect.zero
+    #if DEBUG && targetEnvironment(simulator)
+        /// Openings that flew a book out, so UI tests can confirm that Back from a filter
+        /// returns to details without another flight. It outlives the wall's tab content.
+        var flights = 0
+    #endif
 }
