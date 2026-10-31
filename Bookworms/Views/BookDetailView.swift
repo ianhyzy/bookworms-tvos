@@ -742,7 +742,8 @@ private struct BookReviewHeader: View {
     var body: some View {
         HStack {
             ReaderLabel(
-                name: review.reader.displayName, avatarURL: review.reader.avatarURL, size: 28)
+                name: review.reader.displayName, avatarURL: review.reader.avatarURL, size: 28,
+                allowsNetwork: true)
             Spacer()
             LikesLabel(count: review.likes).padding(.trailing, 12)
             if let rating = review.rating {

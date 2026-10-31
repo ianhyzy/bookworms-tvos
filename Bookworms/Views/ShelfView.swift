@@ -225,7 +225,8 @@ struct ShelfView: View {
         }
         .environment(\.artworkGeneration, artworkGeneration)
         .tvOSSidebarHeader {
-            sidebarHeader
+            // The header sits outside the content that carries the environment value.
+            sidebarHeader.environment(\.artworkGeneration, artworkGeneration)
         }
         .overlay { BookWallDetailOverlay(state: wallDetail, palette: palette) }
         .fullScreenCover(

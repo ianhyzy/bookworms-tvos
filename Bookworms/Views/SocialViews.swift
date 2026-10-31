@@ -945,12 +945,14 @@ struct ReaderLabel: View {
     /// The photo's diameter relative to `size`. Header pills use a smaller photo so they keep
     /// the same height as the pills beside them.
     var avatarScale: CGFloat = 1.5
+    /// Downloads a photo the cache lacks (`CachedAvatarView.allowsNetwork`).
+    var allowsNetwork = false
 
     var body: some View {
         HStack(spacing: size * 0.4) {
             Group {
                 if let avatarURL {
-                    CachedAvatarView(url: avatarURL)
+                    CachedAvatarView(url: avatarURL, allowsNetwork: allowsNetwork)
                 } else {
                     Image(systemName: "person.crop.circle.fill")
                         .resizable().scaledToFit().foregroundStyle(.secondary)
@@ -969,6 +971,11 @@ struct CachedAvatarView: View {
     /// Whose photo it is. While the photo loads, or when it can't, their initial stands in for
     /// it; without a name, a generic person symbol does.
     var name: String? = nil
+    /// Downloads a photo the cache lacks. Browsing and ambient playback read only the photos
+    /// that artwork preparation cached, and reload them when `artworkGeneration` changes; only
+    /// community reviews, whose readers preparation can't know, download.
+    var allowsNetwork = false
+    @Environment(\.artworkGeneration) private var artworkGeneration
     @State private var image: UIImage?
     var body: some View {
         Group {
@@ -983,10 +990,10 @@ struct CachedAvatarView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .task(id: url) {
+        .task(id: "\(url.absoluteString):\(artworkGeneration)") {
             guard
                 let data = try? await ArtworkStore.shared.data(
-                    for: url, maximumPixelSize: 400, allowsNetwork: true),
+                    for: url, maximumPixelSize: 400, allowsNetwork: allowsNetwork),
                 !Task.isCancelled
             else { return }
             image = UIImage(data: data)
