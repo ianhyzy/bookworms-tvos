@@ -966,11 +966,16 @@ struct ReaderLabel: View {
 
 struct CachedAvatarView: View {
     let url: URL
+    /// Whose photo it is. While the photo loads, or when it can't, their initial stands in for
+    /// it; without a name, a generic person symbol does.
+    var name: String? = nil
     @State private var image: UIImage?
     var body: some View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+            } else if let name {
+                ReaderMonogram(name: name)
             } else {
                 Image(systemName: "person.crop.circle.fill")
                     .resizable()
@@ -986,5 +991,20 @@ struct CachedAvatarView: View {
             else { return }
             image = UIImage(data: data)
         }
+    }
+}
+
+/// A reader's initial on a filled circle, in place of a profile photo they don't have.
+struct ReaderMonogram: View {
+    let name: String
+
+    var body: some View {
+        Circle()
+            .fill(.primary.opacity(0.24))
+            .overlay {
+                Text(name.first.map { String($0).uppercased() } ?? "")
+                    .appFont(size: 23, weight: .semibold)
+            }
+            .accessibilityHidden(true)
     }
 }

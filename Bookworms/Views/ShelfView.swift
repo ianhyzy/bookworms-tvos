@@ -881,25 +881,27 @@ struct ShelfView: View {
     /// The Hardcover profile above the sidebar list. The photo centers on the rows' icons and the
     /// name starts where their titles start; the name takes the sidebar's font, like the rows.
     /// Offsets measured from the tvOS 27 sidebar on Apple TV.
-    private var sidebarHeader: some View {
-        HStack(spacing: 14) {
-            Group {
-                if let avatarURL = social.snapshot?.owner.avatarURL {
-                    CachedAvatarView(url: avatarURL)
-                } else {
-                    Image(systemName: "person.crop.circle.fill")
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(.secondary)
+    ///
+    /// Without a profile, such as while signed out or after Hardcover rejects the login, the
+    /// sidebar has no header. A reader without a photo gets their initial.
+    @ViewBuilder private var sidebarHeader: some View {
+        if let owner = social.snapshot?.owner {
+            HStack(spacing: 14) {
+                Group {
+                    if let avatarURL = owner.avatarURL {
+                        CachedAvatarView(url: avatarURL, name: owner.displayName)
+                    } else {
+                        ReaderMonogram(name: owner.displayName)
+                    }
                 }
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+                Text(owner.displayName)
+                    .lineLimit(1)
+                Spacer()
             }
-            .frame(width: 40, height: 40)
-            .clipShape(Circle())
-            Text(social.snapshot?.owner.displayName ?? "Bookworms")
-                .lineLimit(1)
-            Spacer()
+            .padding(.leading, 12)
         }
-        .padding(.leading, 12)
     }
 
     /// Chooses ambient timing and starts playback. The sidebar item opens this page instead of
