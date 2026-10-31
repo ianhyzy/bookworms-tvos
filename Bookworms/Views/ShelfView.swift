@@ -279,6 +279,9 @@ struct ShelfView: View {
             .onChange(of: coordinator.preferences, initial: true) {
                 social.prepare(coordinator.preferences)
             }
+            .onChange(of: library.readBookIDs, initial: true) {
+                social.setReadBooks(library.readBookIDs)
+            }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
                     recordActivity()

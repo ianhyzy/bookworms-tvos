@@ -52,10 +52,16 @@ final class LibraryModel {
             let offersOwned =
                 BookPresentation.offersCWA && allBooks.contains { $0.isOwned == true }
             if offersOwned != offersOwnedBooks { offersOwnedBooks = offersOwned }
+            let read = Set(
+                allBooks.filter { $0.isHardcoverBook && ($0.isRead == true || $0.finished != nil) }
+                    .map(\.id))
+            if read != readBookIDs { readBookIDs = read }
             refreshSeriesSources()
             refreshOnThisDay()
         }
     }
+    /// The Hardcover books the library marks read or finished, for Friends' Picks.
+    private(set) var readBookIDs: Set<Int> = []
     /// Each book that shares a series design, by ID, mapped to the book whose design it draws
     /// with (`SeriesDesigns.sources`); a source maps to itself. Prepared with the library, never
     /// on focus or remote input.

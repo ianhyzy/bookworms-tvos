@@ -653,6 +653,9 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(picks[0].fans.map(\.id), [2, 4, 3], "Feed ratings count as fans")
         XCTAssertEqual(picks[1].averageRating, 4.5)
         XCTAssertEqual(
+            FriendPick.ranked(snapshot, alsoRead: [13], limit: 40).map(\.id), [12, 11],
+            "A book the library marks Read without a rating or date isn't in mine but is left out")
+        XCTAssertEqual(
             FriendPick.readersToSync(snapshot, limit: 2), [4, 2],
             "The most active readers in the feed sync first")
     }

@@ -16,9 +16,11 @@ struct SocialPresentation {
 
     init() {}
 
-    init(snapshot: SocialSnapshot?, preferences: ViewPreferences) {
+    /// `readBookIDs` are Hardcover books the reader's library marks read, which Friends' Picks
+    /// leaves out (`FriendPick.ranked(_:alsoRead:limit:)`).
+    init(snapshot: SocialSnapshot?, preferences: ViewPreferences, readBookIDs: Set<Int> = []) {
         guard let snapshot else { return }
-        picks = FriendPick.ranked(snapshot, limit: BookLimit.maximum)
+        picks = FriendPick.ranked(snapshot, alsoRead: readBookIDs, limit: BookLimit.maximum)
         (friendReads, libraryReaders) = FriendRead.byBook(snapshot)
         reader = snapshot.following.first { $0.id == preferences.readerID }
         guard let reader else { return }
@@ -47,11 +49,15 @@ struct FriendPick: Identifiable, Hashable, Sendable {
     /// Ranks books by how many followed readers rated them highly, then by their average rating.
     ///
     /// Uses every synced reader library and the ratings in the feed. Books you finished or marked
-    /// read are left out; books on your other shelves, such as Want to Read, stay.
-    static func ranked(_ snapshot: SocialSnapshot, limit: Int) -> [FriendPick] {
+    /// read are left out; books on your other shelves, such as Want to Read, stay. `snapshot.mine`
+    /// holds only your books with a rating or a read date, so `alsoRead` adds the books your
+    /// library marks read without either.
+    static func ranked(_ snapshot: SocialSnapshot, alsoRead: Set<Int> = [], limit: Int)
+        -> [FriendPick]
+    {
         let measurement = PerformanceDiagnostics.begin("FriendPicks")
         defer { measurement.end() }
-        let read = Set(
+        let read = alsoRead.union(
             snapshot.mine.filter { $0.finished != nil || $0.book.isRead == true }.map(\.id))
         let following = Dictionary(
             snapshot.following.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

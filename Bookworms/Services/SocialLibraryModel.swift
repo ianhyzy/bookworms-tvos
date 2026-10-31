@@ -34,8 +34,18 @@ final class SocialLibraryModel {
         rebuildPresentation()
     }
 
+    /// Hardcover books the reader's library marks read, which Friends' Picks leaves out.
+    func setReadBooks(_ ids: Set<Int>) {
+        guard ids != readBookIDs else { return }
+        readBookIDs = ids
+        rebuildPresentation()
+    }
+
+    @ObservationIgnored private var readBookIDs: Set<Int> = []
+
     private func rebuildPresentation() {
-        presentation = SocialPresentation(snapshot: snapshot, preferences: presentationPreferences)
+        presentation = SocialPresentation(
+            snapshot: snapshot, preferences: presentationPreferences, readBookIDs: readBookIDs)
         presentationRevision += 1
     }
     private(set) var status = "Connect Hardcover to use social views."
