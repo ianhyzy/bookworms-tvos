@@ -242,7 +242,9 @@ final class CacheTests: XCTestCase {
         book.format = "Ebook"
         let withIcon = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
         XCTAssertEqual(plain.length, 420)
-        XCTAssertEqual(withIcon.length, 420 - SpineTextMetrics.formatIconRoom)
+        XCTAssertEqual(
+            withIcon.length,
+            420 - SpineTextMetrics.formatIconMargin - SpineTextMetrics.formatIconSize)
         // The shelf spine stops a title at its first colon and draws no subtitle.
         XCTAssertFalse(plain.title.localizedCaseInsensitiveContains("deluxe"))
     }

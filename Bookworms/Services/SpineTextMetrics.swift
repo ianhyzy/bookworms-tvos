@@ -42,18 +42,49 @@ enum SpineTextMetrics {
     /// How much larger than the author the title stays, where the author's minimum allows.
     nonisolated static let titleLead: CGFloat = 4
     nonisolated static let formatIconSize: CGFloat = 18
-    /// The tail length the format icon takes: the icon and its margin from the spine's end.
-    nonisolated static let formatIconRoom: CGFloat = 38
+    /// The format icon's margin from the tail end of a spine without stamped bands.
+    nonisolated static let formatIconMargin: CGFloat = 20
+    /// The gap between the format icon and the nearer line of a stamped tail band, so the icon
+    /// reads apart from the band instead of against it.
+    nonisolated static let formatIconBandGap: CGFloat = 12
 
-    /// The length along a spine `height` long that `book`'s lettering takes.
-    nonisolated static func letteredLength(for book: Book, height: CGFloat) -> CGFloat {
-        max(0, height - (book.format == nil ? 0 : formatIconRoom))
+    /// The format icon's margin from the tail end of `book`'s spine, `length` long and
+    /// `thickness` across. On a spine with stamped bands (`SpineView.stamps(_:)`), the icon
+    /// clears the tail band by `formatIconBandGap`.
+    nonisolated static func formatIconMargin(
+        for book: Book, length: CGFloat, thickness: CGFloat
+    ) -> CGFloat {
+        guard SpineView.stamps(book) else { return formatIconMargin }
+        let band = SpineView.bands(length: length, thickness: thickness)
+        // The band's lines are centered in its slot, which is `inset` from the tail end.
+        let bandEdge = band.inset + band.slot / 2 + band.line
+        return max(formatIconMargin, bandEdge + formatIconBandGap)
     }
 
-    /// The format icon's center along a spine `height` long, measured from the head. It sits in
-    /// the room `letteredLength` leaves at the tail.
-    nonisolated static func formatIconCenter(height: CGFloat) -> CGFloat {
-        height - (formatIconRoom - formatIconSize) - formatIconSize / 2
+    /// The tail length the format icon takes on `book`'s spine, `length` long and `thickness`
+    /// across: the icon and its margin from the tail end, or none without a format.
+    nonisolated static func formatIconRoom(
+        for book: Book, length: CGFloat, thickness: CGFloat
+    ) -> CGFloat {
+        guard book.format != nil else { return 0 }
+        return formatIconMargin(for: book, length: length, thickness: thickness) + formatIconSize
+    }
+
+    /// The length along `book`'s spine, `length` long and `thickness` across, that its lettering
+    /// takes: the length less the format icon's room.
+    nonisolated static func letteredLength(
+        for book: Book, length: CGFloat, thickness: CGFloat
+    ) -> CGFloat {
+        max(0, length - formatIconRoom(for: book, length: length, thickness: thickness))
+    }
+
+    /// The format icon's center along `book`'s spine, `length` long and `thickness` across,
+    /// measured from the head. It sits in the room `letteredLength` leaves at the tail.
+    nonisolated static func formatIconCenter(
+        for book: Book, length: CGFloat, thickness: CGFloat
+    ) -> CGFloat {
+        length - formatIconMargin(for: book, length: length, thickness: thickness)
+            - formatIconSize / 2
     }
 
     /// The spine's title and author as every view letters them: the title up to its first
@@ -74,7 +105,8 @@ enum SpineTextMetrics {
         let spine = text(of: book, uppercase: style.uppercase)
         return lettering(
             title: spine.title, author: spine.author, fontName: style.fontName,
-            length: letteredLength(for: book, height: dimensions.height),
+            length: letteredLength(
+                for: book, length: dimensions.height, thickness: dimensions.width),
             thickness: dimensions.width, maximumLines: maximumLines)
     }
 

@@ -343,7 +343,8 @@ struct BookWallLayout: Sendable {
             fontName: typography.loadedFont(size: SpineTextMetrics.minimumTitleSize)?.fontName,
             font: { typography.font(size: $0) },
             length: SpineTextMetrics.letteredLength(
-                for: book, height: CGFloat(length * pointsPerUnit)),
+                for: book, length: CGFloat(length * pointsPerUnit),
+                thickness: CGFloat(thickness * pointsPerUnit)),
             thickness: CGFloat(thickness * pointsPerUnit), maximumLines: maximumLines)
     }
 }

@@ -293,7 +293,7 @@ final class BookWallLayoutTests: XCTestCase {
                 isFocused: false))
         renderer.scale = 1
         let shelf = try XCTUnwrap(renderer.cgImage)
-        let room = SpineTextMetrics.formatIconRoom
+        let room = SpineTextMetrics.formatIconRoom(for: book, length: 420, thickness: 60)
         let shelfIcon = try inkBounds(
             shelf, in: CGRect(x: 0, y: 420 - room, width: 60, height: room))
         let slot = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 64).slots.first)
@@ -304,10 +304,13 @@ final class BookWallLayoutTests: XCTestCase {
                     background: cloth, foreground: .paper,
                     typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
         let scale = BookWallSpineTexture.pixelsPerUnit / 64
+        let wallRoom = SpineTextMetrics.formatIconRoom(
+            for: book, length: CGFloat(slot.spineWallWidth * 64),
+            thickness: CGFloat(slot.spineWallHeight * 64))
         let wallIcon = try inkBounds(
             wall,
             in: CGRect(
-                x: CGFloat(wall.width) - room * scale, y: 0, width: room * scale,
+                x: CGFloat(wall.width) - wallRoom * scale, y: 0, width: wallRoom * scale,
                 height: CGFloat(wall.height)))
         XCTAssertFalse(shelfIcon.isNull, book.title)
         XCTAssertFalse(wallIcon.isNull, book.title)
@@ -363,7 +366,8 @@ final class BookWallLayoutTests: XCTestCase {
         let icons = try formatIcons(of: book)
         let shelfData = try pixels(of: icons.shelf)
         // Plain cloth between the lettering and the icon.
-        let clothOffset = (Int(420 - SpineTextMetrics.formatIconRoom - 3) * 60 + 30) * 4
+        let room = SpineTextMetrics.formatIconRoom(for: book, length: 420, thickness: 60)
+        let clothOffset = (Int(420 - room - 3) * 60 + 30) * 4
         let cloth = Double(shelfData[clothOffset + 2])
         let paper = StyleColor.paper.blue * 255
         let shelfInk = try coverage(icons.shelf, in: icons.shelfIcon.insetBy(dx: -2, dy: -2)) {
@@ -374,6 +378,80 @@ final class BookWallLayoutTests: XCTestCase {
                 icons.wall, in: icons.wallIcon.insetBy(dx: -2 * icons.scale, dy: -2 * icons.scale)
             ) { Double($0[$0.startIndex + 3]) / 255 } / Double(icons.scale * icons.scale)
         XCTAssertEqual(wallInk / shelfInk, 1, accuracy: 0.1)
+    }
+
+    /// On a spine with stamped bands, the format icon and the lettering's tail room move toward
+    /// the head, so the icon clears the tail band by `formatIconBandGap` on the shelf and on
+    /// Book Wall alike. A spine without bands keeps the plain margin.
+    @MainActor
+    func testFormatIconClearsTheStampedTailBand() throws {
+        let book = Book(
+            id: 13, title: "Infinite Jest", author: "David Foster Wallace", pages: 1_079,
+            format: "Audiobook")
+        XCTAssertTrue(SpineView.stamps(book))
+        let plain = Book(
+            id: 13, title: "Infinite Jest", author: "David Foster Wallace", pages: 300,
+            format: "Audiobook")
+        XCTAssertFalse(SpineView.stamps(plain))
+        XCTAssertEqual(
+            SpineTextMetrics.formatIconMargin(for: plain, length: 500, thickness: 130),
+            SpineTextMetrics.formatIconMargin)
+        let gap = SpineTextMetrics.formatIconBandGap
+        /// The distance from the tail end to the tail band's line nearer the head.
+        func bandEdge(length: CGFloat, thickness: CGFloat) -> CGFloat {
+            let band = SpineView.bands(length: length, thickness: thickness)
+            return band.inset + band.slot / 2 + band.line
+        }
+
+        let cloth = StyleColor(red: 0.1, green: 0.15, blue: 0.3)
+        var style = SpineStyle.fallback(for: book)
+        style.background = cloth
+        style.foreground = .paper
+        let dimensions = SpineDimensions(width: 130, height: 500)
+        let lettering = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
+        let room = SpineTextMetrics.formatIconRoom(for: book, length: 500, thickness: 130)
+        XCTAssertGreaterThan(room, SpineTextMetrics.formatIconMargin + 18)
+        XCTAssertEqual(lettering.length, 500 - room)
+        let renderer = ImageRenderer(
+            content: SpineView(
+                book: book, style: style, dimensions: dimensions, lettering: lettering,
+                isFocused: false))
+        renderer.scale = 1
+        let shelf = try XCTUnwrap(renderer.cgImage)
+        let shelfIcon = try inkBounds(
+            shelf, in: CGRect(x: 0, y: 500 - room, width: 130, height: room))
+        XCTAssertFalse(shelfIcon.isNull)
+        XCTAssertGreaterThanOrEqual(
+            500 - shelfIcon.maxY - bandEdge(length: 500, thickness: 130), gap - 1)
+
+        let slot = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 64).slots.first)
+        let length = CGFloat(slot.spineWallWidth * 64)
+        let thickness = CGFloat(slot.spineWallHeight * 64)
+        let wallRoom = SpineTextMetrics.formatIconRoom(
+            for: book, length: length, thickness: thickness)
+        XCTAssertEqual(slot.lettering.length, length - wallRoom, accuracy: 0.001)
+        let wall = try XCTUnwrap(
+            BookWallSpineTexture.make(
+                for: slot,
+                style: BookWallLocalSpine.Style(
+                    background: cloth, foreground: .paper,
+                    typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
+        let scale = CGFloat(wall.width) / length
+        // `BookWallSpineTexture.filled` places the bands in the texture's pixels; in points,
+        // they sit where the shelf's metrics place them.
+        let pixelEdge = bandEdge(length: CGFloat(wall.width), thickness: CGFloat(wall.height))
+        XCTAssertEqual(
+            pixelEdge / scale, bandEdge(length: length, thickness: thickness), accuracy: 0.5)
+        let wallIcon = try inkBounds(
+            wall,
+            in: CGRect(
+                x: CGFloat(wall.width) - wallRoom * scale, y: 0, width: wallRoom * scale,
+                height: CGFloat(wall.height)))
+        XCTAssertFalse(wallIcon.isNull)
+        XCTAssertGreaterThanOrEqual(
+            (CGFloat(wall.width) - wallIcon.maxX) / scale
+                - bandEdge(
+                    length: length, thickness: thickness), gap - 1)
     }
 
     @MainActor

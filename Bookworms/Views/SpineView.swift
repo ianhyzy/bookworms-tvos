@@ -44,7 +44,9 @@ struct SpineView: View {
                     .foregroundStyle(style.foreground.color)
                     .frame(width: width, height: SpineTextMetrics.formatIconSize)
                     .padding(
-                        .bottom, SpineTextMetrics.formatIconRoom - SpineTextMetrics.formatIconSize
+                        .bottom,
+                        SpineTextMetrics.formatIconMargin(
+                            for: book, length: height, thickness: width)
                     )
                     .frame(width: width, height: height, alignment: .bottom)
             }

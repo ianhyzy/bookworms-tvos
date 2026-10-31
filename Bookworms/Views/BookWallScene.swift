@@ -2407,7 +2407,8 @@ enum BookWallSpineTexture {
                         for: slot.book, ink: style.foreground, fontStyle: fontStyle,
                         pixelsPerPoint: size.height / thickness,
                         center: CGPoint(
-                            x: SpineTextMetrics.formatIconCenter(height: length),
+                            x: SpineTextMetrics.formatIconCenter(
+                                for: slot.book, length: length, thickness: thickness),
                             y: thickness / 2))
                 }
             }
