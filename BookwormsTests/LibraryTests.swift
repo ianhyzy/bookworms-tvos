@@ -579,4 +579,11 @@ final class LibraryTests: XCTestCase {
         }
     }
 
+    /// Your rating highlights the bar at the same value as its axis label: a 3 lights the 3 bar,
+    /// not the half-star bar beside it.
+    func testYourRatingHighlightsTheBarAtThatRating() {
+        for (rating, bucket) in [(3.0, 3.0), (3.5, 3.5), (5, 5), (0.5, 0.5), (3.2, 3), (3.3, 3.5)] {
+            XCTAssertEqual(RatingsView.bucket(for: rating), bucket, "rating \(rating)")
+        }
+    }
 }

@@ -17,7 +17,10 @@ struct RatingsView: View {
     }
 
     /// The half-star bucket that holds your rating. Only its bar is solid white.
-    private var yourBucket: Double? { book.rating.map { ($0 * 2).rounded() / 2 } }
+    private var yourBucket: Double? { book.rating.map(Self.bucket(for:)) }
+
+    /// The half-star bucket nearest `rating`, whose bar sits on the axis at that value.
+    nonisolated static func bucket(for rating: Double) -> Double { (rating * 2).rounded() / 2 }
 
     /// Your rating, then the community average, as rows of a grid that aligns their stars.
     private var ratings: [(label: String, stars: String)] {
@@ -67,13 +70,27 @@ struct RatingsView: View {
                     )
                 }
                 .chartXScale(domain: 0.25...5.25)
-                .chartXAxis {
-                    AxisMarks(values: [1, 2, 3, 4, 5]) { _ in
-                        // Hierarchical chart styles can inherit the series palette.
-                        AxisValueLabel(anchor: .top).foregroundStyle(Color.detailCaption)
-                    }
-                }
+                // The axis's own labels sat about 10 points right of their bars, so a highlighted
+                // 3 read as 2.5. Placing each star's label with the chart's scale centers it under
+                // the bar for that rating.
+                .chartXAxis(.hidden)
                 .chartYAxis(.hidden)
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        if let plot = proxy.plotFrame.map({ geometry[$0] }) {
+                            ForEach(1...5, id: \.self) { star in
+                                if let x = proxy.position(forX: Double(star)) {
+                                    Text(String(star))
+                                        .appFont(size: 23).foregroundStyle(.detailCaption)
+                                        .fixedSize()
+                                        .position(x: plot.minX + x, y: plot.maxY + 18)
+                                }
+                            }
+                        }
+                    }
+                    .accessibilityHidden(true)
+                }
+                .padding(.bottom, 32)
                 // Takes the width the genres beside the block leave, within these bounds.
                 .frame(minWidth: 220, maxWidth: 340).frame(height: 88)
                 .accessibilityLabel("Community rating distribution")

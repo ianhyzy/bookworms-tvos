@@ -152,11 +152,14 @@ struct BookDetailView: View {
                     // from the metadata row.
                     VStack(alignment: .leading, spacing: 22) {
                         VStack(alignment: .leading, spacing: 18) {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 4) {
                                 BookText(book.title, of: book)
                                     .appFont(size: 56, weight: .semibold)
                                     .lineLimit(3).minimumScaleFactor(0.7)
                                     .accessibilityIdentifier("detail-title")
+                                    // The title's line height puts its letters below Back's
+                                    // label; this lifts their tops level with Back's capsule.
+                                    .padding(.top, -12)
                                 // A full-width section, so Up from the histogram reaches the
                                 // author. The series button sits beside the author and wraps
                                 // below it when the row is too narrow.
@@ -299,7 +302,7 @@ struct BookDetailView: View {
     /// the ratings and their histogram when the book has a rating, which open reviews when
     /// Hardcover can supply them.
     private var metadata: some View {
-        HStack(alignment: .top, spacing: 44) {
+        HStack(alignment: .top, spacing: 20) {
             if book.finished != nil {
                 VStack(alignment: .leading, spacing: 12) {
                     metadataItem(
@@ -315,6 +318,7 @@ struct BookDetailView: View {
                     }
                 }
                 .fixedSize()
+                .metadataCard()
             }
             if !genres.isEmpty {
                 Group {
@@ -329,28 +333,33 @@ struct BookDetailView: View {
                         )
                     }
                 }
+                .metadataCard()
                 // Genres size first and wrap only when the chart would drop below its minimum
                 // width; the chart takes what they leave.
                 .layoutPriority(1)
             }
             if RatingsView.shows(book) {
-                if loadReviews != nil {
-                    Button {
-                        showsReviews = true
-                    } label: {
+                Group {
+                    if loadReviews != nil {
+                        // The card's padding keeps the focus highlight inside it.
+                        Button {
+                            showsReviews = true
+                        } label: {
+                            RatingsView(book: book)
+                        }
+                        .buttonStyle(FocusHighlightButtonStyle())
+                        .focusEffectDisabled()
+                        .accessibilityHint("Shows community reviews.")
+                        .accessibilityIdentifier("community-reviews")
+                    } else {
                         RatingsView(book: book)
                     }
-                    .buttonStyle(FocusHighlightButtonStyle())
-                    // Keeps the focus highlight clear of the facts line and description.
-                    .padding(.vertical, 12)
-                    .focusEffectDisabled()
-                    .accessibilityHint("Shows community reviews.")
-                    .accessibilityIdentifier("community-reviews")
-                } else {
-                    RatingsView(book: book)
                 }
+                .metadataCard()
             }
         }
+        // Lets each card fill the row's height, so the cards line up top and bottom.
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -524,6 +533,17 @@ private struct FlatButtonStyle: ButtonStyle {
                 .opacity(configuration.isPressed ? 0.8 : 1)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isFocused)
         }
+    }
+}
+
+extension View {
+    /// Sets a book-details metadata section on the translucent card the review reader uses. A
+    /// material would read as black over the dark details backdrop, and on Book Wall it would blur
+    /// a 3D scene that changes every frame.
+    fileprivate func metadataCard() -> some View {
+        padding(.horizontal, 24).padding(.vertical, 20)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .background(.primary.opacity(0.08), in: .rect(cornerRadius: 24))
     }
 }
 
