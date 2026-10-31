@@ -314,7 +314,7 @@ final class SocialLibraryModel {
                 default:
                     status =
                         "Social data could not refresh. Cached data is retained. "
-                        + UserFacingError.message(error)
+                        + UserFacingError.hardcoverMessage(error)
                 }
             }
         }

@@ -153,6 +153,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(model.following.isEmpty, "A failed renewal keeps the cached snapshot")
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
         XCTAssertTrue(model.status.contains("Cached data is retained"))
+        XCTAssertTrue(model.status.contains("Hardcover did not respond in time"), model.status)
         let tokens = await client.tokens
         XCTAssertEqual(
             tokens.count - sent, 1, "The load stops instead of sending the rejected token again")

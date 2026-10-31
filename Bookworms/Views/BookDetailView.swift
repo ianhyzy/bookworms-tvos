@@ -629,7 +629,7 @@ struct BookReviewsView: View {
                     HardcoverError.invalidToken.localizedDescription
                     + " Reconnect in Settings → Sources."
             } catch {
-                failure = error.localizedDescription
+                failure = UserFacingError.hardcoverMessage(error)
             }
         }
         .onExitCommand {
