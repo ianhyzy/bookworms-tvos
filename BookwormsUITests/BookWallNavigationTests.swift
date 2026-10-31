@@ -144,7 +144,7 @@ final class BookWallNavigationTests: XCTestCase {
         ] {
             let book = app.buttons["book-wall-\(id)"]
             RemoteNavigation.moveFocus(to: book, in: app)
-            XCTAssertEqual(book.label, "\(title), Alex Rowan")
+            XCTAssertEqual(book.label, "\(title), by Alex Rowan")
             capture(app, name: "Book-Wall-renderer-edge-\(id)-focused")
             XCUIRemote.shared.press(.select)
             let detail = app.staticTexts["detail-title"]
@@ -241,8 +241,8 @@ final class BookWallNavigationTests: XCTestCase {
         let app = openWall()
         for id in 1...8 {
             let book = app.buttons["book-wall-\(id)"]
-            XCTAssertTrue(book.label.hasSuffix(", Alex Rowan"))
-            XCTAssertGreaterThan(book.label.count, ", Alex Rowan".count)
+            XCTAssertTrue(book.label.hasSuffix(", by Alex Rowan"))
+            XCTAssertGreaterThan(book.label.count, ", by Alex Rowan".count)
         }
         XCTAssertEqual(app.buttons["book-wall-replay"].label, "Drop again")
         try audit(app)

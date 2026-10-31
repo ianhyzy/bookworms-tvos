@@ -135,8 +135,8 @@ struct BookWallView: View {
                                 // Keep the selected button mounted and focused throughout
                                 // its flight; other books cannot start competing flights.
                                 .disabled(openingBookID != nil && openingBookID != book.id)
-                                .accessibilityLabel("\(book.title), \(book.author)")
-                                .accessibilityHint("Open book details")
+                                .accessibilityLabel("\(book.title), by \(book.author)")
+                                .accessibilityHint("Opens book details.")
                                 .accessibilityIdentifier("book-wall-\(book.id)")
                                 // Position last: modifiers after `.position` apply to a
                                 // container that fills the tab, which accessibility would
@@ -184,7 +184,7 @@ struct BookWallView: View {
                         }
                         .buttonStyle(.glass)
                         .disabled(openingBookID != nil || isReturning)
-                        .accessibilityHint("Drop the books onto the shelf again")
+                        .accessibilityHint("Drops the books onto the shelf again.")
                         .accessibilityIdentifier("book-wall-replay")
                     }
                     .padding(.top, 34)

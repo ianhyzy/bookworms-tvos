@@ -1874,7 +1874,7 @@ struct ShelfRow: View {
         .focused($focusedBook, equals: book.id)
         .accessibilityLabel("\(book.title), by \(book.author)")
         .accessibilityHint(
-            endsPage ? "Open book details. Move right for more books." : "Open book details"
+            endsPage ? "Opens book details. Move right for more books." : "Opens book details."
         )
         .accessibilityIdentifier("book-\(book.id)")
     }
