@@ -130,6 +130,7 @@ Check each item that your change touches. These are the problems CodeRabbit find
 
 - Support one active account per provider, with books from multiple enabled providers combined into one shelf. Do not add multiple simultaneous Hardcover accounts or an account-switching interface unless requested.
 - Hardcover and CWA are implemented providers. Treat other providers, including Bookorbit, as future integrations until their code and tests exist.
+- `ExampleProfile/` holds the owner's real reading history for **View example profile** (`scripts/export-example-profile.py`). This repository is public: Git ignores the folder apart from its placeholder, so never commit it, print its contents, publish screenshots made from it, or load it in tests. Scenarios and tests use fictional profiles.
 - Keep literal credentials out of repository files, command arguments, logs, screenshots, and test fixtures. Use Keychain and authorized 1Password references; see [Hardcover authentication](docs/HARDCOVER_AUTHENTICATION.md).
 - Keep credentials provider-specific and library access read-only. Preserve source provenance when merging books. A credential replacement is not permission to combine unrelated accounts from the same provider.
 
