@@ -245,13 +245,16 @@ struct BookWallLayout: Sendable {
     /// it lengthens in 8-point steps up to `maximumBookLength` at the page-count `thickness`,
     /// then thickens in 2-point steps up to a sixth of its length. A title that letters at the
     /// minimum without growing needs only `minimumSpineThickness` if it letters there too. A
-    /// title that can't reach the minimum takes the thickest spine and the shortest length at
-    /// which its title stops growing, since a title held back by the spine's thickness letters
-    /// no larger on a longer one; its lettering may take a third line. A spine that grows no
-    /// longer than it needs keeps room under `maximumBookLength` for its length variety.
+    /// title that can't reach the minimum takes the thickest spine, which the book's shape then
+    /// holds at `maximumBookLength`; its lettering may take a third line. The length is the
+    /// shortest step that letters the title as large at the page-count `thickness`, the
+    /// thinnest the spine is drawn unless its column squeezes it, so it keeps room under
+    /// `maximumBookLength` for its length variety. Measuring it at `minimumSpineThickness`
+    /// would let a title too long for two lines, which a thicker spine narrows, letter below
+    /// the minimum.
     ///
-    /// Each search halves the steps it has left rather than measuring every step, since a
-    /// longer or thicker spine never letters a smaller title.
+    /// Each search halves the steps it has left rather than measuring every step, since along
+    /// each search a longer or thicker spine letters a title no smaller.
     private static func readableSize(
         for book: Book, typography: BookWallLocalSpine.Typography, height: Float,
         thickness: Float, pointsPerUnit: Float
@@ -275,8 +278,8 @@ struct BookWallLayout: Sendable {
         }
         return (
             shortestLength(
-                for: book, typography: typography, from: height, to: length, thickness: across,
-                pointsPerUnit: pointsPerUnit),
+                for: book, typography: typography, from: height, to: length,
+                thickness: max(thickness, across), pointsPerUnit: pointsPerUnit),
             across
         )
     }

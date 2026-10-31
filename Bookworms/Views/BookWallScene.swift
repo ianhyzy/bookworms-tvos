@@ -2427,8 +2427,8 @@ enum BookWallSpineTexture {
         let titleLines = lettering.title.components(separatedBy: "\n")
         var y = (thickness - CGFloat(titleLines.count) * titleFont.lineHeight) / 2
         for line in titleLines {
-            // A spine letters "house" in the blue alone, as `SpineView` does; the glow is for
-            // interface text, such as the shelf front's label.
+            // A spine letters "house" in the blue alone, as `SpineView` does, even where dark
+            // ink on a light spine would otherwise glow.
             HouseOfLeaves.attributed(
                 line, of: book, attributes: [.font: titleFont, .foregroundColor: ink],
                 lettering: HouseOfLeaves.Lettering(
