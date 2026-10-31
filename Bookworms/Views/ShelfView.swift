@@ -28,6 +28,8 @@ struct ShelfView: View {
     @State private var activity = InteractionActivity()
     @State private var hasEnteredShelf = false
     @State private var isWelcomePresented = false
+    /// Whether My Shelf's **Connect Hardcover** shows the sign-in over the example profile.
+    @State private var connectsFromExample = false
     @State private var preparedArtwork: ViewArtworkKey?
     @State private var artworkGeneration = 0
     @State private var presentationStyles: [Int: SpineStyle] = [:]
@@ -57,7 +59,7 @@ struct ShelfView: View {
     @Environment(\.scenePhase) private var scenePhase
     private var controlsVisible: Bool { activity.controlsVisible }
     private var wallBooks: [Book] {
-        let year = Calendar.current.component(.year, from: .now)
+        let year = Calendar.current.component(.year, from: library.now)
         return library.readingYears.first { $0.year == year }?.books ?? []
     }
     /// The wall books' series design sources, from those the library prepared.
@@ -86,7 +88,7 @@ struct ShelfView: View {
         }
         return BookWallPreparationKey(
             loaded: library.hasLoadedLibrarySnapshot,
-            enabled: coordinator.preferences.orderedViews.contains(.bookWall),
+            enabled: sidebarViews.contains(.bookWall),
             books: books, sources: sources, designs: designs, looks: looks,
             retry: bookWallPreparationRetry)
     }
@@ -161,11 +163,18 @@ struct ShelfView: View {
             })
     }
 
+    /// The views in the sidebar: the reader's choice, or for the example profile, every view
+    /// without social data, with Book Wall where the hardware supports it. The example's list is
+    /// never saved, so the reader's choice returns when it ends.
+    private var sidebarViews: [BookwormsView] {
+        library.isExample
+            ? BookwormsView.availableCases.filter { !$0.isSocial }
+            : coordinator.preferences.orderedViews
+    }
+
     /// Selects `view`, or the first sidebar view when the user has hidden it.
     private func showView(_ view: BookwormsView) {
-        let shown =
-            coordinator.preferences.orderedViews.contains(view)
-            ? view : coordinator.preferences.orderedViews[0]
+        let shown = sidebarViews.contains(view) ? view : sidebarViews[0]
         sidebarItem = .view(shown)
         coordinator.current = shown
     }
@@ -173,7 +182,7 @@ struct ShelfView: View {
     /// The tab hierarchy with its backgrounds and overlays.
     private var tabs: some View {
         TabView(selection: sidebarSelection) {
-            ForEach(coordinator.preferences.orderedViews) { view in
+            ForEach(sidebarViews) { view in
                 Tab(view.rawValue, systemImage: view.systemImage, value: SidebarItem.view(view)) {
                     tabContent(for: view)
                 }
@@ -220,6 +229,34 @@ struct ShelfView: View {
             sidebarHeader
         }
         .overlay { BookWallDetailOverlay(state: wallDetail, palette: palette) }
+        .overlay(alignment: .top) {
+            // Names the example profile over each view, level with the view's title, without
+            // taking focus; VoiceOver hears it from My Shelf's Connect Hardcover instead.
+            if library.isExample && isShowingMainView {
+                Text("Example profile")
+                    .appFont(size: 24, weight: .medium)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.55), in: .capsule)
+                    .padding(.top, 56)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .sheet(isPresented: $connectsFromExample) {
+            // The same sign-in as Settings → Sources; connecting ends the example profile.
+            HardcoverConnectionView(library: library) { connectsFromExample = false }
+                .frame(width: 1380)
+                .padding(64)
+                .appTypography()
+                .onExitCommand { connectsFromExample = false }
+        }
+        .onChange(of: library.isExample) {
+            // Book Wall leaves the sidebar with the example unless the reader shows it.
+            if !sidebarViews.contains(coordinator.current) { coordinator.current = sidebarViews[0] }
+        }
     }
 
     var body: some View {
@@ -353,8 +390,9 @@ struct ShelfView: View {
                         selectedBook = chosen
                     },
                     friendReads: social.presentation.friendReads[book.id] ?? [],
-                    // Sample books are fictional, so their IDs aren't their Hardcover pages.
-                    hardcoverURL: library.isSample ? nil : book.hardcoverURL
+                    // Sample books are fictional, so their IDs aren't their Hardcover pages. The
+                    // example profile's books are real.
+                    hardcoverURL: library.isSample && !library.isExample ? nil : book.hardcoverURL
                 )
                 .appTypography()
                 .id(book.id)
@@ -386,7 +424,8 @@ struct ShelfView: View {
                 LibraryWelcomeView(
                     library: library,
                     isLibraryReady: {
-                        preparedArtwork == artworkKey
+                        // The example profile loads before its books publish.
+                        !library.isLoading && preparedArtwork == artworkKey
                             && (library.books.isEmpty || shelfPagesAreReady)
                     },
                     onDismiss: { isWelcomePresented = false }
@@ -552,6 +591,9 @@ struct ShelfView: View {
                 return
             }
         #endif
+        // The example profile shows no other readers, and a load without a token would clear
+        // the social cache.
+        guard !library.isExample else { return }
         if library.isSample {
             social.useSample(books: library.books)
             ensureComparisonReader()
@@ -596,6 +638,8 @@ struct ShelfView: View {
     /// Returns a loader for community reviews, or `nil` when Hardcover can't supply them. It
     /// checks cached credential flags now and reads the token only when the reviews sheet opens.
     private func reviewLoader(for book: Book) -> (@MainActor () async throws -> [BookReview])? {
+        // Fictional reviews belong to the fictional sample, never the example's real books.
+        if library.isExample { return nil }
         if library.isSample { return { SampleLibrary.reviews } }
         guard book.isHardcoverBook, library.hardcoverEnabled, library.hardcoverConnected
         else { return nil }
@@ -1059,13 +1103,21 @@ struct ShelfView: View {
                 .accessibilityLabel("Clear filter: \(filter.name)")
                 .accessibilityIdentifier("clear-shelf-filter")
             }
-            if library.isSample {
+            if library.isExample {
+                Button("Connect Hardcover") { connectsFromExample = true }
+                    .buttonStyle(.glass)
+                    .appFont(size: 24, weight: .medium)
+                    // VoiceOver skips the "Example profile" capsule, so the button names it.
+                    .accessibilityLabel("Example profile: Connect Hardcover")
+                    .accessibilityIdentifier("example-connect-hardcover")
+            } else if library.isSample {
                 Text("Sample shelf").appFont(size: 24)
                     .foregroundStyle(palette.text.opacity(0.6))
             }
             Spacer()
         }
-        // A full-width section, so Down from any cover reaches the filter's clear button.
+        // A full-width section, so Down from any cover reaches the filter's clear button and the
+        // example profile's Connect Hardcover.
         .focusSection()
     }
 
@@ -1119,7 +1171,11 @@ struct ShelfView: View {
                     }
                     .buttonStyle(.glassProminent)
                     .accessibilityIdentifier("choose-sources")
-                    Button("Explore a sample shelf") { library.showSample() }.buttonStyle(.glass)
+                    if library.offersExample {
+                        Button("View example profile") { Task { await library.showExample() } }
+                            .buttonStyle(.glass)
+                            .accessibilityIdentifier("view-example-profile")
+                    }
                 }
             }
         }

@@ -44,7 +44,9 @@ final class ScenarioNavigationTests: XCTestCase {
     }
 
     @discardableResult
-    private func probe(_ app: XCUIApplication, sample: Bool = false) throws -> [String: Any] {
+    private func probe(
+        _ app: XCUIApplication, sample: Bool = false, example: Bool = false
+    ) throws -> [String: Any] {
         let element = app.staticTexts["scenario-probe"].firstMatch
         let previous = element.exists ? element.label : ""
         command("probe", app: app)
@@ -61,6 +63,7 @@ final class ScenarioNavigationTests: XCTestCase {
         )
         XCTAssertEqual(
             evidence["sample"] as? Bool, sample, "The scenario must use the expected library.")
+        XCTAssertEqual(evidence["example"] as? Bool, example)
         XCTAssertEqual(evidence["generating"] as? Bool, false)
         let attachment = XCTAttachment(
             data: try JSONSerialization.data(
@@ -158,38 +161,84 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(try probe(app)["welcomeCompleted"] as? Bool, false)
     }
 
-    func testWelcomeDefaultFocusAndSampleChoicePersistAcrossRelaunch() throws {
+    func testWelcomeDefaultFocusAndExampleChoicePersistAcrossRelaunch() throws {
         let app = launch("welcome", focusProbe: true)
         let welcome = app.descendants(matching: .any)["library-welcome"].firstMatch
         let connect = app.buttons["welcome-connect-hardcover"]
-        let sample = app.buttons["welcome-sample-library"]
+        let example = app.buttons["welcome-example-profile"]
         XCTAssertTrue(welcome.waitForExistence(timeout: 15))
         RemoteNavigation.waitForFocus(connect)
         XCTAssertEqual(connect.label, "Connect Hardcover")
-        XCTAssertEqual(sample.label, "Explore sample library")
+        XCTAssertEqual(example.label, "View example profile")
         RemoteNavigation.pressWithoutMoving(.up, in: app, from: connect)
         RemoteNavigation.pressWithoutMoving(.left, in: app, from: connect)
         RemoteNavigation.pressWithoutMoving(.right, in: app, from: connect)
-        RemoteNavigation.press(.down, in: app, expecting: sample)
-        RemoteNavigation.pressWithoutMoving(.down, in: app, from: sample)
-        RemoteNavigation.pressWithoutMoving(.left, in: app, from: sample)
-        RemoteNavigation.pressWithoutMoving(.right, in: app, from: sample)
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: example)
+        RemoteNavigation.pressWithoutMoving(.left, in: app, from: example)
+        RemoteNavigation.pressWithoutMoving(.right, in: app, from: example)
         RemoteNavigation.press(.up, in: app, expecting: connect)
         capture(app, "scenario-welcome-choices")
         try audit(app)
-        RemoteNavigation.press(.down, in: app, expecting: sample)
+        RemoteNavigation.press(.down, in: app, expecting: example)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
         waitForAbsence(welcome)
-        let selected = try probe(app, sample: true)
+        RemoteNavigation.waitForFocus(first)
+        let selected = try probe(app, sample: true, example: true)
         XCTAssertEqual(selected["welcomeCompleted"] as? Bool, true)
         XCTAssertEqual(selected["sourceCalls"] as? Int, 0)
+        XCTAssertEqual(selected["cloudCalls"] as? Int, 0)
+
+        // The example's one control sits in the shelf's full-width status row, and VoiceOver
+        // hears the example's name from it, since the capsule never takes focus.
+        let exampleConnect = app.buttons["example-connect-hardcover"]
+        XCTAssertEqual(exampleConnect.label, "Example profile: Connect Hardcover")
+        RemoteNavigation.press(.down, in: app, expecting: exampleConnect)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: exampleConnect)
+        capture(app, "scenario-example-profile-shelf")
+        RemoteNavigation.press(.up, in: app, expecting: first)
+        RemoteNavigation.press(.left, in: app, expecting: app.staticTexts["My Shelf"].firstMatch)
+        // The example's sidebar adds Book Wall and leaves out the social views.
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        XCTAssertFalse(app.staticTexts["Feed"].exists)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
+        capture(app, "scenario-example-profile-book-wall")
+        RemoteNavigation.selectView("Year in Review", in: app)
+        capture(app, "scenario-example-profile-year-in-review")
+        RemoteNavigation.selectView("My Shelf", in: app)
+        XCTAssertTrue(exampleConnect.waitForExistence(timeout: 5))
         app.terminate()
 
+        // The example lives in memory; the next launch offers it again on the empty shelf.
         let restored = launch("welcome", preserve: true)
         XCTAssertTrue(restored.buttons["choose-sources"].waitForExistence(timeout: 15))
+        XCTAssertTrue(restored.buttons["view-example-profile"].exists)
         XCTAssertFalse(restored.descendants(matching: .any)["library-welcome"].exists)
         XCTAssertEqual(try probe(restored)["welcomeCompleted"] as? Bool, true)
+    }
+
+    func testExampleConnectHardcoverOpensSignInAndBackReturns() throws {
+        let app = launch("welcome", focusProbe: true)
+        let example = app.buttons["welcome-example-profile"]
+        XCTAssertTrue(example.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        XCUIRemote.shared.press(.select)
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(first)
+        let exampleConnect = app.buttons["example-connect-hardcover"]
+        RemoteNavigation.press(.down, in: app, expecting: exampleConnect)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
+        capture(app, "scenario-example-connect-hardcover")
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(exampleConnect)
+        let afterBack = try probe(app, sample: true, example: true)
+        XCTAssertEqual(afterBack["hardcoverConnected"] as? Bool, false)
     }
 
     func testWelcomeHardcoverDownloadAndArtworkStayInModalUntilReady() throws {
@@ -264,10 +313,11 @@ final class ScenarioNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(connect)
-        RemoteNavigation.press(.down, in: app, expecting: app.buttons["welcome-sample-library"])
+        RemoteNavigation.press(.down, in: app, expecting: app.buttons["welcome-example-profile"])
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
-        XCTAssertEqual(try probe(app, sample: true)["welcomeCompleted"] as? Bool, true)
+        XCTAssertEqual(
+            try probe(app, sample: true, example: true)["welcomeCompleted"] as? Bool, true)
     }
 
     func testWelcomeBackAllowsBrowsingAndReturnsOnNextLaunch() throws {
