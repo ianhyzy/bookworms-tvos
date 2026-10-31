@@ -103,7 +103,9 @@ final class SocialLibraryModel {
         }
         let fingerprint = SHA256.hash(data: Data((account ?? token).utf8))
             .map { String(format: "%02x", $0) }.joined()
-        if identity == fingerprint, requestedReader == readerID,
+        // A manual load replaces a matching load in flight, so its bypass of the daily gates
+        // isn't lost.
+        if !manual, identity == fingerprint, requestedReader == readerID,
             requestedViews == socialViews, let activeTask
         {
             await activeTask.value
@@ -278,7 +280,10 @@ final class SocialLibraryModel {
                 switch error {
                 case HardcoverError.insufficientScope, HardcoverError.forbidden,
                     HardcoverError.invalidToken:
-                    if let owner = snapshot?.owner.id {
+                    // A first load can be denied before it installs the cache file it read.
+                    if let owner = snapshot?.owner.id
+                        ?? defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int
+                    {
                         try? FileManager.default.removeItem(
                             at: cacheRoot.appending(path: "\(owner).json"))
                     }

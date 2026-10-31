@@ -428,6 +428,57 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
     }
 
+    /// A first load that reads the cache file and is then denied deletes that file, though it
+    /// never installed it.
+    func testDeniedFirstLoadDeletesTheCacheFileItRead() async throws {
+        let suite = "SocialDeniedFirst.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let client = SocialFixtureClient()
+        let token = "hc_pat_" + String(repeating: "x", count: 32)
+        let cached = SocialSnapshot(
+            owner: ReaderProfile(id: 1, username: "reader1", name: nil, avatarURL: nil))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try JSONEncoder().encode(cached).write(to: root.appending(path: "1.json"))
+        await client.fail(with: .denied)
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(token: token, readerID: 2)
+        XCTAssertNil(model.snapshot)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+    }
+
+    /// A manual load during a matching automatic load runs its own requests instead of waiting
+    /// for the automatic one, which skipped datasets that aren't due.
+    func testManualLoadDuringAnAutomaticLoadBypassesTheDailyGates() async throws {
+        let suite = "SocialManualInFlight.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let client = SocialFixtureClient()
+        let time = Date()
+        let model = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root, now: { time })
+        let token = "hc_pat_" + String(repeating: "x", count: 32)
+        await client.holdReaderTwo()
+        let automatic = Task { await model.load(token: token, readerID: 2) }
+        while await client.counts["reader2"] == nil { await Task.yield() }
+        let manual = Task { await model.load(token: token, readerID: 2, manual: true) }
+        // A manual load that waited on the automatic one would never request Following again.
+        for _ in 0..<10_000 where await client.counts["following"] != 2 { await Task.yield() }
+        await client.releaseReaderTwo()
+        await automatic.value
+        await manual.value
+        let counts = await client.counts
+        XCTAssertEqual(counts["following"], 2, "The manual load skips the daily gate")
+    }
+
     /// Settings → Sources shows the status, so it names neither Settings nor raw scopes. A missing
     /// permission names Disconnect, the button that state shows, and a rejected login doesn't
     /// blame social permissions.
@@ -659,13 +710,13 @@ private actor SocialFixtureClient: SocialLibraryFetching {
     private var failure: Failure?
     private var unfollowed = false
     private var holdsReaderTwo = false
-    private var readerTwoGate: CheckedContinuation<Void, Never>?
-    /// Holds reader 2's library response until `releaseReaderTwo()`.
+    private var readerTwoGates: [CheckedContinuation<Void, Never>] = []
+    /// Holds every reader 2 library response until `releaseReaderTwo()`.
     func holdReaderTwo() { holdsReaderTwo = true }
     func releaseReaderTwo() {
         holdsReaderTwo = false
-        readerTwoGate?.resume()
-        readerTwoGate = nil
+        for gate in readerTwoGates { gate.resume() }
+        readerTwoGates = []
     }
     private var feedFailure: Error?
     func fail(with failure: Failure) { self.failure = failure }
@@ -704,7 +755,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         counts["reader\(user)", default: 0] += 1
         if deniedReaders.contains(user) { throw HardcoverError.forbidden }
         if user == 2 && holdsReaderTwo {
-            await withCheckedContinuation { readerTwoGate = $0 }
+            await withCheckedContinuation { readerTwoGates.append($0) }
         }
         return [
             ReaderBook(
