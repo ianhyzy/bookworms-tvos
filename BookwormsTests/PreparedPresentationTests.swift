@@ -79,6 +79,22 @@ final class PreparedPresentationTests: XCTestCase {
         XCTAssertEqual(reads, 2)
     }
 
+    func testSampleFollowsTwoReadersWithDifferentShelves() throws {
+        let model = SocialLibraryModel()
+        model.useSample()
+        XCTAssertEqual(model.following.map(\.displayName), ["Sample reader", "Theo Marsh"])
+        XCTAssertEqual(model.following.first?.id, SocialLibraryModel.sampleReaderID)
+        let snapshot = try XCTUnwrap(model.snapshot)
+        let shelves = model.following.map { snapshot.readerBooks[$0.id] ?? [] }
+        XCTAssertFalse(shelves[1].isEmpty)
+        XCTAssertNotEqual(shelves[0].map(\.id), shelves[1].map(\.id))
+        XCTAssertNotEqual(shelves[0].map(\.rating), shelves[1].map(\.rating))
+        // The second reader's books leave Friends' Picks as it was.
+        let picks = FriendPick.ranked(snapshot, limit: 10)
+        XCTAssertFalse(picks.isEmpty)
+        XCTAssertFalse(picks.contains { $0.fans.contains { $0.id == model.following[1].id } })
+    }
+
     func testPreparedComparisonSurvivesNavigationAndInvalidatesForChoices() {
         let model = SocialLibraryModel()
         model.useSample()

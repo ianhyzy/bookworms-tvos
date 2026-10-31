@@ -222,9 +222,10 @@ final class SocialNavigationTests: XCTestCase {
     func testReaderPickerOnViewChoosesReader() {
         let app = RemoteNavigation.open("Compare Shelves")
         XCTAssertTrue(app.otherElements["comparison-upper"].waitForExistence(timeout: 15))
-        RemoteNavigation.chooseReader("Sample reader", in: app)
+        XCTAssertEqual(app.buttons["reader-picker-menu"].label, "Reader: Sample reader")
+        RemoteNavigation.chooseReader("Theo Marsh", in: app)
         capture(app, name: "Comparison reader picker")
-        XCTAssertTrue(app.staticTexts["Sample reader"].exists)
+        XCTAssertTrue(app.staticTexts["Theo Marsh"].exists)
     }
 
     func testSettingsOmitPerViewChoices() {

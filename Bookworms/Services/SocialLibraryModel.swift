@@ -387,6 +387,9 @@ final class SocialLibraryModel {
         }
     }
 
+    /// The sample's first followed reader, whom UI tests start with.
+    static let sampleReaderID = -2
+
     func useSample(books: [Book] = SampleLibrary.books) {
         guard !isSample else { return }
         activeTask?.cancel()
@@ -395,7 +398,10 @@ final class SocialLibraryModel {
         isLoading = false
         let me = ReaderProfile(id: -1, username: "sample", name: "You", avatarURL: nil)
         let other = ReaderProfile(
-            id: -2, username: "sample-reader", name: "Sample reader", avatarURL: nil)
+            id: Self.sampleReaderID, username: "sample-reader", name: "Sample reader",
+            avatarURL: nil)
+        let second = ReaderProfile(
+            id: -3, username: "sample-reader-2", name: "Theo Marsh", avatarURL: nil)
         let mine =
             books
             .map { book in
@@ -423,8 +429,22 @@ final class SocialLibraryModel {
                 ReaderBook(
                     book: $0, rating: 4, review: nil, hasSpoilers: false, finished: $0.finished)
             }
+        // The second reader shares every other book, rated differently, so the reader picker
+        // offers a real choice. Their own books stay below Friends' Picks' rating threshold.
+        let ratings = [3, 5, 3.5, 4.5]
+        let secondBooks =
+            stride(from: 0, to: mine.count, by: 2)
+            .map { index in
+                ReaderBook(
+                    book: mine[index].book, rating: ratings[index / 2 % ratings.count],
+                    review: nil, hasSpoilers: false, finished: mine[index].finished)
+            }
+            + SampleLibrary.secondReaderBooks.map {
+                ReaderBook(
+                    book: $0, rating: 3.5, review: nil, hasSpoilers: false, finished: $0.finished)
+            }
         snapshot = SocialSnapshot(
-            owner: me, following: [other],
+            owner: me, following: [other, second],
             activities: mine.map {
                 FeedActivity(
                     id: $0.id, reader: other,
@@ -433,7 +453,7 @@ final class SocialLibraryModel {
                     summary: "Finished reading",
                     book: $0.book, likes: 2, rating: $0.rating, review: $0.review,
                     hasSpoilers: $0.hasSpoilers)
-            }, mine: mine, readerBooks: [other.id: theirs])
+            }, mine: mine, readerBooks: [other.id: theirs, second.id: secondBooks])
         status = "Sample social data. No accounts or AI requests are used."
         revision += 1
     }

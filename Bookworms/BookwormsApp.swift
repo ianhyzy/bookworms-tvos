@@ -21,6 +21,11 @@ struct BookwormsApp: App {
                 let domain = Bundle.main.bundleIdentifier
             {
                 UserDefaults.standard.removePersistentDomain(forName: domain)
+                // The app picks a random followed reader; tests start with the same one.
+                var preferences = ViewPreferences()
+                preferences.readerID = SocialLibraryModel.sampleReaderID
+                UserDefaults.standard.set(
+                    try? JSONEncoder().encode(preferences), forKey: "viewPreferences")
             }
         #endif
         defaults = .standard

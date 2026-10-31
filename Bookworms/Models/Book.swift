@@ -381,6 +381,16 @@ extension SampleLibrary {
             id: 102, title: "Salt and Lanterns", author: "Imogen Hale", pages: 288,
             finished: "2026-06-02", communityRating: 3.9),
     ]
+
+    /// Fictional books only the second sample reader has read.
+    static let secondReaderBooks: [Book] = [
+        Book(
+            id: 103, title: "The Clockmaker's Garden", author: "Nadia Ferro", pages: 320,
+            finished: "2026-08-02", communityRating: 3.7),
+        Book(
+            id: 104, title: "Northern Lines", author: "Elliot Shaw", pages: 256,
+            finished: "2026-05-19", communityRating: 3.8),
+    ]
 }
 
 struct RatingBucket: Codable, Hashable, Identifiable, Sendable {
