@@ -425,8 +425,9 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
     }
 
-    /// Settings → Sources shows the status beside Reconnect Hardcover, so it names neither
-    /// Settings nor raw scopes, and a rejected login doesn't blame social permissions.
+    /// Settings → Sources shows the status, so it names neither Settings nor raw scopes. A missing
+    /// permission names Disconnect, the button that state shows, and a rejected login doesn't
+    /// blame social permissions.
     func testRejectedLoginAndMissingPermissionExplainThemselvesPlainly() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "SocialStatus.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -444,6 +445,7 @@ final class SocialFeatureTests: XCTestCase {
         await client.fail(with: .scope)
         await scoped.load(token: "hc_at_fixture_new", readerID: 2)
         XCTAssertTrue(scoped.status.contains("permission to see the readers you follow"))
+        XCTAssertTrue(scoped.status.contains("Disconnect Hardcover"))
         for status in [model.status, scoped.status] {
             XCTAssertFalse(status.contains("Settings"), status)
             XCTAssertFalse(status.contains("read:"), status)

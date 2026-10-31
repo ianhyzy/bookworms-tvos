@@ -318,7 +318,7 @@ struct BookDetailView: View {
                     }
                 }
                 .fixedSize()
-                .metadataCard()
+                .detailCard()
             }
             if !genres.isEmpty {
                 Group {
@@ -333,29 +333,25 @@ struct BookDetailView: View {
                         )
                     }
                 }
-                .metadataCard()
+                .detailCard()
                 // Genres size first and wrap only when the chart would drop below its minimum
                 // width; the chart takes what they leave.
                 .layoutPriority(1)
             }
             if RatingsView.shows(book) {
-                Group {
-                    if loadReviews != nil {
-                        // The card's padding keeps the focus highlight inside it.
-                        Button {
-                            showsReviews = true
-                        } label: {
-                            RatingsView(book: book)
-                        }
-                        .buttonStyle(FocusHighlightButtonStyle())
-                        .focusEffectDisabled()
-                        .accessibilityHint("Shows community reviews.")
-                        .accessibilityIdentifier("community-reviews")
-                    } else {
+                if loadReviews != nil {
+                    Button {
+                        showsReviews = true
+                    } label: {
                         RatingsView(book: book)
                     }
+                    .buttonStyle(DetailCardButtonStyle())
+                    .focusEffectDisabled()
+                    .accessibilityHint("Shows community reviews.")
+                    .accessibilityIdentifier("community-reviews")
+                } else {
+                    RatingsView(book: book).detailCard()
                 }
-                .metadataCard()
             }
         }
         // Lets each card fill the row's height, so the cards line up top and bottom.
@@ -537,19 +533,22 @@ private struct FlatButtonStyle: ButtonStyle {
 }
 
 extension View {
-    /// Sets a book-details metadata section on the translucent card the review reader uses. A
-    /// material would read as black over the dark details backdrop, and on Book Wall it would blur
-    /// a 3D scene that changes every frame.
-    fileprivate func metadataCard() -> some View {
-        padding(.horizontal, 24).padding(.vertical, 20)
+    /// Sets book-details content, such as a metadata section or a review, on a translucent card
+    /// that fills the height it's offered and brightens while `focused`. A material would read as
+    /// black over the dark details backdrop, and on Book Wall it would blur a 3D scene that
+    /// changes every frame.
+    fileprivate func detailCard(
+        horizontal: CGFloat = 24, vertical: CGFloat = 20, focused: Bool = false
+    ) -> some View {
+        padding(.horizontal, horizontal).padding(.vertical, vertical)
             .frame(maxHeight: .infinity, alignment: .topLeading)
-            .background(.primary.opacity(0.08), in: .rect(cornerRadius: 24))
+            .background(.primary.opacity(focused ? 0.2 : 0.08), in: .rect(cornerRadius: 24))
     }
 }
 
-/// Shows a rounded highlight behind the label only while focused. The highlight extends past the
-/// label so the content stays aligned with neighboring, unfocusable metadata.
-private struct FocusHighlightButtonStyle: ButtonStyle {
+/// Sets the label on a detail card that brightens and lifts while focused, so the whole card is
+/// the button rather than a highlight drawn inside it.
+private struct DetailCardButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Highlight(configuration: configuration)
     }
@@ -561,11 +560,9 @@ private struct FocusHighlightButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .padding(18)
-                .background(.primary.opacity(isFocused ? 0.12 : 0), in: .rect(cornerRadius: 20))
+                .detailCard(focused: isFocused)
                 .scaleEffect(isFocused && !reduceMotion ? 1.03 : 1)
                 .opacity(configuration.isPressed ? 0.8 : 1)
-                .padding(-18)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isFocused)
         }
     }
@@ -717,9 +714,8 @@ struct BookReviewsView: View {
                 readerMaximumOffset = value
             }
         }
-        .padding(30)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.primary.opacity(0.08), in: .rect(cornerRadius: 24))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .detailCard(horizontal: 30, vertical: 30)
         .padding(.horizontal, Self.liftMargin).padding(.vertical, Self.liftMargin)
         .focusable()
         .focusEffectDisabled()

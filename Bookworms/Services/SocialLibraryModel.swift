@@ -288,12 +288,14 @@ final class SocialLibraryModel {
                     }
                     snapshot = nil
                     revision += 1
-                    // Only Settings → Sources shows this, beside Reconnect Hardcover. A rejected
-                    // login gets the library's message rather than one blaming social access.
+                    // Only Settings → Sources shows this, so it names that page's buttons. A
+                    // missing permission leaves the login working, so the button there is
+                    // Disconnect Hardcover. A rejected login gets the library's message rather
+                    // than one blaming social access.
                     status =
                         switch error {
                         case HardcoverError.insufficientScope:
-                            "Bookworms needs permission to see the readers you follow. Reconnect Hardcover to allow it."
+                            "Bookworms needs permission to see the readers you follow. Disconnect Hardcover, then connect it again to allow it."
                         case HardcoverError.invalidToken:
                             HardcoverError.invalidToken.localizedDescription
                         default:

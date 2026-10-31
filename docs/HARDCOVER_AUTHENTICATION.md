@@ -11,7 +11,7 @@ The OAuth configuration uses:
 - **Revocation Endpoint**: `https://api.hardcover.app/oauth2/revoke`
 - **Requested scopes**: `read:me:content read:library read:catalog:data read:social read:users`
 
-The GraphQL API endpoint is `https://api.hardcover.app/v1/graphql`, with `Authorization: Bearer <token>`. HTTP 401 indicates an invalid or expired credential. HTTP 403 with `insufficient_scope` asks the user to reconnect with the required read permissions; other 403 responses report denied access without incorrectly calling the token expired.
+The GraphQL API endpoint is `https://api.hardcover.app/v1/graphql`, with `Authorization: Bearer <token>`. HTTP 401 indicates an invalid or expired credential. HTTP 403 with `insufficient_scope`, or a GraphQL error about permissions or scopes, leaves the login working, so **Settings → Sources** keeps **Disconnect Hardcover** and its message says to disconnect Hardcover, then connect it again to allow the missing permission; other 403 responses report denied access without incorrectly calling the token expired.
 
 When connecting or updating login, the app exchanges the approved device code for an access token and refresh token and validates the account before saving to Keychain. Between scheduled syncs, credential rotation validates the account without refetching the entire library. A rejected connection preserves the displayed shelf and saved credential. If Keychain refuses the new login, the previous login stays saved. The one exception needs two Keychain failures in one save: when Keychain can't read the previous refresh token and then refuses the new access token, the previous refresh token is lost, and the previous access token works until Hardcover rejects it.
 

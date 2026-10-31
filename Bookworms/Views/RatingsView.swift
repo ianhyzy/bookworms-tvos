@@ -17,10 +17,7 @@ struct RatingsView: View {
     }
 
     /// The half-star bucket that holds your rating. Only its bar is solid white.
-    private var yourBucket: Double? { book.rating.map(Self.bucket(for:)) }
-
-    /// The half-star bucket nearest `rating`, whose bar sits on the axis at that value.
-    nonisolated static func bucket(for rating: Double) -> Double { (rating * 2).rounded() / 2 }
+    private var yourBucket: Double? { book.rating.map { ($0 * 2).rounded() / 2 } }
 
     /// Your rating, then the community average, as rows of a grid that aligns their stars.
     private var ratings: [(label: String, stars: String)] {
