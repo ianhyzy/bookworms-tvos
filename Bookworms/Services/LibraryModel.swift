@@ -903,8 +903,7 @@ final class LibraryModel {
                 isSample = false
                 hardcoverEnabled = true
                 sourceErrors[LibrarySource.hardcover.rawValue] = nil
-                message =
-                    "Hardcover token verified. Library sync keeps its daily schedule."
+                message = Self.verifiedTokenMessage
                 return true
             }
             try schedule
@@ -1177,6 +1176,16 @@ final class LibraryModel {
         completeWelcome()
         message = nil
         publishTopShelf()
+    }
+
+    /// The status after a replacement login is verified between daily syncs, shown while the
+    /// reconnection's social load runs.
+    static let verifiedTokenMessage = "Hardcover token verified. Loading library…"
+
+    /// Removes `verifiedTokenMessage` once the reconnection's social load ends, keeping any
+    /// later message.
+    func clearVerifiedTokenMessage() {
+        if message == Self.verifiedTokenMessage { message = nil }
     }
 
     func disconnect() {

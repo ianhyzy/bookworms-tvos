@@ -239,6 +239,39 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(try probe(restored)["sourceCalls"] as? Int, 0)
     }
 
+    /// Reconnecting with a fresh snapshot validates the login, closes the sheet, and keeps the
+    /// daily download schedule.
+    func testSettingsReconnectClosesTheSheetWithoutDownloading() throws {
+        let app = launch("welcome", settingsTab: "Sources")
+        try openWelcomeHardcover(app)
+        command("approve-hardcover", app: app)
+        _ = try waitForProbe(app) {
+            ($0["network"] as? [String: Any])?["heldLibrary"] as? Int == 1
+        }
+        command("release-library", app: app)
+        _ = try waitForProbe(app) {
+            ($0["network"] as? [String: Any])?["heldArtwork"] as? Int == 1
+        }
+        command("release-artwork", app: app)
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        let downloads = try XCTUnwrap(try probe(app)["sourceCalls"] as? Int)
+
+        RemoteNavigation.openSettings(app)
+        let disconnect = app.buttons["Disconnect Hardcover"]
+        RemoteNavigation.moveFocus(to: disconnect, in: app)
+        XCUIRemote.shared.press(.select)
+        let connect = app.buttons["Connect Hardcover"]
+        RemoteNavigation.waitForFocus(connect)
+        XCUIRemote.shared.press(.select)
+        // The scenario already approved this Apple TV, so the first poll returns a token.
+        XCTAssertTrue(app.buttons["Disconnect Hardcover"].waitForExistence(timeout: 15))
+        waitForAbsence(app.descendants(matching: .any)["hardcover-connection-progress"])
+        XCTAssertFalse(app.staticTexts["hardcover-instructions"].exists)
+        let evidence = try probe(app)
+        XCTAssertEqual(evidence["sourceCalls"] as? Int, downloads)
+        XCTAssertEqual(evidence["hardcoverConnected"] as? Bool, true)
+    }
+
     func testWelcomeDownloadFailureKeepsChoicesAvailableAndDoesNotCompleteSetup() throws {
         let app = launch("welcome-error", focusProbe: true)
         let connect = app.buttons["welcome-connect-hardcover"]
