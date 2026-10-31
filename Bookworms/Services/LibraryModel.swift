@@ -147,10 +147,11 @@ final class LibraryModel {
     }
 
     /// Whether picking a series in `book`'s details can save it: always in the sample library,
-    /// which keeps picks in memory, and otherwise for a book of the active Hardcover account
-    /// with iCloud storage on.
+    /// which keeps picks in memory, never in the read-only example profile, and otherwise for a
+    /// book of the active Hardcover account with iCloud storage on.
     func canPickSeries(for book: Book) -> Bool {
-        isSample
+        guard !isExample else { return false }
+        return isSample
             || (iCloudEnabled && hardcoverEnabled && activeHardcoverAccountID != nil
                 && book.isHardcoverBook)
     }
@@ -541,18 +542,24 @@ final class LibraryModel {
             dependencies.defaults.set(iCloudEnabled, forKey: "iCloudEnabled")
             invalidateCloudSync()
             if iCloudEnabled {
+                // The example profile never syncs, so turning storage on asks for the iCloud
+                // library instead.
+                if isExample { isSample = false }
                 queueCloudSync()
             } else {
                 // Companion designs, covers, and series looks apply only with iCloud storage
-                // on. The on-disk caches stay, so turning iCloud back on restores them.
-                spineDesigns = [:]
-                seriesLinks = [:]
-                pickedLinks = [:]
-                seriesLooks = [:]
-                refreshSeriesSources()
-                if !coverChoices.isEmpty {
-                    coverChoices = [:]
-                    rebuildLibrary()
+                // on. The on-disk caches stay, so turning iCloud back on restores them. The
+                // example profile's own records stay.
+                if !isExample {
+                    spineDesigns = [:]
+                    seriesLinks = [:]
+                    pickedLinks = [:]
+                    seriesLooks = [:]
+                    refreshSeriesSources()
+                    if !coverChoices.isEmpty {
+                        coverChoices = [:]
+                        rebuildLibrary()
+                    }
                 }
                 cloudStatus = "iCloud storage is off. Existing cloud data is retained."
             }
@@ -566,7 +573,35 @@ final class LibraryModel {
     @ObservationIgnored private var cloudTask: Task<Void, Never>?
     @ObservationIgnored private var cloudPending = false
     @ObservationIgnored private var cloudBacked = false
-    private(set) var isSample = false
+    private(set) var isSample = false {
+        didSet {
+            guard oldValue, !isSample else { return }
+            if isExample {
+                // Example records are keyed by real book IDs and draw without revalidation, so
+                // they must never reach a real library, even with iCloud storage off.
+                isExample = false
+                seriesLinks = [:]
+                pickedLinks = [:]
+                seriesLooks = [:]
+                spineDesigns = [:]
+            }
+            // Every way out, including a verified token that skips the download, shows the
+            // saved library in place of the sample's books.
+            rebuildLibrary()
+        }
+    }
+    /// Whether the shelf shows the bundled example profile (`showExample()`), a sample library of
+    /// real books that lives in memory only. `isSample` is set with it, so syncing, generation,
+    /// saved styles, and Top Shelf skip it; it also never reads companion records, loads social
+    /// data, or saves series picks. Leaving sample mode, by connecting a source or turning on
+    /// iCloud storage, ends it.
+    private(set) var isExample = false
+    /// Whether the welcome and the empty shelf offer **View example profile**: the build bundles
+    /// it and no source is connected.
+    var offersExample: Bool { dependencies.exampleProfile != nil && !isConnected && !isExample }
+    /// The date the year views treat as today: the example profile's sync date, so its Book Wall
+    /// doesn't empty as the bundled snapshot ages.
+    var now: Date { isExample ? syncedAt ?? .now : .now }
     private(set) var syncedAt: Date?
     var message: String?
     private(set) var hardcoverDeviceAuth: HardcoverDeviceAuth?
@@ -965,7 +1000,7 @@ final class LibraryModel {
 
     func refresh(manual: Bool = false) async {
         guard !PerformanceDiagnostics.isolates("background") else { return }
-        guard !isLoading, !isGenerating else { return }
+        guard !isLoading, !isGenerating, !isExample else { return }
         if manual {
             guard lastManualRefresh.map({ dependencies.now().timeIntervalSince($0) >= 10 }) ?? true
             else {
@@ -1152,16 +1187,15 @@ final class LibraryModel {
         queueSpineDesignRefresh()
     }
 
+    /// Shows the fictional sample library, for `--sample-library` and tests.
     func showSample() {
         guard !isLoading else { return }
-        cancelShelfWork()
-        allBooks = SampleLibrary.books
-        seriesByID = Dictionary(uniqueKeysWithValues: SampleLibrary.allSeries.map { ($0.id, $0) })
+        var books = SampleLibrary.books
         #if DEBUG
             if dependencies.allowLaunchOverrides,
                 ProcessInfo.processInfo.arguments.contains("--sample-pages")
             {
-                allBooks = (0..<24)
+                books = (0..<24)
                     .map { index in
                         let book = SampleLibrary.books[index % SampleLibrary.books.count]
                         return Book(
@@ -1171,12 +1205,49 @@ final class LibraryModel {
                     }
             }
         #endif
-        books = Array(allBooks.prefix(bookCount))
+        presentSample(books: books, series: SampleLibrary.allSeries)
+    }
+
+    /// Shows the bundled example profile (`ExampleProfile`) read-only, in sample mode, when the
+    /// build has it and no source is connected. Returns whether it shows.
+    ///
+    /// `isExample` and `isLoading` are set before the read, so a refresh that starts meanwhile
+    /// returns at once. A connection, or a library that iCloud brings, during the read wins: the
+    /// example then doesn't show. A profile that can't be read sets `message`.
+    @discardableResult
+    func showExample() async -> Bool {
+        guard offersExample, let load = dependencies.exampleProfile, !isLoading, !isSample,
+            allBooks.isEmpty
+        else { return false }
+        isExample = true
+        isLoading = true
+        let profile = await load()
+        isLoading = false
+        guard isExample, !isConnected, allBooks.isEmpty, let profile else {
+            if isExample, profile == nil { message = "The example profile couldn't be opened." }
+            isExample = false
+            return false
+        }
+        // Looks first: assigning the designs prepares the series drawing once with both.
+        seriesLooks = profile.looks
+        spineDesigns = profile.designs
+        syncedAt = profile.syncedAt
+        presentSample(books: profile.books, series: profile.series)
+        return true
+    }
+
+    /// Shows `books` as the sample library and completes the welcome. Sample mode keeps the
+    /// books in memory: nothing saves, syncs, or generates for them.
+    private func presentSample(books: [Book], series: [SeriesInfo]) {
+        cancelShelfWork()
+        allBooks = books
+        seriesByID = Dictionary(
+            series.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         styles = [:]
         isSample = true
         completeWelcome()
         message = nil
-        publishTopShelf()
+        updateShelf()
     }
 
     func disconnect() {
@@ -1320,8 +1391,10 @@ final class LibraryModel {
         let measurement = PerformanceDiagnostics.begin("UpdateShelf")
         defer { measurement.end() }
         let source = shelfFilter.map { filter in allBooks.filter(filter.matches) } ?? allBooks
+        // The fictional sample keeps its order; the example profile follows the shelf choices
+        // like a real library.
         books =
-            isSample
+            isSample && !isExample
             ? Array(source.prefix(bookCount))
             : activeShelfPreferences.select(source, limit: bookCount)
         if !isSample {
@@ -1461,6 +1534,9 @@ final class LibraryModel {
                         return
                     }
                     seedSchedule()
+                    // A library from iCloud, from a sync that started before the example
+                    // profile, replaces the example.
+                    if isExample, !sourceSnapshots.isEmpty { isSample = false }
                     rebuildLibrary()
                     // Publish from the archive this sync uploaded, because the iPhone and Mac
                     // companion requires the worklist's sync date to match that archive's
@@ -1521,7 +1597,10 @@ final class LibraryModel {
     /// a saved series pick sets because a running read may have missed its new look group.
     private func queueSpineDesignRefresh(restarting: Bool = false) {
         guard !PerformanceDiagnostics.isolates("background") else { return }
-        guard iCloudEnabled, hardcoverEnabled, let accountID = activeHardcoverAccountID,
+        // Sample mode draws its own records; an account that a disconnect kept must not replace
+        // them or save looks for the sample's books.
+        guard !isSample, iCloudEnabled, hardcoverEnabled,
+            let accountID = activeHardcoverAccountID,
             let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
         else { return }
         if !restarting, let identity = spineDesignTaskIdentity, spineDesignTask != nil,

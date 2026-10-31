@@ -2573,3 +2573,190 @@ private final class LibraryWorkflowFixture {
         try? FileManager.default.removeItem(at: directory)
     }
 }
+
+/// The example profile: loading its folder, keeping it read-only, and leaving it. Fixtures are
+/// fictional; tests never load the bundled profile.
+extension LibraryWorkflowTests {
+    private func exampleDesign(for book: Book, accountID: String = ExampleProfile.accountID)
+        -> SpineDesignV1
+    {
+        SpineDesignV1(
+            version: 1, accountID: accountID, bookID: book.id,
+            workItemHash: SpineCloudIdentity.workItemHash(accountID: accountID, book: book),
+            coverHash: String(repeating: "a", count: 64), generatorVersion: "ios-pcc-v2",
+            generatedAt: Date(timeIntervalSince1970: 1_000), backgroundHex: "#102030",
+            foregroundHex: "#FFFFFF", accentHex: "#FFFFFF", typeface: "serif", weight: 700,
+            uppercase: false)
+    }
+
+    /// A fictional profile of books 7 and 8, with a design for book 7.
+    private func exampleProfile(_ fixture: LibraryWorkflowFixture) -> ExampleProfile {
+        let books = [fixture.book(7), fixture.book(8)]
+        return ExampleProfile(
+            books: books, series: [], designs: [7: exampleDesign(for: books[0])], looks: [:],
+            syncedAt: fixture.time.addingTimeInterval(-86_400))
+    }
+
+    func testExampleProfileFolderKeepsOnlyValidRecords() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        let folder = fixture.directory.appending(path: "ExampleProfile")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var books = [fixture.book(7), fixture.book(8)]
+        books[0].seriesID = 3
+        let snapshot = SourceSnapshot(
+            source: .hardcover, accountID: ExampleProfile.accountID, books: books,
+            syncedAt: fixture.time,
+            series: [SeriesInfo(id: 3, name: "Fictional Cycle", books: [])])
+        try JSONEncoder().encode(CloudLibraryArchive(sources: [snapshot]))
+            .write(to: folder.appending(path: "library-v1.json"))
+        let kept = exampleDesign(for: books[0])
+        try JSONEncoder()
+            .encode([
+                "kept": kept,
+                // Another account's design and a design for a book the profile lacks drop out.
+                "other": exampleDesign(for: books[1], accountID: fixture.hardcoverAccountID),
+                "missing": exampleDesign(for: fixture.book(9)),
+            ])
+            .write(to: folder.appending(path: "spine-designs-v1.json"))
+        let key = SeriesLookKey(seriesID: 3, group: "|fictionalauthor")
+        try JSONEncoder()
+            .encode(["look": SeriesLookV1(key: key, design: kept, createdAt: fixture.time)])
+            .write(to: folder.appending(path: "series-looks-v1.json"))
+
+        let loaded = await ExampleProfile.load(from: folder)
+        let profile = try XCTUnwrap(loaded)
+        XCTAssertEqual(profile.books.map(\.id), [7, 8])
+        XCTAssertEqual(profile.series.map(\.id), [3])
+        XCTAssertEqual(profile.designs, [7: kept])
+        XCTAssertEqual(Array(profile.looks.keys), [key])
+        XCTAssertEqual(profile.syncedAt, fixture.time)
+
+        try FileManager.default.removeItem(at: folder.appending(path: "library-v1.json"))
+        let missing = await ExampleProfile.load(from: folder)
+        XCTAssertNil(missing, "A folder without its library holds no profile")
+    }
+
+    func testExampleProfileIsReadOnlyUntilAConnectionReplacesIt() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        var dependencies = fixture.dependencies()
+        let profile = exampleProfile(fixture)
+        dependencies.exampleProfile = { profile }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.offersExample)
+
+        let shown = await model.showExample()
+        XCTAssertTrue(shown)
+        XCTAssertTrue(model.isExample)
+        XCTAssertTrue(model.isSample)
+        XCTAssertFalse(model.offersExample)
+        XCTAssertEqual(Set(model.books.map(\.id)), [7, 8])
+        XCTAssertEqual(model.spineDesigns, profile.designs)
+        XCTAssertEqual(model.now, profile.syncedAt)
+        XCTAssertTrue(model.hasCompletedWelcome)
+        XCTAssertFalse(model.canPickSeries(for: model.books[0]))
+        // A refresh or a sync request reaches no source: the fixture fails any request.
+        await model.refresh(manual: true)
+        model.queueCloudSync()
+        XCTAssertTrue(dependencies.sourceStore.load().isEmpty, "Nothing saves the example")
+
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        dependencies.fetchHardcover = { _, _ in
+            HardcoverLibrary(accountID: fixture.hardcoverAccountID, books: [fixture.book(1)])
+        }
+        dependencies.syncCloud = { $0 }
+        let connecting = LibraryModel(dependencies: dependencies)
+        await connecting.start()
+        await connecting.showExample()
+        let connected = await connecting.connect("hc_pat_fictional_original")
+        XCTAssertTrue(connected)
+        XCTAssertFalse(connecting.isExample)
+        XCTAssertFalse(connecting.isSample)
+        XCTAssertEqual(connecting.books.map(\.id), [1])
+        XCTAssertTrue(connecting.spineDesigns.isEmpty, "Example designs never reach a library")
+        XCTAssertEqual(dependencies.sourceStore.load().flatMap(\.books).map(\.id), [1])
+    }
+
+    func testAVerifiedTokenEndsTheExampleAndShowsTheSavedLibrary() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        // A disconnected account keeps its snapshot, which the disabled source hides.
+        fixture.secrets.removeAll()
+        fixture.defaults.set(false, forKey: "hardcoverEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        let profile = exampleProfile(fixture)
+        dependencies.exampleProfile = { profile }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.books.isEmpty)
+        let shown = await model.showExample()
+        XCTAssertTrue(shown)
+
+        let connected = await model.connect("hc_pat_fictional_original")
+        XCTAssertTrue(connected)
+        XCTAssertEqual(
+            model.message, "Hardcover token verified. Library sync keeps its daily schedule.")
+        XCTAssertFalse(model.isExample)
+        XCTAssertEqual(model.books.map(\.id), [1], "The saved library replaces the example's books")
+        XCTAssertTrue(model.spineDesigns.isEmpty)
+    }
+
+    func testTurningOnICloudStorageEndsTheExample() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        var dependencies = fixture.dependencies()
+        let profile = exampleProfile(fixture)
+        dependencies.exampleProfile = { profile }
+        dependencies.sleep = { _ in }
+        var uploads: [CloudLibraryArchive] = []
+        dependencies.syncCloud = { archive in
+            uploads.append(archive)
+            return archive
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.showExample()
+        model.iCloudEnabled = false
+        XCTAssertTrue(model.isExample, "Turning storage off keeps the example's records")
+        XCTAssertEqual(model.spineDesigns, profile.designs)
+
+        model.iCloudEnabled = true
+        XCTAssertFalse(model.isExample)
+        XCTAssertTrue(model.books.isEmpty)
+        await model.waitForCloudSync()
+        XCTAssertEqual(uploads.count, 1)
+        XCTAssertTrue(
+            uploads.allSatisfy { $0.sources.isEmpty }, "The example never uploads to iCloud")
+    }
+
+    func testAMissingOrUnreadableExampleProfileShowsNothing() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        var dependencies = fixture.dependencies()
+        dependencies.exampleProfile = nil
+        let bundleless = LibraryModel(dependencies: dependencies)
+        await bundleless.start()
+        XCTAssertFalse(bundleless.offersExample)
+        let opened = await bundleless.showExample()
+        XCTAssertFalse(opened)
+
+        dependencies.exampleProfile = { nil }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.offersExample)
+        let shown = await model.showExample()
+        XCTAssertFalse(shown)
+        XCTAssertFalse(model.isExample)
+        XCTAssertFalse(model.isSample)
+        XCTAssertFalse(model.isLoading)
+        XCTAssertNotNil(model.message)
+        XCTAssertTrue(model.shouldOfferWelcome, "A failed read leaves the welcome available")
+    }
+}

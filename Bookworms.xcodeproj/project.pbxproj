@@ -11,6 +11,7 @@
 		0340625950B4EBF79BB9CE54 /* SpineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A56991945AF698A29FB0DA1D /* SpineView.swift */; };
 		06528EE98535FC0DBA45E62D /* BookWallLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EA1EB4BF67308FE91C7CC3 /* BookWallLayoutTests.swift */; };
 		06E219F03B5FC2B5B5A3A11F /* OfflineTestPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4ED7CF6E97284ACFC518B65 /* OfflineTestPolicy.swift */; };
+		074AB5ECCC5B703F64C942EE /* ExampleProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B569854A621C346F4BBDD808 /* ExampleProfile.swift */; };
 		085016EE97D66C5E7C53689D /* SpineTextRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231509B79CBBB761366E401B /* SpineTextRenderer.swift */; };
 		08954C8A4F9F85B0BAFB8752 /* SpineStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7C377D256C8484B49AC4B9B /* SpineStyle.swift */; };
 		08B09F5D77ACBED602B0FEBB /* HardcoverConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA76DA467F4A638010B02043 /* HardcoverConnectionView.swift */; };
@@ -253,6 +254,7 @@
 		AE6C82B5F8B073F4CBD40C73 /* DeviceAmbientProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAmbientProfileTests.swift; sourceTree = "<group>"; };
 		B476083EE441D966AF927F0B /* HardcoverAuthenticationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardcoverAuthenticationTests.swift; sourceTree = "<group>"; };
 		B49901D4DCB9619875ED62CE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B569854A621C346F4BBDD808 /* ExampleProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExampleProfile.swift; sourceTree = "<group>"; };
 		BB2EC841DEE5065CBC2D5512 /* BookWallHardcoverMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallHardcoverMesh.swift; sourceTree = "<group>"; };
 		BC4903ECD2C4C41FD217FAA6 /* SocialLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialLibrary.swift; sourceTree = "<group>"; };
 		BD248044777361FA581C524A /* APIUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIUsageStore.swift; sourceTree = "<group>"; };
@@ -439,6 +441,7 @@
 				BB2EC841DEE5065CBC2D5512 /* BookWallHardcoverMesh.swift */,
 				298822623AB5C4140EEBD022 /* BookWallLayout.swift */,
 				0ACAE587D1E3B17F3C2AD9F4 /* BookWallLocalSpine.swift */,
+				B569854A621C346F4BBDD808 /* ExampleProfile.swift */,
 				94B1956FAC9D419811DBCFFF /* LibrarySources.swift */,
 				6381ADE3A142C1D6F5ED5B80 /* SeriesDesigns.swift */,
 				A15D5ABCDEBD2F53D2DC676A /* ShelfLayout.swift */,
@@ -787,6 +790,7 @@
 				7137D25D47C7B1FE18667136 /* CoverView.swift in Sources */,
 				6B1E9439B1CD5DEF59B00F11 /* CredentialAvailability.swift in Sources */,
 				6FB1D806D46FC1C9184E7EA9 /* CredentialStore.swift in Sources */,
+				074AB5ECCC5B703F64C942EE /* ExampleProfile.swift in Sources */,
 				D28077C8A93A3A8DED5FF37E /* GoogleFontLibrary.swift in Sources */,
 				9FA572A4021F37FCD45CDCED /* HardcoverClient.swift in Sources */,
 				08B09F5D77ACBED602B0FEBB /* HardcoverConnectionView.swift in Sources */,

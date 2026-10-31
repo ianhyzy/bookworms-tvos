@@ -212,6 +212,12 @@
             dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }
             dependencies.saveSeriesLink = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
+            // A fictional stand-in, so UI tests never load the owner's bundled profile.
+            dependencies.exampleProfile = { [self] in
+                ExampleProfile(
+                    books: SampleLibrary.books, series: SampleLibrary.allSeries, designs: [:],
+                    looks: [:], syncedAt: date)
+            }
             dependencies.readTopShelf = { [] }
             dependencies.writeTopShelf = { _ in }
             return dependencies
@@ -258,7 +264,8 @@
             let evidence: [String: Any] = [
                 "revision": probeRevision, "scenario": name, "sourceCalls": sourceCalls,
                 "cloudCalls": cloudCalls, "network": ScenarioNetwork.state.evidence(),
-                "sample": library.isSample, "generating": library.isGenerating,
+                "sample": library.isSample, "example": library.isExample,
+                "generating": library.isGenerating,
                 "bookIDs": library.books.map(\.id), "loading": library.isLoading,
                 "welcomeCompleted": library.hasCompletedWelcome,
                 "welcomeOffered": library.shouldOfferWelcome,
