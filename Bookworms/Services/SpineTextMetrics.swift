@@ -50,9 +50,8 @@ enum SpineTextMetrics {
         max(0, height - (book.format == nil ? 0 : formatIconRoom))
     }
 
-    /// The format icon's center along a spine `height` long, lying flat with its head on the
-    /// left, so it reads in the lettering's direction. It sits in the room `letteredLength`
-    /// leaves at the tail.
+    /// The format icon's center along a spine `height` long, measured from the head. It sits in
+    /// the room `letteredLength` leaves at the tail.
     nonisolated static func formatIconCenter(height: CGFloat) -> CGFloat {
         height - (formatIconRoom - formatIconSize) - formatIconSize / 2
     }

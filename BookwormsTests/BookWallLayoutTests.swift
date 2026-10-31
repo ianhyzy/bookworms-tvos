@@ -314,12 +314,12 @@ final class BookWallLayoutTests: XCTestCase {
         return (shelf, shelfIcon, wall, wallIcon, scale)
     }
 
-    /// The format icon turns with the lettering, so it reads in the lettering's direction: the
-    /// headphones' band faces the tops of the letters, which point right on the upright shelf
-    /// spine, read top to bottom, and up on the flat Book Wall texture, read left to right.
-    /// Down the symbol's axis, the band has ink, and the gap between the ear cups has none.
+    /// The format icon stands upright on the standing shelf spine, as a printed spine's icon
+    /// does, and the flat Book Wall texture draws it as that spine laid flat with its head on
+    /// the left: the headphones' band faces up on the shelf and toward the head, left, on the
+    /// wall. Down the symbol's axis, the band has ink, and the gap between the ear cups has none.
     @MainActor
-    func testFormatIconReadsInTheLetteringsDirection() throws {
+    func testFormatIconStandsUprightOnTheStandingSpine() throws {
         let book = Book(
             id: 11, title: "Dune", author: "Frank Herbert", pages: 200, format: "Audiobook")
         XCTAssertEqual(book.formatSymbol, "headphones")
@@ -329,26 +329,28 @@ final class BookWallLayoutTests: XCTestCase {
         }
 
         let shelf = icons.shelfIcon
-        let third = shelf.width / 3
-        let shelfAxis = CGRect(x: shelf.minX, y: shelf.midY - 1, width: shelf.width, height: 2)
-        let right = try coverage(
-            icons.shelf, in: shelfAxis.divided(atDistance: third, from: .maxXEdge).slice, ink: ink)
-        let left = try coverage(
-            icons.shelf, in: shelfAxis.divided(atDistance: third, from: .minXEdge).slice, ink: ink)
-        XCTAssertGreaterThan(right, 0, "The shelf icon's band faces right")
-        XCTAssertEqual(left, 0, "The shelf icon's ear cups face left")
+        let shelfAxis = CGRect(x: shelf.midX - 1, y: shelf.minY, width: 2, height: shelf.height)
+        let top = try coverage(
+            icons.shelf,
+            in: shelfAxis.divided(atDistance: shelf.height / 3, from: .minYEdge).slice, ink: ink)
+        let bottom = try coverage(
+            icons.shelf,
+            in: shelfAxis.divided(atDistance: shelf.height / 3, from: .maxYEdge).slice, ink: ink)
+        XCTAssertGreaterThan(top, 0, "The shelf icon's band faces up")
+        XCTAssertEqual(bottom, 0, "The shelf icon's ear cups face down")
 
         let wall = icons.wallIcon
-        let wallAxis = CGRect(x: wall.midX - 3, y: wall.minY, width: 6, height: wall.height)
-        let top = try coverage(
-            icons.wall, in: wallAxis.divided(atDistance: wall.height / 3, from: .minYEdge).slice,
+        let wallAxis = CGRect(x: wall.minX, y: wall.midY - 3, width: wall.width, height: 6)
+        let left = try coverage(
+            icons.wall, in: wallAxis.divided(atDistance: wall.width / 3, from: .minXEdge).slice,
             ink: ink)
-        let bottom = try coverage(
-            icons.wall, in: wallAxis.divided(atDistance: wall.height / 3, from: .maxYEdge).slice,
+        let right = try coverage(
+            icons.wall, in: wallAxis.divided(atDistance: wall.width / 3, from: .maxXEdge).slice,
             ink: ink)
-        XCTAssertGreaterThan(top, 0, "The texture's icon band faces up")
-        XCTAssertEqual(bottom, 0, "The texture's icon ear cups face down")
-        // The icon is the shelf's, scaled to the texture.
+        XCTAssertGreaterThan(left, 0, "The texture's icon band faces the head")
+        XCTAssertEqual(right, 0, "The texture's icon ear cups face the tail")
+        // The icon is the shelf's, turned and scaled to the texture.
+        XCTAssertEqual(wall.width / icons.scale, shelf.height, accuracy: 2)
         XCTAssertEqual(wall.height / icons.scale, shelf.width, accuracy: 2)
     }
 
