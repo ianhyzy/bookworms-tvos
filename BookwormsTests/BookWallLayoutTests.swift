@@ -102,7 +102,7 @@ final class BookWallLayoutTests: XCTestCase {
         let books = [
             Book(id: 1, title: "Termush", author: "Sven Holm", pages: 120),
             Book(
-                id: 2, title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", pages: 300),
+                id: 2, title: "The Long Hall of Lanterns", author: "Mirela K. Le Vant", pages: 300),
             Book(id: 3, title: "The Tainted Cup", author: "Robert Jackson Bennett", pages: 390),
         ]
         for slot in BookWallLayout(books: books).slots {
@@ -130,7 +130,7 @@ final class BookWallLayoutTests: XCTestCase {
     func testLongTitleGetsMoreSpineSpace() throws {
         // A shared id gives both books the same seeded thickness and variety, so only the
         // space reserved for their lettering differs.
-        let short = Book(id: 1, title: "Dune", author: "Frank Herbert", pages: 300)
+        let short = Book(id: 1, title: "Wyke", author: "Tamsin Vellor", pages: 300)
         let long = Book(
             id: 1, title: "A Very Long Book Title About the World and Everything in It",
             author: "A Writer With a Long Name", pages: 300)
@@ -252,7 +252,7 @@ final class BookWallLayoutTests: XCTestCase {
     @MainActor
     func testBookWallLettersASpineAsTheShelfDoesAtTheSameFrame() {
         let books = [
-            Book(id: 7, title: "Dune: Deluxe Edition", author: "Frank Herbert", pages: 600),
+            Book(id: 7, title: "Wyke: Deluxe Edition", author: "Tamsin Vellor", pages: 600),
             Book(
                 id: 446730, title: "The Dungeon Anarchist's Cookbook", author: "Matt Dinniman",
                 format: "Ebook"),
@@ -304,12 +304,12 @@ final class BookWallLayoutTests: XCTestCase {
     /// viewing scale, so a wall seen from farther away gives the same title a larger spine.
     func testWallSpinesGrowTowardTheTitleFloorAtTheirViewingScale() throws {
         let book = Book(
-            id: 2, title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", pages: 300)
+            id: 2, title: "The Long Hall of Lanterns", author: "Mirela K. Le Vant", pages: 300)
         let near = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 90).slots.first)
         XCTAssertGreaterThanOrEqual(near.lettering.titleSize, SpineTextMetrics.minimumTitleSize)
         let natural = try XCTUnwrap(
             BookWallLayout(
-                books: [Book(id: 2, title: "Dune", author: "Ursula K. Le Guin", pages: 300)],
+                books: [Book(id: 2, title: "Wyke", author: "Mirela K. Le Vant", pages: 300)],
                 pointsPerUnit: 90
             )
             .slots.first)
@@ -430,7 +430,7 @@ final class BookWallLayoutTests: XCTestCase {
     @MainActor
     func testFormatIconStandsUprightOnTheStandingSpine() throws {
         let book = Book(
-            id: 11, title: "Dune", author: "Frank Herbert", pages: 200, format: "Audiobook")
+            id: 11, title: "Wyke", author: "Tamsin Vellor", pages: 200, format: "Audiobook")
         XCTAssertEqual(book.formatSymbol, "headphones")
         let icons = try formatIcons(of: book)
         func ink(_ bytes: ArraySlice<UInt8>) -> Double {
@@ -468,7 +468,7 @@ final class BookWallLayoutTests: XCTestCase {
     /// within 10%. Monochrome rendering leaves about a third less.
     @MainActor
     func testFormatIconInksTheSameOnTheShelfAndTheWall() throws {
-        let book = Book(id: 12, title: "Dune", author: "Frank Herbert", pages: 200, format: "Ebook")
+        let book = Book(id: 12, title: "Wyke", author: "Tamsin Vellor", pages: 200, format: "Ebook")
         let icons = try formatIcons(of: book)
         let shelfData = try pixels(of: icons.shelf)
         // Plain cloth between the lettering and the icon.
