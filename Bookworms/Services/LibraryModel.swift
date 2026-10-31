@@ -1851,13 +1851,14 @@ final class LibraryModel {
         }
         let selected =
             automatically
-            ? AutomaticSpineGeneration().candidates(in: books, savedIDs: Set(aiRecords.keys))
+            ? AutomaticSpineGeneration(defaults: dependencies.defaults)
+                .candidates(in: books, savedIDs: Set(aiRecords.keys))
             : (onlyMissing ? books.filter { aiRecords[$0.id] == nil } : books)
         guard !selected.isEmpty else {
             if !automatically { generationStatus = "All selected spines are saved." }
             return
         }
-        AutomaticSpineGeneration().recordAttempt(selected)
+        AutomaticSpineGeneration(defaults: dependencies.defaults).recordAttempt(selected)
         analysisTask?.cancel()
         fontTask?.cancel()
         isGenerating = true

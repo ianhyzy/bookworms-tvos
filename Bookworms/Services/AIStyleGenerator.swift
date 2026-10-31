@@ -95,7 +95,7 @@ actor AIStyleGenerator {
             uppercase: proposal.uppercase, recognizedTitle: true,
             provenance:
                 "\(configuration.provider.title) · \(configuration.model) · \(chosen.0.family)")
-        let hash = SHA256.hash(data: cover).map { String(format: "%02x", $0) }.joined()
+        let hash = SHA256.hash(data: cover).hex
         return AIStyleRecord(
             bookID: book.id, style: style, font: chosen.1, weight: chosen.0.weight,
             provider: configuration.provider, model: configuration.model, coverHash: hash,

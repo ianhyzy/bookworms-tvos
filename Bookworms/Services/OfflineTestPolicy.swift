@@ -26,7 +26,9 @@ enum OfflineTestPolicy {
                     let name = String(describing: type)
                     return allowed.contains(name)
                 } + [OfflineDenyProtocol.self]
-            let isolated = URLSession(configuration: configuration)
+            // The caller's delegate keeps its redirect policy, as CWA's does.
+            let isolated = URLSession(
+                configuration: configuration, delegate: session.delegate, delegateQueue: nil)
             defer { isolated.invalidateAndCancel() }
             return try await isolated.data(for: request)
         #else

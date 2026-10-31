@@ -31,7 +31,7 @@ struct AIConfiguration: Codable, Equatable, Sendable {
         if provider != .generic { return "ai-\(provider.rawValue)" }
         let digest =
             SHA256.hash(data: Data(endpoint.trimmingCharacters(in: .whitespacesAndNewlines).utf8))
-            .map { String(format: "%02x", $0) }.joined()
+            .hex
         return "ai-generic-\(digest)"
     }
 

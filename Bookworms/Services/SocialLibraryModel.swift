@@ -111,8 +111,7 @@ final class SocialLibraryModel {
             status = "Social views are disabled."
             return
         }
-        let fingerprint = SHA256.hash(data: Data((account ?? token).utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let fingerprint = SHA256.hash(data: Data((account ?? token).utf8)).hex
         // A manual load replaces a matching load in flight, so its bypass of the daily gates
         // isn't lost.
         if !manual, identity == fingerprint, requestedReader == readerID,

@@ -187,8 +187,7 @@ actor ArtworkStore {
     static let browsingFreeSpaceFloor = 1_000_000_000
 
     private func file(for url: URL, suffix: String) -> URL {
-        let key = SHA256.hash(data: Data((url.absoluteString + suffix).utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let key = SHA256.hash(data: Data((url.absoluteString + suffix).utf8)).hex
         return root.appending(path: key)
     }
 

@@ -66,8 +66,7 @@ actor GoogleFontLibrary {
     private func directory(family: String, weight: Int) -> URL {
         // The key names the file rule (`fileName(for:in:)`), so a file that an earlier rule
         // chose, such as League Gothic's condensed width, downloads again.
-        let key = SHA256.hash(data: Data("files-v2:\(family):\(weight)".utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let key = SHA256.hash(data: Data("files-v2:\(family):\(weight)".utf8)).hex
         return root.appending(path: key)
     }
 
