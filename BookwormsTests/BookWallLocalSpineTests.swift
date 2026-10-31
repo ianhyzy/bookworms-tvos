@@ -7,17 +7,22 @@ import XCTest
 final class BookWallLocalSpineTests: XCTestCase {
     @MainActor
     func testGenresSelectTwelveInstalledFaces() {
-        let genres = [
-            "Fantasy", "Science Fiction", "Mystery", "Horror", "Romance", "History",
-            "Literary Fiction", "Memoir", "Young Adult", "Graphic Novel", "Poetry", "Humor",
+        let table: [(genre: String, face: String)] = [
+            ("Fantasy", "Georgia-Bold"), ("Science Fiction", "Futura-Bold"),
+            ("Mystery", "DINCondensed-Bold"), ("Horror", "BebasNeue"),
+            ("Romance", "Avenir-Heavy"), ("History", "TimesNewRomanPS-BoldMT"),
+            ("Literary Fiction", "AvenirNext-DemiBold"), ("Memoir", "HelveticaNeue-Bold"),
+            ("Young Adult", "ArialRoundedMTBold"), ("Graphic Novel", "Arial-BoldMT"),
+            ("Poetry", "Verdana-Bold"), ("Humor", "CourierNewPS-BoldMT"),
         ]
-        let names = genres.enumerated()
-            .map { index, genre in
-                BookWallLocalSpine.fontName(
-                    for: Book(id: index + 1, title: "Book", author: "Author", genres: [genre]))
-            }
-        XCTAssertEqual(Set(names).count, 12)
-        for name in names { XCTAssertNotNil(UIFont(name: name, size: 24), name) }
+        for (index, row) in table.enumerated() {
+            let book = Book(id: index + 1, title: "Book", author: "Author", genres: [row.genre])
+            XCTAssertEqual(BookWallLocalSpine.fontName(for: book), row.face, row.genre)
+            XCTAssertNotNil(UIFont(name: row.face, size: 24), row.face)
+        }
+        XCTAssertEqual(
+            BookWallLocalSpine.fontName(for: Book(id: 13, title: "Book", author: "Author")),
+            "AvenirNext-DemiBold")
     }
 
     func testCoverColorsAlwaysProduceReadableText() {
