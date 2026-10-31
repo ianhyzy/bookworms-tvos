@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 import XCTest
 
@@ -5,55 +6,6 @@ import XCTest
 
 @MainActor
 final class CacheTests: XCTestCase {
-    func testInkDensityDistinguishesLightAndHeavyFaces() {
-        let light = "HelveticaNeue-UltraLight"
-        let heavy = "HelveticaNeue-Bold"
-        XCTAssertLessThan(
-            SpineFontProfile.bucket(fontName: light), SpineFontProfile.bucket(fontName: heavy))
-        XCTAssertGreaterThan(
-            SpineFontProfile.sizeScale(fontName: light), SpineFontProfile.sizeScale(fontName: heavy)
-        )
-        XCTAssertEqual(
-            SpineFontProfile.bucket(fontName: heavy), SpineFontProfile.bucket(fontName: heavy))
-    }
-
-    func testVisualAdjustmentPreservesTitleFloorAndHierarchy() {
-        for scale: CGFloat in [0.94, 1, 1.06] {
-            let result = SpineTextMetrics.typography(
-                title: "Dune", author: "Frank Herbert", fontName: "Georgia-Bold",
-                length: 450, height: 70, maximumTitle: 52, maximumAuthor: 22,
-                hasSubtitle: false, visualScale: scale)
-            XCTAssertGreaterThanOrEqual(result.titleSize, 23)
-            XCTAssertGreaterThanOrEqual(result.titleSize, result.authorSize + 4)
-            XCTAssertGreaterThanOrEqual(result.authorSize, 16)
-        }
-    }
-
-    func testAuthorLinesKeepAVisibleGapWithoutFontLeading() throws {
-        let layout = SpineAuthorLayout.make(
-            "Robin Hobb", fontName: "Georgia-Italic",
-            size: 24, width: 65)
-        XCTAssertGreaterThan(layout.lines.count, 1)
-        for index in 1..<layout.lines.count {
-            let previous = layout.lines[index - 1]
-            XCTAssertEqual(
-                layout.lines[index].top - previous.top - previous.bounds.height,
-                24 * 0.12, accuracy: 0.01)
-        }
-        let font = try XCTUnwrap(UIFont(name: "Georgia-Italic", size: 24))
-        XCTAssertLessThan(layout.size.height, CGFloat(layout.lines.count) * font.lineHeight)
-    }
-
-    func testApparentSizeAdjustmentsStaySubtleForBothCases() {
-        for name in ["Georgia", "HelveticaNeue-Bold", "Georgia-Italic"] {
-            for text in ["ROBIN HOBB", "Robin Hobb"] {
-                let scale = SpineFontProfile.sizeScale(fontName: name, text: text)
-                XCTAssertGreaterThanOrEqual(scale, 0.94)
-                XCTAssertLessThanOrEqual(scale, 1.06)
-            }
-        }
-    }
-
     private func record() -> AIStyleRecord {
         AIStyleRecord(
             bookID: 1, style: .fallback(for: SampleLibrary.books[0]),
@@ -147,71 +99,181 @@ final class CacheTests: XCTestCase {
         XCTAssertTrue(isDue(syncedAt: nil))
     }
 
-    func testFontFittingCacheRespectsAvailableSpace() {
-        let large = SpineTextMetrics.fittedSize(
-            "Assassin’s Quest", fontName: "Georgia-Bold", maximum: 48, width: 280, height: 65,
-            preferSingleLine: true)
-        let small = SpineTextMetrics.fittedSize(
-            "Assassin’s Quest", fontName: "Georgia-Bold", maximum: 48, width: 140, height: 35,
-            preferSingleLine: true)
-        XCTAssertLessThan(small, large)
+    private func lettering(
+        _ title: String, author: String = "Frank Herbert", length: CGFloat = 420,
+        thickness: CGFloat
+    ) -> SpineLettering {
+        SpineTextMetrics.lettering(
+            title: title, author: author, fontName: "Georgia-Bold", length: length,
+            thickness: thickness)
+    }
+
+    /// The width of each of `lettering`'s title lines at its size.
+    private func titleLineWidths(_ lettering: SpineLettering) -> [CGFloat] {
+        let font = SpineTextMetrics.uiFont(name: lettering.fontName, size: lettering.titleSize)
+        return lettering.title.components(separatedBy: "\n")
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+    }
+
+    func testTitleStartsFromTheBoxWithoutACap() {
+        // An 88% box on a thick spine letters a short title larger than 58 points.
+        let result = lettering("Dune", thickness: 110)
+        XCTAssertGreaterThan(result.titleSize, 58)
+        XCTAssertLessThanOrEqual(result.titleSize, 110 * 0.88)
+        XCTAssertEqual(result.title, "Dune")
+    }
+
+    func testTitleBreaksBetweenWordsAndFitsItsWidth() {
+        for thickness: CGFloat in [40, 60, 90] {
+            let title = "The Hitchhiker's Guide to the Galaxy"
+            let result = lettering(title, thickness: thickness)
+            XCTAssertEqual(result.title.replacingOccurrences(of: "\n", with: " "), title)
+            for width in titleLineWidths(result) {
+                XCTAssertLessThanOrEqual(width, result.titleWidth + 0.01)
+            }
+        }
+        // A title without spaces keeps to one line.
+        XCTAssertFalse(lettering("三体", thickness: 70).title.contains("\n"))
+    }
+
+    func testTwoLinesWhenLargerThanOne() {
+        let result = lettering("Small Gods", length: 300, thickness: 100)
+        XCTAssertEqual(result.title, "Small\nGods")
+        let oneLine = lettering("SmallGods", length: 300, thickness: 100)
+        XCTAssertGreaterThan(result.titleSize, oneLine.titleSize)
+    }
+
+    func testThirdLineOnlyBelowTitleFloor() {
+        let roomy = lettering("The Name of the Wind", thickness: 80)
+        XCTAssertGreaterThanOrEqual(roomy.titleSize, SpineTextMetrics.minimumTitleSize)
+        XCTAssertLessThanOrEqual(roomy.title.components(separatedBy: "\n").count, 2)
+        let tight = lettering(
+            "The Dungeon Anarchist's Cookbook", author: "Matt Dinniman", length: 262,
+            thickness: 82)
+        XCTAssertEqual(tight.title.components(separatedBy: "\n").count, 3)
+        XCTAssertLessThan(tight.titleSize, SpineTextMetrics.minimumTitleSize)
+    }
+
+    func testSpineLengthensBeforeTakingAThirdLine() {
+        // Three lines reach the floor at the natural length, but a longer spine letters the
+        // title on two lines at 23 points or more, so the spine lengthens instead.
+        let book = Book(
+            id: 446730, title: "The Dungeon Anarchist's Cookbook", author: "Matt Dinniman",
+            format: "Ebook")
+        var style = SpineStyle.fallback(for: book)
+        style.fontName = "Georgia-Bold"
+        let natural = SpineDimensions(width: 118, height: 466)
+        let threeLines = SpineTextMetrics.lettering(for: book, style: style, dimensions: natural)
+        let twoLines = SpineTextMetrics.lettering(
+            for: book, style: style, dimensions: natural, maximumLines: 2)
+        XCTAssertLessThan(twoLines.titleSize, SpineTextMetrics.minimumTitleSize)
+        XCTAssertEqual(threeLines.title.components(separatedBy: "\n").count, 3)
+
+        let adjusted = SpineTextMetrics.readableDimensions(
+            for: book, style: style, natural: natural, rowHeight: 600)
+        let drawn = SpineTextMetrics.lettering(for: book, style: style, dimensions: adjusted)
+        XCTAssertGreaterThan(adjusted.height, natural.height)
+        XCTAssertEqual(drawn.title.components(separatedBy: "\n").count, 2)
+        XCTAssertGreaterThanOrEqual(drawn.titleSize, SpineTextMetrics.minimumTitleSize)
+    }
+
+    /// SwiftUI lays the measured text out within the room UIKit measured for it.
+    func testSwiftUIDrawsLetteringWithinItsMeasuredRoom() {
+        let cases: [(String, String, CGFloat, CGFloat)] = [
+            ("The Hitchhiker's Guide to the Galaxy", "Douglas Adams", 420, 60),
+            ("The Dungeon Anarchist's Cookbook", "Matt Dinniman", 262, 82),
+            ("Small Gods", "Terry Pratchett", 300, 100),
+            ("Eragon", "Christopher Paolini", 300, 40),
+        ]
+        for (title, author, length, thickness) in cases {
+            let result = lettering(title, author: author, length: length, thickness: thickness)
+            func size(_ text: String, _ fontSize: CGFloat) -> CGSize {
+                UIHostingController(
+                    rootView: Text(verbatim: text)
+                        .font(SpineTextMetrics.font(name: result.fontName, size: fontSize))
+                        .fixedSize()
+                )
+                .sizeThatFits(in: CGSize(width: 10_000, height: 10_000))
+            }
+            let titleSize = size(result.title, result.titleSize)
+            XCTAssertLessThanOrEqual(titleSize.width, result.titleWidth + 0.5, title)
+            XCTAssertLessThanOrEqual(titleSize.height, thickness * 0.88 + 0.5, title)
+            guard result.authorFits else { continue }
+            let authorSize = size(result.author, result.authorSize)
+            XCTAssertLessThanOrEqual(authorSize.width, result.authorWidth + 0.5, author)
+            XCTAssertLessThanOrEqual(authorSize.height, thickness * 0.88 + 0.5, author)
+        }
+    }
+
+    func testAuthorForms() {
         XCTAssertEqual(
-            large,
-            SpineTextMetrics.fittedSize(
-                "Assassin’s Quest", fontName: "Georgia-Bold", maximum: 48, width: 280, height: 65,
-                preferSingleLine: true))
-    }
-    func testTitleHierarchyFitsWithoutShrinkingAuthorOnRoomySpine() {
-        let result = SpineTextMetrics.typography(
-            title: "Raising Steam", author: "Terry Pratchett", fontName: "Georgia-Bold",
-            length: 450, height: 70, maximumTitle: 52, maximumAuthor: 22, hasSubtitle: false)
-        XCTAssertGreaterThanOrEqual(result.titleSize, result.authorSize + 4)
-        let fittedAuthor = SpineTextMetrics.fittedSize(
-            "Terry Pratchett", fontName: "Georgia-Bold", maximum: 22,
-            width: 450 * 0.22, height: 70)
-        XCTAssertEqual(result.authorSize, fittedAuthor)
-        XCTAssertEqual(result.titleLength + result.authorLength, 450 * 0.97, accuracy: 0.001)
+            SpineView.shortAuthor("Neil Gaiman, Terry Pratchett"), "Neil Gaiman, Terry Pratchett")
+        XCTAssertEqual(SpineView.shortAuthor("A One, B Two, C Three"), "A One et al.")
+        XCTAssertEqual(SpineView.twoLines("David Foster Wallace"), "David Foster\nWallace")
+        XCTAssertEqual(SpineView.surname("Ursula K. Le Guin"), "Le Guin")
+        XCTAssertEqual(SpineView.surname("Walter M. Miller Jr."), "Miller Jr.")
+        XCTAssertNil(SpineView.surname("Homer"))
     }
 
-    func testDifficultTitleDoesNotForceAuthorBelowReadabilityFloor() {
-        let result = SpineTextMetrics.typography(
-            title: String(repeating: "Unbroken", count: 15), author: "Alex",
-            fontName: "Georgia-Bold", length: 320, height: 48,
-            maximumTitle: 36, maximumAuthor: 22, hasSubtitle: false)
-        XCTAssertGreaterThanOrEqual(result.authorSize, 16)
-        XCTAssertLessThan(result.titleSize, result.authorSize + 4)
-        XCTAssertGreaterThanOrEqual(result.authorLength, 320 * 0.13 - 0.001)
+    func testAuthorKeepsMinimumAndFallsBackToSurname() {
+        let author = "Christopher Paolini"
+        for thickness: CGFloat in [40, 60, 100] {
+            let result = lettering("Eragon", author: author, length: 300, thickness: thickness)
+            XCTAssertGreaterThanOrEqual(result.authorSize, SpineTextMetrics.minimumAuthorSize)
+            XCTAssertTrue(result.authorFits)
+            XCTAssertTrue(
+                [author, "Christopher\nPaolini", "Paolini"].contains(result.author), result.author)
+            if result.titleSize >= SpineTextMetrics.minimumAuthorSize + SpineTextMetrics.titleLead {
+                XCTAssertGreaterThanOrEqual(
+                    result.titleSize, result.authorSize + SpineTextMetrics.titleLead)
+            }
+        }
+        // A thin spine has no room for the whole name, so it letters the surname.
+        let thin = lettering(
+            "The Inheritance Cycle", author: author, length: 300, thickness: 40)
+        XCTAssertEqual(thin.author, "Paolini")
     }
 
-    func testLongAuthorIsNotShrunkFurtherToEnforceHierarchy() {
-        let author = "Alexandria Montgomery and Christopher Wellington"
-        let baseline = SpineTextMetrics.fittedSize(
-            author, fontName: "Georgia-Bold",
-            maximum: 22, width: 260 * 0.22, height: 30)
-        let result = SpineTextMetrics.typography(
-            title: "An exceptionally long title for a narrow book", author: author,
-            fontName: "Georgia-Bold", length: 260, height: 30,
-            maximumTitle: 30, maximumAuthor: 22, hasSubtitle: true)
-        XCTAssertGreaterThanOrEqual(result.authorSize, min(16, baseline))
-        XCTAssertLessThanOrEqual(result.titleSize, 30)
+    func testFormatIconReservesTailRoom() {
+        var book = Book(id: 1, title: "Dune: Deluxe Edition", author: "Frank Herbert")
+        let style = SpineStyle.fallback(for: book)
+        let dimensions = SpineDimensions(width: 70, height: 420)
+        let plain = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
+        book.format = "Ebook"
+        let withIcon = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
+        XCTAssertEqual(plain.length, 420)
+        XCTAssertEqual(withIcon.length, 420 - SpineTextMetrics.formatIconRoom)
+        // The shelf spine stops a title at its first colon and draws no subtitle.
+        XCTAssertFalse(plain.title.localizedCaseInsensitiveContains("deluxe"))
     }
 
-    func testTitleLegibilityCanBorrowHeightWithoutChangingWidth() {
+    func testTitleFloorLengthensThenThickensSpine() {
         let book = Book(
             id: 446730, title: "The Dungeon Anarchist's Cookbook", author: "Matt Dinniman",
             format: "Ebook")
         var style = SpineStyle.fallback(for: book)
         style.fontName = "Georgia-Bold"
         let natural = SpineDimensions(width: 82, height: 300)
-        let before = SpineTextMetrics.typography(for: book, style: style, dimensions: natural)
+        let before = SpineTextMetrics.lettering(for: book, style: style, dimensions: natural)
         let adjusted = SpineTextMetrics.readableDimensions(
             for: book, style: style, natural: natural, rowHeight: 600)
-        let after = SpineTextMetrics.typography(for: book, style: style, dimensions: adjusted)
+        let after = SpineTextMetrics.lettering(for: book, style: style, dimensions: adjusted)
         XCTAssertLessThan(before.titleSize, 23)
         XCTAssertGreaterThan(adjusted.height, natural.height)
         XCTAssertEqual(adjusted.width, natural.width)
-        XCTAssertLessThanOrEqual(adjusted.height, 588)
+        XCTAssertLessThanOrEqual(adjusted.height, 600)
         XCTAssertGreaterThanOrEqual(after.titleSize, 23)
+
+        // A title that still can't reach the floor at the shelf's full height thickens.
+        let long = Book(
+            id: 2,
+            title: "Extraordinarily Unpronounceable Supercalifragilistic Antidisestablishment",
+            author: "Alex")
+        let thin = SpineDimensions(width: 50, height: 300)
+        let grown = SpineTextMetrics.readableDimensions(
+            for: long, style: style, natural: thin, rowHeight: 600)
+        XCTAssertEqual(grown.height, min(600, 50 * ShelfLayout.slendernessRange.upperBound))
+        XCTAssertGreaterThan(grown.width, thin.width)
     }
 
     func testReadableTitleKeepsNaturalBookHeight() {
@@ -221,6 +283,23 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(
             SpineTextMetrics.readableDimensions(
                 for: book, style: style, natural: natural, rowHeight: 600), natural)
+    }
+
+    func testPreparedPagesCarryTheMeasuredLettering() throws {
+        let books = Array(SampleLibrary.books.prefix(6))
+        let styles = Dictionary(
+            uniqueKeysWithValues: books.map { ($0.id, SpineStyle.fallback(for: $0)) })
+        let pages = BookPresentation.pages(
+            books: books, styles: styles, coverRatios: [:], width: 1600, rowHeight: 500)
+        for page in pages {
+            for book in page.books {
+                let dimensions = try XCTUnwrap(page.dimensions[book.id])
+                XCTAssertEqual(
+                    page.letterings[book.id],
+                    SpineTextMetrics.lettering(
+                        for: book, style: try XCTUnwrap(styles[book.id]), dimensions: dimensions))
+            }
+        }
     }
 
     func testTrimRemovesOldestFilesAndKeepsFolders() throws {

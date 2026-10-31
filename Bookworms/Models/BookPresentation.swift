@@ -55,13 +55,16 @@ enum BookPresentation {
         var pages: [ShelfPage] = []
         var group: [Book] = []
         var dimensions: [Int: SpineDimensions] = [:]
+        var letterings: [Int: SpineLettering] = [:]
         var used: CGFloat = 0
         for book in books {
             let size: SpineDimensions
+            var lettering: SpineLettering?
             if let style = styles[book.id] {
                 let natural = ShelfLayout.dimensions(for: book, among: books, rowHeight: rowHeight)
                 size = SpineTextMetrics.readableDimensions(
                     for: book, style: style, natural: natural, rowHeight: rowHeight)
+                lettering = SpineTextMetrics.lettering(for: book, style: style, dimensions: size)
             } else {
                 let ratio = coverRatios[book.id] ?? (2.0 / 3.0)
                 let height = rowHeight * 0.92
@@ -71,17 +74,24 @@ enum BookPresentation {
             }
             let next = used + (group.isEmpty ? 0 : ShelfLayout.gap) + size.width
             if !group.isEmpty && next > width {
-                pages.append(ShelfPage(id: pages.count, books: group, dimensions: dimensions))
+                pages.append(
+                    ShelfPage(
+                        id: pages.count, books: group, dimensions: dimensions,
+                        letterings: letterings))
                 group = []
                 dimensions = [:]
+                letterings = [:]
                 used = 0
             }
             used += (group.isEmpty ? 0 : ShelfLayout.gap) + size.width
             group.append(book)
             dimensions[book.id] = size
+            letterings[book.id] = lettering
         }
         if !group.isEmpty {
-            pages.append(ShelfPage(id: pages.count, books: group, dimensions: dimensions))
+            pages.append(
+                ShelfPage(
+                    id: pages.count, books: group, dimensions: dimensions, letterings: letterings))
         }
         return pages
     }

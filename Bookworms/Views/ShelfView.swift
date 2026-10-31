@@ -1670,6 +1670,9 @@ struct ShelfRow: View {
         let dimensions = pages.reduce(into: [Int: SpineDimensions]()) {
             $0.merge($1.dimensions) { first, _ in first }
         }
+        let letterings = pages.reduce(into: [Int: SpineLettering]()) {
+            $0.merge($1.letterings) { first, _ in first }
+        }
         let pageEnds = Set(pages.dropLast().compactMap { $0.books.last?.id })
         PagedRow(
             pages: pages.map(\.books), height: rowHeight, alignment: .bottom,
@@ -1678,7 +1681,9 @@ struct ShelfRow: View {
             width: { dimensions[$0.id]?.width ?? 0 }
         ) { book in
             if let bookDimensions = dimensions[book.id] {
-                bookButton(book, dimensions: bookDimensions, endsPage: pageEnds.contains(book.id))
+                bookButton(
+                    book, dimensions: bookDimensions, lettering: letterings[book.id],
+                    endsPage: pageEnds.contains(book.id))
             }
         }
         .focusSection()
@@ -1697,16 +1702,16 @@ struct ShelfRow: View {
         }
     }
 
-    private func bookButton(_ book: Book, dimensions: SpineDimensions, endsPage: Bool) -> some View
-    {
+    private func bookButton(
+        _ book: Book, dimensions: SpineDimensions, lettering: SpineLettering?, endsPage: Bool
+    ) -> some View {
         Button {
             onSelect(book)
         } label: {
-            if let style = presentationStyles[book.id] {
+            if let style = presentationStyles[book.id], let lettering {
                 SpineView(
-                    book: book, style: style, dimensions: dimensions,
-                    isFocused: focusedBook == book.id,
-                    fontRevision: library.fontRevision)
+                    book: book, style: style, dimensions: dimensions, lettering: lettering,
+                    isFocused: focusedBook == book.id)
             } else {
                 CoverView(
                     book: book, standsOnShelf: true,

@@ -32,7 +32,7 @@ All automatic and explicit spine generation is disabled. Provider implementation
 
 ## Rendering
 
-Artwork decoding runs away from the main actor and the artwork actor. Each cover decodes at the smallest size bucket that covers its on-screen height in pixels, so ambient covers on a 4K display use larger images than shelf rows. A cover shows the nearest cached size at once and replaces a smaller one with the exact size. Typography, shaped author lines, and page layouts use bounded caches that include font-registration revisions in their keys. Focus changes reuse those layouts. Shadows apply to the simple book shape, and focus lighting uses a gradient.
+Artwork decoding runs away from the main actor and the artwork actor. Each cover decodes at the smallest size bucket that covers its on-screen height in pixels, so ambient covers on a 4K display use larger images than shelf rows. A cover shows the nearest cached size at once and replaces a smaller one with the exact size. Spine letterings and per-book dimensions use bounded caches keyed by text or book, resolved face, and geometry. Prepared shelf pages are keyed by content revision, font revision, and geometry. Focus changes reuse those layouts. Shadows apply to the simple book shape, and focus lighting uses a gradient.
 
 Profile optimized Release builds on Apple TV. Capture a repeatable sequence of launch, paging, detail opening, scrolling, and Back navigation. Compare the same workload and retain Instruments traces with the tested build. Coverage-instrumented tests and simulator timings do not establish device performance.
 

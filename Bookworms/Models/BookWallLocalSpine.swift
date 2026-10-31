@@ -53,8 +53,6 @@ enum BookWallLocalSpine {
             }
             return fontName.flatMap { UIFont(name: $0, size: size) }
         }
-
-        func title(for book: Book) -> String { uppercase ? book.title.uppercased() : book.title }
     }
 
     /// The companion design's face, or the genre face without one. A design in a face the type
@@ -72,6 +70,8 @@ enum BookWallLocalSpine {
     }
 
     /// Uses the companion design's colors and type when one exists; otherwise samples the cover.
+    /// A design whose colors don't parse keeps its type, which `BookWallLayout` measured the
+    /// spine's lettering in, over colors sampled from the cover.
     static func style(for book: Book, cover: CGImage?, design: SpineDesignV1? = nil) -> Style {
         if let design, let background = try? StyleColor(hex: design.backgroundHex),
             let foreground = try? StyleColor(hex: design.foregroundHex)
@@ -80,8 +80,11 @@ enum BookWallLocalSpine {
                 background: background, foreground: foreground,
                 typography: typography(for: book, design: design))
         }
-        let samples = cover.flatMap(sampleColors) ?? []
-        return style(for: book, samples: samples)
+        let sampled = style(for: book, samples: cover.flatMap(sampleColors) ?? [])
+        guard let design else { return sampled }
+        return Style(
+            background: sampled.background, foreground: sampled.foreground,
+            typography: typography(for: book, design: design))
     }
 
     static func style(for book: Book, samples: [StyleColor]) -> Style {

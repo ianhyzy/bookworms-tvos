@@ -115,11 +115,6 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
 
     var spineTitle: String { title.components(separatedBy: ":").first ?? title }
 
-    var spineSubtitle: String? {
-        guard let colon = title.firstIndex(of: ":") else { return nil }
-        return String(title[title.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-    }
-
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
 
     /// Each format the book was read in, splitting "Physical & audiobook" into both.
