@@ -266,7 +266,7 @@ struct SocialViews: View {
             if let text = activity.review {
                 let isRead = isBookReadByUser(activity.book?.id ?? activity.id)
                 let hidesSpoilers =
-                    activity.hasSpoilers && (spoilerPolicy == .alwaysHide || !isRead)
+                    spoilerPolicy.hides(hasSpoilers: activity.hasSpoilers, isRead: isRead)
                 Button("Read review") {
                     review = ReviewPresentation(
                         title: activity.reader.displayName, text: text,
@@ -691,7 +691,7 @@ private struct SharedReviewCard: View {
 
     var body: some View {
         let hidesSpoilers =
-            item.hasSpoilers && (spoilerPolicy == .alwaysHide || !isBookRead)
+            spoilerPolicy.hides(hasSpoilers: item.hasSpoilers, isRead: isBookRead)
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 ReaderLabel(name: name, avatarURL: avatarURL, size: 34)
@@ -816,7 +816,7 @@ struct ActivityCard: View {
                 if let rating = activity.rating { Text(String(format: "%.1f ★", rating)) }
                 if let review = activity.review, !isCompact {
                     let hidesSpoilers =
-                        activity.hasSpoilers && (spoilerPolicy == .alwaysHide || !isBookRead)
+                        spoilerPolicy.hides(hasSpoilers: activity.hasSpoilers, isRead: isBookRead)
                     BookText(
                         hidesSpoilers ? "Review contains spoilers" : review, of: activity.book
                     )

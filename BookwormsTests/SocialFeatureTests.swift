@@ -560,6 +560,11 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(library.isBookReadByUser(4))
         // Non-existent book
         XCTAssertFalse(library.isBookReadByUser(9999))
+
+        XCTAssertFalse(SpoilerPolicy.alwaysHide.hides(hasSpoilers: false, isRead: false))
+        XCTAssertTrue(SpoilerPolicy.alwaysHide.hides(hasSpoilers: true, isRead: true))
+        XCTAssertFalse(SpoilerPolicy.showIfRead.hides(hasSpoilers: true, isRead: true))
+        XCTAssertTrue(SpoilerPolicy.showIfRead.hides(hasSpoilers: true, isRead: false))
     }
 
     func testFriendPicksRankUnreadBooksByFansThenRating() {

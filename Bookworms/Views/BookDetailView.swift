@@ -40,6 +40,9 @@ struct BookDetailView: View {
     var onOpenBook: ((Book) -> Void)?
     /// Followed readers with this book in their synced libraries, shown with their ratings.
     var friendReads: [FriendRead] = []
+    /// Whether the reader's own library marks the book read (`LibraryModel.isBookReadByUser`),
+    /// which decides review spoilers. A friend's copy of the book never counts.
+    let isRead: Bool
     @State private var showsSeries = false
     /// The series book chosen in the pop-up, opened after the pop-up finishes closing so that one
     /// presentation never starts while another is still dismissing.
@@ -66,7 +69,8 @@ struct BookDetailView: View {
         onPickSeries: ((Int) -> Void)? = nil,
         libraryBook: @escaping (Int) -> Book? = { _ in nil },
         onOpenBook: ((Book) -> Void)? = nil,
-        friendReads: [FriendRead] = []
+        friendReads: [FriendRead] = [],
+        isRead: Bool = false
     ) {
         self.book = book
         self.style = style
@@ -80,6 +84,7 @@ struct BookDetailView: View {
         self.libraryBook = libraryBook
         self.onOpenBook = onOpenBook
         self.friendReads = friendReads
+        self.isRead = isRead
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
@@ -201,7 +206,7 @@ struct BookDetailView: View {
         }
         .sheet(isPresented: $showsReviews) {
             if let loadReviews {
-                BookReviewsView(book: book, load: loadReviews).appTypography()
+                BookReviewsView(book: book, isRead: isRead, load: loadReviews).appTypography()
             }
         }
     }
@@ -571,6 +576,8 @@ struct BookReviewsView: View {
 
     @AppStorage("spoilerPolicy") private var spoilerPolicy = SpoilerPolicy.alwaysHide
     let book: Book
+    /// Whether the reader's own library marks `book` read, which decides spoiler warnings.
+    let isRead: Bool
     let load: @MainActor () async throws -> [BookReview]
     @State private var reviews: [BookReview]?
     @State private var failure: String?
@@ -655,8 +662,8 @@ struct BookReviewsView: View {
                     ForEach(reviews) { review in
                         BookReviewCard(
                             review: review, book: book,
-                            hidesSpoilers: review.hasSpoilers
-                                && (spoilerPolicy == .alwaysHide || book.isRead != true)
+                            hidesSpoilers: spoilerPolicy.hides(
+                                hasSpoilers: review.hasSpoilers, isRead: isRead)
                         ) {
                             readerScroll = ScrollPosition(y: 0)
                             readerOffset = 0

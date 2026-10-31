@@ -697,7 +697,8 @@ struct ShelfView: View {
                 : nil,
             libraryBook: { library.book(withID: $0) },
             onOpenBook: onOpenBook,
-            friendReads: social.presentation.friendReads[book.id] ?? []
+            friendReads: social.presentation.friendReads[book.id] ?? [],
+            isRead: library.isBookReadByUser(book.id)
         )
         .appTypography()
         .id(book.id)

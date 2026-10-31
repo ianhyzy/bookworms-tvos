@@ -342,7 +342,7 @@ struct AmbientView: View {
 
     private func ambientReview(_ name: String, avatarURL: URL?, item: ReaderBook) -> some View {
         let isBookRead = library.isBookReadByUser(item.id)
-        let hidesSpoilers = item.hasSpoilers && (spoilerPolicy == .alwaysHide || !isBookRead)
+        let hidesSpoilers = spoilerPolicy.hides(hasSpoilers: item.hasSpoilers, isRead: isBookRead)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 ReaderLabel(name: name, avatarURL: avatarURL, size: 30, weight: .regular)

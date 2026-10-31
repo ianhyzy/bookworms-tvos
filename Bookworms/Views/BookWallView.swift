@@ -101,7 +101,8 @@ struct BookWallView: View {
                             ? { library.pickSeries($0, for: detailBook) } : nil,
                         libraryBook: libraryBook,
                         onOpenBook: onOpenBook,
-                        friendReads: friendReads(detailBook)
+                        friendReads: friendReads(detailBook),
+                        isRead: library.isBookReadByUser(detailBook.id)
                     )
                     .padding(.top, topInset)
                     .appTypography()
