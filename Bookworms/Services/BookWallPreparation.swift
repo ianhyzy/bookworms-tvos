@@ -82,8 +82,36 @@ final class BookWallPreparation {
 
         // Glyph checks and layout measure lettering, so each face must be registered first,
         // including the companion design a book keeps when its look's face can't letter it.
-        await Self.loadFonts(for: Array(designs.values) + looks.values)
-        guard !Task.isCancelled else { return }
+        let faces = Array(designs.values) + looks.values
+        let fonts = await Self.loadFonts(for: faces)
+        guard !Task.isCancelled,
+            var built = await build(
+                books, sources: sources, designs: designs, looks: looks, fontStyle: fontStyle)
+        else { return }
+        // Faces a network failure skipped get one more try once everything else is ready. A
+        // face that arrives letters a rebuilt wall before the wall shows, so no spine changes
+        // in view; a face that fails again waits for the next preparation.
+        if fonts.interrupted, await Self.loadFonts(for: faces).registered {
+            guard !Task.isCancelled else { return }
+            completedCount = 0
+            guard
+                let rebuilt = await build(
+                    books, sources: sources, designs: designs, looks: looks, fontStyle: fontStyle)
+            else { return }
+            built = rebuilt
+        }
+        prepared = built.wall
+        missingCovers = built.missing
+        await retryMissingCovers(in: built.wall, fontStyle: fontStyle)
+    }
+
+    /// Draws every book of the wall with the faces registered now. Returns `nil` when the task
+    /// is cancelled or a spine can't be drawn, which sets `failure`, and otherwise the wall and
+    /// the books whose covers it was drawn without.
+    private func build(
+        _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
+        looks: [Int: SpineDesignV1], fontStyle: AppFontStyle
+    ) async -> (wall: BookWallPreparedWall, missing: [Book])? {
         let drawn = Self.drawnDesigns(of: books, designs: designs, looks: looks)
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
             BookWallLocalSpine.typography(for: book, design: drawn[book.id])
@@ -108,7 +136,7 @@ final class BookWallPreparation {
         }
         let preparation = await ArtworkStore.shared.prefetch(
             books: books + outside.values.sorted { $0.id < $1.id }, avatarURLs: [])
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return nil }
         // Spines letter in points at the wall's viewing scale, which its layout sets: a wider
         // wall frames from farther away. A layout grown at one scale can frame a little
         // farther, so it is laid out again at the scale it shows at, up to three more times,
@@ -125,7 +153,7 @@ final class BookWallPreparation {
                 books: books, coverRatios: preparation.ratios, typographies: typographies,
                 pointsPerUnit: scale)
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return nil }
         var styles: [Int: BookWallLocalSpine.Style] = [:]
         var bodies: [Int: ModelEntity] = [:]
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
@@ -144,20 +172,20 @@ final class BookWallPreparation {
                 from: image, options: .init(semantic: .color))
         }
         for slot in layout.slots {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return nil }
             let cover = try? await ArtworkStore.shared.detailImage(
                 for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return nil }
             if cover == nil, !slot.book.coverURLs.isEmpty { missing.append(slot.book) }
             let source = await sourceStyle(
                 for: slot.book, drawsWith: drawsWith, designs: drawn, cache: &styles)
             let images = await rasterizer.render(
                 slot: slot, cover: cover, source: source, design: drawn[slot.book.id],
                 fontStyle: fontStyle)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return nil }
             guard let spine = try? await images.spineMips?.texture() else {
                 failure = "A book spine could not be prepared. Select Retry."
-                return
+                return nil
             }
             let coverTexture: TextureResource?
             if let coverImage = images.cover {
@@ -169,14 +197,14 @@ final class BookWallPreparation {
             if let label = images.label {
                 labels[slot.book.id] = await BookWallShelfLabel.prepare(label)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return nil }
             bodies[slot.book.id] = BookWallScene.makeBook(
                 slot: slot, style: images.style, spine: spine, cover: coverTexture,
                 pageEdge: pageEdge)
             completedCount += 1
             await Task.yield()
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return nil }
         var hint: BookWallShelfLabel.Prepared?
         if let image = BookWallShelfLabel.make("Choose a spine to open its book.", style: fontStyle)
         {
@@ -185,9 +213,7 @@ final class BookWallPreparation {
         let wall = BookWallPreparedWall(
             books: books, sources: sources, designs: designs, looks: looks, drawn: drawn,
             drawsWith: drawsWith, layout: layout, bodies: bodies, labels: labels, hint: hint)
-        prepared = wall
-        missingCovers = missing
-        await retryMissingCovers(in: wall, fontStyle: fontStyle)
+        return (wall, missing)
     }
 
     /// Downloads missing covers again after 30 seconds, as the shelf does after a failure. A
@@ -310,15 +336,27 @@ extension BookWallPreparation {
         return SpineFontPolicy.standInFamily(for: name).map { ($0, design.weight) }
     }
 
+    /// Whether `loadFonts(for:download:)` registered a face, and whether a network failure
+    /// stopped it before it tried every face.
+    struct FontLoad: Equatable {
+        var registered = false
+        var interrupted = false
+    }
+
     /// Downloads and registers each design's Google Fonts face once per family and weight.
     /// A book whose face does not load uses the system face for its design's typeface and
-    /// weight. A network failure stops further downloads until the next preparation, so an
-    /// unreachable host delays the wall by at most one request timeout.
+    /// weight. A network failure stops further downloads, so an unreachable host delays the
+    /// wall by at most one request timeout per call.
     ///
     /// The design's own face counts as registered only by name, so a family's registered Regular
     /// face, for example, does not stand in for its Bold. A stand-in family counts as registered
     /// with any face, since each one ships a single weight (`SpineFontPolicy.standInFamilies`).
-    fileprivate static func loadFonts(for designs: some Sequence<SpineDesignV1>) async {
+    /// Tests pass `download` in place of `GoogleFontLibrary`.
+    static func loadFonts(
+        for designs: some Sequence<SpineDesignV1>,
+        download: ((_ family: String, _ weight: Int) async throws -> Void)? = nil
+    ) async -> FontLoad {
+        var load = FontLoad()
         var requested = Set<String>()
         for design in designs {
             guard let name = design.fontPostScriptName, let request = fontRequest(for: design)
@@ -330,15 +368,22 @@ extension BookWallPreparation {
                 : GoogleFontLibrary.registeredFace(family: family, nearest: weight) != nil
             guard !registered else { continue }
             guard requested.insert("\(family):\(weight)").inserted else { continue }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return load }
             do {
-                _ = try await GoogleFontLibrary.shared.download(family: family, weight: weight)
+                if let download {
+                    try await download(family, weight)
+                } else {
+                    _ = try await GoogleFontLibrary.shared.download(family: family, weight: weight)
+                }
+                load.registered = true
             } catch is URLError {
-                return
+                load.interrupted = true
+                return load
             } catch {
                 continue
             }
         }
+        return load
     }
 }
 

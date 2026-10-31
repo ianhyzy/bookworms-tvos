@@ -511,6 +511,34 @@ final class SeriesDesignsTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testFontLoadStopsAtANetworkFailureAndReportsWhatRegistered() async {
+        // Fictional faces that no test host registers.
+        let designs = [
+            companionDesign(1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold"),
+            companionDesign(2, family: "Fictional Sans", postScriptName: "FictionalSans-Bold"),
+        ]
+        var requested: [String] = []
+        let offline = await BookWallPreparation.loadFonts(for: designs) { family, _ in
+            requested.append(family)
+            throw URLError(.timedOut)
+        }
+        XCTAssertEqual(offline, .init(registered: false, interrupted: true))
+        XCTAssertEqual(requested, ["Fictional Serif"], "A network failure stops the downloads")
+
+        requested = []
+        let retried = await BookWallPreparation.loadFonts(for: designs) { family, _ in
+            requested.append(family)
+        }
+        XCTAssertEqual(retried, .init(registered: true, interrupted: false))
+        XCTAssertEqual(requested, ["Fictional Serif", "Fictional Sans"])
+
+        let rejected = await BookWallPreparation.loadFonts(for: designs) { _, _ in
+            throw AIError.unavailableFont
+        }
+        XCTAssertEqual(rejected, .init(registered: false, interrupted: false))
+    }
+
     func testSeriesSourcesJudgeCompanionDesignsByTheirFace() {
         let books = [book(1, position: 1), book(2, position: 2), book(3, position: 3)]
         let allowed =
