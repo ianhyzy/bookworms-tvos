@@ -523,20 +523,76 @@ final class SeriesDesignsTests: XCTestCase {
             requested.append(family)
             throw URLError(.timedOut)
         }
-        XCTAssertEqual(offline, .init(registered: false, interrupted: true))
+        XCTAssertEqual(offline, .init(registered: false, interruption: .timedOut))
         XCTAssertEqual(requested, ["Fictional Serif"], "A network failure stops the downloads")
 
         requested = []
         let retried = await BookWallPreparation.loadFonts(for: designs) { family, _ in
             requested.append(family)
         }
-        XCTAssertEqual(retried, .init(registered: true, interrupted: false))
+        XCTAssertEqual(retried, .init(registered: true))
         XCTAssertEqual(requested, ["Fictional Serif", "Fictional Sans"])
 
         let rejected = await BookWallPreparation.loadFonts(for: designs) { _, _ in
             throw AIError.unavailableFont
         }
-        XCTAssertEqual(rejected, .init(registered: false, interrupted: false))
+        XCTAssertEqual(rejected, .init(registered: false))
+    }
+
+    /// Prepares one coverless book whose companion design names a fictional face, so every
+    /// font request goes to `download`, and returns the preparation and the requests it made.
+    @MainActor
+    private func prepareWall(
+        download: @escaping (_ call: Int, _ preparation: BookWallPreparation) throws -> Void
+    ) async -> (preparation: BookWallPreparation, calls: Int) {
+        // The download closure reads the preparation it belongs to through this reference.
+        @MainActor final class Reference { weak var preparation: BookWallPreparation? }
+        let reference = Reference()
+        var calls = 0
+        let preparation = BookWallPreparation { _, _ in
+            calls += 1
+            try download(calls, reference.preparation!)
+        }
+        reference.preparation = preparation
+        let design = companionDesign(
+            1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold")
+        await preparation.prepare([book(1, series: nil)], sources: [:], designs: [1: design])
+        return (preparation, calls)
+    }
+
+    @MainActor
+    func testPreparationRetriesSkippedFontsOnceBeforeTheWallShows() async {
+        let (preparation, calls) = await prepareWall { call, preparation in
+            if call == 1 { throw URLError(.notConnectedToInternet) }
+            XCTAssertNil(preparation.prepared, "The wall waits for the retry")
+            XCTAssertEqual(preparation.completedCount, 1, "The retry keeps the progress")
+        }
+        XCTAssertEqual(calls, 2)
+        XCTAssertNotNil(preparation.prepared)
+        XCTAssertEqual(preparation.completedCount, 1)
+        XCTAssertNil(preparation.failure)
+    }
+
+    @MainActor
+    func testPreparationSkipsTheFontRetryAfterATimeout() async {
+        let (preparation, calls) = await prepareWall { _, _ in throw URLError(.timedOut) }
+        XCTAssertEqual(calls, 1)
+        XCTAssertNotNil(preparation.prepared)
+    }
+
+    @MainActor
+    func testPreparationCancelledDuringTheFontRetryPublishesNothing() async {
+        let task = Task { @MainActor in
+            await prepareWall { call, _ in
+                if call == 1 { throw URLError(.notConnectedToInternet) }
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw URLError(.cancelled)
+            }
+        }
+        let (preparation, calls) = await task.value
+        XCTAssertEqual(calls, 2)
+        XCTAssertNil(preparation.prepared, "A cancelled preparation never publishes its wall")
+        XCTAssertNil(preparation.failure)
     }
 
     func testSeriesSourcesJudgeCompanionDesignsByTheirFace() {

@@ -46,6 +46,13 @@ final class BookWallPreparation {
     /// series sources outside the wall whose cover sets their series-mates' colors.
     @ObservationIgnored private var missingCovers: [Book] = []
     private let rasterizer = BookWallRasterizer()
+    private let downloadFont: FontDownload?
+
+    /// Creates a preparation that downloads faces with `downloadFont`, which tests pass in place
+    /// of `GoogleFontLibrary`.
+    init(downloadFont: FontDownload? = nil) {
+        self.downloadFont = downloadFont
+    }
 
     func isReady(
         for books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
@@ -83,34 +90,41 @@ final class BookWallPreparation {
         // Glyph checks and layout measure lettering, so each face must be registered first,
         // including the companion design a book keeps when its look's face can't letter it.
         let faces = Array(designs.values) + looks.values
-        let fonts = await Self.loadFonts(for: faces)
+        let fonts = await Self.loadFonts(for: faces, download: downloadFont)
         guard !Task.isCancelled,
             var built = await build(
                 books, sources: sources, designs: designs, looks: looks, fontStyle: fontStyle)
-        else { return }
+        else {
+            if !Task.isCancelled { failure = "A book spine could not be prepared. Select Retry." }
+            return
+        }
         // Faces a network failure skipped get one more try once everything else is ready. A
         // face that arrives letters a rebuilt wall before the wall shows, so no spine changes
-        // in view; a face that fails again waits for the next preparation.
-        if fonts.interrupted, await Self.loadFonts(for: faces).registered {
-            guard !Task.isCancelled else { return }
-            completedCount = 0
-            guard
-                let rebuilt = await build(
-                    books, sources: sources, designs: designs, looks: looks, fontStyle: fontStyle)
-            else { return }
+        // in view; a face that fails again waits for the next preparation. A host that timed
+        // out gets no retry, which would hold the wall for another request timeout. The rebuild
+        // keeps the progress count, and a rebuild that fails keeps the first wall.
+        if fonts.interruption != nil, fonts.interruption != .timedOut,
+            await Self.loadFonts(for: faces, download: downloadFont).registered,
+            !Task.isCancelled,
+            let rebuilt = await build(
+                books, sources: sources, designs: designs, looks: looks, fontStyle: fontStyle,
+                countsProgress: false)
+        {
             built = rebuilt
         }
+        guard !Task.isCancelled else { return }
         prepared = built.wall
         missingCovers = built.missing
         await retryMissingCovers(in: built.wall, fontStyle: fontStyle)
     }
 
-    /// Draws every book of the wall with the faces registered now. Returns `nil` when the task
-    /// is cancelled or a spine can't be drawn, which sets `failure`, and otherwise the wall and
-    /// the books whose covers it was drawn without.
+    /// Draws every book of the wall with the faces registered now, adding each drawn book to
+    /// `completedCount` when `countsProgress` is true. Returns `nil` when the task is cancelled
+    /// or a spine can't be drawn, and otherwise the wall and the books whose covers it was drawn
+    /// without.
     private func build(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
-        looks: [Int: SpineDesignV1], fontStyle: AppFontStyle
+        looks: [Int: SpineDesignV1], fontStyle: AppFontStyle, countsProgress: Bool = true
     ) async -> (wall: BookWallPreparedWall, missing: [Book])? {
         let drawn = Self.drawnDesigns(of: books, designs: designs, looks: looks)
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
@@ -183,10 +197,7 @@ final class BookWallPreparation {
                 slot: slot, cover: cover, source: source, design: drawn[slot.book.id],
                 fontStyle: fontStyle)
             guard !Task.isCancelled else { return nil }
-            guard let spine = try? await images.spineMips?.texture() else {
-                failure = "A book spine could not be prepared. Select Retry."
-                return nil
-            }
+            guard let spine = try? await images.spineMips?.texture() else { return nil }
             let coverTexture: TextureResource?
             if let coverImage = images.cover {
                 coverTexture = try? await TextureResource.generate(
@@ -201,7 +212,7 @@ final class BookWallPreparation {
             bodies[slot.book.id] = BookWallScene.makeBook(
                 slot: slot, style: images.style, spine: spine, cover: coverTexture,
                 pageEdge: pageEdge)
-            completedCount += 1
+            if countsProgress { completedCount += 1 }
             await Task.yield()
         }
         guard !Task.isCancelled else { return nil }
@@ -336,11 +347,14 @@ extension BookWallPreparation {
         return SpineFontPolicy.standInFamily(for: name).map { ($0, design.weight) }
     }
 
-    /// Whether `loadFonts(for:download:)` registered a face, and whether a network failure
-    /// stopped it before it tried every face.
+    /// Downloads and registers one Google Fonts face by family and weight.
+    typealias FontDownload = @MainActor (_ family: String, _ weight: Int) async throws -> Void
+
+    /// Whether `loadFonts(for:download:)` registered a face, and the network failure, if any,
+    /// that stopped it before it tried every face.
     struct FontLoad: Equatable {
         var registered = false
-        var interrupted = false
+        var interruption: URLError.Code?
     }
 
     /// Downloads and registers each design's Google Fonts face once per family and weight.
@@ -354,7 +368,7 @@ extension BookWallPreparation {
     /// Tests pass `download` in place of `GoogleFontLibrary`.
     static func loadFonts(
         for designs: some Sequence<SpineDesignV1>,
-        download: ((_ family: String, _ weight: Int) async throws -> Void)? = nil
+        download: FontDownload? = nil
     ) async -> FontLoad {
         var load = FontLoad()
         var requested = Set<String>()
@@ -376,8 +390,8 @@ extension BookWallPreparation {
                     _ = try await GoogleFontLibrary.shared.download(family: family, weight: weight)
                 }
                 load.registered = true
-            } catch is URLError {
-                load.interrupted = true
+            } catch let error as URLError {
+                load.interruption = error.code
                 return load
             } catch {
                 continue
