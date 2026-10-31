@@ -15,7 +15,8 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertTrue(app.otherElements["rating-distribution"].exists)
         // The sample book was finished twice, and the sample reader has it. Neither the read
         // count nor the readers row takes focus; the presses below cross the row.
-        XCTAssertEqual(app.staticTexts["detail-read-count"].label, "Read 2 times")
+        XCTAssertEqual(
+            app.descendants(matching: .any)["detail-read-count"].label, "Read 2 times")
         XCTAssertTrue(app.descendants(matching: .any)["detail-friend-reads"].exists)
         let back = app.buttons["back-to-shelf"]
         let reviews = app.buttons["community-reviews"]
@@ -122,10 +123,19 @@ final class ShelfNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(first)
         XCTAssertFalse(app.buttons["book-8"].exists)
 
-        // Back reopens the details and clears the filter; Back again returns to the whole shelf.
+        // Back reveals the details beneath the filtered shelf, already present, with focus back
+        // on the genre; Back again returns to the whole shelf.
+        let before = RemoteNavigation.transitions(app)
         XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 5))
-        RemoteNavigation.waitForFocus(back)
+        XCTAssertTrue(app.staticTexts["detail-title"].exists, "Details weren't there at once")
+        RemoteNavigation.waitForFocus(fantasy)
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Details settle")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertTrue(RemoteNavigation.isFocused(fantasy))
+        // Two updates: the leaving shelf clears focus, and the details restore it to the genre.
+        XCTAssertEqual(RemoteNavigation.transitions(app), before.map { $0 + 2 })
+        XCTAssertFalse(clear.exists)
         XCUIRemote.shared.press(.menu)
         RemoteNavigation.waitForFocus(first)
         XCTAssertTrue(app.buttons["book-8"].waitForExistence(timeout: 5))

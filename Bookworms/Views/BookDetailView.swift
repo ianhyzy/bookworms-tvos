@@ -152,7 +152,7 @@ struct BookDetailView: View {
                     // from the metadata row.
                     VStack(alignment: .leading, spacing: 22) {
                         VStack(alignment: .leading, spacing: 18) {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 9) {
                                 BookText(book.title, of: book)
                                     .appFont(size: 56, weight: .semibold)
                                     .lineLimit(3).minimumScaleFactor(0.7)
@@ -274,52 +274,44 @@ struct BookDetailView: View {
         return description
     }
 
-    /// The labeled facts under the author: reading format, publication year, and length, such as
-    /// "1098 pages" or "742 minutes" for an audiobook. Missing facts are left out.
-    private var facts: [(symbol: String, label: String, value: String)] {
+    /// The facts under the author: reading format, publication year, length, such as "1098
+    /// pages" or "742 minutes" for an audiobook, and the finish date, with a read count for a
+    /// reread. Missing facts are left out.
+    private var facts: [(symbol: String, id: String, text: String)] {
         [
-            book.formatLabel.map { (book.formatSymbol, "Format", $0) },
-            book.publicationYear.map { ("calendar", "Published", String($0)) },
-            book.lengthLabel.map { ("text.book.closed", "Length", $0) },
+            book.formatLabel.map { (book.formatSymbol, "detail-fact-Format", "Format: \($0)") },
+            book.publicationYear.map { ("calendar", "detail-fact-Published", "Published: \($0)") },
+            book.lengthLabel.map { ("text.book.closed", "detail-fact-Length", "Length: \($0)") },
+            book.finished.map { _ in
+                (
+                    "checkmark.circle", "detail-fact-Finished",
+                    "Finished: \(book.finishedLabel(format: dateFormat))"
+                )
+            },
+            book.readCount > 1
+                ? ("arrow.counterclockwise", "detail-read-count", "Read \(book.readCount) times")
+                : nil,
         ]
         .compactMap(\.self)
     }
 
     /// The facts in one row, which wraps when it is too long for the column.
     private var factsLine: some View {
-        FlowLayout(spacing: 26) {
-            ForEach(facts, id: \.label) { fact in
-                Label("\(fact.label): \(fact.value)", systemImage: fact.symbol)
+        FlowLayout(spacing: 26, lineSpacing: 6) {
+            ForEach(facts, id: \.id) { fact in
+                Label(fact.text, systemImage: fact.symbol)
                     .labelStyle(CompactLabelStyle())
                     .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("detail-fact-\(fact.label)")
+                    .accessibilityIdentifier(fact.id)
             }
         }
         .appFont(size: 26).foregroundStyle(.detailCaption).lineLimit(1)
     }
 
-    /// The finish date when one is recorded, with a read count for a reread, then genres, then
-    /// the ratings and their histogram when the book has a rating, which open reviews when
-    /// Hardcover can supply them.
+    /// Genres, then the ratings and their histogram when the book has a rating, which open
+    /// reviews when Hardcover can supply them. Only these controls sit on cards.
     private var metadata: some View {
         HStack(alignment: .top, spacing: 20) {
-            if book.finished != nil {
-                VStack(alignment: .leading, spacing: 12) {
-                    metadataItem(
-                        "Finished", value: book.finishedLabel(format: dateFormat),
-                        symbol: "checkmark.circle"
-                    )
-                    if book.readCount > 1 {
-                        Text("Read \(book.readCount) times")
-                            .appFont(size: 24, weight: .semibold)
-                            .padding(.horizontal, 12).padding(.vertical, 4)
-                            .background(.primary.opacity(0.12), in: .capsule)
-                            .accessibilityIdentifier("detail-read-count")
-                    }
-                }
-                .fixedSize()
-                .detailCard()
-            }
             if !genres.isEmpty {
                 Group {
                     if let onShowShelf {
@@ -815,6 +807,8 @@ private struct CompactLabelStyle: LabelStyle {
 /// Places views left to right and wraps to a new line when the next one doesn't fit.
 private struct FlowLayout: Layout {
     var spacing: CGFloat
+    /// The gap between lines; `spacing` when `nil`.
+    var lineSpacing: CGFloat?
 
     private struct Row {
         var indices: [Int] = []
@@ -826,7 +820,8 @@ private struct FlowLayout: Layout {
         let rows = rows(width: proposal.width ?? .infinity, subviews: subviews)
         return CGSize(
             width: rows.map(\.width).max() ?? 0,
-            height: rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1)))
+            height: rows.map(\.height).reduce(0, +)
+                + (lineSpacing ?? spacing) * CGFloat(max(0, rows.count - 1)))
     }
 
     func placeSubviews(
@@ -839,7 +834,7 @@ private struct FlowLayout: Layout {
                 subviews[index].place(at: CGPoint(x: x, y: y), proposal: .unspecified)
                 x += subviews[index].sizeThatFits(.unspecified).width + spacing
             }
-            y += row.height + spacing
+            y += row.height + (lineSpacing ?? spacing)
         }
     }
 
