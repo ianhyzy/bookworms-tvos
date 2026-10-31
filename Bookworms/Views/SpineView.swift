@@ -33,7 +33,10 @@ struct SpineView: View {
                 letteringRow
                     .frame(width: lettering.length, height: width)
                 if book.format != nil {
+                    // Hierarchical, as each format symbol draws by default, and as Book Wall's
+                    // texture draws it (`BookWallSpineTexture`).
                     Image(systemName: book.formatSymbol)
+                        .symbolRenderingMode(.hierarchical)
                         .appFont(size: SpineTextMetrics.formatIconSize)
                         .frame(width: SpineTextMetrics.formatIconSize)
                         .padding(

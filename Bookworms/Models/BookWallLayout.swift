@@ -51,11 +51,35 @@ struct BookWallLayout: Sendable {
     static let nominalPointsPerUnit: Float = 90
 
     private struct Dimensions {
-        let bookHeight: Float
+        /// The length the lettering search starts from, before it lengthens the spine.
+        let startHeight: Float
+        /// The length the book's lettering needs at `textThickness`, before variety.
+        let readableHeight: Float
         let spineThickness: Float
         /// The thinnest spine that still fits the book's lettering at its minimum sizes.
         let textThickness: Float
-        let coverWidth: Float
+        /// The page-count thickness with variety, which the book's shape keeps it at least
+        /// `minimumLengthToThickness` times as long as.
+        let pageShapeThickness: Float
+        let lengthVariety: Float
+        let coverRatio: Float
+
+        /// The book's length at `thickness`, from `readable`: variety scales it up by as much as
+        /// 22%, so similar books still differ and few sit exactly on the minimums, and the book
+        /// stays at least `minimumLengthToThickness` times as long as it is thick. Variety never
+        /// takes a book past `maximumBookLength`: a spine lengthened for its lettering may
+        /// already come close, and a longer book, with a board that grows with it, can be too
+        /// large for the detail flight to frame. Within 22% of that maximum, variety spreads
+        /// books over the room left, so they still differ rather than all stopping at it.
+        func bookHeight(readable: Float, thickness: Float) -> Float {
+            let maximum = BookWallLayout.maximumBookLength
+            let room = min(0.22, max(0, maximum / max(0.001, readable) - 1))
+            return min(
+                maximum,
+                max(
+                    readable * (1 + lengthVariety * room),
+                    max(thickness, pageShapeThickness) * BookWallLayout.minimumLengthToThickness))
+        }
     }
 
     let columns: Int
@@ -97,11 +121,47 @@ struct BookWallLayout: Sendable {
                     pointsPerUnit: pointsPerUnit)
             }
         }
+        // A crowded column gives up only thickness beyond what each spine's lettering
+        // needs. Text-fit thickness shrinks only if even that exceeds the column.
+        let laneThicknesses = lanes.indices.map { column in
+            let dimensions = laneDimensions[column]
+            // Reserve both covering layers before distributing the available stack height.
+            let coreHeight = max(
+                0, Self.maxStackHeight - Float(lanes[column].count) * Self.coverWrapThickness * 2)
+            let textTotal = dimensions.reduce(0) { $0 + $1.textThickness }
+            let floorScale = min(1, coreHeight / max(0.001, textTotal))
+            let extraSpace = max(0, coreHeight - textTotal)
+            let totalExtra = dimensions.reduce(0) {
+                $0 + max(0, $1.spineThickness - $1.textThickness)
+            }
+            let extraScale = min(1, extraSpace / max(0.001, totalExtra))
+            return dimensions.map {
+                $0.textThickness * floorScale
+                    + max(0, $0.spineThickness - $0.textThickness) * extraScale
+            }
+        }
+        // A spine squeezed thinner than its lettering needs letters a title that its thickness
+        // holds back, so it keeps only the length at which that title stops growing.
+        let laneLengths = lanes.indices.map { column in
+            lanes[column].indices
+                .map { row in
+                    let size = laneDimensions[column][row]
+                    let thickness = laneThicknesses[column][row]
+                    let readable =
+                        thickness < size.textThickness
+                        ? Self.shortestLength(
+                            for: lanes[column][row], typography: typography(of: lanes[column][row]),
+                            from: size.startHeight, to: size.readableHeight, thickness: thickness,
+                            pointsPerUnit: pointsPerUnit)
+                        : size.readableHeight
+                    return size.bookHeight(readable: readable, thickness: thickness)
+                }
+        }
         // Each column fits its own longest book, so one long book does not widen every
         // column and push the camera back. The clearance includes the seeded horizontal
         // offset at both neighboring edges.
-        let laneWidths = laneDimensions.map { lane in
-            max(Self.minimumLaneWidth, (lane.map(\.bookHeight).max() ?? 0) + 0.24)
+        let laneWidths = laneLengths.map { lane in
+            max(Self.minimumLaneWidth, (lane.max() ?? 0) + 0.24)
         }
         let totalWidth = laneWidths.reduce(0, +)
         self.totalWidth = totalWidth
@@ -113,35 +173,21 @@ struct BookWallLayout: Sendable {
         }
         var slots: [Slot] = []
         for (column, lane) in lanes.enumerated() {
-            let dimensions = laneDimensions[column]
-            // Reserve both covering layers before distributing the available stack height.
-            let coreHeight = max(
-                0, Self.maxStackHeight - Float(lane.count) * Self.coverWrapThickness * 2)
-            // A crowded column gives up only thickness beyond what each spine's lettering
-            // needs. Text-fit thickness shrinks only if even that exceeds the column.
-            let textTotal = dimensions.reduce(0) { $0 + $1.textThickness }
-            let floorScale = min(1, coreHeight / max(0.001, textTotal))
-            let extraSpace = max(0, coreHeight - textTotal)
-            let totalExtra = dimensions.reduce(0) {
-                $0 + max(0, $1.spineThickness - $1.textThickness)
-            }
-            let extraScale = min(1, extraSpace / max(0.001, totalExtra))
             var top = Self.floorY
             for (row, book) in lane.enumerated() {
-                let size = dimensions[row]
-                let thickness =
-                    size.textThickness * floorScale
-                    + max(0, size.spineThickness - size.textThickness) * extraScale
+                let thickness = laneThicknesses[column][row]
+                let length = laneLengths[column][row]
                 let collisionThickness = thickness + Self.coverWrapThickness * 2
                 slots.append(
                     Slot(
                         book: book, column: column, row: row,
                         x: laneCenters[column],
-                        restingY: top + collisionThickness / 2, bookHeight: size.bookHeight,
-                        spineThickness: thickness, coverWidth: size.coverWidth,
+                        restingY: top + collisionThickness / 2, bookHeight: length,
+                        spineThickness: thickness,
+                        coverWidth: length * laneDimensions[column][row].coverRatio,
                         lettering: Self.lettering(
                             for: book, typography: typography(of: book),
-                            length: size.bookHeight, thickness: thickness,
+                            length: length, thickness: thickness,
                             pointsPerUnit: pointsPerUnit),
                         pointsPerUnit: pointsPerUnit))
                 top += collisionThickness
@@ -169,38 +215,28 @@ struct BookWallLayout: Sendable {
             + seed * 0.025
         let pageThickness = max(
             Self.minimumSpineThickness, min(naturalThickness, Self.maximumPageThickness))
+        let startHeight = max(
+            Self.minimumBookHeight, naturalHeight,
+            Self.minimumSpineThickness * Self.minimumLengthToThickness)
         let readable = Self.readableSize(
-            for: book, typography: typography,
-            height: max(
-                Self.minimumBookHeight, naturalHeight,
-                Self.minimumSpineThickness * Self.minimumLengthToThickness),
+            for: book, typography: typography, height: startHeight,
             thickness: pageThickness, pointsPerUnit: pointsPerUnit)
-        let initialHeight = readable.height
         // Size tracks page count only loosely. A second per-book seed scales each book up by
         // as much as a quarter, so books of similar length still differ and few sit exactly
         // on the minimums. Scaling only upward keeps the text-fit sizes valid.
         let variety =
             Float((UInt64(bitPattern: Int64(book.id)) &* 40_503 &+ 12_345) % 1_000) / 999
-        let textThickness = readable.thickness
-        let spineThickness = max(pageThickness, textThickness) * (1 + variety * 0.25)
-        let lengthVariety = Float((UInt64(bitPattern: Int64(book.id)) &* 69_069) % 997) / 996
-        // Variety never takes a book past `maximumBookLength`: a spine lengthened for its
-        // lettering may already reach it, and a longer book, with a board that grows with it,
-        // can be too large for the detail flight to frame.
-        let bookHeight = min(
-            Self.maximumBookLength,
-            max(
-                initialHeight * (1 + lengthVariety * 0.22),
-                spineThickness * Self.minimumLengthToThickness))
         let ratio =
             coverRatio.flatMap { value -> Float? in
                 value.isFinite && value > 0 ? Float(value) : nil
             } ?? Self.fallbackCoverAspectRatio
         return Dimensions(
-            bookHeight: bookHeight,
-            spineThickness: spineThickness,
-            textThickness: textThickness,
-            coverWidth: bookHeight * ratio)
+            startHeight: startHeight, readableHeight: readable.height,
+            spineThickness: max(pageThickness, readable.thickness) * (1 + variety * 0.25),
+            textThickness: readable.thickness,
+            pageShapeThickness: pageThickness * (1 + variety * 0.25),
+            lengthVariety: Float((UInt64(bitPattern: Int64(book.id)) &* 69_069) % 997) / 996,
+            coverRatio: ratio)
     }
 
     /// The length, and the thinnest thickness, at which `book`'s title letters at
@@ -209,8 +245,10 @@ struct BookWallLayout: Sendable {
     /// it lengthens in 8-point steps up to `maximumBookLength` at the page-count `thickness`,
     /// then thickens in 2-point steps up to a sixth of its length. A title that letters at the
     /// minimum without growing needs only `minimumSpineThickness` if it letters there too. A
-    /// title that can't reach the minimum takes the largest spine; its lettering may take a
-    /// third line.
+    /// title that can't reach the minimum takes the thickest spine and the shortest length at
+    /// which its title stops growing, since a title held back by the spine's thickness letters
+    /// no larger on a longer one; its lettering may take a third line. A spine that grows no
+    /// longer than it needs keeps room under `maximumBookLength` for its length variety.
     ///
     /// Each search halves the steps it has left rather than measuring every step, since a
     /// longer or thicker spine never letters a smaller title.
@@ -219,26 +257,9 @@ struct BookWallLayout: Sendable {
         thickness: Float, pointsPerUnit: Float
     ) -> (height: Float, thickness: Float) {
         func reads(_ length: Float, _ across: Float) -> Bool {
-            lettering(
+            titleSize(
                 for: book, typography: typography, length: length, thickness: across,
-                pointsPerUnit: pointsPerUnit, maximumLines: 2
-            )
-            .titleSize >= SpineTextMetrics.minimumTitleSize
-        }
-        /// The first of `start`, `start + step`, ... up to `end` at which `reads` holds, or
-        /// `end` when none does.
-        func first(from start: Float, to end: Float, by step: Float, _ reads: (Float) -> Bool)
-            -> Float
-        {
-            func value(_ index: Int) -> Float { min(end, start + Float(index) * step) }
-            guard !reads(start), end > start else { return start }
-            var lower = 0
-            var upper = Int(((end - start) / step).rounded(.up))
-            while upper - lower > 1 {
-                let middle = (lower + upper) / 2
-                if reads(value(middle)) { upper = middle } else { lower = middle }
-            }
-            return value(upper)
+                pointsPerUnit: pointsPerUnit) >= SpineTextMetrics.minimumTitleSize
         }
         let length = first(
             from: height, to: max(height, maximumBookLength), by: 8 / pointsPerUnit
@@ -252,7 +273,58 @@ struct BookWallLayout: Sendable {
         {
             across = minimumSpineThickness
         }
-        return (length, across)
+        return (
+            shortestLength(
+                for: book, typography: typography, from: height, to: length, thickness: across,
+                pointsPerUnit: pointsPerUnit),
+            across
+        )
+    }
+
+    /// The shortest of the 8-point steps from `start` to `end` at which `book`'s title, on one
+    /// or two lines on a spine `thickness` across, letters as large as at `end`, or at
+    /// `SpineTextMetrics.minimumTitleSize` if it reaches that sooner.
+    private static func shortestLength(
+        for book: Book, typography: BookWallLocalSpine.Typography, from start: Float,
+        to end: Float, thickness: Float, pointsPerUnit: Float
+    ) -> Float {
+        func size(_ length: Float) -> CGFloat {
+            titleSize(
+                for: book, typography: typography, length: length, thickness: thickness,
+                pointsPerUnit: pointsPerUnit)
+        }
+        let target = min(SpineTextMetrics.minimumTitleSize, size(end))
+        return first(from: start, to: max(start, end), by: 8 / pointsPerUnit) {
+            size($0) >= target
+        }
+    }
+
+    /// The first of `start`, `start + step`, ... up to `end` at which `holds` is true, or `end`
+    /// when none is. Halves the steps it has left rather than testing every step, so `holds`
+    /// must stay true once it is.
+    private static func first(
+        from start: Float, to end: Float, by step: Float, _ holds: (Float) -> Bool
+    ) -> Float {
+        func value(_ index: Int) -> Float { min(end, start + Float(index) * step) }
+        guard !holds(start), end > start else { return start }
+        var lower = 0
+        var upper = Int(((end - start) / step).rounded(.up))
+        while upper - lower > 1 {
+            let middle = (lower + upper) / 2
+            if holds(value(middle)) { upper = middle } else { lower = middle }
+        }
+        return value(upper)
+    }
+
+    private static func titleSize(
+        for book: Book, typography: BookWallLocalSpine.Typography, length: Float,
+        thickness: Float, pointsPerUnit: Float
+    ) -> CGFloat {
+        lettering(
+            for: book, typography: typography, length: length, thickness: thickness,
+            pointsPerUnit: pointsPerUnit, maximumLines: 2
+        )
+        .titleSize
     }
 
     /// `book`'s lettering on a spine `length` by `thickness` scene units in `typography`,

@@ -2427,9 +2427,13 @@ enum BookWallSpineTexture {
         let titleLines = lettering.title.components(separatedBy: "\n")
         var y = (thickness - CGFloat(titleLines.count) * titleFont.lineHeight) / 2
         for line in titleLines {
+            // A spine letters "house" in the blue alone, as `SpineView` does; the glow is for
+            // interface text, such as the shelf front's label.
             HouseOfLeaves.attributed(
                 line, of: book, attributes: [.font: titleFont, .foregroundColor: ink],
-                lettering: HouseOfLeaves.lettering(on: style.background, ink: style.foreground)
+                lettering: HouseOfLeaves.Lettering(
+                    blue: HouseOfLeaves.lettering(on: style.background, ink: style.foreground).blue,
+                    glows: false)
             )
             .draw(at: CGPoint(x: lettering.inset, y: y))
             y += titleFont.lineHeight
@@ -2462,18 +2466,21 @@ enum BookWallSpineTexture {
     }
 
     /// Draws `book`'s format symbol upright in a spine lying flat, centered on `center`, at the
-    /// shelf's icon size. The context is scaled to points; the symbol is made at the texture's
-    /// `pixelsPerPoint` and drawn unscaled, since a symbol drawn into a scaled context comes
-    /// out as a magnified bitmap.
+    /// shelf's icon size, in the hierarchical rendering `SpineView` draws it in, so the Ebook
+    /// symbol's screen keeps its faint fill. The context is scaled to points; the symbol is made
+    /// at the texture's `pixelsPerPoint` and drawn unscaled, since a symbol drawn into a scaled
+    /// context comes out as a magnified bitmap.
     private static func drawFormatIcon(
         for book: Book, ink: StyleColor, fontStyle: AppFontStyle, pixelsPerPoint: CGFloat,
         center: CGPoint
     ) {
-        let configuration = UIImage.SymbolConfiguration(
-            font: fontStyle.uiFont(size: SpineTextMetrics.formatIconSize * pixelsPerPoint))
+        let configuration =
+            UIImage.SymbolConfiguration(
+                font: fontStyle.uiFont(size: SpineTextMetrics.formatIconSize * pixelsPerPoint)
+            )
+            .applying(UIImage.SymbolConfiguration(hierarchicalColor: ink.uiColor))
         guard
-            let symbol = UIImage(systemName: book.formatSymbol, withConfiguration: configuration)?
-                .withTintColor(ink.uiColor, renderingMode: .alwaysOriginal),
+            let symbol = UIImage(systemName: book.formatSymbol, withConfiguration: configuration),
             let context = UIGraphicsGetCurrentContext()
         else { return }
         context.saveGState()
