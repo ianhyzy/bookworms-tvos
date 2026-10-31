@@ -1193,6 +1193,34 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(revocations, ["hc_rt_fictional_1"])
         XCTAssertFalse(model.hardcoverConnected)
         XCTAssertFalse(model.hardcoverSessionExpired)
+        XCTAssertNil(model.message)
+    }
+
+    func testDisconnectReportsAKeychainTokenItCouldNotRemove() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 5 * 86_400)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.removeCredential = { account in
+            guard account == HardcoverSession.refreshAccount else {
+                throw CredentialStore.CredentialError.removeFailed
+            }
+            fixture.secrets.removeValue(forKey: account)
+        }
+        let revoked = expectation(description: "Disconnecting still revokes the login")
+        dependencies.revokeHardcoverToken = { refreshToken in
+            XCTAssertEqual(refreshToken, "hc_rt_fictional_1")
+            revoked.fulfill()
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.disconnect()
+        await fulfillment(of: [revoked], timeout: 5)
+        XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
+        XCTAssertNotNil(fixture.secrets["hardcover-token"])
+        XCTAssertEqual(model.message, "The saved Hardcover login could not be removed.")
+        XCTAssertFalse(model.hardcoverConnected)
     }
 
     func testTokenWithoutRefreshReplacesTheSavedRefreshToken() async throws {

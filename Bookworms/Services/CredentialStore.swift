@@ -44,17 +44,25 @@ enum CredentialStore {
         }
     }
 
-    static func remove(account: String = "hardcover-token") {
+    /// Deletes the saved item, and succeeds when it doesn't exist.
+    static func remove(account: String = "hardcover-token") throws {
         if OfflineTestPolicy.isEnabled { return }
         var query = query
         query[kSecAttrAccount as String] = account
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw CredentialError.removeFailed
+        }
     }
 
     enum CredentialError: LocalizedError {
         case saveFailed
+        case removeFailed
         var errorDescription: String? {
-            "The credential could not be saved securely. Try saving it again."
+            switch self {
+            case .saveFailed: "The credential could not be saved securely. Try saving it again."
+            case .removeFailed: "The saved Hardcover login could not be removed."
+            }
         }
     }
 }

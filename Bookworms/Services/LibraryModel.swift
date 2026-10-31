@@ -429,7 +429,7 @@ final class LibraryModel {
             let saved = try? JSONDecoder().decode(AIConfiguration.self, from: data)
         else { return }
         cancelGeneration()
-        dependencies.removeCredential(saved.credentialAccount)
+        try? dependencies.removeCredential(saved.credentialAccount)
         reloadSavedAIAvailability()
         generationStatus = "API key removed. Saved designs are retained; books use covers."
     }
@@ -469,8 +469,8 @@ final class LibraryModel {
     /// Other provider accounts, artwork, saved designs, and display preferences are retained.
     func resetHardcoverSetup() async throws {
         guard !hasStarted else { throw SetupResetError.alreadyStarted }
-        hardcoverSession.remove()
-        guard dependencies.readCredential(HardcoverSession.accessAccount) == nil,
+        guard (try? hardcoverSession.remove()) != nil,
+            dependencies.readCredential(HardcoverSession.accessAccount) == nil,
             dependencies.readCredential(HardcoverSession.refreshAccount) == nil
         else {
             throw SetupResetError.credentialRemovalFailed
@@ -1201,12 +1201,12 @@ final class LibraryModel {
     func disconnect() {
         guard !isLoading else { return }
         cancelShelfWork()
-        hardcoverSession.remove()
+        message = nil
+        do { try hardcoverSession.remove() } catch { message = readable(error) }
         hardcoverConnected = false
         hardcoverSessionExpired = false
         hardcoverEnabled = false
         isSample = false
-        message = nil
         rebuildLibrary()
     }
 

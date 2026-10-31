@@ -13,7 +13,7 @@ struct LibraryDependencies {
     var saveCredential: (String, String) throws -> Void = {
         try CredentialStore.save($0, account: $1)
     }
-    var removeCredential: (String) -> Void = { CredentialStore.remove(account: $0) }
+    var removeCredential: (String) throws -> Void = { try CredentialStore.remove(account: $0) }
     /// Fetches the library for a token. The snapshot is the newest one saved for the account the
     /// caller expects, whose covers stay fixed when the token's account matches it.
     var fetchHardcover: @MainActor (String, SourceSnapshot?) async throws -> HardcoverLibrary = {
