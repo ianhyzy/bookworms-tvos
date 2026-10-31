@@ -1,3 +1,4 @@
+import Metal
 import RealityKit
 import SwiftUI
 import XCTest
@@ -139,6 +140,103 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertEqual(
             CGFloat(image.width) / CGFloat(image.height),
             CGFloat(slot.spineWallWidth) / CGFloat(slot.spineWallHeight), accuracy: 0.03)
+        // Two pixels per point at the wall's viewing scale.
+        let points = CGFloat(slot.pointsPerUnit) * BookWallSpineTexture.pixelsPerPoint
+        XCTAssertEqual(CGFloat(image.width), CGFloat(slot.spineWallWidth) * points, accuracy: 1)
+        XCTAssertEqual(CGFloat(image.height), CGFloat(slot.spineWallHeight) * points, accuracy: 1)
+    }
+
+    /// Dark lettering on light cloth keeps its weight at the mip level the resting wall shows:
+    /// the uploaded level 1 is as dark as a half-size Core Graphics drawing of the spine, and
+    /// darker than the level RealityKit generates, which averages in linear light.
+    @MainActor
+    func testSpineMipKeepsDarkLetteringWeight() async throws {
+        let book = Book(
+            id: 9, title: "The Steel Remains", author: "Richard K. Morgan", pages: 900,
+            format: "Ebook")
+        let cloth = try StyleColor(hex: "#E8E7E8")
+        let slot = try XCTUnwrap(BookWallLayout(books: [book]).slots.first)
+        let lettered = try XCTUnwrap(
+            BookWallSpineTexture.make(
+                for: slot,
+                style: BookWallLocalSpine.Style(
+                    background: cloth, foreground: try StyleColor(hex: "#161618"),
+                    typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
+        let spine = try XCTUnwrap(
+            BookWallSpineTexture.filled(lettered, book: book, cloth: cloth, edgeColors: []))
+        let mips = try XCTUnwrap(BookWallSpineTexture.Mips(spine))
+        XCTAssertEqual(
+            mips.levels.count, Int(log2(Double(max(spine.width, spine.height)))) + 1,
+            "The chain runs down to one pixel")
+
+        let (width, height) = (spine.width / 2, spine.height / 2)
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        let half = try XCTUnwrap(
+            CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        half.interpolationQuality = .high
+        half.draw(spine, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let drawn = try XCTUnwrap(half.data).assumingMemoryBound(to: UInt8.self)
+        /// The mean of the color channels, 0 to 255; lower is darker.
+        func lightness(_ bytes: UnsafeBufferPointer<UInt8>) -> Double {
+            var sum = 0.0
+            for (index, byte) in bytes.enumerated() where index % 4 != 3 { sum += Double(byte) }
+            return sum / Double(bytes.count / 4 * 3)
+        }
+        let expected = lightness(UnsafeBufferPointer(start: drawn, count: width * height * 4))
+        let ours = try await Self.level(1, of: try await mips.texture(), spine: spine)
+        let generatedTexture = try await TextureResource.generate(
+            from: spine, options: .init(semantic: .color))
+        let generated = try await Self.level(1, of: generatedTexture, spine: spine)
+        let oursLightness = ours.withUnsafeBufferPointer(lightness)
+        XCTAssertEqual(oursLightness, expected, accuracy: 2)
+        XCTAssertLessThan(
+            oursLightness, generated.withUnsafeBufferPointer(lightness),
+            "RealityKit's generated level thins the dark lettering")
+    }
+
+    /// `texture`'s mip `level`, read back as sRGB-encoded RGBA bytes.
+    @MainActor
+    private static func level(_ level: Int, of texture: TextureResource, spine: CGImage)
+        async throws -> [UInt8]
+    {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm_srgb, width: spine.width, height: spine.height,
+            mipmapped: true)
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        descriptor.storageMode = .private
+        let target = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        try await texture.copy(to: target)
+        return try read(
+            level, of: target, device: device, width: max(1, spine.width >> level),
+            height: max(1, spine.height >> level))
+    }
+
+    /// `target`'s mip `level`, `width` by `height`, copied into shared memory. It waits for the
+    /// GPU, so it runs outside asynchronous contexts.
+    private nonisolated static func read(
+        _ level: Int, of target: any MTLTexture, device: any MTLDevice, width: Int, height: Int
+    ) throws -> [UInt8] {
+        let buffer = try XCTUnwrap(
+            device.makeBuffer(length: width * height * 4, options: .storageModeShared))
+        let commands = try XCTUnwrap(device.makeCommandQueue()?.makeCommandBuffer())
+        let blit = try XCTUnwrap(commands.makeBlitCommandEncoder())
+        blit.copy(
+            from: target, sourceSlice: 0, sourceLevel: level,
+            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: MTLSize(width: width, height: height, depth: 1), to: buffer,
+            destinationOffset: 0, destinationBytesPerRow: width * 4,
+            destinationBytesPerImage: width * height * 4)
+        blit.endEncoding()
+        commands.commit()
+        commands.waitUntilCompleted()
+        return [UInt8](
+            UnsafeBufferPointer(
+                start: buffer.contents().assumingMemoryBound(to: UInt8.self),
+                count: width * height * 4))
     }
 
     /// The shelf and Book Wall make the same lettering decision for a spine of the same frame
@@ -303,7 +401,7 @@ final class BookWallLayoutTests: XCTestCase {
                 style: BookWallLocalSpine.Style(
                     background: cloth, foreground: .paper,
                     typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
-        let scale = BookWallSpineTexture.pixelsPerUnit / 64
+        let scale = BookWallSpineTexture.pixelsPerPoint
         let wallRoom = SpineTextMetrics.formatIconRoom(
             for: book, length: CGFloat(slot.spineWallWidth * 64),
             thickness: CGFloat(slot.spineWallHeight * 64))

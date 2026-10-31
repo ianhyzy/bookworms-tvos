@@ -155,10 +155,7 @@ final class BookWallPreparation {
                 slot: slot, cover: cover, source: source, design: drawn[slot.book.id],
                 fontStyle: fontStyle)
             guard !Task.isCancelled else { return }
-            guard let spineImage = images.spine,
-                let spine = try? await TextureResource.generate(
-                    from: spineImage, options: .init(semantic: .color))
-            else {
+            guard let spine = try? await images.spineMips?.texture() else {
                 failure = "A book spine could not be prepared. Select Retry."
                 return
             }
@@ -231,9 +228,8 @@ final class BookWallPreparation {
             let images = await rasterizer.render(
                 slot: slot, cover: cover, source: source, design: wall.drawn[slot.book.id],
                 fontStyle: fontStyle)
-            guard let spineImage = images.spine, let coverImage = images.cover,
-                let spine = try? await TextureResource.generate(
-                    from: spineImage, options: .init(semantic: .color)),
+            guard let coverImage = images.cover,
+                let spine = try? await images.spineMips?.texture(),
                 let coverTexture = try? await TextureResource.generate(
                     from: coverImage, options: .init(semantic: .color)),
                 !Task.isCancelled, prepared?.id == wall.id
@@ -347,6 +343,8 @@ actor BookWallRasterizer {
         let style: BookWallLocalSpine.Style
         /// The lettered cloth spine with the cover's fold.
         let spine: CGImage?
+        /// `spine`'s mip chain, from which preparation makes its texture.
+        let spineMips: BookWallSpineTexture.Mips?
         let cover: CGImage?
         let label: CGImage?
     }
@@ -391,6 +389,8 @@ actor BookWallRasterizer {
                 BookWallSpineTexture.filled(
                     $0, book: slot.book, cloth: style.background, edgeColors: edge)
             }
-        return Images(style: style, spine: spine, cover: board, label: label)
+        return Images(
+            style: style, spine: spine, spineMips: spine.flatMap(BookWallSpineTexture.Mips.init),
+            cover: board, label: label)
     }
 }
