@@ -57,7 +57,8 @@ actor AIStyleGenerator {
         let response = try await send(
             prompt: prompt, images: [cover], configuration: configuration, key: key)
         let proposal = try Self.decode(StyleProposal.self, text: response)
-        // The prompt asks for four; a shorter list is still usable, a longer one isn't.
+        // The prompt asks for four. A shorter list is still usable; a longer one is rejected on
+        // purpose, so every comparison sheet the model judges holds at most the four it asked for.
         guard (1...4).contains(proposal.candidateFamilies.count), proposal.reason.count <= 4000
         else { throw AIError.invalidResponse }
         var candidates: [(FontCandidate, DownloadedFont)] = []

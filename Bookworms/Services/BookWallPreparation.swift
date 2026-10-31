@@ -193,12 +193,14 @@ final class BookWallPreparation {
     /// Downloads missing covers again after 30 seconds, as the shelf does after a failure. A
     /// recovered cover replaces the materials in place of its book and of every wall book that
     /// draws in its series design, since the source's cover sets their colors; each slot keeps
-    /// the proportions it was laid out with. A redrawn book without a cover of its own keeps its
-    /// plain board in the new colors. Covers that still fail wait for the next preparation pass.
+    /// the proportions it was laid out with. A redrawn book that was drawn without a cover of its
+    /// own keeps its plain board in the new colors; one drawn with a cover whose cached copy can't
+    /// be read keeps its materials. Covers that still fail wait for the next preparation pass.
     private func retryMissingCovers(in wall: BookWallPreparedWall, fontStyle: AppFontStyle)
         async
     {
         let failed = missingCovers
+        let failedIDs = Set(failed.map(\.id))
         guard !failed.isEmpty, (try? await Task.sleep(for: .seconds(30))) != nil else { return }
         await ArtworkStore.shared.forgetFailures()
         _ = await ArtworkStore.shared.prefetch(books: failed, avatarURLs: [])
@@ -222,6 +224,9 @@ final class BookWallPreparation {
             guard let body = wall.bodies[slot.book.id] else { continue }
             let cover = try? await ArtworkStore.shared.detailImage(
                 for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
+            // Only a book that was drawn without its cover may draw a plain board.
+            guard cover != nil || slot.book.coverURLs.isEmpty || failedIDs.contains(slot.book.id)
+            else { continue }
             let source = await sourceStyle(
                 for: slot.book, drawsWith: wall.drawsWith, designs: wall.drawn, cache: &styles)
             let images = await rasterizer.render(

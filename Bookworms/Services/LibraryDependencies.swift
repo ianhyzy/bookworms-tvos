@@ -78,6 +78,11 @@ struct LibraryDependencies {
     }
     var now: () -> Date = { Date() }
     var sleep: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// Returns once Book Wall has waited long enough for launch's companion record read
+    /// (`LibraryModel.hasReadCompanionRecords`). Separate from `sleep`, whose calls tests count.
+    var companionReadLimit: @MainActor () async -> Void = {
+        try? await Task.sleep(for: .seconds(10))
+    }
     var readTopShelf: () -> [TopShelfBook] = { TopShelfSnapshot.read() }
     var writeTopShelf: @Sendable ([TopShelfBook]) throws -> Void = {
         try TopShelfSnapshot.write($0)

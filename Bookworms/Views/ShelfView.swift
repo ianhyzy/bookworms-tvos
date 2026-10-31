@@ -380,6 +380,7 @@ struct ShelfView: View {
                     preferences: coordinator.preferences, reviewYear: coordinator.reviewYear
                 )
                 .appTypography()
+                .environment(\.artworkGeneration, artworkGeneration)
                 #if DEBUG && targetEnvironment(simulator)
                     .overlay(alignment: .topLeading) {
                         if let scenario = ScenarioRuntime.current {
@@ -477,9 +478,11 @@ struct ShelfView: View {
                 } else {
                     ProgressView()
                     Text(
-                        library.hasLoadedLibrarySnapshot && library.hasReadCompanionRecords
-                            ? "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
-                            : "Loading your library…"
+                        !library.hasLoadedLibrarySnapshot
+                            ? "Loading your library…"
+                            : !library.hasReadCompanionRecords
+                                ? "Loading spine designs…"
+                                : "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
                     )
                     .appFont(size: 28)
                 }
@@ -655,18 +658,21 @@ struct ShelfView: View {
         // Browsing covers follow the library's and don't wait for the retry below; a newer
         // preparation cancels this one and resumes after the covers already saved.
         _ = await ArtworkStore.shared.prefetchBrowsing(library.browsingCoverURLs)
-        // Retry covers that failed, such as after a timeout, once. Mounted covers reload from the
-        // local cache when the generation changes; browsing itself never downloads.
-        if !preparation.failed.isEmpty {
+        // Retry covers and photos that failed, such as after a timeout, once. Mounted covers and
+        // photos reload from the local cache when the generation changes; browsing itself never
+        // downloads.
+        if !preparation.failed.isEmpty || !preparation.failedAvatars.isEmpty {
             guard (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey else {
                 return
             }
             await ArtworkStore.shared.forgetFailures()
             let retry = await ArtworkStore.shared.prefetch(
-                books: preparation.failed, avatarURLs: [])
+                books: preparation.failed, avatarURLs: preparation.failedAvatars)
             guard !Task.isCancelled, key == artworkKey else { return }
-            if !retry.ratios.isEmpty {
-                for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
+            for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
+            if !retry.ratios.isEmpty
+                || retry.failedAvatars.count < preparation.failedAvatars.count
+            {
                 artworkGeneration &+= 1
             }
         }
@@ -694,6 +700,8 @@ struct ShelfView: View {
             isRead: library.isBookReadByUser(book.id)
         )
         .appTypography()
+        // Full-screen covers present outside the content that carries the value.
+        .environment(\.artworkGeneration, artworkGeneration)
         .id(book.id)
     }
 
@@ -1743,15 +1751,11 @@ struct PagedRow<Item: Identifiable, Content: View>: View where Item.ID == Int {
 final class ShelfFocus {
     /// The focused shelf book, or `nil` while focus is elsewhere.
     private(set) var focused: Int?
-    /// Whether a shelf book has focus. It changes only when focus enters or leaves the row, so
-    /// views that read it don't update on each move.
-    private(set) var hasFocus = false
     /// The book focus last rested on, where focus returns.
     var last: Int?
 
     func focus(_ id: Int?) {
         focused = id
-        if hasFocus != (id != nil) { hasFocus = id != nil }
     }
 }
 

@@ -251,9 +251,11 @@ final class LibraryModel {
         return preferences
     }
     private(set) var hasLoadedLibrarySnapshot = false
-    /// Whether launch's companion record read has applied, or no read will run, as with iCloud
-    /// storage off. Book Wall waits for it, so its first preparation includes the companion
-    /// designs and series looks instead of preparing every spine again when they arrive.
+    /// Whether launch's companion record read has applied, no read will run, as with iCloud
+    /// storage off, or 10 seconds have passed since launch started the read. Book Wall waits for
+    /// it, so its first preparation includes the companion designs and series looks instead of
+    /// preparing every spine again when they arrive. The time limit covers a stalled read and a
+    /// read that a newer snapshot replaced; records that arrive later rebuild the wall.
     private(set) var hasReadCompanionRecords = false
     /// The connected Hardcover account's permanent profile link, for the profile code in ambient
     /// mode. `nil` without a connected, enabled account.
@@ -435,7 +437,12 @@ final class LibraryModel {
             let saved = try? JSONDecoder().decode(AIConfiguration.self, from: data)
         else { return }
         cancelGeneration()
-        try? dependencies.removeCredential(saved.credentialAccount)
+        do {
+            try dependencies.removeCredential(saved.credentialAccount)
+        } catch {
+            generationStatus = "The API key could not be removed. Try again."
+            return
+        }
         reloadSavedAIAvailability()
         generationStatus = "API key removed. Saved designs are retained; books use covers."
     }
@@ -732,7 +739,15 @@ final class LibraryModel {
         } else {
             cloudStatus = "iCloud storage is off."
         }
-        if spineDesignTask == nil { hasReadCompanionRecords = true }
+        if spineDesignTask == nil {
+            hasReadCompanionRecords = true
+        } else {
+            let limit = dependencies.companionReadLimit
+            Task { [weak self] in
+                await limit()
+                self?.hasReadCompanionRecords = true
+            }
+        }
         #if DEBUG
             if dependencies.allowLaunchOverrides,
                 let token = ProcessInfo.processInfo.environment["HARDCOVER_BOOTSTRAP_TOKEN"]
@@ -1400,11 +1415,14 @@ final class LibraryModel {
     /// changes. Storage stays on while the signed-in user is the one the last sync used;
     /// otherwise, including when the user can't be read, it turns off.
     func cloudAccountChanged() async {
+        let enabled = iCloudEnabled
         if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey),
             await dependencies.cloudUserRecordName() == previous
         {
             return
         }
+        // A storage toggle made while CloudKit answered is the reader's newer choice.
+        guard iCloudEnabled == enabled else { return }
         dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
         cloudBacked = false
         iCloudEnabled = false
@@ -1436,8 +1454,13 @@ final class LibraryModel {
                 cloudStatus = "Syncing with iCloud…"
                 do {
                     let archive = CloudLibraryArchive(sources: sourceSnapshots, designs: aiRecords)
+                    // The user is read on both sides of the sync and saved only when both reads
+                    // agree, so an account switch during the sync can't record the new user as
+                    // the one this library synced with (`cloudAccountChanged()`).
+                    let userBefore = await dependencies.cloudUserRecordName()
                     let remote = try await dependencies.syncCloud(archive)
-                    let cloudUser = await dependencies.cloudUserRecordName()
+                    let userAfter = await dependencies.cloudUserRecordName()
+                    let cloudUser = userBefore == userAfter ? userAfter : nil
                     // Disabling storage or changing accounts invalidates even uncancellable replies.
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return

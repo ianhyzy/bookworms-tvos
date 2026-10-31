@@ -342,13 +342,15 @@ actor ArtworkStore {
         throw lastError
     }
 
-    /// Cover aspect ratios by book ID, and the books whose covers could not be prepared.
+    /// Cover aspect ratios by book ID, and the books and avatars that could not be prepared.
     struct Preparation: Sendable {
         var ratios: [Int: Double] = [:]
         /// Books whose covers failed for a reason that may pass, such as a timeout. Missing,
         /// rejected, or undecodable images are not retried.
         var failed: [Book] = []
         var failureCount = 0
+        /// Avatar URLs whose photos could not be stored, for any reason.
+        var failedAvatars: [URL] = []
     }
 
     private nonisolated static func isTransient(_ error: Error) -> Bool {
@@ -404,7 +406,9 @@ actor ArtworkStore {
         // Only the stored source is needed; avatar views downsample it when they load.
         for url in Set(avatarURLs) {
             guard !Task.isCancelled else { break }
-            _ = try? await originalData(for: url, allowsNetwork: true)
+            if (try? await originalData(for: url, allowsNetwork: true)) == nil {
+                result.failedAvatars.append(url)
+            }
         }
         if needsPrune { prune() }
         if result.failureCount > 0, !Task.isCancelled {
