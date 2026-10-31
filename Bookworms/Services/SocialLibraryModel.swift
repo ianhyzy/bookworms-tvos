@@ -66,14 +66,10 @@ final class SocialLibraryModel {
     }
     var following: [ReaderProfile] { snapshot?.following ?? [] }
     private(set) var activities: [FeedActivity] = []
-    var mine: [ReaderBook] { snapshot?.mine ?? [] }
     func reader(_ id: Int?) -> ReaderProfile? { following.first { $0.id == id } }
     func books(for id: Int?) -> [ReaderBook] {
         guard let id, reader(id) != nil else { return [] }
         return snapshot?.readerBooks[id] ?? []
-    }
-    func shared(with id: Int?, limit: Int) -> [SharedRead] {
-        SharedRead.ranked(mine: mine, theirs: books(for: id), limit: limit)
     }
 
     /// Loads the social datasets the enabled views need, each on its own daily gate.

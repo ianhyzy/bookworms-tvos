@@ -26,14 +26,14 @@ final class HardcoverAuthenticationTests: XCTestCase {
 
     func testMalformedTokenNeverReachesTransport() async {
         do {
-            _ = try await client().fetchBooks(token: "malformed token with spaces")
+            _ = try await client().fetchLibrary(token: "malformed token with spaces").books
             XCTFail("Malformed credentials must be rejected.")
         } catch HardcoverError.invalidToken {
         } catch { XCTFail("Unexpected error: \(error)") }
     }
 
     func testPATUsesBearerAuthentication() async throws {
-        let books = try await client().fetchBooks(token: "hc_pat_success")
+        let books = try await client().fetchLibrary(token: "hc_pat_success").books
         XCTAssertTrue(books.isEmpty)
     }
 
@@ -167,11 +167,11 @@ final class HardcoverAuthenticationTests: XCTestCase {
     }
 
     func testLibraryPaginationLoadsAllPagesAndRejectsPartialFailure() async throws {
-        let books = try await client().fetchBooks(token: "hc_pat_pages")
+        let books = try await client().fetchLibrary(token: "hc_pat_pages").books
         XCTAssertEqual(books.count, 101)
         XCTAssertEqual(Set(books.map(\.id)).count, 101)
         do {
-            _ = try await client().fetchBooks(token: "hc_pat_partial")
+            _ = try await client().fetchLibrary(token: "hc_pat_partial").books
             XCTFail("A failed later page must not be returned as a successful partial library.")
         } catch HardcoverError.rejected {} catch { XCTFail("Unexpected error: \(error)") }
     }
@@ -215,7 +215,7 @@ final class HardcoverAuthenticationTests: XCTestCase {
 
     func testMissingScopeIsNotReportedAsExpired() async {
         do {
-            _ = try await client().fetchBooks(token: "hc_pat_scope")
+            _ = try await client().fetchLibrary(token: "hc_pat_scope").books
             XCTFail("Missing permissions must fail.")
         } catch HardcoverError.insufficientScope {
         } catch { XCTFail("Unexpected error: \(error)") }
@@ -223,7 +223,7 @@ final class HardcoverAuthenticationTests: XCTestCase {
 
     func testOtherForbiddenResponsesAreNotReportedAsExpired() async {
         do {
-            _ = try await client().fetchBooks(token: "hc_pat_forbidden")
+            _ = try await client().fetchLibrary(token: "hc_pat_forbidden").books
             XCTFail("Forbidden requests must fail.")
         } catch HardcoverError.forbidden {
         } catch { XCTFail("Unexpected error: \(error)") }
@@ -231,7 +231,7 @@ final class HardcoverAuthenticationTests: XCTestCase {
 
     func testUnauthorizedResponseRequestsReplacementToken() async {
         do {
-            _ = try await client().fetchBooks(token: "hc_pat_expired")
+            _ = try await client().fetchLibrary(token: "hc_pat_expired").books
             XCTFail("Expired credentials must fail.")
         } catch HardcoverError.invalidToken {
         } catch { XCTFail("Unexpected error: \(error)") }

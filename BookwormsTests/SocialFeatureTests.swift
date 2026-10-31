@@ -88,7 +88,7 @@ final class SocialFeatureTests: XCTestCase {
         try FileManager.default.removeItem(at: root)
         let restored = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
         await restored.load(token: token, readerID: 2)
-        XCTAssertFalse(restored.mine.isEmpty)
+        XCTAssertFalse(restored.snapshot?.mine.isEmpty ?? true)
         XCTAssertFalse(restored.books(for: 2).isEmpty)
         let counts = await client.counts
         XCTAssertEqual(counts["following"], 2)
@@ -110,7 +110,7 @@ final class SocialFeatureTests: XCTestCase {
                 return "hc_at_fixture_new"
             })
         XCTAssertEqual(renewals, ["hc_at_fixture_old"])
-        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertFalse(model.snapshot?.mine.isEmpty ?? true)
         XCTAssertFalse(model.books(for: 2).isEmpty)
         let tokens = await client.tokens
         XCTAssertEqual(tokens.first, "hc_at_fixture_old")
@@ -385,7 +385,10 @@ final class SocialFeatureTests: XCTestCase {
         let second = await client.counts
         XCTAssertEqual(first, second)
         XCTAssertEqual(model.revision, revision, "A load with nothing due doesn't reinstall")
-        XCTAssertEqual(model.shared(with: 2, limit: 20).count, 1)
+        var preferences = ViewPreferences()
+        preferences.readerID = 2
+        model.prepare(preferences)
+        XCTAssertEqual(model.presentation.shared.count, 1)
         await model.load(token: token, readerID: 3)
         let third = await client.counts
         XCTAssertEqual(third["reader3"], 1)
@@ -396,7 +399,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(fourth["feed"], 2)
         let restored = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
         await restored.load(token: token, readerID: 3)
-        XCTAssertEqual(restored.mine.count, 1)
+        XCTAssertEqual(restored.snapshot?.mine.count, 1)
         XCTAssertEqual(restored.books(for: 3).count, 1)
     }
 
@@ -417,7 +420,7 @@ final class SocialFeatureTests: XCTestCase {
         await client.fail(with: .offline)
         time += 11
         await model.load(token: token, readerID: 2, manual: true)
-        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertFalse(model.snapshot?.mine.isEmpty ?? true)
         await client.fail(with: .denied)
         time += 11
         await model.load(token: token, readerID: 2, manual: true)
@@ -475,7 +478,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertNotNil(model.reader(2))
         XCTAssertTrue(model.books(for: 2).isEmpty)
         XCTAssertFalse(model.books(for: 3).isEmpty)
-        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertFalse(model.snapshot?.mine.isEmpty ?? true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
         let counts = await client.counts
         XCTAssertEqual(counts["reader2"], 1, "The empty library counts as synced for the day")

@@ -448,10 +448,6 @@ actor HardcoverClient {
         return String(user.id)
     }
 
-    func fetchBooks(token: String) async throws -> [Book] {
-        try await fetchLibrary(token: token).books
-    }
-
     /// Returns the authenticated account with its complete library so saved books keep provenance.
     ///
     /// `previous` is the newest saved snapshot the caller knows for the account. Its books keep
