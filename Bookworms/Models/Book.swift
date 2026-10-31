@@ -303,8 +303,9 @@ enum SampleLibrary {
             genres: ["Fantasy", "Mystery"], communityRating: 4.24,
             ratingsCount: 100,
             ratingDistribution: [
-                RatingBucket(rating: 3, count: 10), RatingBucket(rating: 4, count: 56),
-                RatingBucket(rating: 5, count: 34),
+                RatingBucket(rating: 3, count: 6), RatingBucket(rating: 3.5, count: 4),
+                RatingBucket(rating: 4, count: 30), RatingBucket(rating: 4.5, count: 36),
+                RatingBucket(rating: 5, count: 24),
             ], publicationYear: 2023),
         Book(
             id: 2, title: "A Field Guide to Elsewhere", author: "Morgan Vale",
