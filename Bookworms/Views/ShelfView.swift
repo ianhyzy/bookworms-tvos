@@ -111,7 +111,7 @@ struct ShelfView: View {
     /// A book chosen on the filtered shelf, whose details open over it.
     @State private var filteredShelfBook: Book?
     /// The book whose details applied the current detail filter, where focus enters the
-    /// filtered shelf. `lastFocusedID` keeps the book that opened the first details.
+    /// filtered shelf. `shelfFocus.last` keeps the book that opened the first details.
     @State private var detailFilterEntryID: Int?
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
@@ -122,8 +122,9 @@ struct ShelfView: View {
         if case .view = sidebarItem { true } else { false }
     }
     @State private var lastSelectedID: Int?
-    @State private var lastFocusedID: Int?
-    @State private var focusedBook: Int?
+    /// My Shelf's focused and last focused books. Only the row and caption read them, so focus
+    /// movement doesn't evaluate this view's body.
+    @State private var shelfFocus = ShelfFocus()
     @State private var bookFocusRequest: ShelfBookFocusRequest?
 
     #if DEBUG && targetEnvironment(simulator)
@@ -133,7 +134,7 @@ struct ShelfView: View {
                 "pagesReady": !preparedPages.isEmpty,
                 "pagesCurrent": shelfPagesAreReady,
                 "hasEnteredShelf": hasEnteredShelf,
-                "focusedBook": focusedBook ?? -1,
+                "focusedBook": shelfFocus.focused ?? -1,
                 "requestedBook": bookFocusRequest?.id ?? -1,
             ]
         }
@@ -325,7 +326,7 @@ struct ShelfView: View {
                     ensureComparisonReader()
                 }
                 recordActivity()
-                focusedBook = nil
+                shelfFocus.focus(nil)
                 bookFocusRequest = nil
             }
             .onPlayPauseCommand { recordActivity() }
@@ -350,7 +351,7 @@ struct ShelfView: View {
                 bookDetails(
                     book, onShowShelf: { showDetailFilter($0, from: book) },
                     onOpenBook: { chosen in
-                        lastFocusedID = chosen.id
+                        shelfFocus.last = chosen.id
                         selectedBook = chosen
                     }
                 )
@@ -429,7 +430,7 @@ struct ShelfView: View {
         let entry = preparedPages.first?.books.first?.id ?? library.books.first?.id
         if let entry {
             hasEnteredShelf = true
-            requestBookFocus(lastFocusedID ?? entry)
+            requestBookFocus(shelfFocus.last ?? entry)
         }
     }
 
@@ -589,7 +590,7 @@ struct ShelfView: View {
     }
 
     private var canHideControls: Bool {
-        (focusedBook != nil || coordinator.current != .shelf) && !voiceOver
+        (shelfFocus.hasFocus || coordinator.current != .shelf) && !voiceOver
             && !library.books.isEmpty && isShowingMainView && selectedBook == nil
             && !ambient.isActive && !isWelcomePresented
     }
@@ -758,7 +759,7 @@ struct ShelfView: View {
         recordActivity()
         guard isShowingMainView else { return }
         if coordinator.current == .shelf {
-            requestBookFocus(lastFocusedID ?? lastSelectedID)
+            requestBookFocus(shelfFocus.last ?? lastSelectedID)
         } else {
             socialReturnRevision += 1
         }
@@ -769,7 +770,7 @@ struct ShelfView: View {
             let book = library.book(withID: id)
         else { return }
         lastSelectedID = id
-        lastFocusedID = id
+        shelfFocus.last = id
         showsDetailFilter = false
         library.shelfFilter = nil
         selectedBook = book
@@ -897,6 +898,8 @@ struct ShelfView: View {
                     shelfPreparationKey.fontRevision == library.fontRevision
                 else { return }
                 requestedShelfPreparationKey = shelfPreparationKey
+                // Pages prepared for this key, as when the tab appears again, stay as they are.
+                guard preparedShelf?.key != shelfPreparationKey else { return }
                 if !preparedPages.isEmpty {
                     do { try await activity.waitUntilQuiet() } catch { return }
                 }
@@ -905,13 +908,15 @@ struct ShelfView: View {
                 }
                 let measurement = PerformanceDiagnostics.begin("DeferredRepack")
                 defer { measurement.end() }
-                let candidates = Dictionary(
-                    library.books.compactMap { book in
-                        library.savedSpineStyle(for: book).map { (book.id, $0) }
-                    }, uniquingKeysWith: { first, _ in first })
-                let styles =
-                    BookPresentation.showsGeneratedSpines
-                    ? BookPresentation.uniformStyles(books: library.books, styles: candidates) : [:]
+                var styles: [Int: SpineStyle] = [:]
+                if BookPresentation.showsGeneratedSpines {
+                    let candidates = Dictionary(
+                        library.books.compactMap { book in
+                            library.savedSpineStyle(for: book).map { (book.id, $0) }
+                        }, uniquingKeysWith: { first, _ in first })
+                    styles = BookPresentation.uniformStyles(
+                        books: library.books, styles: candidates)
+                }
                 let updated = BookPresentation.pages(
                     books: library.books, styles: styles, coverRatios: library.coverRatios,
                     width: available, rowHeight: rowHeight)
@@ -929,8 +934,8 @@ struct ShelfView: View {
                         preparedPages.indices.contains(requestedPage)
                     {
                         appliedDevelopmentPage = true
-                        lastFocusedID = preparedPages[requestedPage].books.first?.id
-                        requestBookFocus(lastFocusedID)
+                        shelfFocus.last = preparedPages[requestedPage].books.first?.id
+                        requestBookFocus(shelfFocus.last)
                     }
                     if !openedDevelopmentDetail,
                         let argument = ProcessInfo.processInfo.arguments.first(where: {
@@ -1101,8 +1106,14 @@ struct ShelfView: View {
     }
 
     private var selectionCaption: some View {
-        let book = library.books.first { $0.id == (focusedBook ?? lastFocusedID) }
-        return Group {
+        ShelfFocusReader(focus: shelfFocus) { focus in
+            selectionCaption(
+                for: library.books.first { $0.id == (focus.focused ?? focus.last) })
+        }
+    }
+
+    private func selectionCaption(for book: Book?) -> some View {
+        Group {
             if let book {
                 BookCaption(
                     book: book, dateFormat: dateFormat,
@@ -1140,18 +1151,31 @@ struct ShelfView: View {
     }
 
     /// The shelf's books. Over details, focus enters on the book whose details applied the
-    /// filter, a selected book opens details over the shelf, and focus leaves `lastFocusedID` on
+    /// filter, a selected book opens details over the shelf, and focus leaves `shelfFocus.last` on
     /// the book that opened the first details.
     private func shelfRow(rowHeight: CGFloat, coversDetails: Bool) -> some View {
+        let filterEntryID = detailFilterEntryID
+        return ShelfFocusReader(focus: shelfFocus) { focus in
+            shelfRow(
+                rowHeight: rowHeight, coversDetails: coversDetails,
+                entryBookID: coversDetails ? filterEntryID : focus.last)
+        }
+        // The shelf over details keeps My Shelf's photo.
+        .onAppear { if !coversDetails { photoSeed = Int.random(in: 0..<1000) } }
+    }
+
+    private func shelfRow(rowHeight: CGFloat, coversDetails: Bool, entryBookID: Int?)
+        -> ShelfRow
+    {
         ShelfRow(
             library: library, pages: preparedPages, rowHeight: rowHeight, palette: palette,
-            entryBookID: coversDetails ? detailFilterEntryID : lastFocusedID,
+            entryBookID: entryBookID,
             focusRequest: bookFocusRequest,
             presentationStyles: presentationStyles,
             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[0],
             onFocus: { id in
-                focusedBook = id
-                if let id, !coversDetails { lastFocusedID = id }
+                shelfFocus.focus(id)
+                if let id, !coversDetails { shelfFocus.last = id }
                 recordActivity()
             },
             onSelect: { book in
@@ -1164,15 +1188,13 @@ struct ShelfView: View {
                 }
             }
         )
-        // The shelf over details keeps My Shelf's photo.
-        .onAppear { if !coversDetails { photoSeed = Int.random(in: 0..<1000) } }
     }
 
     /// Shows the whole of My Shelf, closing any details the filter covered, with focus on the
     /// book whose details applied the filter.
     private func clearShelfFilter() {
         if showsDetailFilter {
-            lastFocusedID = detailFilterEntryID ?? lastFocusedID
+            shelfFocus.last = detailFilterEntryID ?? shelfFocus.last
             showsDetailFilter = false
             filteredShelfBook = nil
             selectedBook = nil
@@ -1719,6 +1741,33 @@ struct PagedRow<Item: Identifiable, Content: View>: View where Item.ID == Int {
             position.scrollTo(x: CGFloat(page) * pageWidth)
         }
     }
+}
+
+/// My Shelf's focused book and the book focus last rested on, kept apart from `ShelfView`'s
+/// state so focus movement redraws only the views that read them (`ShelfFocusReader`).
+@MainActor @Observable
+final class ShelfFocus {
+    /// The focused shelf book, or `nil` while focus is elsewhere.
+    private(set) var focused: Int?
+    /// Whether a shelf book has focus. It changes only when focus enters or leaves the row, so
+    /// views that read it don't update on each move.
+    private(set) var hasFocus = false
+    /// The book focus last rested on, where focus returns.
+    var last: Int?
+
+    func focus(_ id: Int?) {
+        focused = id
+        if hasFocus != (id != nil) { hasFocus = id != nil }
+    }
+}
+
+/// Builds `content` from `focus` in its own body, so focus changes update this view rather
+/// than the view that creates it.
+struct ShelfFocusReader<Content: View>: View {
+    let focus: ShelfFocus
+    @ViewBuilder let content: (ShelfFocus) -> Content
+
+    var body: some View { content(focus) }
 }
 
 /// Presents prepared shelf pages as one paged row of book buttons.

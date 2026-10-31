@@ -1762,6 +1762,20 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(model.cloudStatus.contains("Local data is retained"))
     }
 
+    func testUnchangedShelfKeepsItsPresentationRevision() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1), fixture.book(2)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let revision = model.presentationRevision
+        // Reapplying the same preferences selects the same books with the same styles.
+        model.shelfPreferences = model.shelfPreferences
+        XCTAssertEqual(model.presentationRevision, revision)
+    }
+
     func testBookWallWaitsForTheLaunchCompanionRead() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

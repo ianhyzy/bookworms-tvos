@@ -278,12 +278,15 @@ struct AmbientView: View {
     private func ambientShelf(
         books: [Book], size: CGSize, coversOnly: Bool = false, photo: String, offset: Int = 0
     ) -> some View {
-        let candidates = Dictionary(
-            books.compactMap { book in library.savedSpineStyle(for: book).map { (book.id, $0) } },
-            uniquingKeysWith: { first, _ in first })
-        let styles =
-            (coversOnly || !BookPresentation.showsGeneratedSpines)
-            ? [:] : BookPresentation.uniformStyles(books: books, styles: candidates)
+        var styles: [Int: SpineStyle] = [:]
+        if !coversOnly && BookPresentation.showsGeneratedSpines {
+            let candidates = Dictionary(
+                books.compactMap { book in
+                    library.savedSpineStyle(for: book).map { (book.id, $0) }
+                },
+                uniquingKeysWith: { first, _ in first })
+            styles = BookPresentation.uniformStyles(books: books, styles: candidates)
+        }
         let pages = BookPresentation.pages(
             books: books, styles: styles, coverRatios: library.coverRatios, width: size.width,
             rowHeight: size.height - 20)

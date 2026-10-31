@@ -442,7 +442,9 @@ final class LibraryModel {
         }
     }
 
-    private(set) var styles: [Int: SpineStyle] = [:]
+    private(set) var styles: [Int: SpineStyle] = [:] {
+        didSet { if styles != oldValue { presentationRevision += 1 } }
+    }
     private(set) var isLoading = false
     private(set) var hardcoverConnectionPhase: HardcoverConnectionPhase?
     private(set) var hasCompletedWelcome: Bool
@@ -1327,7 +1329,6 @@ final class LibraryModel {
         allBooks = merged
         seriesByID = Dictionary(
             (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        updateBrowsingCovers()
         syncedAt = enabled.map(\.syncedAt).max()
         styles = aiRecords.mapValues(\.style)
         updateShelf()
@@ -1760,7 +1761,6 @@ final class LibraryModel {
     private func restoreSavedStyles(_ books: [Book]) {
         // Retain paid choices; books without a saved design are rendered as covers.
         for book in books { if let record = aiRecords[book.id] { styles[book.id] = record.style } }
-        presentationRevision += 1
     }
 
     var hasAIKey: Bool { credentials.contains(aiConfiguration.credentialAccount) }
