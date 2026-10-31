@@ -783,6 +783,9 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.books.map(\.id), [1])
         XCTAssertEqual(model.connectionRevision, 1)
         XCTAssertEqual(dependencies.sourceStore.load().first?.syncedAt, fixture.time)
+        XCTAssertEqual(model.message, "Hardcover token verified. Loading library…")
+        model.clearVerifiedTokenMessage()
+        XCTAssertNil(model.message)
     }
 
     func testSyncRenewsAnExpiringTokenAndSpendsEachRefreshTokenOnce() async throws {

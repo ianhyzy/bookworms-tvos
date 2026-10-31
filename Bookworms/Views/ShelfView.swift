@@ -292,7 +292,10 @@ struct ShelfView: View {
             ) { await loadSocial() }
             .task(id: library.connectionRevision) {
                 // Explicit reconnection retries social permissions even after a denied daily attempt.
-                if library.connectionRevision > 0 { await loadSocial(manual: true) }
+                if library.connectionRevision > 0 {
+                    await loadSocial(manual: true)
+                    library.clearVerifiedTokenMessage()
+                }
             }
             .task(
                 id: SocialLoadKey(
