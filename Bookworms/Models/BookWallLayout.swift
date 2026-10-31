@@ -33,7 +33,6 @@ struct BookWallLayout: Sendable {
     static let minimumLaneWidth: Float = 3.1
     static let maxStackHeight: Float = 8.5
     static let minimumSpineThickness: Float = 0.55
-    static let minimumBookHeight: Float = 2.75
     /// Keeps each spine clearly longer than it is thick, so thick books do not read as blocks.
     static let minimumLengthToThickness: Float = 6
     /// Very long books stop thickening here (before per-book variety) so one book cannot
@@ -216,8 +215,7 @@ struct BookWallLayout: Sendable {
         let pageThickness = max(
             Self.minimumSpineThickness, min(naturalThickness, Self.maximumPageThickness))
         let startHeight = max(
-            Self.minimumBookHeight, naturalHeight,
-            Self.minimumSpineThickness * Self.minimumLengthToThickness)
+            naturalHeight, Self.minimumSpineThickness * Self.minimumLengthToThickness)
         let readable = Self.readableSize(
             for: book, typography: typography, height: startHeight,
             thickness: pageThickness, pointsPerUnit: pointsPerUnit)

@@ -77,8 +77,14 @@ final class BookWallLayoutTests: XCTestCase {
         // Per-book variety keeps size loosely tied to page count.
         XCTAssertGreaterThan(long.spineThickness, ordinary.spineThickness * 1.5)
         XCTAssertGreaterThanOrEqual(ordinary.spineThickness, BookWallLayout.minimumSpineThickness)
-        XCTAssertGreaterThan(ordinary.bookHeight, ordinary.spineThickness * 2)
-        XCTAssertGreaterThan(long.bookHeight, long.spineThickness * 2.1)
+        // At least 6:1, except where the length cap stops a thick book first.
+        for slot in slots {
+            XCTAssertGreaterThanOrEqual(
+                slot.bookHeight,
+                min(
+                    BookWallLayout.maximumBookLength,
+                    slot.spineThickness * BookWallLayout.minimumLengthToThickness) - 0.0001)
+        }
         XCTAssertGreaterThanOrEqual(long.bookHeight, ordinary.bookHeight)
         XCTAssertLessThanOrEqual(long.bookHeight, BookWallLayout.maximumBookLength + 0.0001)
     }
@@ -100,7 +106,9 @@ final class BookWallLayoutTests: XCTestCase {
             Book(id: 3, title: "The Tainted Cup", author: "Robert Jackson Bennett", pages: 390),
         ]
         for slot in BookWallLayout(books: books).slots {
-            XCTAssertGreaterThanOrEqual(slot.bookHeight, BookWallLayout.minimumBookHeight)
+            XCTAssertGreaterThanOrEqual(
+                slot.bookHeight,
+                BookWallLayout.minimumSpineThickness * BookWallLayout.minimumLengthToThickness)
             XCTAssertEqual(
                 slot.coverWidth / slot.bookHeight,
                 BookWallLayout.fallbackCoverAspectRatio, accuracy: 0.0001)
