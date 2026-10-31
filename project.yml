@@ -20,7 +20,25 @@ targets:
   Bookworms:
     type: application
     platform: tvOS
-    sources: [Bookworms, Shared]
+    sources:
+      - Bookworms
+      - Shared
+      # The owner's example profile, which `scripts/export-example-profile.py` writes and Git
+      # ignores except for a placeholder. Builds without it hide **View example profile**;
+      # archives require it, and other Release builds, such as `scripts/device-build.py`, warn.
+      - path: ExampleProfile
+        type: folder
+        buildPhase: resources
+    preBuildScripts:
+      - name: Check the example profile
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = Release ] && [ ! -f "$SRCROOT/ExampleProfile/library-v1.json" ]; then
+            message="ExampleProfile/ is missing. Run python3 -I scripts/export-example-profile.py --out ExampleProfile (see docs/RELEASING.md)."
+            # An archive builds with the install action.
+            if [ "$ACTION" = install ]; then echo "error: $message"; exit 1; fi
+            echo "warning: $message"
+          fi
     dependencies:
       - target: BookwormsTopShelf
         embed: true

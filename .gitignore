@@ -23,3 +23,8 @@ __pycache__/
 *.mobileprovision
 
 # Real-library visual review artifacts.
+
+# The owner's private example profile (scripts/export-example-profile.py). The placeholder keeps
+# the folder, which the project copies into the app, so builds without the profile still work.
+ExampleProfile/*
+!ExampleProfile/.gitkeep
