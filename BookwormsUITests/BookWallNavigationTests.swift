@@ -257,11 +257,11 @@ final class BookWallNavigationTests: XCTestCase {
     func testRetryAfterRendererErrorRestoresTheWall() {
         let app = launchWithWall(arguments: ["--test-fail-book-wall-renderer"])
         RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        // The stopped wall's only control is Retry, so Select moves focus once, straight to it.
         let retry = app.buttons["book-wall-retry"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+        RemoteNavigation.press(.select, in: app, expecting: retry)
         XCTAssertFalse(app.buttons["book-wall-8"].exists, "A stopped wall offers no spines")
         let sidebar = app.staticTexts["Book Wall"].firstMatch
-        RemoteNavigation.press(.select, in: app, expecting: retry)
         RemoteNavigation.press(.left, in: app, expecting: sidebar)
         RemoteNavigation.press(.right, in: app, expecting: retry)
         RemoteNavigation.press(.menu, in: app, expecting: sidebar)

@@ -36,6 +36,9 @@ struct BookWallView: View {
     @State private var transitionRevision = 0
     @State private var configurationRevision = 0
     @State private var openingFailed = false
+    /// Keeps Retry mounted after a press until focus reaches a spine, so removing the focused
+    /// button doesn't move focus a second time.
+    @State private var isRetrying = false
     #if DEBUG && targetEnvironment(simulator)
         /// Counts completed falls so UI tests can confirm that Drop again ran a replay. With
         /// Reduce Motion, the status text can clear before a test reads it.
@@ -112,23 +115,32 @@ struct BookWallView: View {
                         PerformanceDiagnostics.isolates("wall-instant-panel-exit")
                             ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
                 }
-                // Spine targets exist from the tab's first render at each book's resting
-                // position and stay mounted while books fall. Opening details waits for the
-                // books to settle.
-                if let failure = rendererStatus.failure, detailBook == nil, !isReturning {
+                if rendererStatus.failure != nil || isRetrying, detailBook == nil, !isReturning {
                     // Retry runs only on a press, so a lasting error can't loop.
                     VStack(spacing: 40) {
-                        Text("Book Wall could not continue.\n\(failure)")
-                            .appFont(size: 28)
-                            .multilineTextAlignment(.center)
-                        Button("Retry", action: rendererStatus.retry)
-                            .buttonStyle(.glass)
-                            .accessibilityIdentifier("book-wall-retry")
+                        if let failure = rendererStatus.failure {
+                            Text("Book Wall could not continue.\n\(failure)")
+                                .appFont(size: 28)
+                                .multilineTextAlignment(.center)
+                        }
+                        Button("Retry") {
+                            rendererStatus.retry()
+                            // The press is an entry event, so focus moves to the book the wall
+                            // enters at, and Retry leaves once focus is there.
+                            isRetrying = true
+                            focusedBook = entryID
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityIdentifier("book-wall-retry")
                     }
                     .padding(.horizontal, 120)
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .focusSection()
-                } else if detailBook == nil && !isReturning {
+                }
+                if rendererStatus.failure == nil, detailBook == nil, !isReturning {
+                    // Spine targets exist from the tab's first render at each book's resting
+                    // position and stay mounted while books fall. Opening details waits for the
+                    // books to settle.
                     ZStack(alignment: .topLeading) {
                         ForEach(books) { book in
                             if let frame = spineFrames[book.id] {
@@ -278,6 +290,7 @@ struct BookWallView: View {
             }
         }
         .onChange(of: focusedBook) {
+            if focusedBook != nil { isRetrying = false }
             guard isActive, openingBookID == nil, detailBook == nil, !isReturning else { return }
             if let focusedBook { coordinator.wallSelection = focusedBook }
             scene.highlight(focusedBook, reduceMotion: reduceMotion)
