@@ -41,7 +41,15 @@ final class UserFacingErrorTests: XCTestCase {
             XCTAssertFalse(text.contains("expired"))
             XCTAssertFalse(text.contains("NSURLErrorDomain"))
         }
-        XCTAssertTrue(UserFacingError.message(URLError(.timedOut)).contains("Tailscale"))
+        XCTAssertEqual(
+            UserFacingError.message(URLError(.timedOut)),
+            "The server did not respond in time. Check that it's reachable and try again.")
+        XCTAssertEqual(
+            UserFacingError.hardcoverMessage(URLError(.timedOut)),
+            "Hardcover did not respond in time. Check your network and try again.")
+        XCTAssertEqual(
+            UserFacingError.hardcoverMessage(URLError(.cannotFindHost)),
+            UserFacingError.message(URLError(.cannotFindHost)))
     }
 
     func testCloudErrorsDistinguishQuotaAccountAndTemporaryFailure() {

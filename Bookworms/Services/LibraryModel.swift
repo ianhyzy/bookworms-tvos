@@ -862,7 +862,7 @@ final class LibraryModel {
                         }
                     } catch {
                         guard !Task.isCancelled else { break }
-                        self.hardcoverDeviceAuthMessage = self.readable(error)
+                        self.hardcoverDeviceAuthMessage = UserFacingError.hardcoverMessage(error)
                         // Hardcover won't accept a rejected code again; the message offers a new one.
                         if case HardcoverError.invalidAuthorizationCode = error { return }
                     }
@@ -870,7 +870,7 @@ final class LibraryModel {
             } catch {
                 guard !Task.isCancelled else { return }
                 self.hardcoverDeviceAuthLoading = false
-                self.hardcoverDeviceAuthMessage = self.readable(error)
+                self.hardcoverDeviceAuthMessage = UserFacingError.hardcoverMessage(error)
             }
         }
     }
@@ -964,8 +964,8 @@ final class LibraryModel {
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
-            message = readable(error)
-            sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
+            message = UserFacingError.hardcoverMessage(error)
+            sourceErrors[LibrarySource.hardcover.rawValue] = message
             return false
         }
     }
@@ -1050,8 +1050,9 @@ final class LibraryModel {
                     series: result.series)
             } catch {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
-                sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
-                failures.append("Hardcover: " + readable(error))
+                let text = UserFacingError.hardcoverMessage(error)
+                sourceErrors[LibrarySource.hardcover.rawValue] = text
+                failures.append(text.hasPrefix("Hardcover") ? text : "Hardcover: " + text)
                 switch error as? HardcoverError {
                 case .invalidToken: hardcoverSessionExpired = true
                 default: break

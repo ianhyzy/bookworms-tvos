@@ -3,6 +3,15 @@ import Foundation
 
 /// Maps system failures to recovery steps without exposing server payloads or local file paths.
 enum UserFacingError {
+    /// Names Hardcover when its sign-in or sync times out, since its address isn't the reader's to
+    /// check.
+    static func hardcoverMessage(_ error: Error) -> String {
+        if (error as? URLError)?.code == .timedOut {
+            return "Hardcover did not respond in time. Check your network and try again."
+        }
+        return message(error)
+    }
+
     static func message(_ error: Error) -> String {
         if let cloud = error as? CKError {
             switch cloud.code {
@@ -30,7 +39,7 @@ enum UserFacingError {
                     "The network connection is unavailable. Check Apple TV's connection and try again."
             case .timedOut:
                 return
-                    "The server did not respond in time. Check that it is reachable; private servers may require Tailscale."
+                    "The server did not respond in time. Check that it's reachable and try again."
             case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
                 return
                     "The server could not be reached. Check its address and your network connection."

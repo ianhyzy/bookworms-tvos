@@ -384,6 +384,19 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(fetches, 2)
     }
 
+    func testHardcoverSyncTimeoutNamesHardcover() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86401)])
+        var dependencies = fixture.dependencies()
+        dependencies.fetchHardcover = { _, _ in throw URLError(.timedOut) }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let text = "Hardcover did not respond in time. Check your network and try again."
+        XCTAssertEqual(model.sourceErrors["hardcover"], text)
+        XCTAssertEqual(model.message, text)
+    }
+
     func testPartialProviderFailureSavesSuccessfulSourceAndKeepsOtherCache() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
