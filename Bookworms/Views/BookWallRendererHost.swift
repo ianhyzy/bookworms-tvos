@@ -13,6 +13,8 @@ import UIKit
 struct BookWallRendererView: UIViewRepresentable {
     @Environment(\.scenePhase) private var scenePhase
     let scene: BookWallScene
+    /// Whether an opaque view covers the surface. A covered surface stops drawing.
+    var isCovered = false
 
     func makeCoordinator() -> BookWallRendererCoordinator {
         BookWallRendererCoordinator()
@@ -21,13 +23,13 @@ struct BookWallRendererView: UIViewRepresentable {
     func makeUIView(context: Context) -> BookWallRendererSurface {
         let surface = BookWallRendererSurface(frame: .zero)
         context.coordinator.connect(scene: scene, surface: surface)
-        context.coordinator.setSceneActive(scenePhase == .active)
+        context.coordinator.setSceneActive(scenePhase == .active && !isCovered)
         return surface
     }
 
     func updateUIView(_ surface: BookWallRendererSurface, context: Context) {
         context.coordinator.connect(scene: scene, surface: surface)
-        context.coordinator.setSceneActive(scenePhase == .active)
+        context.coordinator.setSceneActive(scenePhase == .active && !isCovered)
     }
 
     static func dismantleUIView(
@@ -302,7 +304,8 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         updatePauseState()
     }
 
-    /// Follows the representable's `scenePhase`, the clock's only source of app activity.
+    /// Follows the representable's `scenePhase` and whether a view covers the surface, the
+    /// clock's only sources of activity.
     func setSceneActive(_ active: Bool) {
         isApplicationActive = active
         updatePauseState()

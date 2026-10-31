@@ -125,9 +125,11 @@ final class ShelfNavigationTests: XCTestCase {
 
         // Back reveals the details beneath the filtered shelf, already present, with focus back
         // on the genre; Back again returns to the whole shelf.
+        let title = app.staticTexts["detail-title"]
+        XCTAssertFalse(title.exists && title.isHittable, "The shelf didn't cover the details")
         let before = RemoteNavigation.transitions(app)
         XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(app.staticTexts["detail-title"].exists, "Details weren't there at once")
+        XCTAssertTrue(title.exists, "Details weren't there at once")
         RemoteNavigation.waitForFocus(fantasy)
         _ = XCTWaiter.wait(
             for: [XCTestExpectation(description: "Details settle")],
@@ -139,6 +141,55 @@ final class ShelfNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         RemoteNavigation.waitForFocus(first)
         XCTAssertTrue(app.buttons["book-8"].waitForExistence(timeout: 5))
+        XCTAssertFalse(clear.exists)
+    }
+
+    /// A book chosen on a filtered shelf filters it again from its own details; Back twice
+    /// returns to the details that applied the first filter, then to the book that opened them.
+    func testFilterFromFilteredShelfReturnsToFirstBook() {
+        let app = RemoteNavigation.launch()
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(first, timeout: 15)
+        XCUIRemote.shared.press(.select)
+        let back = app.buttons["back-to-shelf"]
+        let author = app.buttons["detail-author"]
+        let title = app.staticTexts["detail-title"]
+        RemoteNavigation.waitForFocus(back, timeout: 15)
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+
+        // Sample books 1 and 8 share an author. Book 8's author filter enters on book 8.
+        let clear = app.buttons["clear-shelf-filter"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(first)
+        let second = app.buttons["book-8"]
+        RemoteNavigation.press(.right, in: app, expecting: second)
+        XCUIRemote.shared.press(.select)
+        // Book 8's details open above book 1's, which stay in the tree, so match the focused copy.
+        func focused(_ identifier: String) -> XCUIElement {
+            app.buttons
+                .matching(
+                    NSPredicate(format: "identifier == %@ AND hasFocus == true", identifier)
+                )
+                .firstMatch
+        }
+        RemoteNavigation.waitForFocus(focused("back-to-shelf"))
+        XCTAssertTrue(
+            app.staticTexts.matching(identifier: "detail-title")
+                .matching(NSPredicate(format: "label == %@", "Winter in the Orchard")).firstMatch
+                .exists)
+        RemoteNavigation.press(.right, in: app, expecting: focused("detail-author"))
+        XCUIRemote.shared.press(.select)
+        RemoteNavigation.waitForFocus(second)
+        XCTAssertEqual(app.staticTexts.matching(identifier: "detail-title").count, 1)
+
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(author)
+        XCTAssertEqual(title.label, "The Orchard at Night")
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(first)
+        XCTAssertTrue(app.buttons["book-2"].waitForExistence(timeout: 5))
         XCTAssertFalse(clear.exists)
     }
 

@@ -191,6 +191,7 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["clear-shelf-filter"].waitForExistence(timeout: 5))
         let shelfBook = app.buttons["book-8"]
         RemoteNavigation.waitForFocus(shelfBook)
+        XCTAssertFalse(title.exists && title.isHittable, "The shelf didn't cover the details")
 
         let before = RemoteNavigation.transitions(app)
         XCUIRemote.shared.press(.menu)
@@ -210,6 +211,30 @@ final class BookWallNavigationTests: XCTestCase {
         // Back from the author closes the details onto the same spine.
         XCUIRemote.shared.press(.menu)
         RemoteNavigation.waitForFocus(book)
+    }
+
+    /// The clear button on a shelf that wall details filtered closes those details and shows
+    /// the whole of My Shelf on the book whose details applied the filter.
+    func testClearingDetailFilterShowsWholeShelf() {
+        let app = openWall()
+        let book = app.buttons["book-wall-8"]
+        RemoteNavigation.waitForFocus(book)
+        XCUIRemote.shared.press(.select)
+        let back = app.buttons["back-to-shelf"]
+        RemoteNavigation.waitForFocus(back)
+        let author = app.buttons["detail-author"]
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+        let clear = app.buttons["clear-shelf-filter"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        let shelfBook = app.buttons["book-8"]
+        RemoteNavigation.waitForFocus(shelfBook)
+        RemoteNavigation.press(.down, in: app, expecting: clear)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["book-2"].waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(shelfBook)
+        XCTAssertFalse(clear.exists)
+        XCTAssertFalse(app.staticTexts["detail-title"].exists)
     }
 
     func testRendererExposesBookDescriptionsAndAccessibleDetails() throws {

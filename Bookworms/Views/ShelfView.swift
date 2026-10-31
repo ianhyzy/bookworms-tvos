@@ -110,6 +110,9 @@ struct ShelfView: View {
     @State private var showsDetailFilter = false
     /// A book chosen on the filtered shelf, whose details open over it.
     @State private var filteredShelfBook: Book?
+    /// The book whose details applied the current detail filter, where focus enters the
+    /// filtered shelf. `lastFocusedID` keeps the book that opened the first details.
+    @State private var detailFilterEntryID: Int?
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
         case ambient
@@ -204,7 +207,9 @@ struct ShelfView: View {
             if sidebarItem == .view(.bookWall) {
                 ZStack {
                     WoodBackground(palette: palette)
-                    BookWallRendererView(scene: bookWallScene)
+                    // The opaque shelf a detail filter shows covers the wall, which keeps its
+                    // last frame and stops drawing until Back reveals it.
+                    BookWallRendererView(scene: bookWallScene, isCovered: showsDetailFilter)
                         .accessibilityHidden(true)
                         .allowsHitTesting(false)
                 }
@@ -700,7 +705,7 @@ struct ShelfView: View {
     /// Shows My Shelf filtered to `filter` over the details of `book`, which matches its own
     /// author and genres, so focus enters the shelf on it.
     private func showDetailFilter(_ filter: ShelfFilter, from book: Book) {
-        lastFocusedID = book.id
+        detailFilterEntryID = book.id
         library.shelfFilter = filter
         showsDetailFilter = true
     }
@@ -741,7 +746,7 @@ struct ShelfView: View {
                 bookDetails(
                     book,
                     onShowShelf: { filter in
-                        lastFocusedID = book.id
+                        detailFilterEntryID = book.id
                         library.shelfFilter = filter
                         filteredShelfBook = nil
                     },
@@ -885,7 +890,9 @@ struct ShelfView: View {
             // those details. Everywhere else the handler is `nil` and Back opens the sidebar.
             .onExitCommand(perform: coversDetails ? { closeDetailFilter() } : nil)
             .task(id: shelfPreparationKey) {
+                // While a detail filter is up, only its shelf prepares the filtered pages.
                 guard !Task.isCancelled, available > 0, rowHeight > 0,
+                    !showsDetailFilter || coversDetails,
                     shelfPreparationKey.revision == library.presentationRevision,
                     shelfPreparationKey.fontRevision == library.fontRevision
                 else { return }
@@ -1132,12 +1139,13 @@ struct ShelfView: View {
         .focusSection()
     }
 
-    /// The shelf's books. Over details, a selected book opens details over the shelf, and
-    /// focus leaves `lastFocusedID` on the book whose details applied the filter.
+    /// The shelf's books. Over details, focus enters on the book whose details applied the
+    /// filter, a selected book opens details over the shelf, and focus leaves `lastFocusedID` on
+    /// the book that opened the first details.
     private func shelfRow(rowHeight: CGFloat, coversDetails: Bool) -> some View {
         ShelfRow(
             library: library, pages: preparedPages, rowHeight: rowHeight, palette: palette,
-            entryBookID: lastFocusedID,
+            entryBookID: coversDetails ? detailFilterEntryID : lastFocusedID,
             focusRequest: bookFocusRequest,
             presentationStyles: presentationStyles,
             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[0],
@@ -1156,12 +1164,15 @@ struct ShelfView: View {
                 }
             }
         )
-        .onAppear { photoSeed = Int.random(in: 0..<1000) }
+        // The shelf over details keeps My Shelf's photo.
+        .onAppear { if !coversDetails { photoSeed = Int.random(in: 0..<1000) } }
     }
 
-    /// Shows the whole of My Shelf, closing any details the filter covered.
+    /// Shows the whole of My Shelf, closing any details the filter covered, with focus on the
+    /// book whose details applied the filter.
     private func clearShelfFilter() {
         if showsDetailFilter {
+            lastFocusedID = detailFilterEntryID ?? lastFocusedID
             showsDetailFilter = false
             filteredShelfBook = nil
             selectedBook = nil

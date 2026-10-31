@@ -257,7 +257,7 @@ RealityRenderer renders into each slot's own texture. When the slot's Metal even
 
 The output uses `bgra8Unorm_srgb` with a Display P3 layer color space and `extendedDynamicRangeOutput = false` for standard dynamic range. Display P3 uses the sRGB transfer curve; tagging the layer as sRGB instead desaturates the scene through compositor color conversion. Antialiasing defaults to 4× multisampling; `off` disables it. Backdrop materials bypass tone mapping. The layer allows non-framebuffer operations for RealityKit's output path. The display-link rate is a request, not measured presented performance.
 
-Projection uses the shared camera's vertical field of view and the viewport's point dimensions independently of the texture dimensions. A fatal renderer error pauses its clock, detaches the adapter, and cancels active flights. Leaving Book Wall through the sidebar and returning creates another host.
+Projection uses the shared camera's vertical field of view and the viewport's point dimensions independently of the texture dimensions. A fatal renderer error pauses its clock, detaches the adapter, and cancels active flights. The clock also pauses while the app is inactive and while a shelf filtered from wall details covers the wall; the surface keeps its last frame, and Back from that shelf resumes the clock and draws the scene again. Leaving Book Wall through the sidebar and returning creates another host.
 
 | Launch argument | Values | Default | Applies to |
 | --- | --- | --- | --- |
