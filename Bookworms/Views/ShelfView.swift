@@ -264,6 +264,17 @@ struct ShelfView: View {
         .onChange(of: library.isExample) {
             // Book Wall leaves the sidebar with the example unless the reader shows it.
             if !sidebarViews.contains(coordinator.current) { coordinator.current = sidebarViews[0] }
+            // Selections and the filter origin point at the example's books and years, so Back
+            // must not reopen an example book. This clears stored state only and requests no
+            // focus.
+            if !library.isExample {
+                filterOrigin = nil
+                lastFocusedID = nil
+                lastSelectedID = nil
+                coordinator.reviewYear = nil
+                coordinator.reviewSelection = nil
+                coordinator.wallSelection = nil
+            }
         }
     }
 

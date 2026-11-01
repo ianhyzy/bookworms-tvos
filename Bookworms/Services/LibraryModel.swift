@@ -578,8 +578,10 @@ final class LibraryModel {
             guard oldValue, !isSample else { return }
             if isExample {
                 // Example records are keyed by real book IDs and draw without revalidation, so
-                // they must never reach a real library, even with iCloud storage off.
+                // they must never reach a real library, even with iCloud storage off. Its
+                // filter names the example's authors and genres, so the library opens unfiltered.
                 isExample = false
+                shelfFilter = nil
                 seriesLinks = [:]
                 pickedLinks = [:]
                 seriesLooks = [:]
@@ -1239,7 +1241,8 @@ final class LibraryModel {
             isExample = false
             return false
         }
-        // Looks first: assigning the designs prepares the series drawing once with both.
+        // Links and looks first: assigning the designs prepares the series drawing once with all.
+        seriesLinks = profile.links
         seriesLooks = profile.looks
         spineDesigns = profile.designs
         syncedAt = profile.syncedAt

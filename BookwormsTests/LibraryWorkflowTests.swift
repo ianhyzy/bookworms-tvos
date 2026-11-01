@@ -2612,12 +2612,18 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         try JSONEncoder().encode(CloudLibraryArchive(sources: [snapshot]))
             .write(to: folder.appending(path: "library-v1.json"))
         let kept = exampleDesign(for: books[0])
+        // A design made before the book's title changed carries a stale `workItemHash`.
+        var retitled = books[1]
+        retitled.title += " (earlier title)"
+        let stale = exampleDesign(for: retitled)
         try JSONEncoder()
             .encode([
                 "kept": kept,
-                // Another account's design and a design for a book the profile lacks drop out.
+                // Another account's design, a design for a book the profile lacks, and a stale
+                // design drop out.
                 "other": exampleDesign(for: books[1], accountID: fixture.hardcoverAccountID),
                 "missing": exampleDesign(for: fixture.book(9)),
+                "stale": stale,
             ])
             .write(to: folder.appending(path: "spine-designs-v1.json"))
         let key = SeriesLookKey(seriesID: 3, group: "|fictionalauthor")
@@ -2632,6 +2638,27 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         XCTAssertEqual(profile.designs, [7: kept])
         XCTAssertEqual(Array(profile.looks.keys), [key])
         XCTAssertEqual(profile.syncedAt, fixture.time)
+
+        // The records file decodes as a whole, so one bad entry drops every design in it.
+        let keptJSON = try XCTUnwrap(String(data: JSONEncoder().encode(kept), encoding: .utf8))
+        try Data(#"{"kept": \#(keptJSON), "bad": {"version": 1}}"#.utf8)
+            .write(to: folder.appending(path: "spine-designs-v1.json"))
+        let partial = await ExampleProfile.load(from: folder)
+        let partialProfile = try XCTUnwrap(partial, "A bad records file keeps the library")
+        XCTAssertTrue(partialProfile.designs.isEmpty)
+        XCTAssertEqual(Array(partialProfile.looks.keys), [key])
+
+        // Only a version 1 archive with the example account's Hardcover source holds a profile.
+        try JSONEncoder().encode(CloudLibraryArchive(version: 2, sources: [snapshot]))
+            .write(to: folder.appending(path: "library-v1.json"))
+        let newer = await ExampleProfile.load(from: folder)
+        XCTAssertNil(newer, "A newer archive version holds no profile")
+        var otherAccount = snapshot
+        otherAccount.accountID = fixture.hardcoverAccountID
+        try JSONEncoder().encode(CloudLibraryArchive(sources: [otherAccount]))
+            .write(to: folder.appending(path: "library-v1.json"))
+        let foreign = await ExampleProfile.load(from: folder)
+        XCTAssertNil(foreign, "Another account's library holds no profile")
 
         try FileManager.default.removeItem(at: folder.appending(path: "library-v1.json"))
         let missing = await ExampleProfile.load(from: folder)
@@ -2732,10 +2759,31 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         model.iCloudEnabled = true
         XCTAssertFalse(model.isExample)
         XCTAssertTrue(model.books.isEmpty)
+        XCTAssertTrue(model.spineDesigns.isEmpty, "Example designs never reach a library")
         await model.waitForCloudSync()
         XCTAssertEqual(uploads.count, 1)
         XCTAssertTrue(
             uploads.allSatisfy { $0.sources.isEmpty }, "The example never uploads to iCloud")
+    }
+
+    func testLeavingTheExampleClearsItsShelfFilter() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        var dependencies = fixture.dependencies()
+        let profile = exampleProfile(fixture)
+        dependencies.exampleProfile = { profile }
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { $0 }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.showExample()
+        model.shelfFilter = .author("Fictional author")
+
+        model.iCloudEnabled = true
+        XCTAssertFalse(model.isExample)
+        XCTAssertNil(model.shelfFilter, "The real library opens unfiltered")
+        await model.waitForCloudSync()
     }
 
     func testAMissingOrUnreadableExampleProfileShowsNothing() async throws {
@@ -2777,5 +2825,48 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         XCTAssertFalse(model.offersExample, "Turning the source back on must show its library")
         let shown = await model.showExample()
         XCTAssertFalse(shown)
+    }
+
+    func testExampleProfileFolderAppliesItsChosenCoversAndSeriesLinks() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        let folder = fixture.directory.appending(path: "ExampleProfile")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let books = [fixture.book(7), fixture.book(8)]
+        try JSONEncoder()
+            .encode(
+                CloudLibraryArchive(sources: [
+                    SourceSnapshot(
+                        source: .hardcover, accountID: ExampleProfile.accountID, books: books,
+                        syncedAt: fixture.time)
+                ])
+            )
+            .write(to: folder.appending(path: "library-v1.json"))
+        let cover = try XCTUnwrap(URL(string: "https://covers.example.com/7.jpg"))
+        func choice(_ bookID: Int, accountID: String = ExampleProfile.accountID) -> CoverChoiceV1 {
+            CoverChoiceV1(
+                version: 1, accountID: accountID, bookID: bookID, coverURL: cover,
+                chosenAt: fixture.time)
+        }
+        // Another account's choice and a choice for a book the profile lacks drop out.
+        try JSONEncoder()
+            .encode([
+                "kept": choice(7), "other": choice(8, accountID: fixture.hardcoverAccountID),
+                "missing": choice(9),
+            ])
+            .write(to: folder.appending(path: "cover-choices-v1.json"))
+        let link = SeriesLinkV1(
+            accountID: ExampleProfile.accountID, bookID: 8, linkedSeriesID: 3,
+            chosenAt: fixture.time)
+        let missing = SeriesLinkV1(
+            accountID: ExampleProfile.accountID, bookID: 9, standsAlone: true,
+            chosenAt: fixture.time)
+        try JSONEncoder().encode(["kept": link, "missing": missing])
+            .write(to: folder.appending(path: "series-links-v1.json"))
+
+        let loaded = await ExampleProfile.load(from: folder)
+        let profile = try XCTUnwrap(loaded)
+        XCTAssertEqual(profile.books.map(\.chosenCoverURL), [cover, nil])
+        XCTAssertEqual(profile.links, [8: link])
     }
 }
