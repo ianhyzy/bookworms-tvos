@@ -210,6 +210,7 @@ struct BookWallView: View {
                         Spacer()
                         Button(action: replayFall) {
                             Label("Drop again", systemImage: "arrow.clockwise")
+                                .appFont(size: 29, weight: .medium)
                         }
                         .buttonStyle(.glass)
                         .disabled(openingBookID != nil || isReturning)

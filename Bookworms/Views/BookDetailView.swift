@@ -127,6 +127,7 @@ struct BookDetailView: View {
                                 close()
                             } label: {
                                 Label("Back to view", systemImage: "chevron.left")
+                                    .appFont(size: 29, weight: .medium)
                             }
                             .buttonStyle(.glass)
                             .accessibilityIdentifier("back-to-shelf")
@@ -221,7 +222,7 @@ struct BookDetailView: View {
     }
 
     /// The description truncated to the remaining height. A hidden full-height copy detects
-    /// overflow, which offers **Show more** to read the whole text in a sheet.
+    /// overflow, which offers **Show more** to read the whole text full screen.
     private func description(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             BookText(text, of: book)
@@ -249,9 +250,11 @@ struct BookDetailView: View {
             if fullDescriptionHeight > descriptionHeight + 1,
                 !PerformanceDiagnostics.isolates("wall-no-show-more")
             {
-                let showMore = Button("Show more") {
+                let showMore = Button {
                     readingDescription = ReviewPresentation(
                         title: book.title, text: text, spoilers: false, book: book)
+                } label: {
+                    Text("Show more").appFont(size: 29, weight: .medium)
                 }
                 // Book Wall shows details over its live 3D scene, without the cover. Glass there
                 // samples a layer that changes every frame, which kept the open state at 40 fps
@@ -361,6 +364,18 @@ struct BookDetailView: View {
                 } else {
                     RatingsView(book: book).detailCard()
                 }
+            } else if loadReviews != nil {
+                // Reviews stay reachable for a book that nobody has rated yet.
+                Button {
+                    showsReviews = true
+                } label: {
+                    Label("Reviews", systemImage: "text.bubble")
+                        .appFont(size: 26, weight: .medium)
+                }
+                .buttonStyle(DetailCardButtonStyle())
+                .focusEffectDisabled()
+                .accessibilityHint("Shows community reviews.")
+                .accessibilityIdentifier("community-reviews")
             }
         }
         // Lets each card fill the row's height, so the cards line up top and bottom.
@@ -636,6 +651,9 @@ struct BookReviewsView: View {
                 failure =
                     HardcoverError.invalidToken.localizedDescription
                     + " Reconnect in Settings → Sources."
+            } catch is HardcoverError {
+                // Hardcover's own messages speak of library sync and the saved shelf.
+                failure = "Hardcover couldn't load reviews. Try again later."
             } catch {
                 failure = UserFacingError.hardcoverMessage(error)
             }
@@ -820,14 +838,16 @@ private struct CompactLabelStyle: LabelStyle {
     }
 }
 
-/// Places views left to right and wraps to a new line when the next one doesn't fit.
+/// Places views left to right and wraps to a new line when the next one doesn't fit. Each view
+/// is offered the full row width, so one wider than a row wraps or truncates within it instead
+/// of overflowing the column.
 private struct FlowLayout: Layout {
     var spacing: CGFloat
     /// The gap between lines; `spacing` when `nil`.
     var lineSpacing: CGFloat?
 
     private struct Row {
-        var indices: [Int] = []
+        var items: [(index: Int, size: CGSize)] = []
         var width: CGFloat = 0
         var height: CGFloat = 0
     }
@@ -846,25 +866,26 @@ private struct FlowLayout: Layout {
         var y = bounds.minY
         for row in rows(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
-            for index in row.indices {
-                subviews[index].place(at: CGPoint(x: x, y: y), proposal: .unspecified)
-                x += subviews[index].sizeThatFits(.unspecified).width + spacing
+            for item in row.items {
+                subviews[item.index].place(at: CGPoint(x: x, y: y), proposal: .init(item.size))
+                x += item.size.width + spacing
             }
             y += row.height + (lineSpacing ?? spacing)
         }
     }
 
     private func rows(width: CGFloat, subviews: Subviews) -> [Row] {
+        let proposal = ProposedViewSize(width: width.isFinite ? width : nil, height: nil)
         var rows: [Row] = []
         for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(proposal)
             if var last = rows.last, last.width + spacing + size.width <= width {
-                last.indices.append(index)
+                last.items.append((index, size))
                 last.width += spacing + size.width
                 last.height = max(last.height, size.height)
                 rows[rows.count - 1] = last
             } else {
-                rows.append(Row(indices: [index], width: size.width, height: size.height))
+                rows.append(Row(items: [(index, size)], width: size.width, height: size.height))
             }
         }
         return rows
@@ -919,13 +940,25 @@ private struct SeriesBrowser: View {
 /// the checks form two columns: Left and Right move between a row and its check, Up and Down
 /// between rows.
 private struct SeriesList: View {
+    private enum Focus: Hashable {
+        case row(Int)
+        case check(Int)
+    }
+
     let series: ShownSeries
     let title: String
     /// The series whose row receives focus when the list appears.
     let entryID: Int
     let onPick: ((Int) -> Void)?
     let onOpenSeries: (Int) -> Void
-    @FocusState private var focused: Int?
+    @FocusState private var focused: Focus?
+
+    /// The entry series' row, or its check when the row is text that focus skips.
+    private var entryFocus: Focus {
+        opens(entryID) || onPick == nil ? .row(entryID) : .check(entryID)
+    }
+
+    private func opens(_ id: Int) -> Bool { (series.infos[id]?.books.count ?? 0) > 1 }
 
     /// Wide enough for a long name, such as "Discworld - Industrial Revolution", at 30 points.
     private static let rowWidth: CGFloat = 900
@@ -939,7 +972,7 @@ private struct SeriesList: View {
             VStack(alignment: .leading, spacing: 16) {
                 ForEach(series.all, id: \.seriesID) { row($0) }
             }
-            .defaultFocus($focused, entryID, priority: .userInitiated)
+            .defaultFocus($focused, entryFocus, priority: .userInitiated)
             if onPick != nil {
                 Text("The checked series names this book on every device.")
                     .appFont(size: 24).foregroundStyle(.secondary)
@@ -961,14 +994,14 @@ private struct SeriesList: View {
         }
         .frame(width: Self.rowWidth, alignment: .leading)
         return HStack(spacing: 24) {
-            if (series.infos[id]?.books.count ?? 0) > 1 {
+            if opens(id) {
                 Button {
                     onOpenSeries(id)
                 } label: {
                     text
                 }
                 .buttonStyle(FlatButtonStyle(horizontalPadding: 30, verticalPadding: 14))
-                .focused($focused, equals: id)
+                .focused($focused, equals: .row(id))
                 .accessibilityHint("Shows the books in this series.")
                 .accessibilityIdentifier("series-row-\(id)")
             } else {
@@ -984,6 +1017,7 @@ private struct SeriesList: View {
                         .appFont(size: 40)
                 }
                 .buttonStyle(FlatButtonStyle(horizontalPadding: 14, verticalPadding: 14))
+                .focused($focused, equals: .check(id))
                 .accessibilityLabel("Name \(membership.name) on this book")
                 .accessibilityAddTraits(isShown ? .isSelected : [])
                 .accessibilityIdentifier("series-pick-\(id)")

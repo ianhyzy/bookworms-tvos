@@ -1226,10 +1226,12 @@ struct ShelfView: View {
             )
             .appFont(size: 28).multilineTextAlignment(.center).frame(maxWidth: 900)
             if let filter = library.shelfFilter {
-                Button("Show all books", action: clearShelfFilter)
-                    .buttonStyle(.glassProminent)
-                    .accessibilityLabel("Clear filter: \(filter.name)")
-                    .accessibilityIdentifier("clear-shelf-filter")
+                Button(action: clearShelfFilter) {
+                    Text("Show all books").appFont(size: 29, weight: .medium)
+                }
+                .buttonStyle(.glassProminent)
+                .accessibilityLabel("Clear filter: \(filter.name)")
+                .accessibilityIdentifier("clear-shelf-filter")
             } else {
                 HStack(spacing: 24) {
                     Button("Choose sources") {
@@ -1338,6 +1340,7 @@ private struct BookWallDetailNavigationCover: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Button(action: onBack) {
                             Label("Back to view", systemImage: "chevron.left")
+                                .appFont(size: 29, weight: .medium)
                         }
                         .buttonStyle(.glass)
                         .focused($backFocused)
