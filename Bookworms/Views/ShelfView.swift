@@ -1153,19 +1153,22 @@ struct ShelfView: View {
     private var emptyShelf: some View {
         VStack(spacing: 26) {
             Image(systemName: "books.vertical").appFont(size: 80, weight: .ultraLight)
+                .foregroundStyle(palette.text)
                 .accessibilityHidden(true)
             Text(
                 library.shelfFilter != nil
                     ? "No books on your shelf match"
                     : library.isConnected ? "Your shelf is waiting" : "Make room for your books"
             )
-            .appFont(size: 42)
+            .appFont(size: 42).foregroundStyle(palette.text)
             Text(
                 library.isConnected
                     ? "No books match your shelf choices. Change Show in Settings → Shelf."
                     : "Connect a source in Settings to explore your books."
             )
-            .appFont(size: 28).multilineTextAlignment(.center).frame(maxWidth: 900)
+            .appFont(size: 28).foregroundStyle(palette.text).multilineTextAlignment(.center)
+            .frame(maxWidth: 900)
+            // The buttons keep the glass styles' own label colors, which change with focus.
             if let filter = library.shelfFilter {
                 Button("Show all books") { library.shelfFilter = nil }
                     .buttonStyle(.glassProminent)
@@ -1197,7 +1200,6 @@ struct ShelfView: View {
                 }
             }
         }
-        .foregroundStyle(palette.text)
     }
 }
 
