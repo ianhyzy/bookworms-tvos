@@ -300,11 +300,7 @@ actor GoogleFontLibrary {
     private func fetch(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = 40
-        let started = Date()
         let (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
-        await APIUsageStore.shared.record(
-            service: "google-fonts", status: (response as? HTTPURLResponse)?.statusCode ?? 0,
-            duration: Date().timeIntervalSince(started))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw AIError.unavailableFont
         }

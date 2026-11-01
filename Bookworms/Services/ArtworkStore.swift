@@ -195,15 +195,10 @@ actor ArtworkStore {
     private func originalData(for url: URL, allowsNetwork: Bool) async throws -> Data {
         guard url.scheme == "https" else { throw URLError(.badURL) }
         let canonical = file(for: url, suffix: "@source2400")
-        // Reuse older size-specific files rather than downloading artwork again after an update.
-        for suffix in ["@source2400", "@2400", "@2200", "", "@800", "@400"] {
-            let cachedFile = file(for: url, suffix: suffix)
-            if let cached = try? Data(contentsOf: cachedFile),
-                CGImageSourceCreateWithData(cached as CFData, nil) != nil
-            {
-                if cachedFile != canonical { try? cached.write(to: canonical, options: .atomic) }
-                return cached
-            }
+        if let cached = try? Data(contentsOf: canonical),
+            CGImageSourceCreateWithData(cached as CFData, nil) != nil
+        {
+            return cached
         }
         if let browsing = try? Data(contentsOf: browsingFile(for: url)),
             CGImageSourceCreateWithData(browsing as CFData, nil) != nil
@@ -292,7 +287,6 @@ actor ArtworkStore {
     private func fetchOnce(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = 25
-        let started = Date()
         let data: Data
         let response: URLResponse
         if usesSavedCWAConfiguration,
@@ -308,10 +302,6 @@ actor ArtworkStore {
         } else {
             (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
         }
-        await APIUsageStore.shared.record(
-            service: "artwork",
-            status: (response as? HTTPURLResponse)?.statusCode ?? 0,
-            duration: Date().timeIntervalSince(started))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 429 || (500...599).contains(status) { throw URLError(.badServerResponse) }
         // A guard on memory while the original is held before downsampling; covers are far

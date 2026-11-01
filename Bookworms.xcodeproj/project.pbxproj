@@ -73,7 +73,6 @@
 		A1F31CF8B45441D498F77CA5 /* ShelfLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15D5ABCDEBD2F53D2DC676A /* ShelfLayout.swift */; };
 		A673C16699F87904B29A6FD4 /* BookWallLocalSpineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84378779167064447B362EBB /* BookWallLocalSpineTests.swift */; };
 		A84D5194A30375A5F338C1B6 /* BookWallPresentation.metal in Sources */ = {isa = PBXBuildFile; fileRef = 16A6B427A1FC7FE1F7484517 /* BookWallPresentation.metal */; };
-		AB942298E6A58FF7E7F13631 /* APIUsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD248044777361FA581C524A /* APIUsageStore.swift */; };
 		AC49499F99D8B42982E5EA10 /* HardcoverToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90CB4771D70E516A54D3C45 /* HardcoverToken.swift */; };
 		B3E07E04B17EEF8485ACE61A /* SocialClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE96ACA925111A491EAFE88 /* SocialClientTests.swift */; };
 		B55622DB808DA825DA899D7F /* SpineCloudStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54B01951606EB4530AE6332 /* SpineCloudStore.swift */; };
@@ -253,7 +252,6 @@
 		B49901D4DCB9619875ED62CE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		BB2EC841DEE5065CBC2D5512 /* BookWallHardcoverMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallHardcoverMesh.swift; sourceTree = "<group>"; };
 		BC4903ECD2C4C41FD217FAA6 /* SocialLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialLibrary.swift; sourceTree = "<group>"; };
-		BD248044777361FA581C524A /* APIUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIUsageStore.swift; sourceTree = "<group>"; };
 		BF92C639B243B2856606C1C3 /* SocialNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialNavigationTests.swift; sourceTree = "<group>"; };
 		C179DF4162B44730E39DA89F /* BookPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookPresentation.swift; sourceTree = "<group>"; };
 		C2547F66E0C15CE3CACD73A2 /* BookwormsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BookwormsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -326,7 +324,6 @@
 				770B8645E4BD2AD2DAA2A202 /* AIStyleGenerator.swift */,
 				2E85DB3D309F8DF85CCD4690 /* AIStyleStore.swift */,
 				D034111C42F557409C97FF62 /* AmbientController.swift */,
-				BD248044777361FA581C524A /* APIUsageStore.swift */,
 				3DE0AE68DB17CF2BED251A3A /* ArtworkStore.swift */,
 				3911BB3B9FC6F012E81172A1 /* AutomaticSpineGeneration.swift */,
 				4664FDF12F4575226EFE2BF2 /* BookWallPreparation.swift */,
@@ -733,7 +730,6 @@
 				40A94A5AEE259BB7229DA2E8 /* AIConfiguration.swift in Sources */,
 				60BBEDDC5BA0B740C5912773 /* AIStyleGenerator.swift in Sources */,
 				8A7D3AB2BFBD63715D11928E /* AIStyleStore.swift in Sources */,
-				AB942298E6A58FF7E7F13631 /* APIUsageStore.swift in Sources */,
 				85D12C9C85F080E21CC0396F /* AmbientController.swift in Sources */,
 				0A4C3B6D545AD4C5C6CBB589 /* AmbientView.swift in Sources */,
 				B9A3FDB428325E4177D5D2C3 /* AppAppearance.swift in Sources */,
