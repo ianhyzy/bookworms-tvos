@@ -779,8 +779,7 @@ actor HardcoverClient {
                 seriesName: seriesName?.isEmpty == false ? seriesName : nil,
                 seriesMemberships: source.bookSeries?.compactMap(\.membership),
                 genres: source.genres,
-                // Hardcover reports an unrated book's average as 0, which no view shows.
-                communityRating: source.rating.flatMap { $0 > 0 ? $0 : nil },
+                communityRating: source.communityRating,
                 ratingsCount: source.ratingsCount,
                 ratingDistribution: source.validRatingDistribution,
                 detailCoverURL: covers.preferred, sources: [.hardcover],
@@ -923,6 +922,9 @@ extension SourceBook {
             .filter { ($0.spoilerRatio ?? 0) < 0.2 && !["Fiction", "Nonfiction"].contains($0.tag) }
             .sorted { ($0.count ?? 0) > ($1.count ?? 0) }.map(\.tag)
     }
+
+    /// The community average, without the 0 Hardcover reports for an unrated book.
+    var communityRating: Double? { rating.flatMap { $0 > 0 ? $0 : nil } }
 
     /// Rating buckets from half a star to five stars with nonnegative counts.
     var validRatingDistribution: [RatingBucket]? {
