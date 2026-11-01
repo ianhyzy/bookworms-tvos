@@ -1454,11 +1454,11 @@ struct BookCaption: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 16) {
-                if !book.formatParts.isEmpty {
+                if !book.formatSymbols.isEmpty {
                     // One icon per format. Symbols differ in width; fixed frames keep them even.
                     HStack(spacing: 4) {
-                        ForEach(book.formatParts, id: \.self) { format in
-                            Image(systemName: Book.formatSymbol(forLabel: format))
+                        ForEach(book.formatSymbols, id: \.self) { symbol in
+                            Image(systemName: symbol)
                                 .appFont(size: 28, weight: .medium)
                                 .frame(width: 40, height: 40)
                         }
@@ -1487,7 +1487,7 @@ struct BookCaption: View {
                 community > 0
             {
                 Text(
-                    "You ★\(rating.formatted(.number.precision(.fractionLength(0...1)))) · Community ★\(community.formatted(.number.precision(.fractionLength(1))))"
+                    "You \(RatingText.stars(rating)) · Community \(RatingText.stars(community))"
                 )
                 .appFont(size: 29).opacity(0.82).padding(.top, 4)
             } else if let rating = book.rating {
@@ -1507,8 +1507,9 @@ struct ReadingLine: View {
         // A full-size symbol makes this line read larger than the author line at the same point
         // size, so it uses the small scale and sits on the text baseline.
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if book.formatLabel != nil {
-                Image(systemName: book.formatSymbol).imageScale(.small).accessibilityHidden(true)
+            // One icon per format, as the My Shelf caption shows them.
+            ForEach(book.formatSymbols, id: \.self) {
+                Image(systemName: $0).imageScale(.small).accessibilityHidden(true)
             }
             Text(book.readingSummary(dateFormat: dateFormat))
         }

@@ -446,6 +446,20 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(books.first?.rating, 5)
         XCTAssertEqual(books.first?.communityRating, 3.7)
         XCTAssertEqual(books.first?.ratingDistribution?.reduce(0) { $0 + $1.count }, 20)
+        let unrated =
+            #"[{"id":2,"book":{"id":11,"title":"Unrated","rating":0,"ratings_count":0}}]"#
+        XCTAssertNil(
+            HardcoverClient.normalize(
+                try JSONDecoder().decode([UserBook].self, from: Data(unrated.utf8))
+            )
+            .first?
+            .communityRating, "Hardcover's 0 average for an unrated book shows no rating")
+    }
+
+    func testRatingsReadTheSameInEveryView() {
+        XCTAssertEqual(RatingText.stars(4.5), "★4.5")
+        XCTAssertEqual(RatingText.stars(4), "★4")
+        XCTAssertEqual(RatingText.stars(3.75), "★3.8")
     }
 
     func testAppearanceOverrideAndSystemDefault() {

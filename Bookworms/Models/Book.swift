@@ -114,6 +114,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
 
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
 
+    /// One symbol per format in `formatParts`, so a book read in print and on audio shows both.
+    var formatSymbols: [String] { formatParts.map(Self.formatSymbol(forLabel:)) }
+
     /// Each format the book was read in, splitting "Physical & audiobook" into both.
     var formatParts: [String] {
         guard let formatLabel else { return [] }
@@ -391,6 +394,15 @@ extension SampleLibrary {
             id: 104, title: "Northern Lines", author: "Elliot Shaw", pages: 256,
             finished: "2026-05-19", communityRating: 3.8),
     ]
+}
+
+/// Ratings as every view writes them.
+enum RatingText {
+    /// A star before the rating, with at most one decimal in the reader's locale, such as "★4.5"
+    /// or "★4".
+    static func stars(_ rating: Double) -> String {
+        "★" + rating.formatted(.number.precision(.fractionLength(0...1)))
+    }
 }
 
 struct RatingBucket: Codable, Hashable, Identifiable, Sendable {

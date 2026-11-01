@@ -181,7 +181,7 @@ struct SocialViews: View {
                     }
                 }
                 Text(
-                    "\(pick.book.author) · Friends' average ★\(pick.averageRating.formatted(.number.precision(.fractionLength(1))))"
+                    "\(pick.book.author) · Friends' average \(RatingText.stars(pick.averageRating))"
                 )
                 .appFont(size: 27).opacity(0.82).lineLimit(1)
             } else {
@@ -697,7 +697,7 @@ private struct SharedReviewCard: View {
                 ReaderLabel(name: name, avatarURL: avatarURL, size: 34)
                 Spacer()
                 LikesLabel(count: item.likes).padding(.trailing, 12)
-                Text(item.rating.map { String(format: "%.1f ★", $0) } ?? "Not rated")
+                Text(item.rating.map(RatingText.stars) ?? "Not rated")
                     .appFont(size: 34, weight: .semibold)
             }
             Divider()
@@ -813,7 +813,9 @@ struct ActivityCard: View {
                     Text(book.author).appFont(size: 24).foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                if let rating = activity.rating { Text(String(format: "%.1f ★", rating)) }
+                if let rating = activity.rating {
+                    Text(RatingText.stars(rating)).appFont(size: isCompact ? 23 : 26)
+                }
                 if let review = activity.review, !isCompact {
                     let hidesSpoilers =
                         spoilerPolicy.hides(hasSpoilers: activity.hasSpoilers, isRead: isBookRead)

@@ -779,7 +779,9 @@ actor HardcoverClient {
                 seriesName: seriesName?.isEmpty == false ? seriesName : nil,
                 seriesMemberships: source.bookSeries?.compactMap(\.membership),
                 genres: source.genres,
-                communityRating: source.rating, ratingsCount: source.ratingsCount,
+                // Hardcover reports an unrated book's average as 0, which no view shows.
+                communityRating: source.rating.flatMap { $0 > 0 ? $0 : nil },
+                ratingsCount: source.ratingsCount,
                 ratingDistribution: source.validRatingDistribution,
                 detailCoverURL: covers.preferred, sources: [.hardcover],
                 isRead: row.statusID == Self.readStatus || !finishes.isEmpty

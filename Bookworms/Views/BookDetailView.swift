@@ -282,19 +282,24 @@ struct BookDetailView: View {
     /// The facts under the author: reading format, publication year, length, such as "1098
     /// pages" or "742 minutes" for an audiobook, and the finish date, with a read count for a
     /// reread. Missing facts are left out.
-    private var facts: [(symbol: String, id: String, text: String)] {
+    private var facts: [(symbols: [String], id: String, text: String)] {
         [
-            book.formatLabel.map { (book.formatSymbol, "detail-fact-Format", "Format: \($0)") },
-            book.publicationYear.map { ("calendar", "detail-fact-Published", "Published: \($0)") },
-            book.lengthLabel.map { ("text.book.closed", "detail-fact-Length", "Length: \($0)") },
+            book.formatLabel.map { (book.formatSymbols, "detail-fact-Format", "Format: \($0)") },
+            book.publicationYear.map {
+                (["calendar"], "detail-fact-Published", "Published: \($0)")
+            },
+            book.lengthLabel.map { (["text.book.closed"], "detail-fact-Length", "Length: \($0)") },
             book.finished.map { _ in
                 (
-                    "checkmark.circle", "detail-fact-Finished",
+                    ["checkmark.circle"], "detail-fact-Finished",
                     "Finished: \(book.finishedLabel(format: dateFormat))"
                 )
             },
             book.readCount > 1
-                ? ("arrow.counterclockwise", "detail-read-count", "Read \(book.readCount) times")
+                ? (
+                    ["arrow.counterclockwise"], "detail-read-count",
+                    "Read \(book.readCount) times"
+                )
                 : nil,
         ]
         .compactMap(\.self)
@@ -304,10 +309,17 @@ struct BookDetailView: View {
     private var factsLine: some View {
         FlowLayout(spacing: 26, lineSpacing: 6) {
             ForEach(facts, id: \.id) { fact in
-                Label(fact.text, systemImage: fact.symbol)
-                    .labelStyle(CompactLabelStyle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier(fact.id)
+                // A book read in print and on audio shows both format symbols.
+                Label {
+                    Text(fact.text)
+                } icon: {
+                    HStack(spacing: 4) {
+                        ForEach(fact.symbols, id: \.self) { Image(systemName: $0) }
+                    }
+                }
+                .labelStyle(CompactLabelStyle())
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(fact.id)
             }
         }
         .appFont(size: 26).foregroundStyle(.detailCaption).lineLimit(1)
@@ -367,12 +379,8 @@ struct BookDetailView: View {
                         ReaderLabel(
                             name: read.reader.displayName, avatarURL: read.reader.avatarURL,
                             size: 26)
-                        Text(
-                            read.rating.map {
-                                "★" + $0.formatted(.number.precision(.fractionLength(0...1)))
-                            } ?? "Read"
-                        )
-                        .appFont(size: 26, weight: .semibold).monospacedDigit()
+                        Text(read.rating.map(RatingText.stars) ?? "Read")
+                            .appFont(size: 26, weight: .semibold).monospacedDigit()
                     }
                 }
             }
@@ -747,7 +755,7 @@ private struct BookReviewHeader: View {
             Spacer()
             LikesLabel(count: review.likes).padding(.trailing, 12)
             if let rating = review.rating {
-                Text(String(format: "%.1f ★", rating)).appFont(size: 28, weight: .semibold)
+                Text(RatingText.stars(rating)).appFont(size: 28, weight: .semibold)
             }
         }
     }
