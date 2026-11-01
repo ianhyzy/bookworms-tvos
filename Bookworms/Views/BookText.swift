@@ -59,7 +59,8 @@ enum HouseOfLeaves {
     /// The wall and ambient mode are darker, so a blue that reads here reads on them too.
     static let darkGround = StyleColor(red: 0x3A / 255, green: 0x3A / 255, blue: 0x3C / 255)
     /// The darkest ground that light-scheme text sits on: the oak wall's lower edge
-    /// (`ShelfPalette.wallBottom`). Light cards and the plain background are lighter.
+    /// (`ShelfPalette.wallBottom`). Light cards and the plain background are lighter. Book Wall
+    /// details darken the wall further, so they use the dark scheme in either appearance.
     static let lightGround = StyleColor(red: 0.77, green: 0.67, blue: 0.54)
     /// Lettering for interface text, prepared once per color scheme.
     static let onDark = lettering(on: darkGround)

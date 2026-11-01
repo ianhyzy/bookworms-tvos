@@ -121,6 +121,9 @@ struct BookWallView: View {
                     )
                     .padding(.top, topInset)
                     .appTypography()
+                    // Details sit on the darkened wall in either appearance, so their text uses
+                    // the dark scheme.
+                    .environment(\.colorScheme, .dark)
                     .id(detailBook.id)
                     .transition(
                         PerformanceDiagnostics.isolates("wall-instant-panel-exit")

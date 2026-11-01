@@ -1272,6 +1272,8 @@ private struct BookWallDetailOverlay: View {
             BookWallDetailNavigationCover(palette: palette, detailFrame: state.frame) {
                 state.closeRevision += 1
             }
+            // Back sits on the darkened wall in either appearance, as the details do.
+            .environment(\.colorScheme, .dark)
             .transition(
                 PerformanceDiagnostics.isolates("wall-instant-cover-exit")
                     ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
