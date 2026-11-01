@@ -98,15 +98,21 @@ def export(snapshot, out):
     # A look's group is "<subseries>|<first author>" (`SeriesDesigns.lookKey(of:link:)`).
     # ponytail: matches the style series and first author but not the Discworld subseries
     # table, so it can keep a Discworld look no kept book draws; port the table if that matters.
-    styles = {(style_series(b), first_author(b)) for b in kept}
+    # A look whose source book wasn't exported names a kept member instead, since a Hardcover
+    # book ID reveals the earlier reading. The app checks only that the ID is positive.
+    members = {}
+    for book in sorted(kept, key=lambda b: b["id"]):
+        members.setdefault((style_series(book), first_author(book)), book["id"])
     raw_looks = snapshot["looks"]
     looks = {}
     for key, look in zip(raw_looks[::2], raw_looks[1::2]):
         if look["accountID"] != real_account:
             continue
-        if (key["seriesID"], key["group"].split("|", 1)[-1]) not in styles:
+        member = members.get((key["seriesID"], key["group"].split("|", 1)[-1]))
+        if member is None:
             continue
-        look = dict(look, accountID=ACCOUNT)
+        source = look["sourceBookID"] if look["sourceBookID"] in by_id else member
+        look = dict(look, accountID=ACCOUNT, sourceBookID=source)
         looks["series-look-v1-" + sha(f"{ACCOUNT}:{key['seriesID']}:{key['group']}")] = look
 
     archive = {"version": 1, "sources": [{
