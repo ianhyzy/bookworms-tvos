@@ -326,7 +326,8 @@ struct ShelfView: View {
             }
             .onChange(of: ambient.isActive) { library.setAmbientActive(ambient.isActive) }
             .onChange(of: coordinator.current) {
-                // Disabling the current view in Settings falls back to My Shelf without leaving Settings.
+                // Disabling the current view in Settings falls back to the first sidebar view
+                // without leaving Settings.
                 if isShowingMainView { sidebarItem = .view(coordinator.current) }
                 if coordinator.current == .comparison || coordinator.current == .shared {
                     ensureComparisonReader()
@@ -1112,7 +1113,7 @@ struct ShelfView: View {
     }
 
     private var controls: some View {
-        ViewSpecificControls(library: library, coordinator: coordinator)
+        ViewSpecificControls(library: library)
     }
 
     private var selectionCaption: some View {
@@ -1256,12 +1257,6 @@ extension BookwormsView {
     /// Views whose top-right header holds their options, level with the sidebar title.
     fileprivate var hasHeader: Bool {
         self == .comparison || self == .shared || self == .yearInReview || self == .bookWall
-    }
-}
-
-struct SpineButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(configuration.isPressed ? 0.85 : 1)
     }
 }
 

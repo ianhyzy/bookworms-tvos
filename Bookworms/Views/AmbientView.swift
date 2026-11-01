@@ -150,8 +150,7 @@ struct AmbientView: View {
             if !social.activities.isEmpty {
                 ActivityCard(
                     activity: social.activities[
-                        controller.contentIndex % min(10, social.activities.count)],
-                    isAmbient: true
+                        controller.contentIndex % min(10, social.activities.count)]
                 )
                 .frame(maxHeight: .infinity, alignment: .center)
             }

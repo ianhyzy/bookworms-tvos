@@ -8,20 +8,12 @@ enum HeaderOptionTypography {
     static let verticalPadding: CGFloat = 6
 }
 
-/// Applies header typography in the user's chosen font style.
-private struct SharedPillButtonLabel: ViewModifier {
-    @AppStorage("fontStyle") private var fontStyle = AppFontStyle.serif
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 29, weight: .semibold, design: fontStyle.design))
+extension View {
+    /// Applies header typography in the user's chosen font style.
+    func sharedPillButtonLabel() -> some View {
+        appFont(size: 29, weight: .semibold)
             .padding(.horizontal, HeaderOptionTypography.horizontalPadding)
             .padding(.vertical, HeaderOptionTypography.verticalPadding)
-    }
-}
-
-extension View {
-    func sharedPillButtonLabel() -> some View {
-        modifier(SharedPillButtonLabel())
     }
 }
 
@@ -58,16 +50,6 @@ struct SocialViews: View {
             case .shared: shared
             case .friendsPicks: friendsPicks
             case .shelf, .yearInReview, .bookWall: EmptyView()
-            }
-        }
-        .task(id: social.following.map(\.id)) {
-            if coordinator.preferences.readerID == nil
-                || !social.following.contains(where: { $0.id == coordinator.preferences.readerID })
-            {
-                if let randomID = social.following.randomElement()?.id {
-                    coordinator.preferences.readerID = randomID
-                    social.prepare(coordinator.preferences)
-                }
             }
         }
         .onChange(of: returnRevision) { restoreContentFocus() }
@@ -231,14 +213,9 @@ struct SocialViews: View {
         -> some View
     {
         VStack(spacing: 16) {
+            // Feed keeps only activities with a book (`FeedActivity.latestPerBook`).
             Button {
-                if let book = activity.book {
-                    selectBook(book)
-                } else {
-                    review = ReviewPresentation(
-                        title: activity.reader.displayName,
-                        text: activity.summary, spoilers: false)
-                }
+                if let book = activity.book { selectBook(book) }
             } label: {
                 ActivityCard(
                     activity: activity,
@@ -256,11 +233,6 @@ struct SocialViews: View {
             }
             .buttonStyle(CoverButtonStyle())
             .focusEffectDisabled()
-            .background(
-                focusedItem == activity.id && activity.book == nil
-                    ? Color.primary.opacity(0.12) : .clear,
-                in: .rect(cornerRadius: 12)
-            )
             .focused($focusedItem, equals: activity.id)
             .accessibilityIdentifier("activity-\(activity.id)")
             if let text = activity.review {
@@ -347,7 +319,7 @@ struct SocialViews: View {
                 } else {
                     empty(
                         "Choose a reader",
-                        "Select someone you follow above or in Settings → Views to compare your books."
+                        "Select someone you follow above to compare your books."
                     )
                 }
             }
@@ -501,7 +473,7 @@ struct SocialViews: View {
                     empty(
                         "Book Club",
                         reader == nil
-                            ? "Choose a reader above or in Settings → Views."
+                            ? "Choose a reader above."
                             : "No books with ratings from both readers are available."
                     )
                 }
@@ -590,7 +562,7 @@ struct SocialViews: View {
             .sharedPillButtonLabel()
         }
         .performanceGlassButton()
-        .accessibilityLabel("Side by side ordering options")
+        .accessibilityLabel("Compare Shelves order")
         .accessibilityValue(coordinator.preferences.comparisonOrder.rawValue)
         .accessibilityIdentifier("comparison-order-options")
     }
@@ -767,7 +739,6 @@ struct ActivityCard: View {
     @AppStorage("spoilerPolicy") private var spoilerPolicy = SpoilerPolicy.alwaysHide
     let activity: FeedActivity
     var isBookRead = false
-    var isAmbient = false
     var isCompact = false
     var coverHeight: CGFloat = 420
     var body: some View {
@@ -786,23 +757,12 @@ struct ActivityCard: View {
                     .accessibilityIdentifier("activity-cover-\(activity.id)")
             }
             VStack(alignment: .leading, spacing: isCompact ? 6 : 10) {
-                HStack(spacing: 10) {
-                    Group {
-                        if let url = activity.reader.avatarURL {
-                            CachedAvatarView(url: url)
-                        } else {
-                            Image(systemName: "person.crop.circle.fill")
-                                .resizable().scaledToFit()
-                        }
-                    }
-                    .frame(width: 40, height: 40)
-                    .clipShape(.circle)
-                    .accessibilityHidden(true)
-                    Text(activity.reader.displayName)
-                        .appFont(size: isCompact ? 24 : 28, weight: .semibold)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                let nameSize: CGFloat = isCompact ? 24 : 28
+                ReaderLabel(
+                    name: activity.reader.displayName, avatarURL: activity.reader.avatarURL,
+                    size: nameSize, weight: .semibold, avatarScale: 40 / nameSize
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
                 Text(activity.summary).appFont(size: isCompact ? 23 : 26)
                     .lineLimit(isCompact ? 1 : 2)
