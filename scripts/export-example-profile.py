@@ -86,6 +86,10 @@ def export(snapshot, out):
     used_series |= {b["seriesID"] for b in kept if b.get("seriesID")}
     series = [s for s in snapshot.get("series") or [] if s["id"] in used_series]
 
+    # A copied design's provenance names its source ("series-reuse:<bookID>"). A source that
+    # wasn't exported becomes the design's own book, since a Hardcover book ID reveals the earlier
+    # reading. The apps check only the token's prefix.
+    kept_ids = {str(i) for i in by_id}
     designs, stale = {}, 0
     for design in snapshot["designs"].values():
         book = by_id.get(design["bookID"])
@@ -93,6 +97,11 @@ def export(snapshot, out):
             continue
         stale += design["workItemHash"] != work_item_hash(real_account, book)
         design = dict(design, accountID=ACCOUNT, workItemHash=work_item_hash(ACCOUNT, book))
+        if design.get("provenance"):
+            design["provenance"] = " ".join(
+                f"series-reuse:{book['id']}"
+                if t.startswith("series-reuse:") and t[len("series-reuse:"):] not in kept_ids
+                else t for t in design["provenance"].split(" "))
         designs["spine-design-v1-" + sha(f"{ACCOUNT}:{book['id']}")] = design
 
     # A look's group is "<subseries>|<first author>" (`SeriesDesigns.lookKey(of:link:)`).
