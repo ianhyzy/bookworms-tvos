@@ -129,12 +129,12 @@ final class SettingsInteractionTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: spines)
     }
 
-    /// Without designs, **Settings → Spines** lists no models and says Book Wall shows a default
-    /// look, and that iCloud storage is off.
+    /// Without designs, **Settings → Spines** lists no models and says books get the Apple TV's
+    /// own look, and that iCloud storage is off.
     func testSpinesWithoutDesignsExplainsBookWallsOwnLook() {
         let app = openSettings("Spines")
         XCTAssertTrue(
-            text(containing: "Book Wall shows a default look", in: app).waitForExistence(timeout: 5)
+            text(containing: "get the Apple TV's own look", in: app).waitForExistence(timeout: 5)
         )
         XCTAssertFalse(app.descendants(matching: .any)["spine-makers"].exists)
         XCTAssertTrue(text(containing: "iCloud storage is off", in: app).exists)

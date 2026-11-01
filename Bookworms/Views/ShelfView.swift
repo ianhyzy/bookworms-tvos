@@ -191,7 +191,11 @@ struct ShelfView: View {
             Tab("Settings", systemImage: "gearshape", value: SidebarItem.settings) {
                 SettingsView(
                     library: library, social: social, coordinator: coordinator,
-                    section: $settingsSection, onShowShelf: { showView(.shelf) })
+                    section: $settingsSection, onShowShelf: { showView(.shelf) },
+                    onSyncNow: {
+                        await library.refresh(manual: true)
+                        await loadSocial(manual: true)
+                    })
             }
         }
         .tabViewStyle(.sidebarAdaptable)
