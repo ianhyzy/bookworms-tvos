@@ -247,36 +247,9 @@ struct ShelfView: View {
         ) {
             filteredShelf
         }
-        .overlay(alignment: .top) {
-            // Names the example profile over each view, level with the view's title, without
-            // taking focus; VoiceOver hears it from My Shelf's Connect Hardcover instead.
-            if library.isExample && isShowingMainView {
-                Text("Example profile")
-                    .appFont(size: 24, weight: .medium)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.55), in: .capsule)
-                    .padding(.top, 56)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
-        .sheet(isPresented: $connectsFromExample) {
-            // The same sign-in as Settings → Sources; connecting ends the example profile.
-            HardcoverConnectionView(library: library) { connectsFromExample = false }
-                .frame(width: 1380)
-                .padding(64)
-                .appTypography()
-                .onExitCommand { connectsFromExample = false }
-                #if DEBUG && targetEnvironment(simulator)
-                    .background(alignment: .topLeading) {
-                        if FocusTransitionProbe.isEnabled {
-                            FocusTransitionProbe().frame(width: 1, height: 1)
-                        }
-                    }
-                #endif
+        .overlay(alignment: .top) { if isShowingMainView { exampleCapsule } }
+        .sheet(isPresented: exampleConnectionBinding(overDetailFilter: false)) {
+            exampleConnection
         }
         .onChange(of: library.isExample) {
             // Book Wall leaves the sidebar with the example unless the reader shows it.
@@ -768,6 +741,7 @@ struct ShelfView: View {
         .appTypography()
         // Full-screen covers present outside the content that carries the value.
         .environment(\.artworkGeneration, artworkGeneration)
+        .overlay(alignment: .top) { exampleCapsule }
         .id(book.id)
     }
 
@@ -777,6 +751,53 @@ struct ShelfView: View {
         detailFilterEntryID = book.id
         library.shelfFilter = filter
         showsDetailFilter = true
+    }
+
+    /// Names the example profile at the top of the screen, level with a view's title, without
+    /// taking focus; VoiceOver hears it from My Shelf's Connect Hardcover instead. The tabs and
+    /// each cover over them show it, since a full-screen cover hides the tabs' overlay.
+    @ViewBuilder private var exampleCapsule: some View {
+        if library.isExample {
+            Text("Example profile")
+                .appFont(size: 24, weight: .medium)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .background(.black.opacity(0.55), in: .capsule)
+                .padding(.top, 56)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// Presents the example's sign-in from the topmost presentation that shows Connect
+    /// Hardcover: the filtered shelf over details when `overDetailFilter`, otherwise the tabs. A
+    /// sheet on the tabs can't present while a full-screen cover is up.
+    private func exampleConnectionBinding(overDetailFilter: Bool) -> Binding<Bool> {
+        Binding(
+            get: { connectsFromExample && showsDetailFilter == overDetailFilter },
+            set: { if !$0 { connectsFromExample = false } })
+    }
+
+    /// The same sign-in as Settings → Sources. Connecting ends the example profile, so it also
+    /// closes any filtered shelf and the example details beneath it.
+    private var exampleConnection: some View {
+        HardcoverConnectionView(library: library) {
+            connectsFromExample = false
+            clearShelfFilter()
+        }
+        .frame(width: 1380)
+        .padding(64)
+        .appTypography()
+        .onExitCommand { connectsFromExample = false }
+        #if DEBUG && targetEnvironment(simulator)
+            .background(alignment: .topLeading) {
+                if FocusTransitionProbe.isEnabled {
+                    FocusTransitionProbe().frame(width: 1, height: 1)
+                }
+            }
+        #endif
     }
 
     /// Presents the filtered shelf from cover details when `fromCoverDetails`, otherwise from
@@ -811,6 +832,10 @@ struct ShelfView: View {
         tabContent(for: .shelf, coversDetails: true)
             .environment(\.artworkGeneration, artworkGeneration)
             .appTypography()
+            .overlay(alignment: .top) { exampleCapsule }
+            .sheet(isPresented: exampleConnectionBinding(overDetailFilter: true)) {
+                exampleConnection
+            }
             .fullScreenCover(item: $filteredShelfBook) { book in
                 bookDetails(
                     book,

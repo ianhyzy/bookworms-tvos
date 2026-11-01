@@ -263,6 +263,46 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(afterBack["hardcoverConnected"] as? Bool, false)
     }
 
+    /// The shelf an author filtered over the example's book details offers Connect Hardcover too,
+    /// and its sign-in presents over that shelf, which covers the tabs.
+    func testExampleFilteredShelfConnectHardcoverOpensSignInAndBackReturns() throws {
+        let app = launch("welcome", focusProbe: true)
+        let example = app.buttons["welcome-example-profile"]
+        XCTAssertTrue(example.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        let first = app.buttons["book-1"]
+        RemoteNavigation.press(
+            .select, in: app, expecting: first, updates: exampleEntryUpdates, timeout: 15)
+        XCUIRemote.shared.press(.select)
+        let author = app.buttons["detail-author"]
+        RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"], timeout: 15)
+        // The details cover the tabs, so they show the example's capsule themselves.
+        capture(app, "scenario-example-details")
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+        let clear = app.buttons["clear-shelf-filter"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(first)
+        capture(app, "scenario-example-filtered-shelf")
+        let exampleConnect = app.buttons["example-connect-hardcover"]
+        RemoteNavigation.press(.down, in: app, expecting: clear)
+        RemoteNavigation.press(.right, in: app, expecting: exampleConnect)
+        RemoteNavigation.press(
+            .select, in: app, expecting: app.buttons["hardcover-new-code"],
+            updates: sheetEntryUpdates)
+        XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
+        capture(app, "scenario-example-filtered-connect-hardcover")
+        RemoteNavigation.press(
+            .menu, in: app, expecting: exampleConnect, updates: sheetExitUpdates)
+        XCTAssertTrue(clear.exists, "Back from the sign-in left the filtered shelf")
+        XCTAssertEqual(
+            try probe(app, sample: true, example: true)["hardcoverConnected"] as? Bool, false)
+        // Back from the filtered shelf still reveals the details beneath it.
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(author)
+    }
+
     func testWelcomeHardcoverDownloadAndArtworkStayInModalUntilReady() throws {
         let app = launch("welcome", focusProbe: true)
         let connect = app.buttons["welcome-connect-hardcover"]
