@@ -8,6 +8,8 @@ struct LibraryWelcomeView: View {
 
     @State private var stage = Stage.choices
     @State private var exampleFailed = false
+    /// Set while the example profile loads: its empty shelf counts as ready until books publish.
+    @State private var openingExample = false
     @FocusState private var focusedChoice: Choice?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -84,9 +86,12 @@ struct LibraryWelcomeView: View {
     /// ready (`isLibraryReady`). A profile that can't be read returns to the choices.
     private func showExample() {
         exampleFailed = false
+        openingExample = true
         stage = .preparation
         Task {
-            guard !(await library.showExample()), library.books.isEmpty else { return }
+            let shown = await library.showExample()
+            openingExample = false
+            guard !shown, library.books.isEmpty else { return finishIfReady() }
             exampleFailed = true
             stage = .choices
         }
@@ -111,7 +116,7 @@ struct LibraryWelcomeView: View {
 
     private func finishIfReady() {
         // The sheet can retain the empty shelf's readiness while newly downloaded books publish.
-        guard stage == .preparation, isLibraryReady() else { return }
+        guard stage == .preparation, !openingExample, isLibraryReady() else { return }
         finish()
     }
 

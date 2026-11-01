@@ -161,6 +161,15 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(try probe(app)["welcomeCompleted"] as? Bool, false)
     }
 
+    /// Focus updates from Select on **View example profile** to the first book: the choice leaves
+    /// with the preparation card, the closing popup returns focus to the shelf, and the shelf
+    /// restores its entry book. More means app code moved focus again.
+    private let exampleEntryUpdates = 3
+    /// Focus updates into the example's sign-in sheet, and back out of it with Back, where the
+    /// closing sheet's focus leaves before the status row's button takes it.
+    private let sheetEntryUpdates = 1
+    private let sheetExitUpdates = 2
+
     func testWelcomeDefaultFocusAndExampleChoicePersistAcrossRelaunch() throws {
         let app = launch("welcome", focusProbe: true)
         let welcome = app.descendants(matching: .any)["library-welcome"].firstMatch
@@ -181,11 +190,21 @@ final class ScenarioNavigationTests: XCTestCase {
         capture(app, "scenario-welcome-choices")
         try audit(app)
         RemoteNavigation.press(.down, in: app, expecting: example)
-        XCUIRemote.shared.press(.select)
+        // The popup shows its preparation card until the example's shelf is ready, so focus
+        // goes straight to the first book, without first visiting the empty shelf.
         let first = app.buttons["book-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        let beforeSelect = RemoteNavigation.transitions(app)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["welcome-preparing-library"].firstMatch
+                .waitForExistence(timeout: 3))
+        RemoteNavigation.waitForFocus(first, timeout: 15)
         waitForAbsence(welcome)
-        RemoteNavigation.waitForFocus(first)
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Focus settles")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertEqual(
+            RemoteNavigation.transitions(app), beforeSelect.map { $0 + exampleEntryUpdates })
         let selected = try probe(app, sample: true, example: true)
         XCTAssertEqual(selected["welcomeCompleted"] as? Bool, true)
         XCTAssertEqual(selected["sourceCalls"] as? Int, 0)
@@ -201,7 +220,9 @@ final class ScenarioNavigationTests: XCTestCase {
         RemoteNavigation.press(.up, in: app, expecting: first)
         RemoteNavigation.press(.left, in: app, expecting: app.staticTexts["My Shelf"].firstMatch)
         // The example's sidebar adds Book Wall and leaves out the social views.
-        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        RemoteNavigation.press(
+            .down, in: app, expecting: app.staticTexts["Year in Review"].firstMatch)
+        RemoteNavigation.press(.down, in: app, expecting: app.staticTexts["Book Wall"].firstMatch)
         XCTAssertFalse(app.staticTexts["Feed"].exists)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
@@ -226,17 +247,18 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertTrue(example.waitForExistence(timeout: 15))
         RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
         RemoteNavigation.press(.down, in: app, expecting: example)
-        XCUIRemote.shared.press(.select)
         let first = app.buttons["book-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 15))
-        RemoteNavigation.waitForFocus(first)
+        RemoteNavigation.press(
+            .select, in: app, expecting: first, updates: exampleEntryUpdates, timeout: 15)
         let exampleConnect = app.buttons["example-connect-hardcover"]
         RemoteNavigation.press(.down, in: app, expecting: exampleConnect)
-        XCUIRemote.shared.press(.select)
+        RemoteNavigation.press(
+            .select, in: app, expecting: app.buttons["hardcover-new-code"],
+            updates: sheetEntryUpdates)
         XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
         capture(app, "scenario-example-connect-hardcover")
-        XCUIRemote.shared.press(.menu)
-        RemoteNavigation.waitForFocus(exampleConnect)
+        RemoteNavigation.press(
+            .menu, in: app, expecting: exampleConnect, updates: sheetExitUpdates)
         let afterBack = try probe(app, sample: true, example: true)
         XCTAssertEqual(afterBack["hardcoverConnected"] as? Bool, false)
     }

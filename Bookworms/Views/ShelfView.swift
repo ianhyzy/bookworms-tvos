@@ -30,6 +30,7 @@ struct ShelfView: View {
     @State private var isWelcomePresented = false
     /// Whether My Shelf's **Connect Hardcover** shows the sign-in over the example profile.
     @State private var connectsFromExample = false
+    @State private var exampleFailed = false
     @State private var preparedArtwork: ViewArtworkKey?
     @State private var artworkGeneration = 0
     @State private var presentationStyles: [Int: SpineStyle] = [:]
@@ -252,6 +253,13 @@ struct ShelfView: View {
                 .padding(64)
                 .appTypography()
                 .onExitCommand { connectsFromExample = false }
+                #if DEBUG && targetEnvironment(simulator)
+                    .background(alignment: .topLeading) {
+                        if FocusTransitionProbe.isEnabled {
+                            FocusTransitionProbe().frame(width: 1, height: 1)
+                        }
+                    }
+                #endif
         }
         .onChange(of: library.isExample) {
             // Book Wall leaves the sidebar with the example unless the reader shows it.
@@ -1172,10 +1180,20 @@ struct ShelfView: View {
                     .buttonStyle(.glassProminent)
                     .accessibilityIdentifier("choose-sources")
                     if library.offersExample {
-                        Button("View example profile") { Task { await library.showExample() } }
-                            .buttonStyle(.glass)
-                            .accessibilityIdentifier("view-example-profile")
+                        Button("View example profile") {
+                            exampleFailed = false
+                            Task {
+                                exampleFailed =
+                                    !(await library.showExample()) && library.books.isEmpty
+                            }
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityIdentifier("view-example-profile")
                     }
+                }
+                if exampleFailed {
+                    Text("The example profile couldn't be opened.").appFont(size: 26)
+                        .foregroundStyle(palette.text.opacity(0.7))
                 }
             }
         }

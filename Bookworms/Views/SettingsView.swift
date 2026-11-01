@@ -301,7 +301,10 @@ struct SettingsView: View {
                     isOn: Binding(get: { isOn }, set: { coordinator.setEnabled(view, $0) })
                 )
                 .font(.system(size: 26))
-                .disabled(isOn && coordinator.preferences.orderedViews.count == 1)
+                // The example profile's sidebar is fixed, so its choices would save unseen.
+                .disabled(
+                    library.isExample || (isOn && coordinator.preferences.orderedViews.count == 1)
+                )
                 .accessibilityIdentifier("menu-view-\(view)")
             }
         } trailing: {
