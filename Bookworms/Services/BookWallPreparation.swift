@@ -61,7 +61,8 @@ final class BookWallPreparation {
     /// source's design unless the source's face can't letter it. Both checks run here, once.
     ///
     /// A wall prepared earlier stays in `prepared` until the new one is ready, so a design, link,
-    /// or look that arrives while the wall is on screen replaces it in place.
+    /// or look that arrives while the wall is on screen replaces it in place. When the new wall
+    /// can't be built, the earlier one stays and `failure` describes the problem.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
         looks: [Int: SpineDesignV1] = [:]
@@ -69,6 +70,7 @@ final class BookWallPreparation {
         let fontStyle =
             AppFontStyle(rawValue: UserDefaults.standard.string(forKey: "fontStyle") ?? "")
             ?? .serif
+        failure = nil
         if let prepared, prepared.books == books, prepared.sources == sources,
             prepared.designs == designs, prepared.looks == looks
         {
@@ -76,7 +78,6 @@ final class BookWallPreparation {
             await retryMissingCovers(in: prepared, fontStyle: fontStyle)
             return
         }
-        failure = nil
         completedCount = 0
         totalCount = books.count
 

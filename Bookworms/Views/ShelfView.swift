@@ -85,16 +85,18 @@ struct ShelfView: View {
             books: books, sources: sources, designs: designs, looks: looks,
             retry: bookWallPreparationRetry)
     }
+    /// Whether Book Wall shows the waiting dialog: before its first wall, or after a rebuild
+    /// fails, so Retry stays reachable. An earlier wall stays on screen while a newer one
+    /// prepares, and a failure waits until open details close.
+    private var needsBookWallDialog: Bool {
+        bookWallPreparation.prepared == nil
+            || (bookWallPreparation.failure != nil && !wallDetail.isPresented)
+    }
     private var waitsForBookWall: Binding<Bool> {
         Binding(
-            get: {
-                // An earlier wall stays on screen while a newer one prepares.
-                coordinator.current == .bookWall && bookWallPreparation.prepared == nil
-            },
+            get: { coordinator.current == .bookWall && needsBookWallDialog },
             set: { presented in
-                if !presented && bookWallPreparation.prepared == nil {
-                    showView(.shelf)
-                }
+                if !presented && needsBookWallDialog { showView(.shelf) }
             })
     }
     @State private var openedDevelopmentDetail = false
