@@ -116,6 +116,27 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(Set(merged.first?.sources ?? []), Set([.hardcover, .cwa]))
     }
 
+    func testMergeKeepsHardcoverBooksWithDifferentIDsApart() {
+        let first = Book(id: 4, title: "A Book", author: "An Author", sources: [.hardcover])
+        let second = Book(id: 5, title: "a book", author: "An Author", sources: [.hardcover])
+        let cwa = Book(
+            id: 1_000_000_000_000_001, title: "A Book", author: "An Author", sources: [.cwa],
+            isOwned: true)
+        let otherCWA = Book(
+            id: 1_000_000_000_000_002, title: "Another Book", author: "An Author",
+            sources: [.cwa])
+        let merged = LibraryMerge.books(from: [
+            SourceSnapshot(
+                source: .hardcover, accountID: "hc", books: [first, second], syncedAt: Date()),
+            SourceSnapshot(source: .cwa, accountID: "cwa", books: [cwa, otherCWA], syncedAt: Date()),
+        ])
+        XCTAssertEqual(
+            Set(merged.map(\.id)), [4, 5, 1_000_000_000_000_002],
+            "Same-title Hardcover books stay apart, and CWA joins only by title and author")
+        XCTAssertEqual(merged.first { $0.id == 4 }?.isOwned, true)
+        XCTAssertNil(merged.first { $0.id == 5 }?.isOwned)
+    }
+
     func testShelfFiltersSortsAndKeepsMissingValuesLast() {
         let books = [
             Book(id: 1, title: "Z", author: "Author", finished: "2026-01-01", rating: 3),

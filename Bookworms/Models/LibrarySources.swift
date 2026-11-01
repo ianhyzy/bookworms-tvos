@@ -211,13 +211,28 @@ struct ShelfPreferences: Codable, Equatable {
 }
 
 enum LibraryMerge {
+    /// Books from every snapshot, one per Hardcover ID. Hardcover books never merge with each
+    /// other, even with the same title and author, because Hardcover can list one real book
+    /// under two IDs and cleaning that up isn't the app's job. A CWA book has no Hardcover ID, so
+    /// it joins the Hardcover book with its title and author (`matchingKey(_:)`), else stands
+    /// alone.
     static func books(from snapshots: [SourceSnapshot]) -> [Book] {
         var result: [String: Book] = [:]
+        /// The result key of the first Hardcover book with each title and author.
+        var hardcoverKeys: [String: String] = [:]
         // Hardcover supplies personal reading data; CWA adds ownership without replacing it.
         for snapshot in snapshots.sorted(by: { $0.source.rawValue > $1.source.rawValue }) {
             for var book in snapshot.books {
                 book.sources = [snapshot.source]
-                let key = matchingKey(book)
+                let ownKey = "\(snapshot.source.rawValue):\(book.id)"
+                let titleKey = matchingKey(book)
+                let key: String
+                if snapshot.source == .hardcover {
+                    key = ownKey
+                    if let titleKey, hardcoverKeys[titleKey] == nil { hardcoverKeys[titleKey] = key }
+                } else {
+                    key = titleKey.flatMap { hardcoverKeys[$0] } ?? ownKey
+                }
                 if var existing = result[key] {
                     existing.isOwned = existing.isOwned == true || book.isOwned == true
                     existing.isRead = existing.isRead == true || book.isRead == true
@@ -236,7 +251,8 @@ enum LibraryMerge {
         return result.values.sorted(by: Book.recentFirst)
     }
 
-    private static func matchingKey(_ book: Book) -> String {
+    /// The normalized title and author, or `nil` when the title is empty or the author unknown.
+    private static func matchingKey(_ book: Book) -> String? {
         func normalized(_ text: String) -> String {
             text.folding(
                 options: [.caseInsensitive, .diacriticInsensitive],
@@ -244,7 +260,7 @@ enum LibraryMerge {
             )
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         }
-        guard book.author != "Unknown author", !book.title.isEmpty else { return "id:\(book.id)" }
+        guard book.author != "Unknown author", !book.title.isEmpty else { return nil }
         return normalized(book.title) + "|" + normalized(book.author)
     }
 }
