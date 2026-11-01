@@ -96,6 +96,18 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertGreaterThan(largest, 0.035)
     }
 
+    @MainActor func testFlightPullsATurnedBookOutTheWayItsSpineFaces() {
+        let resting = Transform(
+            scale: .one, rotation: simd_quatf(angle: 0.07, axis: [0, 1, 0]),
+            translation: [1, 2, 0.5])
+        let clear = BookWallScene.pulledOut(resting, toDepth: 3.9)
+        let moved = clear.translation - resting.translation
+        XCTAssertEqual(clear.translation.z, 3.9, accuracy: 1e-5)
+        XCTAssertEqual(moved.y, 0, accuracy: 1e-6)
+        XCTAssertEqual(moved.x, moved.z * tan(0.07), accuracy: 1e-5)
+        XCTAssertEqual(clear.rotation, resting.rotation)
+    }
+
     func testPageEdgesWearAsTheIPhoneWearsThem() {
         let accent = StyleColor(red: 0.8, green: 0.1, blue: 0.1)
         let now = try! Date("2026-11-01T12:00:00Z", strategy: .iso8601)

@@ -848,8 +848,7 @@ final class BookWallScene {
                 SIMD3<Float>(
                     slot.bookHeight, slot.spineThickness + 2 * Self.coverSurfaceOffset,
                     slot.coverWidth + 0.02)) / 2
-        var clear = resting
-        clear.translation.z = stackFront + radius + 0.12
+        let clear = Self.pulledOut(resting, toDepth: stackFront + radius + 0.12)
         var cameraDepth = wallCameraDepth + clear.translation.z - start.translation.z
         var planned: [FlightFrame]?
         // Fit the paired camera/book trajectory, not just its endpoints. No model scaling
@@ -2023,6 +2022,15 @@ final class BookWallScene {
     private static func pulledOut(_ resting: Transform) -> Transform {
         var pose = resting
         pose.translation += resting.rotation.act([0, 0, focusPullOut])
+        return pose
+    }
+
+    /// A resting book pulled out of its stack along the way its spine faces, as focus pulls it,
+    /// until its middle reaches `depth`.
+    static func pulledOut(_ resting: Transform, toDepth depth: Float) -> Transform {
+        let outward = resting.rotation.act([0, 0, 1])
+        var pose = resting
+        pose.translation += outward * ((depth - resting.translation.z) / outward.z)
         return pose
     }
 
