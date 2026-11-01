@@ -75,14 +75,14 @@ enum SourceError: LocalizedError {
 
 enum ShelfCollection: String, Codable, CaseIterable, Identifiable {
     /// Up to `ShelfPreferences.readingLimit` current reads, then read books.
-    case standard = "Default"
+    case read = "Read Books"
     case owned = "Owned Books"
     case all = "All Books"
     var id: String { rawValue }
 
-    /// Decodes unknown values, including the retired "Read Books", as `standard`.
+    /// Decodes unknown values, including the retired "Default", as `read`.
     init(from decoder: any Decoder) throws {
-        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .standard
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .read
     }
 }
 
@@ -131,7 +131,7 @@ enum ProgressStyle: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ShelfPreferences: Codable, Equatable {
-    /// The most current reads that lead the default collection.
+    /// The most current reads that lead **Read Books** and **All Books**.
     static let readingLimit = 3
 
     var collection: ShelfCollection
@@ -161,7 +161,7 @@ struct ShelfPreferences: Codable, Equatable {
                 ProgressStyle.self, forKey: .progressStyle)) ?? .vertical)
     }
 
-    /// Books for the shelf, in display order. **Default** and **All Books** lead with the most
+    /// Books for the shelf, in display order. **Read Books** and **All Books** lead with the most
     /// recently started current reads, regardless of sort, and they count toward `limit`.
     func select(_ books: [Book], limit: Int) -> [Book] {
         let reading =
@@ -175,7 +175,7 @@ struct ShelfPreferences: Codable, Equatable {
         let eligible = books.filter {
             guard !pinned.contains($0.id) else { return false }
             switch collection {
-            case .standard: return $0.isReading != true && ($0.isRead == true || $0.finished != nil)
+            case .read: return $0.isReading != true && ($0.isRead == true || $0.finished != nil)
             case .owned: return $0.isOwned == true
             case .all: return true
             }
@@ -229,7 +229,9 @@ enum LibraryMerge {
                 let key: String
                 if snapshot.source == .hardcover {
                     key = ownKey
-                    if let titleKey, hardcoverKeys[titleKey] == nil { hardcoverKeys[titleKey] = key }
+                    if let titleKey, hardcoverKeys[titleKey] == nil {
+                        hardcoverKeys[titleKey] = key
+                    }
                 } else {
                     key = titleKey.flatMap { hardcoverKeys[$0] } ?? ownKey
                 }

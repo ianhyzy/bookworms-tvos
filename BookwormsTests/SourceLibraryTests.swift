@@ -128,7 +128,8 @@ final class SourceLibraryTests: XCTestCase {
         let merged = LibraryMerge.books(from: [
             SourceSnapshot(
                 source: .hardcover, accountID: "hc", books: [first, second], syncedAt: Date()),
-            SourceSnapshot(source: .cwa, accountID: "cwa", books: [cwa, otherCWA], syncedAt: Date()),
+            SourceSnapshot(
+                source: .cwa, accountID: "cwa", books: [cwa, otherCWA], syncedAt: Date()),
         ])
         XCTAssertEqual(
             Set(merged.map(\.id)), [4, 5, 1_000_000_000_000_002],
@@ -145,7 +146,7 @@ final class SourceLibraryTests: XCTestCase {
         ]
         XCTAssertEqual(ShelfPreferences().collection, .all, "My Shelf shows All Books by default")
         XCTAssertEqual(
-            ShelfPreferences(collection: .standard).select(books, limit: 20).map(\.id), [1])
+            ShelfPreferences(collection: .read).select(books, limit: 20).map(\.id), [1])
         var prefs = ShelfPreferences(collection: .owned, sort: .rating)
         XCTAssertEqual(prefs.select(books, limit: 20).map(\.id), [2, 3])
         prefs.reversed = true
@@ -157,7 +158,7 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertEqual(prefs.select(books, limit: 2).map(\.id), [2, 3])
     }
 
-    func testDefaultAndAllBooksLeadWithThreeMostRecentlyStartedCurrentReads() throws {
+    func testReadBooksAndAllBooksLeadWithThreeMostRecentlyStartedCurrentReads() throws {
         let reading = (1...4)
             .map {
                 Book(
@@ -169,7 +170,7 @@ final class SourceLibraryTests: XCTestCase {
             Book(id: 11, title: "Newer", author: "Author", finished: "2026-08-01"),
             Book(id: 12, title: "Unread", author: "Author", isOwned: true),
         ]
-        let prefs = ShelfPreferences(collection: .standard, sort: .title)
+        let prefs = ShelfPreferences(collection: .read, sort: .title)
         XCTAssertEqual(prefs.select(read + reading, limit: 40).map(\.id), [4, 3, 2, 11, 10])
         XCTAssertEqual(prefs.select(read + reading, limit: 2).map(\.id), [4, 3])
         let all = ShelfPreferences(collection: .all, sort: .title)
@@ -185,8 +186,8 @@ final class SourceLibraryTests: XCTestCase {
         let legacy = try JSONDecoder()
             .decode(
                 ShelfPreferences.self,
-                from: Data(#"{"collection":"Read Books","sort":"Title","reversed":false}"#.utf8))
-        XCTAssertEqual(legacy.collection, .standard)
+                from: Data(#"{"collection":"Default","sort":"Title","reversed":false}"#.utf8))
+        XCTAssertEqual(legacy.collection, .read, "The retired Default choice keeps read books")
         XCTAssertEqual(legacy.progressStyle, .vertical, "Older choices gain the vertical sweep")
         let unknown = try JSONDecoder()
             .decode(ShelfPreferences.self, from: Data(#"{"progressStyle":"Diagonal"}"#.utf8))
