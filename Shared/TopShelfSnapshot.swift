@@ -5,8 +5,12 @@ struct TopShelfBook: Codable, Sendable, Equatable {
     let id: Int
     let title: String
     let imageURL: URL
-    /// The fraction of a current read completed, from 0 to 1. `nil` for books not in progress.
+    /// The fraction of a current read completed, from 0 to 1. `nil` for books not in progress
+    /// and for current reads without recorded progress.
     var progress: Double? = nil
+    /// Whether the book is a current read, which **Now reading** shows with or without
+    /// `progress`. Optional so older snapshots decode.
+    var isReading: Bool? = nil
     /// A local copy of the cover with the light sweep drawn in, in the App Group container.
     var posterURL: URL? = nil
     /// Shows `progress` with Top Shelf's native progress bar. Optional so older snapshots decode.
@@ -33,11 +37,15 @@ enum TopShelfSnapshot {
             .appending(path: "Library/Caches/top-shelf.json")
     }
 
-    /// Builds a **Now reading** section for books with progress and a **Recently read** section
-    /// for the rest. Current reads show the app's swept poster when one was rendered, or the
-    /// native progress bar when `showsNativeProgress` is set.
+    /// Builds a **Now reading** section for current reads and a **Recently read** section for
+    /// the rest, from the first 10 books with a valid ID and an HTTPS cover. Current reads with
+    /// progress show the app's swept poster when one was rendered, or the native progress bar
+    /// when `showsNativeProgress` is set.
     static func content(for books: [TopShelfBook]) -> TVTopShelfSectionedContent? {
         let valid = books.filter { $0.id > 0 && $0.imageURL.scheme == "https" }.prefix(10)
+        func isCurrent(_ book: TopShelfBook) -> Bool {
+            book.isReading == true || book.progress != nil
+        }
         func section(_ title: String, _ books: [TopShelfBook]) -> TVTopShelfItemCollection<
             TVTopShelfSectionedItem
         >? {
@@ -59,18 +67,19 @@ enum TopShelfSnapshot {
             return section
         }
         let sections = [
-            section("Now reading", valid.filter { $0.progress != nil }),
-            section("Recently read", valid.filter { $0.progress == nil }),
+            section("Now reading", valid.filter(isCurrent)),
+            section("Recently read", valid.filter { !isCurrent($0) }),
         ]
         .compactMap(\.self)
         return sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections)
     }
 
+    /// The saved books, unvalidated; `content(for:)` validates them.
     static func read() -> [TopShelfBook] {
         guard let url = fileURL, let data = try? Data(contentsOf: url),
             let books = try? JSONDecoder().decode([TopShelfBook].self, from: data)
         else { return [] }
-        return Array(books.filter { $0.id > 0 && $0.imageURL.scheme == "https" }.prefix(10))
+        return books
     }
 
     static func write(_ books: [TopShelfBook]) throws {

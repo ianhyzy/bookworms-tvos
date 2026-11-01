@@ -567,6 +567,19 @@ final class LibraryTests: XCTestCase {
             native.sections[0].items.first?.playbackProgress, 0.4,
             "The horizontal style uses Top Shelf's native progress bar")
         reading.showsNativeProgress = nil
+        var unstarted = books[2]
+        unstarted.isReading = true
+        let invalid = [
+            TopShelfBook(id: 0, title: "No ID", imageURL: books[3].imageURL),
+            TopShelfBook(
+                id: 14, title: "Plain HTTP", imageURL: URL(string: "http://example.com/14.jpg")!),
+        ]
+        let current = try XCTUnwrap(TopShelfSnapshot.content(for: invalid + [unstarted, books[1]]))
+        XCTAssertEqual(current.sections.map(\.title), ["Now reading", "Recently read"])
+        XCTAssertEqual(
+            current.sections.flatMap(\.items).map(\.identifier), ["3", "2"],
+            "A current read without progress is still current, and invalid books are left out")
+        XCTAssertEqual(current.sections[0].items.first?.playbackProgress, 0)
         reading.posterURL = URL(filePath: "/tmp/1-400.jpg")
         let swept = try XCTUnwrap(TopShelfSnapshot.content(for: [reading]))
         XCTAssertEqual(

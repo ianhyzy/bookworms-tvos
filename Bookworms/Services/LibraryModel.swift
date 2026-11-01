@@ -1789,7 +1789,10 @@ final class LibraryModel {
                     else { return nil }
                     return TopShelfBook(
                         id: book.id, title: book.title, imageURL: url,
-                        progress: book.isReading == true ? book.progress ?? 0 : nil,
+                        // A current read without progress shows its cover undimmed, as on
+                        // My Shelf.
+                        progress: book.isReading == true ? book.progress : nil,
+                        isReading: book.isReading == true ? true : nil,
                         showsNativeProgress: style == .horizontal ? true : nil)
                 }
         topShelfRevision &+= 1
