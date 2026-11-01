@@ -334,7 +334,7 @@ enum SampleLibrary {
         Book(
             id: 7, title: "Tides", author: "Casey Moon",
             description: "A natural history of a changing coast.", pages: 180,
-            finished: "2026-08-20"),
+            finished: "2026-08-20", format: "Both"),
         Book(
             id: 8, title: "Winter in the Orchard", author: "Alex Rowan",
             description: "The island's story continues.", pages: 410, finished: "2026-08-18",
