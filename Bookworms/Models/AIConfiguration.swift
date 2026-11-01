@@ -9,7 +9,7 @@ enum AIProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         case .google: "Google Gemini"
         case .anthropic: "Anthropic"
         case .openAI: "OpenAI"
-        case .generic: "Custom"
+        case .generic: "OpenAI-compatible endpoint"
         }
     }
     var defaultModel: String {
