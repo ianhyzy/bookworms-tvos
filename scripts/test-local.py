@@ -18,7 +18,6 @@ import sys
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-SIMSLIM_KEEP = "siri,icloud"
 spec = importlib.util.spec_from_file_location("source_identity", ROOT / "scripts/source-identity.py")
 sources = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sources)
@@ -383,11 +382,12 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None,
         record["simulator_id"] = device
         save_json(output / "owned-simulator.json", {"id": device})
         if shutil.which("simslim"):
-            # Boots the new simulator without background daemons the tests don't use. Siri keeps
-            # on-device models and icloud keeps CloudKit and account services available.
+            # Boots the new simulator with every simslim category off. The offline tests replace
+            # CloudKit with fakes, use the local keychain, and call no on-device models, so they
+            # need neither the icloud nor the siri category.
             try:
-                run(["simslim", "on", device, "--except", SIMSLIM_KEEP], capture_output=True, text=True)
-                record["simslim"] = SIMSLIM_KEEP
+                run(["simslim", "on", device], capture_output=True, text=True)
+                record["simslim"] = "full"
             except subprocess.CalledProcessError:
                 # simslim may have persisted some disables before failing, and `simctl erase` keeps
                 # them. `simslim off` re-enables every daemon and boots the stock simulator; if it

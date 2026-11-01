@@ -11,11 +11,13 @@
 		0340625950B4EBF79BB9CE54 /* SpineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A56991945AF698A29FB0DA1D /* SpineView.swift */; };
 		06528EE98535FC0DBA45E62D /* BookWallLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EA1EB4BF67308FE91C7CC3 /* BookWallLayoutTests.swift */; };
 		06E219F03B5FC2B5B5A3A11F /* OfflineTestPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4ED7CF6E97284ACFC518B65 /* OfflineTestPolicy.swift */; };
+		074AB5ECCC5B703F64C942EE /* ExampleProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B569854A621C346F4BBDD808 /* ExampleProfile.swift */; };
 		085016EE97D66C5E7C53689D /* SpineTextRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231509B79CBBB761366E401B /* SpineTextRenderer.swift */; };
 		08954C8A4F9F85B0BAFB8752 /* SpineStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7C377D256C8484B49AC4B9B /* SpineStyle.swift */; };
 		08B09F5D77ACBED602B0FEBB /* HardcoverConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA76DA467F4A638010B02043 /* HardcoverConnectionView.swift */; };
 		0A4C3B6D545AD4C5C6CBB589 /* AmbientView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 299DC2145E57031515C1299D /* AmbientView.swift */; };
 		0C941F81194609F17ED852AD /* ComparisonBookshelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD15ED4A371F7D2C1E369E23 /* ComparisonBookshelf.swift */; };
+		0CD4A9222BFC636D7C8A96EA /* ExampleProfile in Resources */ = {isa = PBXBuildFile; fileRef = 8E67F0D59C597EADB1140D65 /* ExampleProfile */; };
 		12CA76C2DDD6826AB3213A1E /* SourceLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B6346E6E420EB9EFA795E0 /* SourceLibraryStore.swift */; };
 		1A4BBF9E3B062B070EB5B570 /* BookWallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A847C8F051A95D80AF04A830 /* BookWallView.swift */; };
 		1D5974D6AE395AACF8D8B0B8 /* Book.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C32CAF5A0AD0A522E9DD714 /* Book.swift */; };
@@ -228,6 +230,7 @@
 		8BBBC79FFB6DFFB4C23E852E /* BookwormsTopShelf.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BookwormsTopShelf.entitlements; sourceTree = "<group>"; };
 		8C4BB9A02FA73549E988BF4E /* SpineTextMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpineTextMetrics.swift; sourceTree = "<group>"; };
 		8DA3CAD4B6586D3BE16280C5 /* ViewPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewPreferences.swift; sourceTree = "<group>"; };
+		8E67F0D59C597EADB1140D65 /* ExampleProfile */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ExampleProfile; sourceTree = SOURCE_ROOT; };
 		91EA1EB4BF67308FE91C7CC3 /* BookWallLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallLayoutTests.swift; sourceTree = "<group>"; };
 		92396CFC2CBBDAD171DF93C3 /* BookwormsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookwormsApp.swift; sourceTree = "<group>"; };
 		94B1956FAC9D419811DBCFFF /* LibrarySources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySources.swift; sourceTree = "<group>"; };
@@ -251,6 +254,7 @@
 		AE6C82B5F8B073F4CBD40C73 /* DeviceAmbientProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAmbientProfileTests.swift; sourceTree = "<group>"; };
 		B476083EE441D966AF927F0B /* HardcoverAuthenticationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardcoverAuthenticationTests.swift; sourceTree = "<group>"; };
 		B49901D4DCB9619875ED62CE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B569854A621C346F4BBDD808 /* ExampleProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExampleProfile.swift; sourceTree = "<group>"; };
 		BB2EC841DEE5065CBC2D5512 /* BookWallHardcoverMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWallHardcoverMesh.swift; sourceTree = "<group>"; };
 		BC4903ECD2C4C41FD217FAA6 /* SocialLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialLibrary.swift; sourceTree = "<group>"; };
 		BD248044777361FA581C524A /* APIUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIUsageStore.swift; sourceTree = "<group>"; };
@@ -415,6 +419,7 @@
 		AC7C8840890A027187197BE4 = {
 			isa = PBXGroup;
 			children = (
+				8E67F0D59C597EADB1140D65 /* ExampleProfile */,
 				D4B1F3B2DFD92E7BE9CFBBA5 /* Bookworms */,
 				E92976DF85769A3A367053B2 /* BookwormsLiveTests */,
 				230B2F7149D6713607E85603 /* BookwormsTests */,
@@ -436,6 +441,7 @@
 				BB2EC841DEE5065CBC2D5512 /* BookWallHardcoverMesh.swift */,
 				298822623AB5C4140EEBD022 /* BookWallLayout.swift */,
 				0ACAE587D1E3B17F3C2AD9F4 /* BookWallLocalSpine.swift */,
+				B569854A621C346F4BBDD808 /* ExampleProfile.swift */,
 				94B1956FAC9D419811DBCFFF /* LibrarySources.swift */,
 				6381ADE3A142C1D6F5ED5B80 /* SeriesDesigns.swift */,
 				A15D5ABCDEBD2F53D2DC676A /* ShelfLayout.swift */,
@@ -498,6 +504,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7866408D626CE3E04B49A2F4 /* Build configuration list for PBXNativeTarget "Bookworms" */;
 			buildPhases = (
+				58240347301626D73B640126 /* Check the example profile */,
 				FFE718C56C6C37F2658909AC /* Sources */,
 				8ED2B7AD7417B3D8ED2E8092 /* Resources */,
 				EF96A2922E7C844A1670BF84 /* Embed Foundation Extensions */,
@@ -655,11 +662,34 @@
 			buildActionMask = 2147483647;
 			files = (
 				817789793D6F7A2714673E53 /* Assets.xcassets in Resources */,
+				0CD4A9222BFC636D7C8A96EA /* ExampleProfile in Resources */,
 				CA4E6E89FB3C7F4445E43C8D /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		58240347301626D73B640126 /* Check the example profile */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Check the example profile";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$CONFIGURATION\" = Release ] && [ ! -f \"$SRCROOT/ExampleProfile/library-v1.json\" ]; then\n  message=\"ExampleProfile/ is missing. Run python3 -I scripts/export-example-profile.py --out ExampleProfile (see docs/RELEASING.md).\"\n  # An archive builds with the install action.\n  if [ \"$ACTION\" = install ]; then echo \"error: $message\"; exit 1; fi\n  echo \"warning: $message\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A1F438F9ADF8B60D0D990567 /* Sources */ = {
@@ -760,6 +790,7 @@
 				7137D25D47C7B1FE18667136 /* CoverView.swift in Sources */,
 				6B1E9439B1CD5DEF59B00F11 /* CredentialAvailability.swift in Sources */,
 				6FB1D806D46FC1C9184E7EA9 /* CredentialStore.swift in Sources */,
+				074AB5ECCC5B703F64C942EE /* ExampleProfile.swift in Sources */,
 				D28077C8A93A3A8DED5FF37E /* GoogleFontLibrary.swift in Sources */,
 				9FA572A4021F37FCD45CDCED /* HardcoverClient.swift in Sources */,
 				08B09F5D77ACBED602B0FEBB /* HardcoverConnectionView.swift in Sources */,

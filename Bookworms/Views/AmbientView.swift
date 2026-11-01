@@ -194,7 +194,12 @@ struct AmbientView: View {
     private func yearInReview(_ review: YearInReview, size: CGSize) -> some View {
         let shelfHeight = size.height * 0.56
         return VStack(alignment: .leading, spacing: 34) {
-            Text("Your \(String(review.year)) in books").appFont(size: 52, weight: .semibold)
+            // The example profile's reading isn't the viewer's.
+            Text(
+                library.isExample
+                    ? "\(String(review.year)) in books" : "Your \(String(review.year)) in books"
+            )
+            .appFont(size: 52, weight: .semibold)
             HStack(alignment: .top, spacing: 70) {
                 ambientStat("Books read", review.books.count.formatted())
                 if review.pages > 0 { ambientStat("Pages", review.pages.formatted()) }
@@ -264,7 +269,8 @@ struct AmbientView: View {
                     .lineLimit(3)
                 Text(book.author).appFont(size: 32)
                 HStack(spacing: 16) {
-                    Text("You finished it").appFont(size: 28).foregroundStyle(.secondary)
+                    Text(library.isExample ? "Finished" : "You finished it").appFont(size: 28)
+                        .foregroundStyle(.secondary)
                     if let rating = book.rating { StarRating(rating: rating, size: 28) }
                 }
             }

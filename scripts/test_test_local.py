@@ -424,6 +424,22 @@ class ExecutionTests(unittest.TestCase):
             self.assertFalse(record["simulator_deleted"])
             self.assertIn("cleanup failed", record["failures"][0])
 
+    def test_simslim_turns_off_every_category(self):
+        device = "12345678-1234-1234-1234-123456789ABC"
+        success = subprocess.CompletedProcess([], 0, stderr="")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "tvOS-27.0"
+            with mock.patch.object(runner, "mute_simulator_audio", return_value={"enabled": False}), \
+                 mock.patch.object(runner, "command_text", return_value=device), \
+                 mock.patch.object(runner.shutil, "which", return_value="/usr/local/bin/simslim"), \
+                 mock.patch.object(runner, "run") as checked_run, \
+                 mock.patch.object(runner, "inspect_results", return_value={"failures": []}), \
+                 mock.patch.object(runner.subprocess, "run", side_effect=[success] * 3):
+                record = runner.execute_runtime({"version": "27.0", "identifier": "runtime"},
+                                                {"identifier": "tv"}, output, "Unit", REQUIRED)
+            self.assertEqual(record["simslim"], "full")
+            self.assertEqual(checked_run.call_args_list[0].args[0], ["simslim", "on", device])
+
     def test_failed_simslim_falls_back_to_a_stock_boot(self):
         device = "12345678-1234-1234-1234-123456789ABC"
         success = subprocess.CompletedProcess([], 0, stderr="")

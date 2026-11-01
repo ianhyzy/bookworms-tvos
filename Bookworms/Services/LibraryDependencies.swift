@@ -76,6 +76,9 @@ struct LibraryDependencies {
     var saveSeriesLink: @MainActor (SeriesLinkV1, String, Int) async throws -> Void = {
         try await SpineCloudStore.shared.setSeriesLink($0, accountID: $1, bookID: $2)
     }
+    /// Reads the bundled example profile, or `nil` in builds without it, which then don't offer
+    /// **View example profile**.
+    var exampleProfile: (@MainActor () async -> ExampleProfile?)? = ExampleProfile.bundledLoader
     var now: () -> Date = { Date() }
     var sleep: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     /// Returns once Book Wall has waited long enough for launch's companion record read

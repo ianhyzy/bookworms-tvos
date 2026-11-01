@@ -74,6 +74,8 @@ def main():
     assert info['CFBundleIdentifier'] == 'gay.ian.Bookworms'
     assert info['CFBundleDisplayName'] == 'Bookworms - eBook Display'
     assert (app / 'Assets.car').is_file(), 'Missing compiled artwork'
+    # Checks presence only; the profile is private reading history, so nothing reads it here.
+    assert (app / 'ExampleProfile' / 'library-v1.json').is_file(), 'Missing the example profile'
     assert 'iCloud.gay.ian.Bookworms' in entitlements['com.apple.developer.icloud-container-identifiers']
     assert entitlements['com.apple.developer.icloud-services'] == ['CloudKit']
     assert app_report['requiredReasonAPIs'] == {

@@ -47,11 +47,21 @@ The signed-in Xcode account provides authentication on this Mac. For unattended 
 
 No GitHub workflow or recurring upload is enabled by these commands. Source changes are not automatically committed or pushed.
 
+## Example profile
+
+Before `release.py prepare`, open the signed-in Bookworms Mac app so its launch cache is current, then run:
+
+```sh
+python3 -I scripts/export-example-profile.py --out ExampleProfile
+```
+
+It reads `~/Library/Containers/gay.ian.Bookworms.Mac/Data/Library/Caches/Bookworms/library-snapshot.json`, keeps the **Read** books finished since 2024, and prints only counts. The folder holds private reading history and stays out of Git, the source digest, and the candidate's source snapshot; see [privacy](PRIVACY.md). An archive fails with "ExampleProfile/ is missing" until the folder has `library-v1.json`; other Release builds, such as `scripts/device-build.py`, only warn. Export again before each release, so Book Wall's year stays recent. Don't export while preparation runs.
+
 ## Archive verification
 
 Both targets must provide `CFBundleDisplayName` and require `arm64` in their Info.plists. Keep these values and the app's push entitlement in `project.yml` so regeneration preserves them.
 
-The verifier checks display names, the arm64 requirement, the CloudKit push entitlement against its profile, both executable images for LLVM coverage, both packaged versions, signatures, entitlements, privacy manifests, and extension packaging. Development signing is reported, not treated as App Store approval. Preserve the complete candidate directory. Local verification does not replace Apple distribution validation.
+The verifier checks that the app bundles the example profile, display names, the arm64 requirement, the CloudKit push entitlement against its profile, both executable images for LLVM coverage, both packaged versions, signatures, entitlements, privacy manifests, and extension packaging. Development signing is reported, not treated as App Store approval. Preserve the complete candidate directory. Local verification does not replace Apple distribution validation.
 
 ## App Store submission
 
@@ -106,7 +116,7 @@ Use these App Review notes, adjusted to the build:
 ```text
 Bookworms shows a Hardcover (hardcover.app) reading library on Apple TV. It only reads the account; it never changes it.
 
-Without an account: select "Explore sample library" in the welcome popup. If the popup has already been dismissed, select "Explore a sample shelf" on My Shelf.
+Without an account: select "View example profile" in the welcome popup. If the popup has already been dismissed, select "View example profile" on My Shelf. It shows a read-only copy of the developer's own reading that ships in the app, without social views, so use the demo account to review sign-in and social views.
 
 With the demo account: select "Connect Hardcover" in the welcome popup, or open Settings > Sources > Connect Hardcover. Scan the QR code, or open hardcover.app/link on a phone or computer, sign in with the demo account, enter the code shown on the TV, and select Authorize. The TV connects automatically and shows progress while the library downloads and the shelf prepares.
 
@@ -156,7 +166,7 @@ Changes
 Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new effective date.
 ```
 
-Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, Google Fonts requests for the fonts of companion spines (`BookPresentation.showsCompanionSpines`), iCloud storage as off by default, an iCloud copy that includes your own reviews and that your Apple devices share with their spine designs, cover choices, and series choices, and no AI requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. iCloud storage is opt-in.
+Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, Google Fonts requests for the fonts of companion spines (`BookPresentation.showsCompanionSpines`), iCloud storage as off by default, an iCloud copy that includes your own reviews and that your Apple devices share with their spine designs, cover choices, and series choices, and no AI requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. Before the first release with the example profile, add to both that the app includes an example profile of the developer's own Hardcover reading, with ratings, finish dates, and book descriptions, which the app only displays, and change the effective date. iCloud storage is opt-in.
 
 ## Verify the release candidate
 

@@ -346,9 +346,17 @@ struct YearInReviewView: View {
     }
 
     private func shelfSummary(_ review: YearInReview) -> String {
-        review.shelf.count < review.books.count
-            ? "Your \(review.shelf.count) highest-rated books of \(String(review.year))"
-            : "Every book you finished in \(String(review.year))"
+        let year = String(review.year)
+        let isTopRated = review.shelf.count < review.books.count
+        // The example profile's reading isn't the viewer's.
+        if library.isExample {
+            return isTopRated
+                ? "The \(review.shelf.count) highest-rated books of \(year)"
+                : "Every book finished in \(year)"
+        }
+        return isTopRated
+            ? "Your \(review.shelf.count) highest-rated books of \(year)"
+            : "Every book you finished in \(year)"
     }
 
     private var empty: some View {
