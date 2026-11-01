@@ -1778,7 +1778,8 @@ final class BookWallScene {
     private static func coverMaterial(
         _ cover: TextureResource?, style: BookWallLocalSpine.Style
     ) -> any RealityKit.Material {
-        guard let cover else { return UnlitMaterial(color: style.background.uiColor) }
+        // Without a cover, the board is cloth, lit like the casing it continues.
+        guard let cover else { return caseMaterial(style) }
         // The shaped covering reflects a soft edge highlight without tinting the artwork.
         var paper = surface(color: .white, roughness: 0.52, specular: 0.25)
         paper.baseColor = .init(texture: .init(cover))
