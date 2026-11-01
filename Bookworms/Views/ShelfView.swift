@@ -697,7 +697,6 @@ struct ShelfView: View {
             onPickSeries: library.canPickSeries(for: book)
                 ? { library.pickSeries($0, for: library.book(withID: book.id) ?? book) }
                 : nil,
-            libraryBook: { library.book(withID: $0) },
             onOpenBook: onOpenBook,
             friendReads: social.presentation.friendReads[book.id] ?? [],
             isRead: library.isBookReadByUser(book.id)
@@ -816,7 +815,6 @@ struct ShelfView: View {
                                 reviewLoader: reviewLoader(for:),
                                 onShowShelf: { showDetailFilter($1, from: $0) },
                                 series: { library.series(for: library.book(withID: $0.id) ?? $0) },
-                                libraryBook: { library.book(withID: $0) },
                                 // A series book opens in the cover details, even one on the wall.
                                 onOpenBook: { selectedBook = $0 },
                                 friendReads: { social.presentation.friendReads[$0.id] ?? [] },

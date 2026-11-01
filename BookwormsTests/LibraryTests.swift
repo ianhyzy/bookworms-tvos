@@ -18,14 +18,30 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(invalid.finishedLabel(format: .iso), "Date not recorded")
     }
 
-    func testLengthLabelUsesMinutesOnlyForAudiobooksWithARecordedLength() {
-        var book = Book(id: 1, title: "Book", author: "Author", pages: 304, format: "Listened")
-        XCTAssertEqual(book.lengthLabel, "304 pages")
-        book.audioSeconds = 44_550
-        XCTAssertEqual(book.lengthLabel, "743 minutes")
+    func testLengthLabelUsesListeningTimeOnlyForAudiobooksWithARecordedLength() {
+        var book = Book(id: 1, title: "Book", author: "Author", pages: 1_024, format: "Listened")
+        XCTAssertEqual(book.lengthLabel, "1,024 pages")
+        book.audioSeconds = 43_500
+        XCTAssertEqual(book.lengthLabel, "12 hr, 5 min")
         book.format = "Ebook"
-        XCTAssertEqual(book.lengthLabel, "304 pages")
+        XCTAssertEqual(book.lengthLabel, "1,024 pages")
         XCTAssertNil(Book(id: 2, title: "Book", author: "Author").lengthLabel)
+    }
+
+    func testHumourAndHumorShowAsOneGenre() {
+        XCTAssertEqual(Book.displayGenre("Humour"), "Humor")
+        XCTAssertEqual(Book.displayGenre("dark humour"), "Dark Humor")
+        let book = Book(
+            id: 1, title: "Book", author: "Author",
+            genres: ["Humor", "Humour", "Satire", "Fantasy"])
+        XCTAssertEqual(
+            BookDetailView.genres(of: book), ["Humor", "Satire", "Fantasy"],
+            "A repeat leaves room for the next genre")
+        XCTAssertTrue(
+            ShelfFilter.genre("Humor")
+                .matches(
+                    Book(
+                        id: 2, title: "Book", author: "Author", genres: ["humour"])))
     }
 
     func testGenreTagsKeepEnglishAndDropForeignLanguages() {

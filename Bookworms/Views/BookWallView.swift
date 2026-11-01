@@ -14,7 +14,6 @@ struct BookWallView: View {
     /// Shows My Shelf filtered to the author or genre chosen in the given book's details.
     let onShowShelf: (Book, ShelfFilter) -> Void
     let series: (Book) -> ShownSeries?
-    let libraryBook: (Int) -> Book?
     /// Opens details for another library book, chosen from the series pop-up.
     let onOpenBook: (Book) -> Void
     /// Followed readers with the book in their synced libraries, for its details.
@@ -114,7 +113,6 @@ struct BookWallView: View {
                         series: series(detailBook),
                         onPickSeries: library.canPickSeries(for: detailBook)
                             ? { library.pickSeries($0, for: detailBook) } : nil,
-                        libraryBook: libraryBook,
                         onOpenBook: onOpenBook,
                         friendReads: friendReads(detailBook),
                         isRead: library.isBookReadByUser(detailBook.id)

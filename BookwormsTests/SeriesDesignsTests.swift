@@ -162,6 +162,80 @@ final class SeriesDesignsTests: XCTestCase {
             "A book Hardcover lists in no series names none")
     }
 
+    private func member(_ id: Int, _ memberships: [SeriesMembership]) -> Book {
+        Book(
+            id: id, title: "Volume \(id)", author: "Terry Pratchett",
+            seriesMemberships: memberships)
+    }
+
+    private func membership(_ seriesID: Int, position: Double? = nil) -> SeriesMembership {
+        SeriesMembership(seriesID: seriesID, name: "Series \(seriesID)", position: position)
+    }
+
+    /// Mirrors the iPhone companion's `SeriesLookTests`, so both apps list a series alike.
+    func testSeriesListingMarksTheReadersBooksInOrder() {
+        func entry(_ id: Int, _ position: Double) -> SeriesInfo.SeriesBook {
+            SeriesInfo.SeriesBook(
+                id: id, title: "Volume \(id)", position: position, releaseYear: nil,
+                coverURL: nil)
+        }
+        let info = SeriesInfo(
+            id: 10605, name: "Discworld - Industrial Revolution",
+            books: [entry(1, 1), entry(2, 2), entry(3, 3)])
+        // The reader's edition of the second book has its own ID; a novella sits between books.
+        let edition = member(20, [membership(10605, position: 2)])
+        let novella = member(21, [membership(10605, position: 2.5)])
+        let first = member(1, [membership(10605, position: 1)])
+        let elsewhere = member(22, [membership(99, position: 1)])
+        let library = [elsewhere, novella, edition, first]
+
+        let listing = SeriesEntry.listings(infos: [10605: info], library: library)[10605] ?? []
+        XCTAssertEqual(listing.map(\.position), [1, 2, 2.5, 3])
+        XCTAssertEqual(listing.map(\.book?.id), [1, 20, 21, nil])
+
+        // Without Hardcover's list, the library's own books in the series show.
+        let older = book(23, series: 10605, position: 3)
+        XCTAssertEqual(
+            SeriesEntry.listings(infos: [:], library: library + [older])[10605]?.map(\.id),
+            [1, 20, 21, 23])
+    }
+
+    /// The series label opens for a book in two or more series, or for one whose series lists
+    /// two or more books, as the iPhone and Mac decide.
+    func testSeriesOpensOnlyWithMoreThanTheBookToList() {
+        func opens(_ book: Book, infos: [SeriesInfo], library: [Book]) -> Bool {
+            let all = book.seriesMemberships ?? []
+            let listings = SeriesEntry.listings(
+                infos: Dictionary(uniqueKeysWithValues: infos.map { ($0.id, $0) }),
+                library: library)
+            return ShownSeries(
+                membership: all[0], all: all, infos: [:],
+                listings: listings.filter { id, _ in all.contains { $0.seriesID == id } }
+            )
+            .opens
+        }
+        let alone = member(30, [membership(500, position: 1)])
+        let solo = SeriesInfo(
+            id: 500, name: "Series 500",
+            books: [.init(id: 30, title: "A Volume", position: 1, releaseYear: nil, coverURL: nil)])
+        XCTAssertFalse(opens(alone, infos: [solo], library: [alone]))
+        XCTAssertFalse(opens(alone, infos: [], library: [alone]))
+
+        // A novella the reader owns joins the list, so the series has two books to show.
+        let novella = member(32, [membership(500, position: 1.5)])
+        XCTAssertTrue(opens(alone, infos: [solo], library: [alone, novella]))
+        let listed = SeriesInfo(
+            id: 500, name: "Series 500",
+            books: solo.books + [
+                .init(id: 33, title: "A Sequel", position: 2, releaseYear: nil, coverURL: nil)
+            ])
+        XCTAssertTrue(opens(alone, infos: [listed], library: [alone]))
+
+        // Two series to choose between open even with one book each.
+        let both = member(34, [membership(500, position: 1), membership(501)])
+        XCTAssertTrue(opens(both, infos: [], library: [both]))
+    }
+
     func testLookKeysSplitDiscworldGroupsAndFirstAuthors() {
         func discworld(_ id: Int, _ title: String) -> Book {
             book(id, series: 1018, author: "Terry Pratchett, Stephen Baxter", title: title)

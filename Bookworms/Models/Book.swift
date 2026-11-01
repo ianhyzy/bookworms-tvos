@@ -140,9 +140,12 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     }
 
     /// Capitalizes tags that readers entered in lowercase, such as "litrpg", and keeps any other
-    /// capitalization, such as "LGBTQ" or "LitRPG".
+    /// capitalization, such as "LGBTQ" or "LitRPG". Readers tag in British and American spelling,
+    /// so "Humour" reads "Humor", and the two count as one genre wherever genres are tallied,
+    /// listed, or filtered, as on the iPhone and Mac.
     static func displayGenre(_ tag: String) -> String {
-        tag == tag.lowercased() ? tag.capitalized : tag
+        (tag == tag.lowercased() ? tag.capitalized : tag)
+            .replacing("Humour", with: "Humor").replacing("humour", with: "humor")
     }
 
     /// The reading format's display name. Hardcover records Read, Listened, Both, or Ebook.
@@ -157,13 +160,15 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         }
     }
 
-    /// The length for display: listening time in whole minutes for an audiobook when Hardcover
-    /// records it, otherwise the page count.
+    /// The length for display, as the iPhone and Mac write it: the listening time for an
+    /// audiobook when Hardcover records it, such as "12 hr, 5 min", otherwise the page count, such
+    /// as "1,024 pages".
     var lengthLabel: String? {
         if formatLabel == "Audiobook", let audioSeconds, audioSeconds > 0 {
-            return "\((audioSeconds + 30) / 60) minutes"
+            return Duration.seconds(audioSeconds)
+                .formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
         }
-        if let pages, pages > 0 { return "\(pages) pages" }
+        if let pages, pages > 0 { return "\(pages.formatted()) pages" }
         return nil
     }
 
@@ -245,7 +250,7 @@ struct SeriesInfo: Codable, Hashable, Sendable, Identifiable {
 
 /// A book's series as its details show them: the series its label names
 /// (`SeriesDesigns.shownSeries(of:link:)`) and every series the book belongs to, with each
-/// series' main books when the last sync fetched them.
+/// series' main books when the last sync fetched them, and the books each series lists.
 struct ShownSeries: Hashable, Sendable {
     /// The series the label names.
     let membership: SeriesMembership
@@ -253,8 +258,17 @@ struct ShownSeries: Hashable, Sendable {
     let all: [SeriesMembership]
     /// The main books of the series in `all` that the last sync fetched, by series ID.
     let infos: [Int: SeriesInfo]
+    /// The books of each series in `all` that has any to list
+    /// (`SeriesEntry.listings(infos:library:)`), by series ID.
+    let listings: [Int: [SeriesEntry]]
 
     var info: SeriesInfo? { infos[membership.seriesID] }
+
+    /// Whether the series label opens the series pop-up: the book is in two or more series, or
+    /// its one series lists two or more books. Otherwise the label names the series as text. The
+    /// iPhone and Mac follow the same rule (`SeriesEntry.opensSeries(of:infos:library:)` in the
+    /// iOS app).
+    var opens: Bool { all.count > 1 || (listings[membership.seriesID]?.count ?? 0) > 1 }
 }
 
 struct LibrarySnapshot: Codable, Sendable {

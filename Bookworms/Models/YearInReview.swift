@@ -25,7 +25,8 @@ struct YearInReview: Equatable, Identifiable, Sendable {
     let ratedBooks: Int
     /// Books finished in each month, January first.
     let monthlyCounts: [Int]
-    /// The month (1–12) with the most finished books; the earliest wins a tie.
+    /// The month (1–12) with the most finished books, when it has at least two; the earliest wins
+    /// a tie.
     let busiestMonth: Int?
     /// Recorded reading formats, most common first. A book read in two formats counts toward
     /// both.
@@ -36,7 +37,8 @@ struct YearInReview: Equatable, Identifiable, Sendable {
     let topAuthor: Tally?
     /// The book with the most pages; the latest finish wins a tie.
     let longest: Book?
-    /// The book with the fewest pages, when the year has at least two books with page counts.
+    /// The book with the fewest pages; the latest finish wins a tie. `nil` when every paged book
+    /// has the same page count, so one book is never both the longest and the shortest.
     let shortest: Book?
     /// The highest-rated book; the latest finish wins a tie.
     let favorite: Book?
@@ -90,7 +92,8 @@ struct YearInReview: Equatable, Identifiable, Sendable {
         let maximumPages = paged.max()
         let minimumPages = paged.min()
         longest = withPages.last { $0.pages == maximumPages }
-        shortest = withPages.count < 2 ? nil : withPages.last { $0.pages == minimumPages }
+        shortest =
+            minimumPages == maximumPages ? nil : withPages.last { $0.pages == minimumPages }
         pages = paged.reduce(0, +)
         booksWithPages = paged.count
         let ratings = books.compactMap(\.rating).filter { (0...5).contains($0) }
@@ -101,7 +104,7 @@ struct YearInReview: Equatable, Identifiable, Sendable {
         for entry in entries { months[entry.month - 1] += 1 }
         monthlyCounts = months
         let most = months.max() ?? 0
-        busiestMonth = most > 0 ? months.firstIndex(of: most).map { $0 + 1 } : nil
+        busiestMonth = most >= 2 ? months.firstIndex(of: most).map { $0 + 1 } : nil
 
         formats = Self.tally(books.flatMap(\.formatParts))
         genres = Array(

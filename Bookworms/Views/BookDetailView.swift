@@ -34,8 +34,6 @@ struct BookDetailView: View {
     /// Makes a series the one the label names, from the series list's check buttons. When `nil`,
     /// the list has no check buttons.
     var onPickSeries: ((Int) -> Void)?
-    /// Your library's copy of a series book, or `nil` when you don't have it.
-    var libraryBook: (Int) -> Book? = { _ in nil }
     /// Opens details for another book in your library, chosen from the series pop-up.
     var onOpenBook: ((Book) -> Void)?
     /// Followed readers with this book in their synced libraries, shown with their ratings.
@@ -54,8 +52,8 @@ struct BookDetailView: View {
     @State private var readingDescription: ReviewPresentation?
     @State private var descriptionHeight: CGFloat = 0
     @State private var fullDescriptionHeight: CGFloat = 0
-    /// Up to three most-tagged genres that read as English, filtered once when details open so
-    /// saved snapshots from any source benefit without a sync.
+    /// The book's genres (`genres(of:)`), filtered once when details open so saved snapshots from
+    /// any source benefit without a sync.
     private let genres: [String]
 
     init(
@@ -67,7 +65,6 @@ struct BookDetailView: View {
         onShowShelf: ((ShelfFilter) -> Void)? = nil,
         series: ShownSeries? = nil,
         onPickSeries: ((Int) -> Void)? = nil,
-        libraryBook: @escaping (Int) -> Book? = { _ in nil },
         onOpenBook: ((Book) -> Void)? = nil,
         friendReads: [FriendRead] = [],
         isRead: Bool = false
@@ -81,12 +78,20 @@ struct BookDetailView: View {
         self.onShowShelf = onShowShelf
         self.series = series
         self.onPickSeries = onPickSeries
-        self.libraryBook = libraryBook
         self.onOpenBook = onOpenBook
         self.friendReads = friendReads
         self.isRead = isRead
-        genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
-            .map(Book.displayGenre)
+        genres = Self.genres(of: book)
+    }
+
+    /// Up to three of `book`'s most-tagged genres that read as English, each once by its display
+    /// name (`Book.displayGenre(_:)`, which shows "Humour" as "Humor").
+    static func genres(of book: Book) -> [String] {
+        var shown = Set<String>()
+        return Array(
+            (book.genres ?? []).filter(HardcoverClient.isEnglishTag).map(Book.displayGenre)
+                .filter { shown.insert($0.lowercased()).inserted }
+                .prefix(3))
     }
 
     var body: some View {
@@ -282,9 +287,9 @@ struct BookDetailView: View {
         return description
     }
 
-    /// The facts under the author: reading format, publication year, length, such as "1098
-    /// pages" or "742 minutes" for an audiobook, and the finish date, with a read count for a
-    /// reread. Missing facts are left out.
+    /// The facts under the author: reading format, publication year, length (`Book.lengthLabel`),
+    /// such as "1,098 pages" or "12 hr, 22 min" for an audiobook, and the finish date, with a read
+    /// count for a reread. Missing facts are left out.
     private var facts: [(symbols: [String], id: String, text: String)] {
         [
             book.formatLabel.map { (book.formatSymbols, "detail-fact-Format", "Format: \($0)") },
@@ -431,8 +436,8 @@ struct BookDetailView: View {
     }
 
     /// "Discworld - Industrial Revolution 5 of 6" beside the author (`SeriesDesigns.label(of:)`).
-    /// It opens the book's series (`SeriesBrowser`) when the last sync has at least two main books
-    /// of one of them, or the book is in more than one to pick from; otherwise it is text.
+    /// It opens the book's series (`SeriesBrowser`) when the book is in two or more series, or its
+    /// one series lists two or more books (`ShownSeries.opens`); otherwise it is text.
     @ViewBuilder private var seriesButton: some View {
         if let shown = series {
             let label = Label(
@@ -441,8 +446,7 @@ struct BookDetailView: View {
             .labelStyle(CompactLabelStyle())
             .appFont(size: 26, weight: .medium)
             .lineLimit(1)
-            let opens = shown.all.contains { (shown.infos[$0.seriesID]?.books.count ?? 0) > 1 }
-            if opens || (shown.all.count > 1 && onPickSeries != nil) {
+            if shown.opens {
                 seriesButton(shown, label: label)
             } else {
                 label.foregroundStyle(.detailCaption)
@@ -465,8 +469,7 @@ struct BookDetailView: View {
         .accessibilityIdentifier("detail-series")
         .fullScreenCover(isPresented: $showsSeries, onDismiss: openChosenSeriesBook) {
             SeriesBrowser(
-                series: shown, title: book.title, currentID: book.id, libraryBook: libraryBook,
-                onPick: onPickSeries,
+                series: shown, title: book.title, currentID: book.id, onPick: onPickSeries,
                 onOpen: { chosen in
                     if chosen.id != book.id { chosenSeriesBook = chosen }
                     showsSeries = false
@@ -893,14 +896,13 @@ private struct FlowLayout: Layout {
 }
 
 /// A book's series, opened from its series label: the list of every series the book belongs to
-/// (`SeriesList`), each opening its main books (`SeriesPopup`). A book in one series opens
+/// (`SeriesList`), each opening its books (`SeriesPopup`). A book in one series opens
 /// straight to its books. Back from a series' books returns to the list, whose default focus is
 /// the series that was open; Back from the list closes the pop-up.
 private struct SeriesBrowser: View {
     let series: ShownSeries
     let title: String
     let currentID: Int
-    let libraryBook: (Int) -> Book?
     let onPick: ((Int) -> Void)?
     let onOpen: (Book) -> Void
     let onClose: () -> Void
@@ -910,11 +912,14 @@ private struct SeriesBrowser: View {
     @State private var lastOpened: Int?
 
     var body: some View {
-        let single = series.all.count > 1 ? nil : series.info
+        let single = series.all.count > 1 ? nil : series.membership
         Group {
-            if let info = opened.flatMap({ series.infos[$0] }) ?? single {
+            if let membership = opened.flatMap({ id in series.all.first { $0.seriesID == id } })
+                ?? single, let entries = series.listings[membership.seriesID]
+            {
                 SeriesPopup(
-                    series: info, currentID: currentID, libraryBook: libraryBook, onOpen: onOpen)
+                    name: series.infos[membership.seriesID]?.name ?? membership.name,
+                    entries: entries, currentID: currentID, onOpen: onOpen)
             } else {
                 SeriesList(
                     series: series, title: title,
@@ -932,7 +937,7 @@ private struct SeriesBrowser: View {
 }
 
 /// Every series a book belongs to, one row each in Hardcover's order with the book's place in
-/// it. Selecting a series whose last sync has at least two main books opens them; other rows are
+/// it. Selecting a series opens its books (`ShownSeries.listings`); a series with none to list is
 /// text that focus skips.
 ///
 /// With `onPick`, a check button after each row marks the series the book's label names, and
@@ -958,7 +963,7 @@ private struct SeriesList: View {
         opens(entryID) || onPick == nil ? .row(entryID) : .check(entryID)
     }
 
-    private func opens(_ id: Int) -> Bool { (series.infos[id]?.books.count ?? 0) > 1 }
+    private func opens(_ id: Int) -> Bool { series.listings[id] != nil }
 
     /// Wide enough for a long name, such as "Discworld - Industrial Revolution", at 30 points.
     private static let rowWidth: CGFloat = 900
@@ -1026,17 +1031,19 @@ private struct SeriesList: View {
     }
 }
 
-/// Every main book in a series, in order, on pages of two rows with the series name above them.
-/// Each book shows its position, publication year, and full title. Books you haven't read, or
-/// that aren't out yet, are faded. Selecting a book in your library opens it.
+/// A series' books in order (`SeriesEntry.listings(infos:library:)`), on pages of two rows with
+/// the series name above them. Each book shows its position, publication year, and full title.
+/// Books you haven't read, or that aren't out yet, are faded. Selecting a book in your library
+/// opens it. Each entry's library copy, which can be another edition, decides its mark and the
+/// read count.
 ///
 /// Covers come from the library artwork tier or the browsing tier, which prepares them after
 /// sync; opening the pop-up fetches any that are still missing, nearest the current book first.
 /// Pages scroll with focus, and chevrons mark further pages.
 private struct SeriesPopup: View {
-    let series: SeriesInfo
+    let name: String
+    let entries: [SeriesEntry]
     let currentID: Int
-    let libraryBook: (Int) -> Book?
     let onOpen: (Book) -> Void
     @FocusState private var focused: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1058,15 +1065,21 @@ private struct SeriesPopup: View {
         CGFloat(columns) * columnWidth + CGFloat(columns - 1) * columnSpacing + 2 * inset
     }
 
-    private var pages: [[SeriesInfo.SeriesBook]] { series.books.chunked(into: Self.columns * 2) }
+    private var pages: [[SeriesEntry]] { entries.chunked(into: Self.columns * 2) }
 
     private func page(of id: Int?) -> Int {
-        (series.books.firstIndex { $0.id == id } ?? 0) / (Self.columns * 2)
+        (entries.firstIndex { $0.id == id } ?? 0) / (Self.columns * 2)
     }
 
-    private var readCount: Int {
-        series.books.filter { isRead(libraryBook($0.id)) }.count
+    /// Whether `entry` is the book whose details opened the pop-up, by its own ID or its copy's.
+    private func isCurrent(_ entry: SeriesEntry) -> Bool {
+        entry.id == currentID || entry.book?.id == currentID
     }
+
+    /// The entry of the book whose details opened the pop-up, which receives focus.
+    private var currentEntryID: Int? { entries.first(where: isCurrent)?.id }
+
+    private var readCount: Int { entries.filter { isRead($0.book) }.count }
 
     private func isRead(_ book: Book?) -> Bool {
         guard let book else { return false }
@@ -1076,8 +1089,8 @@ private struct SeriesPopup: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(series.name).appFont(size: 44, weight: .semibold)
-                Text("\(readCount) of \(series.books.count) read")
+                Text(name).appFont(size: 44, weight: .semibold)
+                Text("\(readCount) of \(entries.count) read")
                     .appFont(size: 26).foregroundStyle(.secondary)
             }
             .padding(.horizontal, Self.inset)
@@ -1093,7 +1106,7 @@ private struct SeriesPopup: View {
             .scrollPosition($position)
             .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
-            .defaultFocus($focused, currentID, priority: .userInitiated)
+            .defaultFocus($focused, currentEntryID, priority: .userInitiated)
             .environment(\.artworkGeneration, artworkGeneration)
             .onScrollGeometryChange(for: Int.self) {
                 Int(($0.contentOffset.x / Self.pageWidth).rounded())
@@ -1108,13 +1121,11 @@ private struct SeriesPopup: View {
                 }
             }
             .onAppear {
-                position.scrollTo(id: page(of: currentID))
+                position.scrollTo(id: page(of: currentEntryID))
                 // Opened from the series list, the pop-up replaces the focused row, so it takes
                 // focus as it appears, as the reviews reader does. `defaultFocus` alone leaves
                 // focus unset after the swap.
-                focused =
-                    series.books.contains { $0.id == currentID }
-                    ? currentID : series.books.first?.id
+                focused = currentEntryID ?? entries.first?.id
             }
             .overlay(alignment: .leading) {
                 if visiblePage > 0 { chevron("chevron.left").offset(x: -40) }
@@ -1129,7 +1140,7 @@ private struct SeriesPopup: View {
         .task { await prepareCovers() }
     }
 
-    private func pageView(_ books: [SeriesInfo.SeriesBook]) -> some View {
+    private func pageView(_ books: [SeriesEntry]) -> some View {
         VStack(alignment: .leading, spacing: Self.rowSpacing) {
             ForEach(Array(books.chunked(into: Self.columns).enumerated()), id: \.offset) {
                 _, row in
@@ -1153,11 +1164,11 @@ private struct SeriesPopup: View {
     /// Fetches covers the browsing tier doesn't have yet, nearest the current book first, and
     /// reloads the covers after each batch. Cancelled when the pop-up closes.
     private func prepareCovers() async {
-        let current = series.books.firstIndex { $0.id == currentID } ?? 0
-        let missing = series.books.enumerated()
+        let current = entries.firstIndex(where: isCurrent) ?? 0
+        let missing = entries.enumerated()
             .sorted { abs($0.offset - current) < abs($1.offset - current) }
             .compactMap { offset, entry in
-                libraryBook(entry.id).map(\.preferredCoverURL) ?? entry.coverURL
+                entry.book.map(\.preferredCoverURL) ?? entry.coverURL
             }
         for start in stride(from: 0, to: missing.count, by: 6) {
             guard !Task.isCancelled else { return }
@@ -1167,14 +1178,15 @@ private struct SeriesPopup: View {
         }
     }
 
-    private func item(_ entry: SeriesInfo.SeriesBook) -> some View {
-        let owned = libraryBook(entry.id)
+    private func item(_ entry: SeriesEntry) -> some View {
+        let owned = entry.book
+        let isCurrent = isCurrent(entry)
         let book =
             owned
             ?? Book(id: entry.id, title: entry.title, author: "", coverURL: entry.coverURL)
         let unreleased =
             (entry.releaseYear ?? 0) > Calendar.current.component(.year, from: .now)
-        let faded = !isRead(owned) && entry.id != currentID
+        let faded = !isRead(owned) && !isCurrent
         return Button {
             if let owned { onOpen(owned) }
         } label: {
@@ -1193,7 +1205,7 @@ private struct SeriesPopup: View {
                 .appFont(size: 24, weight: .medium)
                 .lineLimit(1).minimumScaleFactor(23 / 24)
                 // Titles wrap to two lines; longer ones truncate rather than shrink.
-                Text(entry.id == currentID ? "This book" : entry.title)
+                Text(isCurrent ? "This book" : entry.title)
                     .appFont(size: 23).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).lineLimit(2)
                     .frame(height: 58, alignment: .top)

@@ -333,3 +333,70 @@ extension SeriesDesigns {
         [series.name, place(in: series)].compactMap(\.self).joined(separator: " ")
     }
 }
+
+/// One book of a series as the details' series pop-up lists it, with the library's copy when the
+/// reader has the book. The iPhone and Mac list a series the same way (`SeriesEntry` in the iOS
+/// app).
+struct SeriesEntry: Identifiable, Hashable, Sendable {
+    /// The Hardcover book ID.
+    let id: Int
+    let title: String
+    let position: Double
+    let releaseYear: Int?
+    /// Hardcover's cover of the listed book. The reader's copy draws its own cover.
+    let coverURL: URL?
+    /// The reader's copy, or `nil` when the book isn't in the library.
+    let book: Book?
+
+    /// The books of every series in reading order, by series ID: each series in `infos`, and each
+    /// series a library book belongs to. A series with nothing to list has no entry.
+    ///
+    /// `infos`, Hardcover's lists from the last sync, give one main book per whole-number
+    /// position. Hardcover lists one edition at each position, so the library book with the
+    /// entry's ID, else a library book at that position, stands in for the entry, and library
+    /// books at other positions, such as a novella at 2.5, join in order. Without a list, the
+    /// library's own books in the series show.
+    static func listings(infos: [Int: SeriesInfo], library: [Book]) -> [Int: [SeriesEntry]] {
+        var owned: [Int: [Double: Book]] = [:]
+        for book in library {
+            // Memberships decide; a book from an older snapshot has only its featured series.
+            let places =
+                book.seriesMemberships.map { all in all.map { ($0.seriesID, $0.position) } }
+                ?? [(book.seriesID, book.seriesPosition)]
+                .compactMap { id, position in
+                    id.map { ($0, position) }
+                }
+            var seen = Set<Int>()
+            for (id, position) in places where seen.insert(id).inserted {
+                if let position, owned[id]?[position] == nil {
+                    owned[id, default: [:]][position] = book
+                }
+            }
+        }
+        let byID = Dictionary(library.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var listings: [Int: [SeriesEntry]] = [:]
+        for id in Set(infos.keys).union(owned.keys) {
+            let owned = owned[id] ?? [:]
+            var entries = (infos[id]?.books ?? [])
+                .map {
+                    SeriesEntry(
+                        id: $0.id, title: $0.title, position: $0.position,
+                        releaseYear: $0.releaseYear, coverURL: $0.coverURL,
+                        book: byID[$0.id] ?? owned[$0.position])
+                }
+            let listed = Set(entries.map(\.position))
+            let listedBooks = Set(entries.compactMap(\.book?.id))
+            for (position, book) in owned
+            where !listed.contains(position) && !listedBooks.contains(book.id) {
+                entries.append(
+                    SeriesEntry(
+                        id: book.id, title: book.title, position: position,
+                        releaseYear: book.publicationYear, coverURL: book.coverURL, book: book))
+            }
+            if !entries.isEmpty {
+                listings[id] = entries.sorted { ($0.position, $0.id) < ($1.position, $1.id) }
+            }
+        }
+        return listings
+    }
+}
