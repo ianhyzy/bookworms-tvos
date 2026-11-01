@@ -347,8 +347,10 @@ extension BookWallPreparation {
         return SpineFontPolicy.standInFamily(for: name).map { ($0, design.weight) }
     }
 
-    /// Downloads and registers one Google Fonts face by family and weight.
-    typealias FontDownload = @MainActor (_ family: String, _ weight: Int) async throws -> Void
+    /// Downloads and registers one Google Fonts face by family and weight. Without
+    /// `allowsNetwork`, it registers only a face cached on disk and throws otherwise.
+    typealias FontDownload =
+        @MainActor (_ family: String, _ weight: Int, _ allowsNetwork: Bool) async throws -> Void
 
     /// Whether `loadFonts(for:download:)` registered a face, and the network failure, if any,
     /// that stopped it before it tried every face.
@@ -360,7 +362,8 @@ extension BookWallPreparation {
     /// Downloads and registers each design's Google Fonts face once per family and weight.
     /// A book whose face does not load uses the system face for its design's typeface and
     /// weight. A network failure stops further downloads, so an unreachable host delays the
-    /// wall by at most one request timeout per call.
+    /// wall by at most one request timeout per call; the remaining faces still register from
+    /// the disk cache.
     ///
     /// The design's own face counts as registered only by name, so a family's registered Regular
     /// face, for example, does not stand in for its Bold. A stand-in family counts as registered
@@ -372,6 +375,7 @@ extension BookWallPreparation {
     ) async -> FontLoad {
         var load = FontLoad()
         var requested = Set<String>()
+        var allowsNetwork = true
         for design in designs {
             guard let name = design.fontPostScriptName, let request = fontRequest(for: design)
             else { continue }
@@ -385,14 +389,15 @@ extension BookWallPreparation {
             guard !Task.isCancelled else { return load }
             do {
                 if let download {
-                    try await download(family, weight)
+                    try await download(family, weight, allowsNetwork)
                 } else {
-                    _ = try await GoogleFontLibrary.shared.download(family: family, weight: weight)
+                    _ = try await GoogleFontLibrary.shared.download(
+                        family: family, weight: weight, allowsNetwork: allowsNetwork)
                 }
                 load.registered = true
-            } catch let error as URLError {
+            } catch let error as URLError where allowsNetwork {
                 load.interruption = error.code
-                return load
+                allowsNetwork = false
             } catch {
                 continue
             }

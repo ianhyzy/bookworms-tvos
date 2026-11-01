@@ -512,28 +512,39 @@ final class SeriesDesignsTests: XCTestCase {
     }
 
     @MainActor
-    func testFontLoadStopsAtANetworkFailureAndReportsWhatRegistered() async {
+    func testFontLoadStopsDownloadsAtANetworkFailureAndReportsWhatRegistered() async {
         // Fictional faces that no test host registers.
         let designs = [
             companionDesign(1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold"),
             companionDesign(2, family: "Fictional Sans", postScriptName: "FictionalSans-Bold"),
+            companionDesign(3, family: "Fictional Slab", postScriptName: "FictionalSlab-Bold"),
         ]
         var requested: [String] = []
-        let offline = await BookWallPreparation.loadFonts(for: designs) { family, _ in
-            requested.append(family)
+        let offline = await BookWallPreparation.loadFonts(for: designs) { family, _, network in
+            requested.append("\(family):\(network)")
             throw URLError(.timedOut)
         }
         XCTAssertEqual(offline, .init(registered: false, interruption: .timedOut))
-        XCTAssertEqual(requested, ["Fictional Serif"], "A network failure stops the downloads")
+        XCTAssertEqual(
+            requested,
+            ["Fictional Serif:true", "Fictional Sans:false", "Fictional Slab:false"],
+            "A network failure stops the downloads but not the cache reads")
+
+        // A face cached on disk registers after another face's network failure.
+        let cached = await BookWallPreparation.loadFonts(for: designs) { family, _, network in
+            if network { throw URLError(.notConnectedToInternet) }
+            if family != "Fictional Slab" { throw URLError(.notConnectedToInternet) }
+        }
+        XCTAssertEqual(cached, .init(registered: true, interruption: .notConnectedToInternet))
 
         requested = []
-        let retried = await BookWallPreparation.loadFonts(for: designs) { family, _ in
+        let retried = await BookWallPreparation.loadFonts(for: designs) { family, _, _ in
             requested.append(family)
         }
         XCTAssertEqual(retried, .init(registered: true))
-        XCTAssertEqual(requested, ["Fictional Serif", "Fictional Sans"])
+        XCTAssertEqual(requested, ["Fictional Serif", "Fictional Sans", "Fictional Slab"])
 
-        let rejected = await BookWallPreparation.loadFonts(for: designs) { _, _ in
+        let rejected = await BookWallPreparation.loadFonts(for: designs) { _, _, _ in
             throw AIError.unavailableFont
         }
         XCTAssertEqual(rejected, .init(registered: false))
@@ -549,7 +560,7 @@ final class SeriesDesignsTests: XCTestCase {
         @MainActor final class Reference { weak var preparation: BookWallPreparation? }
         let reference = Reference()
         var calls = 0
-        let preparation = BookWallPreparation { _, _ in
+        let preparation = BookWallPreparation { _, _, _ in
             calls += 1
             try download(calls, reference.preparation!)
         }

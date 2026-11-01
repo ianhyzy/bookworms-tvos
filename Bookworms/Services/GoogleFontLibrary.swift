@@ -86,12 +86,16 @@ actor GoogleFontLibrary {
 
     /// Downloads and registers `family`, and returns its upright face nearest `weight`. Throws
     /// `AIError.invalidFont` for a blocked family, such as Impact, before reading the cache or
-    /// the network.
-    func download(family: String, weight: Int = 400) async throws -> DownloadedFont {
+    /// the network. Without `allowsNetwork`, it reads only the cache and throws
+    /// `URLError(.notConnectedToInternet)` for a face that isn't there.
+    func download(
+        family: String, weight: Int = 400, allowsNetwork: Bool = true
+    ) async throws -> DownloadedFont {
         guard SpineFontPolicy.allows(family) else { throw AIError.invalidFont }
         if let font = cached(family: family, weight: weight) {
             if (try? register(font)) != nil { return font }
         }
+        guard allowsNetwork else { throw URLError(.notConnectedToInternet) }
         let catalog = try await catalog()
         guard let entry = catalog.first(where: { $0.family == family }), entry.isOpenSource != false
         else { throw AIError.invalidFont }

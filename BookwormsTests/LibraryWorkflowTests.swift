@@ -356,6 +356,25 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertFalse(model.hasCompletedWelcome)
     }
 
+    /// A login refused for a missing permission isn't saved, so its message asks the reader to
+    /// connect again rather than to use a Disconnect button that isn't shown.
+    func testFailedConnectionForMissingPermissionAsksToConnectAgain() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        var dependencies = fixture.dependencies()
+        dependencies.validateHardcover = { _ in throw HardcoverError.insufficientScope }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let connected = await model.connect("hc_pat_fictional_original")
+        XCTAssertFalse(connected)
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertEqual(model.message, LibraryModel.unsavedScopeMessage)
+        XCTAssertEqual(
+            model.sourceErrors[LibrarySource.hardcover.rawValue], LibraryModel.unsavedScopeMessage)
+    }
+
     func testCachedOfflineStartupRetainsBooksAndErrorAcrossRelaunch() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -2323,6 +2342,55 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.cloudAccountChanged()
         XCTAssertFalse(model.iCloudEnabled)
         XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+    }
+
+    /// No sync starts while `cloudAccountChanged()` reads the user, so a sync queued then can't
+    /// upload this library to another account. The held-back sync runs once the user matches.
+    func testCloudAccountChangeHoldsSyncsWhileReadingTheUser() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        var syncs = 0
+        dependencies.syncCloud = {
+            syncs += 1
+            return $0
+        }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        var model: LibraryModel?
+        var queueDuringRead = false
+        var syncsDuringRead: Int?
+        var user = "_fictional_user_1"
+        dependencies.cloudUserRecordName = {
+            if queueDuringRead, let model {
+                queueDuringRead = false
+                model.queueCloudSync(delay: .zero)
+                await model.waitForCloudSync()
+                syncsDuringRead = syncs
+            }
+            return user
+        }
+        model = LibraryModel(dependencies: dependencies)
+        let library = try XCTUnwrap(model)
+        await library.start()
+        await library.waitForCloudSync()
+        let before = syncs
+
+        queueDuringRead = true
+        await library.cloudAccountChanged()
+        XCTAssertEqual(syncsDuringRead, before)
+        await library.waitForCloudSync()
+        XCTAssertEqual(syncs, before + 1)
+
+        user = "_fictional_user_2"
+        queueDuringRead = true
+        await library.cloudAccountChanged()
+        XCTAssertEqual(syncsDuringRead, before + 1)
+        await library.waitForCloudSync()
+        XCTAssertEqual(syncs, before + 1)
+        XCTAssertFalse(library.iCloudEnabled)
     }
 
     /// A user that changes during a sync isn't recorded, and a storage toggle made while

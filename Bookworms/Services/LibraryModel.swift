@@ -278,6 +278,8 @@ final class LibraryModel {
     @ObservationIgnored private var topShelfRevision = 0
     @ObservationIgnored private var topShelfTask: Task<Void, Never>?
     @ObservationIgnored private var cloudRevision = 0
+    /// The `cloudAccountChanged()` calls still reading the iCloud user; cloud work waits for them.
+    @ObservationIgnored private var cloudUserChecks = 0
     @ObservationIgnored private var activeHardcoverAccountID: String?
     @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
     @ObservationIgnored private var spineDesignTaskIdentity:
@@ -964,7 +966,13 @@ final class LibraryModel {
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
-            message = UserFacingError.hardcoverMessage(error)
+            // This login isn't saved, so no Disconnect button appears; the reader connects again.
+            message =
+                if case HardcoverError.insufficientScope = error {
+                    Self.unsavedScopeMessage
+                } else {
+                    UserFacingError.hardcoverMessage(error)
+                }
             sourceErrors[LibrarySource.hardcover.rawValue] = message
             return false
         }
@@ -1213,6 +1221,8 @@ final class LibraryModel {
     /// The status after a replacement login is verified between daily syncs, shown while the
     /// reconnection's social load runs.
     static let verifiedTokenMessage = "Hardcover token verified. Loading library…"
+    static let unsavedScopeMessage =
+        "Hardcover didn't give Bookworms permission to read your library. Connect again and allow access to your library."
 
     /// Removes `verifiedTokenMessage` once the reconnection's social load ends, keeping any
     /// later message.
@@ -1415,15 +1425,27 @@ final class LibraryModel {
     /// Handles `CKAccountChanged`, which CloudKit also posts when the same account's state
     /// changes. Storage stays on while the signed-in user is the one the last sync used;
     /// otherwise, including when the user can't be read, it turns off.
+    ///
+    /// Cloud syncs and companion-record reads and writes stop while the user is read, so none
+    /// of them exchanges this library with another account's iCloud data. They resume when the
+    /// user is unchanged.
     func cloudAccountChanged() async {
         let enabled = iCloudEnabled
-        if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey),
-            await dependencies.cloudUserRecordName() == previous
-        {
-            return
+        if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
+            cloudUserChecks += 1
+            if hasStarted { invalidateCloudSync() }
+            let sameUser = await dependencies.cloudUserRecordName() == previous
+            cloudUserChecks -= 1
+            if sameUser {
+                resumeCloudWork()
+                return
+            }
         }
         // A storage toggle made while CloudKit answered is the reader's newer choice.
-        guard iCloudEnabled == enabled else { return }
+        guard iCloudEnabled == enabled else {
+            resumeCloudWork()
+            return
+        }
         dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
         cloudBacked = false
         iCloudEnabled = false
@@ -1436,13 +1458,20 @@ final class LibraryModel {
             "Your iCloud account changed. Turn iCloud Storage on to sync this library with the current account."
     }
 
+    /// Restarts the cloud sync and companion-record read that `cloudAccountChanged()` held back.
+    private func resumeCloudWork() {
+        guard hasStarted else { return }
+        queueCloudSync()
+        queueSpineDesignRefresh()
+    }
+
     /// Queues a cloud sync, which uploads local snapshots and merges the archive's newer ones.
     /// `delay` batches the changes that follow one another; a sync already queued keeps its own.
     func queueCloudSync(delay: Duration = .seconds(2)) {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         guard hasStarted, iCloudEnabled, !isSample, !cloudSyncSuppressedForWelcome else { return }
         cloudPending = true
-        guard cloudTask == nil else { return }
+        guard cloudTask == nil, cloudUserChecks == 0 else { return }
         let revision = cloudRevision
         cloudTask = Task { [weak self] in
             guard let self else { return }
@@ -1584,7 +1613,7 @@ final class LibraryModel {
     /// account and sync date; a newer selection cancels an older one, as does `restarting`, which
     /// a saved series pick sets because a running read may have missed its new look group.
     private func queueSpineDesignRefresh(restarting: Bool = false) {
-        guard !PerformanceDiagnostics.isolates("background") else { return }
+        guard !PerformanceDiagnostics.isolates("background"), cloudUserChecks == 0 else { return }
         guard iCloudEnabled, hardcoverEnabled, let accountID = activeHardcoverAccountID,
             let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
         else { return }

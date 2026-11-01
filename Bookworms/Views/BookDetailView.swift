@@ -628,6 +628,9 @@ struct BookReviewsView: View {
                 failure =
                     HardcoverError.invalidToken.localizedDescription
                     + " Reconnect in Settings → Sources."
+            } catch HardcoverError.insufficientScope {
+                failure =
+                    "Hardcover didn't give Bookworms permission to read reviews. Disconnect Hardcover in Settings → Sources, then connect it again to allow it."
             } catch {
                 failure = UserFacingError.hardcoverMessage(error)
             }
