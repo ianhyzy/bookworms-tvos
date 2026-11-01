@@ -2,12 +2,13 @@
 """Exports the owner's recent reading as the app's bundled example profile.
 
 Reads the signed-in Mac app's launch cache (`library-snapshot.json`) and writes the folder that
-`ExampleProfile.load(from:)` reads: `library-v1.json`, `spine-designs-v1.json`, and
-`series-looks-v1.json`, the shapes of the iCloud archive and the companion record caches. The
-iPhone and Mac repository keeps a copy of this script; keep the two the same. It keeps only books on the Read shelf finished on or after `SINCE`, and
-only their finish dates since then, with the series, designs, and looks those books use. Every
-record moves to the account ID `example`, which no Hardcover account matches, with its record
-name and work-item hash recomputed.
+`ExampleProfile.load(from:)` reads, in the shapes of the iCloud archive and the companion record
+caches: `library-v1.json`, `spine-designs-v1.json`, `series-looks-v1.json`,
+`cover-choices-v1.json`, and `series-links-v1.json`. The iPhone and Mac repository keeps a copy of
+this script; keep the two the same. It keeps only books on the Read shelf finished on or after
+`SINCE`, and only their finish dates since then, with the series, designs, looks, chosen covers,
+and series links those books use. Every record moves to the account ID `example`, which no
+Hardcover account matches, with its record name and work-item hash recomputed.
 
 It strips reviews and Hardcover's community ratings, and calls no API: it reads no token, no
 Keychain item, and no file besides the cache. The output is the owner's private reading history.
@@ -29,8 +30,10 @@ SINCE = "2024-01-01"
 READ_STATUS = 3
 # Reviews are the owner's to share, and Hardcover allows its aggregates only when labeled as
 # Hardcover data, which the details card doesn't do.
-STRIPPED = ("review", "communityRating", "ratingsCount", "ratingDistribution",
-            "chosenCoverURL", "seriesLink")
+STRIPPED = ("review", "communityRating", "ratingsCount", "ratingDistribution")
+# The reader's choices, which the archive never carries: they become `CoverChoiceV1` and
+# `SeriesLinkV1` records, as the apps read them.
+CHOICES = ("chosenCoverURL", "seriesLink")
 
 
 def sha(text):
@@ -48,8 +51,13 @@ def fold(text):
     return "".join(c for c in text if c.isalnum() and not unicodedata.combining(c))
 
 
-def style_series(book):
-    # `SeriesDesigns.styleSeries(of:link:)` without a link: the shortest series.
+def style_series(book, link):
+    # `SeriesDesigns.styleSeries(of:link:)`: the linked series, else the shortest series.
+    if link:
+        if link["standsAlone"]:
+            return None
+        if link.get("linkedSeriesID"):
+            return link["linkedSeriesID"]
     memberships = book.get("seriesMemberships")
     if memberships is None:
         return book.get("seriesID")
@@ -70,8 +78,11 @@ def first_author(book):
 
 def export(snapshot, out):
     real_account = snapshot["accountID"]
-    kept = [dict((k, v) for k, v in b.items() if k not in STRIPPED) for b in snapshot["books"]
+    read = [b for b in snapshot["books"]
             if b.get("statusID") == READ_STATUS and (b.get("finished") or "") >= SINCE]
+    covers = {b["id"]: b["chosenCoverURL"] for b in read if b.get("chosenCoverURL")}
+    links = {b["id"]: b["seriesLink"] for b in read if b.get("seriesLink")}
+    kept = [dict((k, v) for k, v in b.items() if k not in STRIPPED + CHOICES) for b in read]
     # A re-read keeps only its finishes since `SINCE`; `finished`, the newest, is one of them.
     trimmed = 0
     for book in kept:
@@ -109,9 +120,12 @@ def export(snapshot, out):
     # table, so it can keep a Discworld look no kept book draws; port the table if that matters.
     # A look whose source book wasn't exported names a kept member instead, since a Hardcover
     # book ID reveals the earlier reading. The app checks only that the ID is positive.
+    # A book whose link keeps its own look draws none.
     members = {}
     for book in sorted(kept, key=lambda b: b["id"]):
-        members.setdefault((style_series(book), first_author(book)), book["id"])
+        link = links.get(book["id"])
+        if not (link and link["ownLook"]):
+            members.setdefault((style_series(book, link), first_author(book)), book["id"])
     raw_looks = snapshot["looks"]
     looks = {}
     for key, look in zip(raw_looks[::2], raw_looks[1::2]):
@@ -124,17 +138,29 @@ def export(snapshot, out):
         look = dict(look, accountID=ACCOUNT, sourceBookID=source)
         looks["series-look-v1-" + sha(f"{ACCOUNT}:{key['seriesID']}:{key['group']}")] = look
 
+    # The launch cache keeps only a chosen cover's URL, so the record dates it to the sync and
+    # names no edition, which only the cover picker reads.
+    cover_choices = {
+        "cover-choice-v1-" + sha(f"{ACCOUNT}:{i}"): {
+            "version": 1, "accountID": ACCOUNT, "bookID": i, "coverURL": url,
+            "chosenAt": snapshot["syncedAt"]}
+        for i, url in covers.items()}
+    series_links = {"series-link-v1-" + sha(f"{ACCOUNT}:{i}"): dict(link, accountID=ACCOUNT)
+                    for i, link in links.items()}
+
     archive = {"version": 1, "sources": [{
         "source": "hardcover", "accountID": ACCOUNT, "books": kept,
         "syncedAt": snapshot["syncedAt"], "series": series}]}
     out.mkdir(parents=True, exist_ok=True)
     for name, value in (("library-v1.json", archive), ("spine-designs-v1.json", designs),
-                        ("series-looks-v1.json", looks)):
+                        ("series-looks-v1.json", looks), ("cover-choices-v1.json", cover_choices),
+                        ("series-links-v1.json", series_links)):
         (out / name).write_text(json.dumps(value, sort_keys=True, separators=(",", ":")))
     # Counts only: the folder holds private reading history.
     print(f"Kept {len(kept)} of {len(snapshot['books'])} books, {len(series)} series, "
           f"{len(designs)} designs ({stale} with an outdated work-item hash), "
-          f"and {len(looks)} looks; dropped {trimmed} earlier finish dates.")
+          f"{len(looks)} looks, {len(cover_choices)} chosen covers, and {len(series_links)} "
+          f"series links; dropped {trimmed} earlier finish dates.")
 
 
 def main():

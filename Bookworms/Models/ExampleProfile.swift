@@ -1,12 +1,13 @@
 import Foundation
 
 /// The owner's recent Hardcover reading, which **View example profile** shows read-only: books,
-/// their series, and the companion designs and series looks they draw, all under the account ID
-/// `example`, which no Hardcover account matches.
+/// their series, and the companion designs, series looks, chosen covers, and series links they
+/// draw, all under the account ID `example`, which no Hardcover account matches.
 ///
 /// `scripts/export-example-profile.py` writes it into the Git-ignored `ExampleProfile/` folder,
 /// in the shapes of the iCloud archive (`library-v1.json`) and the companion record caches
-/// (`spine-designs-v1.json`, `series-looks-v1.json`). It is real reading history shipped with the
+/// (`spine-designs-v1.json`, `series-looks-v1.json`, `cover-choices-v1.json`, and
+/// `series-links-v1.json`). It is real reading history shipped with the
 /// owner's consent, unlike the fictional `SampleLibrary`; tests load fictional folders only.
 struct ExampleProfile: Sendable {
     static let accountID = "example"
@@ -15,6 +16,7 @@ struct ExampleProfile: Sendable {
     var series: [SeriesInfo]
     var designs: [Int: SpineDesignV1]
     var looks: [SeriesLookKey: SeriesLookV1]
+    var links: [Int: SeriesLinkV1] = [:]
     var syncedAt: Date
 
     /// The bundled profile's folder, or `nil` in builds without its data.
@@ -31,9 +33,9 @@ struct ExampleProfile: Sendable {
         return { await load(from: folder) }
     }
 
-    /// Reads the profile in `folder` off the main actor. Returns `nil` when its library is
-    /// missing or can't be decoded. Designs and looks that fail validation are left out, and a
-    /// missing record file reads as none.
+    /// Reads the profile in `folder` off the main actor, with each chosen cover set on its book.
+    /// Returns `nil` when its library is missing or can't be decoded. Records that fail
+    /// validation are left out, and a missing record file reads as none.
     @concurrent nonisolated static func load(from folder: URL) async -> ExampleProfile? {
         // The archive's own shape, without the Apple TV's `designs`, which the export leaves out.
         struct Archive: Decodable {
@@ -66,8 +68,26 @@ struct ExampleProfile: Sendable {
         where look.isValid(accountID: accountID, key: look.key) {
             looks[look.key] = look
         }
+        var covers: [Int: URL] = [:]
+        for choice: CoverChoiceV1 in records("cover-choices-v1.json") {
+            if let book = books[choice.bookID], BookPresentation.showsCompanionCovers,
+                choice.isValid(accountID: accountID, book: book)
+            {
+                covers[book.id] = choice.coverURL
+            }
+        }
+        var links: [Int: SeriesLinkV1] = [:]
+        for link: SeriesLinkV1 in records("series-links-v1.json")
+        where books[link.bookID] != nil && link.isValid(accountID: accountID, bookID: link.bookID) {
+            links[link.bookID] = link
+        }
+        let shown = source.books.map { book in
+            var book = book
+            book.chosenCoverURL = covers[book.id]
+            return book
+        }
         return ExampleProfile(
-            books: source.books, series: source.series ?? [], designs: designs, looks: looks,
-            syncedAt: source.syncedAt)
+            books: shown, series: source.series ?? [], designs: designs, looks: looks,
+            links: links, syncedAt: source.syncedAt)
     }
 }
