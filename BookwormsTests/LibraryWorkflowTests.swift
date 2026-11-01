@@ -2663,6 +2663,8 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         await model.refresh(manual: true)
         model.queueCloudSync()
         XCTAssertTrue(dependencies.sourceStore.load().isEmpty, "Nothing saves the example")
+        model.hardcoverEnabled = false
+        XCTAssertEqual(model.spineDesigns, profile.designs, "The cache prune keeps the example")
 
         dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
         dependencies.fetchHardcover = { _, _ in
@@ -2757,7 +2759,23 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         XCTAssertFalse(model.isExample)
         XCTAssertFalse(model.isSample)
         XCTAssertFalse(model.isLoading)
-        XCTAssertNotNil(model.message)
+        XCTAssertNil(model.message, "The welcome or empty shelf reports the failure")
         XCTAssertTrue(model.shouldOfferWelcome, "A failed read leaves the welcome available")
+    }
+
+    func testASavedLoginWithHardcoverOffDoesNotOfferTheExample() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(false, forKey: "hardcoverEnabled")
+        var dependencies = fixture.dependencies()
+        let profile = exampleProfile(fixture)
+        dependencies.exampleProfile = { profile }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.hardcoverConnected)
+        XCTAssertFalse(model.isConnected)
+        XCTAssertFalse(model.offersExample, "Turning the source back on must show its library")
+        let shown = await model.showExample()
+        XCTAssertFalse(shown)
     }
 }

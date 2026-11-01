@@ -597,8 +597,11 @@ final class LibraryModel {
     /// iCloud storage, ends it.
     private(set) var isExample = false
     /// Whether the welcome and the empty shelf offer **View example profile**: the build bundles
-    /// it and no source is connected.
-    var offersExample: Bool { dependencies.exampleProfile != nil && !isConnected && !isExample }
+    /// it and no source has a saved login, even a turned-off one, since the example never syncs.
+    var offersExample: Bool {
+        dependencies.exampleProfile != nil && !hasSavedLogin && !isExample
+    }
+    private var hasSavedLogin: Bool { hardcoverConnected || hasCWAPassword }
     /// The date the year views treat as today: the example profile's sync date, so its Book Wall
     /// doesn't empty as the bundled snapshot ages.
     var now: Date { isExample ? syncedAt ?? .now : .now }
@@ -1222,7 +1225,7 @@ final class LibraryModel {
     ///
     /// `isExample` and `isLoading` are set before the read, so a refresh that starts meanwhile
     /// returns at once. A connection, or a library that iCloud brings, during the read wins: the
-    /// example then doesn't show. A profile that can't be read sets `message`.
+    /// example then doesn't show. Callers report a profile that can't be read.
     @discardableResult
     func showExample() async -> Bool {
         guard offersExample, let load = dependencies.exampleProfile, !isLoading, !isSample,
@@ -1232,8 +1235,7 @@ final class LibraryModel {
         isLoading = true
         let profile = await load()
         isLoading = false
-        guard isExample, !isConnected, allBooks.isEmpty, let profile else {
-            if isExample, profile == nil { message = "The example profile couldn't be opened." }
+        guard isExample, !hasSavedLogin, allBooks.isEmpty, let profile else {
             isExample = false
             return false
         }
@@ -1369,13 +1371,8 @@ final class LibraryModel {
         let measurement = PerformanceDiagnostics.begin("RebuildLibrary")
         defer { measurement.end() }
         guard !isSample else { return }
-        let hardcover = hardcoverEnabled ? activeHardcoverSnapshot() : nil
-        // Merge one active Hardcover snapshot so an older copy cannot supply stale covers.
-        let enabled =
-            [hardcover].compactMap(\.self)
-            + sourceSnapshots.filter {
-                $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
-            }
+        let enabled = enabledSnapshots()
+        let hardcover = enabled.first { $0.source == .hardcover }
         // Assigned once: each assignment prepares series designs again, with `seriesLinks`.
         var merged = LibraryMerge.books(from: enabled)
         if BookPresentation.showsCompanionCovers, let accountID = hardcover?.accountID,
@@ -1394,6 +1391,15 @@ final class LibraryModel {
         syncedAt = enabled.map(\.syncedAt).max()
         styles = aiRecords.mapValues(\.style)
         updateShelf()
+    }
+
+    /// The snapshots the shelf merges: one active Hardcover snapshot, so an older copy cannot
+    /// supply stale covers, and the configured CWA library, each while its source is on.
+    private func enabledSnapshots() -> [SourceSnapshot] {
+        [hardcoverEnabled ? activeHardcoverSnapshot() : nil].compactMap(\.self)
+            + sourceSnapshots.filter {
+                $0.source == .cwa && cwaEnabled && $0.accountID == cwaConfiguration.identity
+            }
     }
 
     private func updateShelf() {
@@ -1545,7 +1551,9 @@ final class LibraryModel {
                     seedSchedule()
                     // A library from iCloud, from a sync that started before the example
                     // profile, replaces the example.
-                    if isExample, !sourceSnapshots.isEmpty { isSample = false }
+                    if isExample, enabledSnapshots().contains(where: { !$0.books.isEmpty }) {
+                        isSample = false
+                    }
                     rebuildLibrary()
                     // Publish from the archive this sync uploaded, because the iPhone and Mac
                     // companion requires the worklist's sync date to match that archive's
@@ -1729,16 +1737,19 @@ final class LibraryModel {
     }
 
     /// Clears the companion design, cover-choice, series-link, and series-look caches once
-    /// Hardcover is disabled or disconnected.
+    /// Hardcover is disabled or disconnected. The example profile keeps its in-memory records,
+    /// which leaving it clears.
     private func queueSpineCachePrune() {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         spineDesignTask?.cancel()
-        spineDesigns = [:]
-        coverChoices = [:]
-        seriesLinks = [:]
-        pickedLinks = [:]
-        seriesLooks = [:]
-        refreshSeriesSources()
+        if !isExample {
+            spineDesigns = [:]
+            coverChoices = [:]
+            seriesLinks = [:]
+            pickedLinks = [:]
+            seriesLooks = [:]
+            refreshSeriesSources()
+        }
         let requestID = UUID()
         spineDesignTaskIdentity = ("", .distantPast, requestID)
         spineDesignTask = Task { [weak self] in
