@@ -45,7 +45,18 @@ struct BookWallView: View {
         @State private var completedFalls = 0
     #endif
 
-    private var books: [Book] { prepared.books }
+    /// The wall the scene last showed, which `wall` keeps while a book is out of it.
+    @State private var shownWall: BookWallPreparedWall?
+
+    /// The wall to show: `prepared`, except that a newer wall waits while a book is out of the
+    /// wall, so its arrival never closes details.
+    private var wall: BookWallPreparedWall {
+        if let shownWall, detailBook != nil || openingBookID != nil || isReturning {
+            return shownWall
+        }
+        return prepared
+    }
+    private var books: [Book] { wall.books }
     private var entryID: Int? {
         #if DEBUG && targetEnvironment(simulator)
             // Scenario hook: chooses the entry book for Simulator captures.
@@ -90,7 +101,7 @@ struct BookWallView: View {
             let spineFrames =
                 frames.isEmpty
                 ? BookWallScene.plannedFocusFrames(
-                    for: prepared.layout, viewport: viewportFrame.size)
+                    for: wall.layout, viewport: viewportFrame.size)
                 : frames
             ZStack(alignment: .topLeading) {
                 if let detailBook, !PerformanceDiagnostics.isolates("wall-no-detail-panel") {
@@ -254,7 +265,7 @@ struct BookWallView: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("book-wall-fall-probe")
-                    Text(String(prepared.drawn.count))
+                    Text(String(wall.drawn.count))
                         .font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
@@ -267,7 +278,7 @@ struct BookWallView: View {
                 #endif
             }
         }
-        .task(id: ConfigurationKey(books: books, isActive: isActive)) {
+        .task(id: ConfigurationKey(wallID: wall.id, isActive: isActive)) {
             cancelTransition()
             configurationRevision &+= 1
             guard isActive else {
@@ -275,11 +286,17 @@ struct BookWallView: View {
                 return
             }
             let revision = configurationRevision
+            let wall = wall
+            // A wall that replaces one of the same books, such as after a design arrives,
+            // appears in place instead of falling again, and Drop again stays.
+            let inPlace = shownWall?.books == wall.books
+            shownWall = wall
             isSettled = false
-            hasSettledOnce = false
+            if !inPlace { hasSettledOnce = false }
             // Empty frames fall back to the planned layout, so the spines stay mounted.
             frames = [:]
-            scene.configure(prepared: prepared, reduceMotion: reduceMotion) { newFrames, settled in
+            scene.configure(prepared: wall, reduceMotion: reduceMotion || inPlace) {
+                newFrames, settled in
                 guard revision == configurationRevision else { return }
                 frames = newFrames
                 guard settled, !isSettled else { return }
@@ -331,7 +348,7 @@ struct BookWallView: View {
     private var detailFade: Animation? { reduceMotion ? nil : .easeInOut(duration: 0.35) }
 
     private struct ConfigurationKey: Equatable {
-        let books: [Book]
+        let wallID: UUID
         let isActive: Bool
     }
 

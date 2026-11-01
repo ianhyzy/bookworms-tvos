@@ -54,19 +54,14 @@ final class BookWallPreparation {
         self.downloadFont = downloadFont
     }
 
-    func isReady(
-        for books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
-        looks: [Int: SpineDesignV1]
-    ) -> Bool {
-        prepared?.books == books && prepared?.sources == sources && prepared?.designs == designs
-            && prepared?.looks == looks
-    }
-
     /// Prepares `books`, each drawn in its series look from `looks`, else its companion design
     /// from `designs`, else from its cover. A look draws on a book unless the look's face can't
     /// letter it (`canLetter(_:in:)`); that book keeps its companion design, as on the iPhone. A
     /// book with a series source in `sources` (`LibraryModel.seriesSources`) draws in the
     /// source's design unless the source's face can't letter it. Both checks run here, once.
+    ///
+    /// A wall prepared earlier stays in `prepared` until the new one is ready, so a design, link,
+    /// or look that arrives while the wall is on screen replaces it in place.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
         looks: [Int: SpineDesignV1] = [:]
@@ -81,8 +76,6 @@ final class BookWallPreparation {
             await retryMissingCovers(in: prepared, fontStyle: fontStyle)
             return
         }
-        prepared = nil
-        missingCovers = []
         failure = nil
         completedCount = 0
         totalCount = books.count

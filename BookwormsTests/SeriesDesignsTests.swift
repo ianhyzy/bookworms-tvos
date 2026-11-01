@@ -574,6 +574,26 @@ final class SeriesDesignsTests: XCTestCase {
     }
 
     @MainActor
+    func testPreparationKeepsTheShownWallUntilItsReplacementIsReady() async throws {
+        var firstID: UUID?
+        var checks = 0
+        let (preparation, _) = await prepareWall { _, preparation in
+            // Requests after the first wall is ready come from its replacement's preparation.
+            guard let firstID else { return }
+            XCTAssertEqual(preparation.prepared?.id, firstID, "The shown wall stays")
+            checks += 1
+        }
+        firstID = try XCTUnwrap(preparation.prepared).id
+        await preparation.prepare(
+            [book(1, series: nil)], sources: [:],
+            designs: [
+                1: companionDesign(1, family: "Other Serif", postScriptName: "OtherSerif-Bold")
+            ])
+        XCTAssertGreaterThan(checks, 0)
+        XCTAssertNotEqual(preparation.prepared?.id, firstID, "The new wall replaces it")
+    }
+
+    @MainActor
     func testPreparationSkipsTheFontRetryAfterATimeout() async {
         let (preparation, calls) = await prepareWall { _, _ in throw URLError(.timedOut) }
         XCTAssertEqual(calls, 1)

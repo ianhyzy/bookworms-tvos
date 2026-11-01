@@ -66,11 +66,6 @@ struct ShelfView: View {
         for book in wallBooks { sources[book.id] = library.seriesSources[book.id] }
         return sources
     }
-    private var isWallReady: Bool {
-        let key = wallPreparationKey
-        return bookWallPreparation.isReady(
-            for: key.books, sources: key.sources, designs: key.designs, looks: key.looks)
-    }
     private var wallPreparationKey: BookWallPreparationKey {
         let books = wallBooks
         let sources = wallSources
@@ -93,11 +88,11 @@ struct ShelfView: View {
     private var waitsForBookWall: Binding<Bool> {
         Binding(
             get: {
-                coordinator.current == .bookWall
-                    && !isWallReady
+                // An earlier wall stays on screen while a newer one prepares.
+                coordinator.current == .bookWall && bookWallPreparation.prepared == nil
             },
             set: { presented in
-                if !presented && !isWallReady {
+                if !presented && bookWallPreparation.prepared == nil {
                     showView(.shelf)
                 }
             })
@@ -812,9 +807,7 @@ struct ShelfView: View {
                         ProgressView("Loading view…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if view == .bookWall {
-                        if let prepared = bookWallPreparation.prepared,
-                            isWallReady
-                        {
+                        if let prepared = bookWallPreparation.prepared {
                             BookWallView(
                                 library: library, coordinator: coordinator, scene: bookWallScene,
                                 rendererStatus: wallRenderer, prepared: prepared,
