@@ -35,7 +35,7 @@ Authentication tests cover device authorization initiation, device token polling
 
 ## Sign in on Apple TV
 
-On a fresh launch without a saved account or library snapshot, a welcome popup offers **Connect Hardcover** and **Explore sample library**. **Connect Hardcover** receives focus by default. Down moves to the sample choice; Up returns to Hardcover. The popup appears after startup checks saved state. Choosing the sample library completes the welcome flow without contacting Hardcover.
+On a fresh launch without a saved account or library snapshot, a welcome popup offers **Connect Hardcover** and, in builds that bundle it, **View example profile** (see [the example profile](../VIEWS.md#example-profile)). **Connect Hardcover** receives focus by default. Down moves to the example choice; Up returns to Hardcover. The popup appears after startup checks saved state. Choosing the example profile completes the welcome flow without contacting Hardcover; a profile that can't be read returns to the choices with an error.
 
 Select **Connect Hardcover** in the popup, or open **Settings → Sources → Connect Hardcover**, to use the same sign-in card.
 
@@ -47,9 +47,9 @@ The card requests a code as soon as it opens and requests another when that code
 
 If authorization completes while another library operation is running, the app clears the consumed code and asks you to try again after that operation finishes. Select **Get link code** to request a fresh code. The app keeps the existing account and shelf until a new connection succeeds.
 
-The welcome popup then shows **Preparing your library** while the app loads covers and arranges the shelf. It closes when that preparation finishes. Transitions fade between stages and respect Reduce Motion. Back from sign-in returns to the two welcome choices. Back from the initial choices closes the popup without completing setup, so it appears again on the next launch. Back during preparation completes setup and closes the popup. Choosing a sample library or completing setup persists the welcome completion flag. Saved accounts and snapshots also prevent the popup from appearing, including accounts whose source is disabled.
+The welcome popup then shows **Preparing the shelf** while the app loads covers and arranges the shelf. It closes when that preparation finishes. Transitions fade between stages and respect Reduce Motion. Back from sign-in returns to the two welcome choices. Back from the initial choices closes the popup without completing setup, so it appears again on the next launch. Back during preparation completes setup and closes the popup. Choosing the example profile or completing setup persists the welcome completion flag. Saved accounts and snapshots also prevent the popup from appearing, including accounts whose source is disabled.
 
-In Settings, Back closes the sign-in card. The empty shelf still offers **Choose sources**, which opens **Settings → Sources**, and **Explore a sample shelf**.
+In Settings, Back closes the sign-in card. The empty shelf still offers **Choose sources**, which opens **Settings → Sources**, and **View example profile** while no source has a saved login. In the example profile, My Shelf's **Connect Hardcover** opens the same sign-in card in a popup; connecting ends the example.
 
 While a login works, **Settings → Sources** shows **Disconnect Hardcover** instead of opening the card. When a sync reports the saved login as invalid or expired, the button becomes **Reconnect Hardcover** and **Sync now** is unavailable until you sign in again, unless another source can sync. The saved login stays in Keychain until a new link replaces it or you disconnect.
 

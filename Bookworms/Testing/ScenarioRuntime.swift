@@ -212,6 +212,15 @@
             dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }
             dependencies.saveSeriesLink = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
+            // A fictional stand-in, so UI tests never load the owner's bundled profile. It
+            // suspends like the bundled read, long enough for UI tests to see the welcome's
+            // preparation card through the load.
+            dependencies.exampleProfile = { [self] in
+                try? await Task.sleep(for: .seconds(3))
+                return ExampleProfile(
+                    books: SampleLibrary.books, series: SampleLibrary.allSeries, designs: [:],
+                    looks: [:], syncedAt: date)
+            }
             dependencies.readTopShelf = { [] }
             dependencies.writeTopShelf = { _ in }
             return dependencies
@@ -258,7 +267,8 @@
             let evidence: [String: Any] = [
                 "revision": probeRevision, "scenario": name, "sourceCalls": sourceCalls,
                 "cloudCalls": cloudCalls, "network": ScenarioNetwork.state.evidence(),
-                "sample": library.isSample, "generating": library.isGenerating,
+                "sample": library.isSample, "example": library.isExample,
+                "generating": library.isGenerating,
                 "bookIDs": library.books.map(\.id), "loading": library.isLoading,
                 "welcomeCompleted": library.hasCompletedWelcome,
                 "welcomeOffered": library.shouldOfferWelcome,
@@ -625,7 +635,8 @@
     /// A remote press that moves focus once produces one update. A bounce, where the focus engine
     /// moves focus and app code then moves it again, produces two. The count is stored in the
     /// view's accessibility value rather than SwiftUI state, so observing focus never invalidates
-    /// views or changes focus timing.
+    /// views or changes focus timing. Every probe reports one app-wide count, so a test can count
+    /// across a sheet, which shows its own probe while it hides the presenting view's.
     struct FocusTransitionProbe: UIViewRepresentable {
         static let isEnabled = ProcessInfo.processInfo.arguments.contains("--focus-probe")
 
@@ -633,25 +644,28 @@
         func updateUIView(_ uiView: ProbeView, context: Context) {}
 
         final class ProbeView: UIView {
-            private var transitions = 0
+            private static var transitions = 0
+            /// Observes from the first probe's creation, at launch, for the app's lifetime.
+            private static let observer = NotificationCenter.default.addObserver(
+                forName: UIFocusSystem.didUpdateNotification, object: nil, queue: .main
+            ) { _ in
+                MainActor.assumeIsolated { transitions += 1 }
+            }
 
             override init(frame: CGRect) {
                 super.init(frame: frame)
+                _ = Self.observer
                 isUserInteractionEnabled = false
                 isAccessibilityElement = true
                 accessibilityIdentifier = "focus-transition-probe"
                 accessibilityLabel = "Focus transitions"
-                accessibilityValue = "0"
-                NotificationCenter.default.addObserver(
-                    self, selector: #selector(focusUpdated(_:)),
-                    name: UIFocusSystem.didUpdateNotification, object: nil)
             }
 
             required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-            @objc private func focusUpdated(_ notification: Notification) {
-                transitions += 1
-                accessibilityValue = String(transitions)
+            override var accessibilityValue: String? {
+                get { String(Self.transitions) }
+                set {}
             }
         }
     }

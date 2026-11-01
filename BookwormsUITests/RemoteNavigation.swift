@@ -35,9 +35,10 @@ enum RemoteNavigation {
         return app
     }
 
-    /// The number of native focus updates since launch, or `nil` without `--focus-probe`.
+    /// The number of native focus updates since launch, or `nil` without `--focus-probe`. Every
+    /// probe, including a sheet's, reports the same app-wide count.
     static func transitions(_ app: XCUIApplication) -> Int? {
-        let probe = app.descendants(matching: .any)["focus-transition-probe"]
+        let probe = app.descendants(matching: .any)["focus-transition-probe"].firstMatch
         guard probe.exists else { return nil }
         return (probe.value as? String).flatMap(Int.init)
     }
@@ -61,15 +62,17 @@ enum RemoteNavigation {
             "Expected focus on \(element.identifier)", file: file, line: line)
     }
 
-    /// Presses `direction` and requires one focus update that lands on `expected` and stays there.
+    /// Presses `direction` and requires `updates` focus updates, one by default, that land on
+    /// `expected` within `timeout` and stay there.
     static func press(
         _ direction: XCUIRemote.Button, in app: XCUIApplication, expecting expected: XCUIElement,
+        updates: Int = 1, timeout: TimeInterval = 5,
         file: StaticString = #filePath, line: UInt = #line
     ) {
         let before = transitions(app)
         XCUIRemote.shared.press(direction)
-        waitForFocus(expected, file: file, line: line)
-        assertSettled(app, after: before, expectedUpdates: 1, file: file, line: line)
+        waitForFocus(expected, timeout: timeout, file: file, line: line)
+        assertSettled(app, after: before, expectedUpdates: updates, file: file, line: line)
         XCTAssertTrue(
             isFocused(expected), "Focus left \(expected.identifier) without input",
             file: file, line: line)
