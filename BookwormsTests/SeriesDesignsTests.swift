@@ -15,6 +15,20 @@ final class SeriesDesignsTests: XCTestCase {
         return book
     }
 
+    /// A companion design made for `book` as it is now, so it can lend (`SeriesDesigns.isCurrent`).
+    private func design(
+        for book: Book, family: String? = "EB Garamond",
+        postScriptName: String? = "EBGaramond-Bold"
+    ) -> SpineDesignV1 {
+        companionDesign(
+            book.id, family: family, postScriptName: postScriptName,
+            workItemHash: SpineCloudIdentity.workItemHash(accountID: "account", book: book))
+    }
+
+    private func designs(for books: [Book]) -> [Int: SpineDesignV1] {
+        Dictionary(uniqueKeysWithValues: books.map { ($0.id, design(for: $0)) })
+    }
+
     private func sameLook(_ book: Book, _ other: Book) -> Bool {
         guard let key = SeriesDesigns.lookKey(of: book, link: nil) else { return false }
         return key == SeriesDesigns.lookKey(of: other, link: nil)
@@ -202,13 +216,13 @@ final class SeriesDesignsTests: XCTestCase {
             cityWatch(2, featuredPosition: 9, position: 1),
             cityWatch(3, featuredPosition: 5, position: 3),
         ]
-        let fonts = Dictionary(uniqueKeysWithValues: books.map { ($0.id, "Georgia-Bold") })
         XCTAssertEqual(
-            SeriesDesigns.sources(books: books, fonts: fonts), [1: 2, 2: 2, 3: 2],
+            SeriesDesigns.sources(books: books, designs: designs(for: books)), [1: 2, 2: 2, 3: 2],
             "Book 2 is first in City Watch")
         XCTAssertEqual(
             SeriesDesigns.sources(
-                books: books, fonts: fonts, links: [2: link(2, standsAlone: true)]),
+                books: books, designs: designs(for: books),
+                links: [2: link(2, standsAlone: true)]),
             [1: 1, 3: 1])
     }
 
@@ -330,8 +344,13 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(drawing.looks[2]?.backgroundHex, "#102030")
         XCTAssertNil(drawing.looks[3], "A book that keeps its own look draws its design")
 
-        let without = LibraryModel.seriesDrawing(of: books, designs: [3: own])
+        XCTAssertEqual(drawing.mates[1]?.map(\.id), [1, 2], "The look's books share its face")
+        XCTAssertNil(drawing.mates[3])
+
+        let without = LibraryModel.seriesDrawing(
+            of: books, designs: [1: design(for: books[0]), 3: own])
         XCTAssertEqual(without.sources[2]?.id, 1, "Without a look, the best-ranked book lends")
+        XCTAssertEqual(without.mates[2]?.map(\.id), [1, 2, 3])
     }
 
     /// The Apple TV names a design's model as the iPhone and Mac do, from the design alone.
@@ -455,11 +474,11 @@ final class SeriesDesignsTests: XCTestCase {
     }
 
     private func companionDesign(
-        _ bookID: Int, family: String?, postScriptName: String?, weight: Int = 700
+        _ bookID: Int, family: String?, postScriptName: String?, weight: Int = 700,
+        workItemHash: String = String(repeating: "a", count: 64)
     ) -> SpineDesignV1 {
         SpineDesignV1(
-            version: 1, accountID: "account", bookID: bookID,
-            workItemHash: String(repeating: "a", count: 64),
+            version: 1, accountID: "account", bookID: bookID, workItemHash: workItemHash,
             coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
             generatedAt: Date(timeIntervalSince1970: 1_000_000), backgroundHex: "#1F3A5A",
             foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: weight,
@@ -580,6 +599,22 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertNotNil(preparation.prepared)
     }
 
+    /// A font style change in Settings prepares the wall again, so its shelf labels, hint, and
+    /// format icons follow the style.
+    @MainActor
+    func testTheWallIsReadyOnlyForTheFontStyleItWasPreparedIn() async {
+        let (preparation, _) = await prepareWall { _, _ in throw URLError(.timedOut) }
+        let wall = [book(1, series: nil)]
+        let design = companionDesign(
+            1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold")
+        XCTAssertTrue(
+            preparation.isReady(
+                for: wall, sources: [:], designs: [1: design], looks: [:], fontStyle: .serif))
+        XCTAssertFalse(
+            preparation.isReady(
+                for: wall, sources: [:], designs: [1: design], looks: [:], fontStyle: .sansSerif))
+    }
+
     @MainActor
     func testPreparationCancelledDuringTheFontRetryPublishesNothing() async {
         let task = Task { @MainActor in
@@ -600,7 +635,7 @@ final class SeriesDesignsTests: XCTestCase {
         let allowed =
             LibraryModel.seriesDrawing(
                 of: books,
-                designs: [1: companionDesign(1, family: "Oswald", postScriptName: "Oswald-Bold")]
+                designs: [1: design(for: books[0], family: "Oswald", postScriptName: "Oswald-Bold")]
             )
             .sources
         XCTAssertEqual(allowed[2]?.id, 1)
@@ -612,7 +647,7 @@ final class SeriesDesignsTests: XCTestCase {
             let remapped =
                 LibraryModel.seriesDrawing(
                     of: books,
-                    designs: [1: companionDesign(1, family: family, postScriptName: name)]
+                    designs: [1: design(for: books[0], family: family, postScriptName: name)]
                 )
                 .sources
             XCTAssertEqual(remapped[2]?.id, 1, name)
@@ -640,32 +675,28 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertTrue(SeriesDesigns.ranksBefore(book(1, position: 2), book(9, position: 2)))
     }
 
-    func testEachSeriesDrawsWithItsBestRankedUsableBook() {
+    func testEachSeriesDrawsWithItsBestRankedBookWithACurrentDesign() {
         let books = [
             book(1, position: 1), book(2, position: 2), book(3, position: 3),
             book(4, position: 4, author: "Someone Else"), book(5, series: nil),
             book(6, series: 9, position: 1), book(7, series: 9, position: 2),
+            book(8, series: 9, position: 3),
         ]
-        var fonts = Dictionary(uniqueKeysWithValues: books.map { ($0.id, "Georgia-Bold") })
-        fonts[1] = "Impact"
-        fonts[6] = "Georgia-BoldItalic"
-        let sources = SeriesDesigns.sources(books: books, fonts: fonts)
-        XCTAssertNil(
-            sources[1], "An Impact book ranks first, so it lends to no one and draws its own")
+        var designs = designs(for: books)
+        designs[1] = nil
+        designs[6] = companionDesign(6, family: nil, postScriptName: nil)
+        let sources = SeriesDesigns.sources(books: books, designs: designs)
+        XCTAssertNil(sources[1], "A book without a design lends to no one and draws its own")
         XCTAssertEqual(sources[2], 2, "A source maps to itself")
         XCTAssertEqual(sources[3], 2)
         XCTAssertNil(sources[4], "A book by another author keeps its own design")
         XCTAssertNil(sources[5])
-        XCTAssertNil(sources[6], "An italic book ranks first and draws its own, remapped upright")
-        XCTAssertNil(sources[7], "Only an earlier book lends its design")
-        XCTAssertEqual(
-            SeriesDesigns.sources(books: books, fonts: fonts) { book, _ in book.id != 3 }[3], nil,
-            "A book the source's font can't letter keeps its own design")
+        XCTAssertNil(sources[6], "A stale design draws its own book but lends to no one")
+        XCTAssertEqual(sources[7], 7)
+        XCTAssertEqual(sources[8], 7)
 
         let library = LibraryModel.seriesDrawing(of: books).sources
-        XCTAssertEqual(library[3]?.id, 1, "Book Wall fonts are never blocked")
-        XCTAssertEqual(library[1]?.id, 1)
-        XCTAssertNil(library[4])
+        XCTAssertTrue(library.isEmpty, "Local spines lend to no one, as on the iPhone")
     }
 
     func testSourcesLendOnlyOwnDesignsInAnyBookOrder() {
@@ -676,10 +707,9 @@ final class SeriesDesignsTests: XCTestCase {
             book(2, position: 2, author: "Ann Author, Co Writer"),
             book(3, position: 3, author: "Co Writer"),
         ]
-        let fonts = Dictionary(uniqueKeysWithValues: books.map { ($0.id, "Georgia-Bold") })
         for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
             XCTAssertEqual(
-                SeriesDesigns.sources(books: order.map { books[$0] }, fonts: fonts),
+                SeriesDesigns.sources(books: order.map { books[$0] }, designs: designs(for: books)),
                 [1: 1, 2: 1], "\(order)")
         }
     }
@@ -707,20 +737,39 @@ final class SeriesDesignsTests: XCTestCase {
         XCTAssertEqual(SeriesDesigns.lettering(of: book(5, title: "Mort")), "Mort Matt Dinniman")
     }
 
+    /// A series keeps one font: when the shared face lacks a glyph for any book that draws it,
+    /// every one of them letters the shared design in its system typeface.
     @MainActor
-    func testTheWallDrawsALookOnlyOnBooksItsFaceCanLetter() {
+    func testASeriesLettersInTheSystemTypefaceWhenItsFaceLacksAGlyph() {
         let latin = book(1, title: "Carl's Doomsday")
         let japanese = book(2, title: "ダンジョン")
-        let uninstalled = book(3, title: "ダンジョン")
-        let own = companionDesign(2, family: "Oswald", postScriptName: "Oswald-Bold")
+        let alsoLatin = book(3, title: "The Butcher's Masquerade")
         let look = companionDesign(1, family: nil, postScriptName: "Georgia-Bold")
-        let missing = companionDesign(3, family: nil, postScriptName: "NoSuchFont-Bold")
-        let drawn = BookWallPreparation.drawnDesigns(
-            of: [latin, japanese, uninstalled], designs: [2: own],
-            looks: [1: look, 2: look, 3: missing])
-        XCTAssertEqual(drawn[1], look, "Georgia letters the Latin title")
-        XCTAssertEqual(drawn[2], own, "The Japanese title keeps its companion design")
-        XCTAssertEqual(drawn[3], missing, "A face that isn't installed letters in the system face")
+        let looks = [1: look, 2: look, 3: look]
+        let mixed = BookWallPreparation.drawnDesigns(
+            of: [latin, alsoLatin], designs: [:], looks: looks,
+            mates: [1: [latin, japanese], 2: [latin, japanese], 3: [alsoLatin]])
+        XCTAssertEqual(
+            mixed[1], look.inSystemTypeface,
+            "A mate off the wall that Georgia can't letter moves the whole look to the system face")
+        XCTAssertNil(mixed[1]?.fontPostScriptName)
+        XCTAssertEqual(mixed[1]?.backgroundHex, look.backgroundHex, "The colors stay")
+        XCTAssertEqual(mixed[3], look, "Georgia letters a look whose books are all Latin")
+
+        let missing = companionDesign(1, family: nil, postScriptName: "NoSuchFont-Bold")
+        XCTAssertEqual(
+            BookWallPreparation.drawnDesigns(
+                of: [japanese], designs: [:], looks: [2: missing], mates: [2: [latin, japanese]]
+            )[2], missing, "A face that isn't installed letters in the system face anyway")
+
+        let source = companionDesign(1, family: nil, postScriptName: "Georgia-Bold")
+        let ranked = BookWallPreparation.drawnDesigns(
+            of: [japanese], designs: [1: source], looks: [:], sources: [2: latin],
+            mates: [2: [latin, japanese]])
+        XCTAssertEqual(
+            ranked[1], source.inSystemTypeface,
+            "A source whose face can't letter a book that draws it letters in the system face")
+        XCTAssertNil(ranked[2], "The book draws its source's entry")
     }
 
     /// A book drawing with its source's design takes the source's cloth and font, and keeps its

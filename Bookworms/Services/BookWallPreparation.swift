@@ -19,11 +19,15 @@ struct BookWallPreparedWall {
     let designs: [Int: SpineDesignV1]
     /// The series looks the wall was prepared for (`LibraryModel.lookDesigns`), keyed by book ID.
     let looks: [Int: SpineDesignV1]
-    /// The design each spine was drawn from, by book ID: its series look when the look's face
-    /// can letter the book, else its companion design.
+    /// The books sharing each wall book's design (`LibraryModel.seriesMates`), keyed by book ID.
+    let mates: [Int: [Book]]
+    /// The app font style the shelf labels, the hint, and the spines' format icons use.
+    let fontStyle: AppFontStyle
+    /// The design each spine was drawn from, by book ID, for wall books and their series
+    /// sources: its series look, else its companion design, in its system typeface when the
+    /// face it shares lacks a glyph (`BookWallPreparation.drawnDesigns`).
     let drawn: [Int: SpineDesignV1]
-    /// The source each book's spine draws with: its series source, when that source's face can
-    /// letter the book. Other books draw their own.
+    /// The series source each book's spine draws with. Other books draw their own.
     let drawsWith: [Int: Book]
     let layout: BookWallLayout
     let bodies: [Int: ModelEntity]
@@ -56,26 +60,28 @@ final class BookWallPreparation {
 
     func isReady(
         for books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
-        looks: [Int: SpineDesignV1]
+        looks: [Int: SpineDesignV1], mates: [Int: [Book]] = [:], fontStyle: AppFontStyle = .serif
     ) -> Bool {
-        prepared?.books == books && prepared?.sources == sources && prepared?.designs == designs
-            && prepared?.looks == looks
+        guard let prepared else { return false }
+        return prepared.books == books && prepared.sources == sources
+            && prepared.designs == designs && prepared.looks == looks && prepared.mates == mates
+            && prepared.fontStyle == fontStyle
     }
 
-    /// Prepares `books`, each drawn in its series look from `looks`, else its companion design
-    /// from `designs`, else from its cover. A look draws on a book unless the look's face can't
-    /// letter it (`canLetter(_:in:)`); that book keeps its companion design, as on the iPhone. A
-    /// book with a series source in `sources` (`LibraryModel.seriesSources`) draws in the
-    /// source's design unless the source's face can't letter it. Both checks run here, once.
+    /// Prepares `books` in `fontStyle`, each drawn in its series look from `looks`, else in its
+    /// series source's design when `sources` (`LibraryModel.seriesSources`) gives one, else in
+    /// its companion design from `designs`, else from its cover. A shared design letters in its
+    /// face only when the face can letter every book in `mates` that draws it; otherwise all of
+    /// them letter it in its system typeface, as on the iPhone. The checks run here, once.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
-        looks: [Int: SpineDesignV1] = [:]
+        looks: [Int: SpineDesignV1] = [:], mates: [Int: [Book]] = [:],
+        fontStyle: AppFontStyle = .serif
     ) async {
-        let fontStyle =
-            AppFontStyle(rawValue: UserDefaults.standard.string(forKey: "fontStyle") ?? "")
-            ?? .serif
-        if let prepared, prepared.books == books, prepared.sources == sources,
-            prepared.designs == designs, prepared.looks == looks
+        if let prepared,
+            isReady(
+                for: books, sources: sources, designs: designs, looks: looks, mates: mates,
+                fontStyle: fontStyle)
         {
             // A cancelled preparation may have left covers to retry.
             await retryMissingCovers(in: prepared, fontStyle: fontStyle)
@@ -87,13 +93,13 @@ final class BookWallPreparation {
         completedCount = 0
         totalCount = books.count
 
-        // Glyph checks and layout measure lettering, so each face must be registered first,
-        // including the companion design a book keeps when its look's face can't letter it.
+        // Glyph checks and layout measure lettering, so each face must be registered first.
         let faces = Array(designs.values) + looks.values
         let fonts = await Self.loadFonts(for: faces, download: downloadFont)
         guard !Task.isCancelled,
             var built = await build(
-                books, sources: sources, designs: designs, looks: looks, fontStyle: fontStyle)
+                books, sources: sources, designs: designs, looks: looks, mates: mates,
+                fontStyle: fontStyle)
         else {
             if !Task.isCancelled { failure = "A book spine could not be prepared. Select Retry." }
             return
@@ -107,8 +113,8 @@ final class BookWallPreparation {
             await Self.loadFonts(for: faces, download: downloadFont).registered,
             !Task.isCancelled,
             let rebuilt = await build(
-                books, sources: sources, designs: designs, looks: looks, fontStyle: fontStyle,
-                countsProgress: false)
+                books, sources: sources, designs: designs, looks: looks, mates: mates,
+                fontStyle: fontStyle, countsProgress: false)
         {
             built = rebuilt
         }
@@ -124,18 +130,18 @@ final class BookWallPreparation {
     /// without.
     private func build(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
-        looks: [Int: SpineDesignV1], fontStyle: AppFontStyle, countsProgress: Bool = true
+        looks: [Int: SpineDesignV1], mates: [Int: [Book]], fontStyle: AppFontStyle,
+        countsProgress: Bool = true
     ) async -> (wall: BookWallPreparedWall, missing: [Book])? {
-        let drawn = Self.drawnDesigns(of: books, designs: designs, looks: looks)
+        let drawn = Self.drawnDesigns(
+            of: books, designs: designs, looks: looks, sources: sources, mates: mates)
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
             BookWallLocalSpine.typography(for: book, design: drawn[book.id])
         }
         var drawsWith: [Int: Book] = [:]
         var typographies: [Int: BookWallLocalSpine.Typography] = [:]
         for book in books {
-            if let source = sources[book.id], source.id != book.id,
-                Self.canLetter(book, in: typography(of: source))
-            {
+            if let source = sources[book.id], source.id != book.id {
                 drawsWith[book.id] = source
                 typographies[book.id] = typography(of: source)
             } else if drawn[book.id] != nil {
@@ -222,8 +228,9 @@ final class BookWallPreparation {
             hint = await BookWallShelfLabel.prepare(image)
         }
         let wall = BookWallPreparedWall(
-            books: books, sources: sources, designs: designs, looks: looks, drawn: drawn,
-            drawsWith: drawsWith, layout: layout, bodies: bodies, labels: labels, hint: hint)
+            books: books, sources: sources, designs: designs, looks: looks, mates: mates,
+            fontStyle: fontStyle, drawn: drawn, drawsWith: drawsWith, layout: layout,
+            bodies: bodies, labels: labels, hint: hint)
         return (wall, missing)
     }
 
@@ -288,18 +295,39 @@ final class BookWallPreparation {
 }
 
 extension BookWallPreparation {
-    /// The design each book draws, by book ID: its series look from `looks`, unless the look's
-    /// face can't letter the book (`canLetter(_:in:)`); else its companion design from `designs`.
+    /// The design each of `books` and their series sources draws, by book ID: its series look
+    /// from `looks`, else its companion design from `designs`. A book with a series source in
+    /// `sources` draws the source's entry.
+    ///
+    /// A shared design, a look or a source's design, letters in its face only when the face can
+    /// letter every book in `mates` that draws it (`canLetter(_:in:)`), including books outside
+    /// the wall. Otherwise every one of them draws it in its system typeface
+    /// (`SpineDesignV1.inSystemTypeface`), so a series keeps one font, as on the iPhone.
     /// Register the faces (`loadFonts(for:)`) before calling this.
     static func drawnDesigns(
-        of books: [Book], designs: [Int: SpineDesignV1], looks: [Int: SpineDesignV1]
+        of books: [Book], designs: [Int: SpineDesignV1], looks: [Int: SpineDesignV1],
+        sources: [Int: Book] = [:], mates: [Int: [Book]] = [:]
     ) -> [Int: SpineDesignV1] {
         var drawn = designs
+        // Each group's books share one mates list, so its glyph check runs once.
+        var letters: [Int: Bool] = [:]
+        func lettersAll(_ mates: [Book], in design: SpineDesignV1) -> Bool {
+            guard let first = mates.first?.id else { return true }
+            if let known = letters[first] { return known }
+            let typography = BookWallLocalSpine.typography(for: mates[0], design: design)
+            let known = mates.allSatisfy { canLetter($0, in: typography) }
+            letters[first] = known
+            return known
+        }
         for book in books {
-            guard let look = looks[book.id],
-                canLetter(book, in: BookWallLocalSpine.typography(for: book, design: look))
-            else { continue }
-            drawn[book.id] = look
+            if let look = looks[book.id] {
+                let mates = mates[book.id] ?? [book]
+                drawn[book.id] = lettersAll(mates, in: look) ? look : look.inSystemTypeface
+            } else if let source = sources[book.id], let design = designs[source.id],
+                !lettersAll(mates[book.id] ?? [book, source], in: design)
+            {
+                drawn[source.id] = design.inSystemTypeface
+            }
         }
         return drawn
     }
@@ -362,9 +390,11 @@ extension BookWallPreparation {
     /// weight. A network failure stops further downloads, so an unreachable host delays the
     /// wall by at most one request timeout per call.
     ///
-    /// The design's own face counts as registered only by name, so a family's registered Regular
-    /// face, for example, does not stand in for its Bold. A stand-in family counts as registered
-    /// with any face, since each one ships a single weight (`SpineFontPolicy.standInFamilies`).
+    /// The design's own face counts as registered by its recorded name, or once this process
+    /// downloaded its family at its weight (`GoogleFontLibrary.downloadedName`), whose file can
+    /// name the face otherwise. A family's registered Regular face, for example, does not stand
+    /// in for its Bold. A stand-in family counts as registered with any face, since each one
+    /// ships a single weight (`SpineFontPolicy.standInFamilies`).
     /// Tests pass `download` in place of `GoogleFontLibrary`.
     static func loadFonts(
         for designs: some Sequence<SpineDesignV1>,
@@ -378,7 +408,8 @@ extension BookWallPreparation {
             let (family, weight) = request
             let registered =
                 SpineFontPolicy.standInFamily(for: name) == nil
-                ? UIFont(name: SpineFontPolicy.allowedFontName(name), size: 12) != nil
+                ? SpineFontPolicy.uprightName(name).flatMap { UIFont(name: $0, size: 12) } != nil
+                    || GoogleFontLibrary.downloadedName(family: family, weight: weight) != nil
                 : GoogleFontLibrary.registeredFace(family: family, nearest: weight) != nil
             guard !registered else { continue }
             guard requested.insert("\(family):\(weight)").inserted else { continue }

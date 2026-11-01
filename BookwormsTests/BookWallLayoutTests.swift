@@ -629,7 +629,8 @@ final class BookWallLayoutTests: XCTestCase {
         var settled = false
         scene.configure(
             prepared: BookWallPreparedWall(
-                books: [], sources: [:], designs: [:], looks: [:], drawn: [:], drawsWith: [:],
+                books: [], sources: [:], designs: [:], looks: [:], mates: [:], fontStyle: .serif,
+                drawn: [:], drawsWith: [:],
                 layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil),
             reduceMotion: false, onFocusFrames: { _, isSettled in settled = isSettled })
         scene.didDrawFrame()

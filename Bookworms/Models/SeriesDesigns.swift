@@ -21,7 +21,12 @@ struct SeriesLookKey: Hashable, Comparable, Sendable {
 ///
 /// A look group (`SeriesLookKey`) draws its synced series look (`SeriesLookV1`) when one exists.
 /// Without one, each book draws the design of the group's best-ranked book that can lend it
-/// (`sources(books:fonts:links:canLetter:)`). Each book keeps its own saved style either way.
+/// (`sources(books:designs:links:)`). Each book keeps its own saved style either way.
+///
+/// Books that draw one design share its font. They letter it in its face only when the face has
+/// a glyph for every one of them (`canLetter(_:font:uppercase:)`); otherwise all of them letter
+/// it in its system typeface (`SpineDesignV1.inSystemTypeface`), which letters any book. No book
+/// leaves its series' design, or takes another book's, because the shared face lacks a glyph.
 /// The look key names the look's record (`SeriesLookV1`), so keep `styleSeries`, `lookKey`, and
 /// `subseries` in step with the iPhone companion: keys that differ between the apps give one
 /// group two looks, and a changed rule leaves earlier looks unused. Keep the series label
@@ -169,15 +174,6 @@ enum SeriesDesigns {
         return try? Date(String(finished.prefix(10)) + "T12:00:00Z", strategy: .iso8601)
     }
 
-    /// Returns whether another book may draw with a design in `fontName`: never a name
-    /// `SpineFontPolicy.allows(_:)` blocks, such as Impact, an italic, or a slanted face.
-    ///
-    /// The check stands on its own and doesn't rely on saved styles having been remapped to
-    /// allowed faces when they load.
-    static func isUsableSource(_ fontName: String) -> Bool {
-        SpineFontPolicy.allows(fontName)
-    }
-
     /// Returns whether a new series look may copy `design`: never one whose family or PostScript
     /// name is blocked, such as Impact or a slanted script, as the iPhone companion's
     /// `isUsableSource(_:)` rules.
@@ -190,13 +186,12 @@ enum SeriesDesigns {
     /// among the `members`' usable original designs, else among their usable `series-reuse`
     /// copies, with the lower book ID breaking a tie. `nil` when no member has a usable design.
     ///
-    /// A usable design passes `isUsableSource(_:)` and was made for the member as it is now: its
-    /// `workItemHash` matches the member's current one.
+    /// A usable design passes `isUsableSource(_:)` and was made for the member as it is now
+    /// (`isCurrent(_:for:)`).
     static func lookDesign(of members: [Book], designs: [Int: SpineDesignV1]) -> SpineDesignV1? {
         let usable = members.compactMap { book -> SpineDesignV1? in
             guard let design = designs[book.id], isUsableSource(design),
-                design.workItemHash
-                    == SpineCloudIdentity.workItemHash(accountID: design.accountID, book: book)
+                isCurrent(design, for: book)
             else { return nil }
             return design
         }
@@ -205,31 +200,37 @@ enum SeriesDesigns {
             .min { ($0.generatedAt, $0.bookID) < ($1.generatedAt, $1.bookID) }
     }
 
+    /// Returns whether `design` was made for `book` as it is now: its `workItemHash` matches the
+    /// book's current one. A stale design still draws its own book, but it neither lends to other
+    /// books by rank nor starts a look.
+    static func isCurrent(_ design: SpineDesignV1, for book: Book) -> Bool {
+        design.workItemHash
+            == SpineCloudIdentity.workItemHash(accountID: design.accountID, book: book)
+    }
+
     /// Maps each book that draws another book's spine design to that book, its source; a
     /// source maps to itself, and a book that draws its own design and lends it to no one is
-    /// absent.
+    /// absent. This is the rule for look groups without a saved look.
     ///
     /// Each look group (`lookGroups(_:links:)`) is decided in `ranksBefore` order, so a book
-    /// whose link keeps its own look neither lends nor borrows. A book takes the best-ranked
-    /// earlier root whose font, from `fonts`, is usable and can letter it (`canLetter`);
-    /// otherwise it is a root itself. Only a root lends its design, so no book draws a design
-    /// another book borrowed. The result doesn't depend on the order of `books`.
+    /// whose link keeps its own look neither lends nor borrows. A book lends when it has a
+    /// companion design in `designs` made for it as it is now (`isCurrent(_:for:)`), in any face,
+    /// since Book Wall draws a blocked one in its upright stand-in, as the iPhone does. Every
+    /// book ranked after a group's best-ranked lender draws that lender's design; earlier books
+    /// draw their own. A book without a design, or with a stale one, lends to no one. The result
+    /// doesn't depend on the order of `books`.
     static func sources(
-        books: [Book], fonts: [Int: String], links: [Int: SeriesLinkV1] = [:],
-        canLetter: (Book, String) -> Bool = { _, _ in true }
+        books: [Book], designs: [Int: SpineDesignV1], links: [Int: SeriesLinkV1] = [:]
     ) -> [Int: Int] {
         var sources: [Int: Int] = [:]
         for books in lookGroups(books, links: links).values {
-            var roots: [Book] = []
+            var source: Book?
             for book in books.sorted(by: { ranksBefore($0, $1, links: links) }) {
-                if let root = roots.first(where: { root in
-                    guard let font = fonts[root.id], isUsableSource(font) else { return false }
-                    return canLetter(book, font)
-                }) {
-                    sources[book.id] = root.id
-                    sources[root.id] = root.id
-                } else {
-                    roots.append(book)
+                if let source {
+                    sources[book.id] = source.id
+                    sources[source.id] = source.id
+                } else if let design = designs[book.id], isCurrent(design, for: book) {
+                    source = book
                 }
             }
         }
@@ -258,6 +259,17 @@ enum SeriesDesigns {
 }
 
 extension SpineDesignV1 {
+    /// The design without its face, so it letters in its system typeface (`typeface`) at its
+    /// weight. Books that share a design whose face lacks a glyph one of them needs draw this
+    /// (`SeriesDesigns`).
+    var inSystemTypeface: SpineDesignV1 {
+        var design = self
+        design.fontFamily = nil
+        design.fontPostScriptName = nil
+        design.instanceWeight = nil
+        return design
+    }
+
     /// Whether the design copies another book's (`provenance` "series-reuse:<bookID>").
     var isSeriesReuse: Bool {
         provenance?.split(separator: " ").contains { $0.hasPrefix("series-reuse:") } == true

@@ -23,15 +23,23 @@ enum BookWallLocalSpine {
         /// The stand-in's or the system face's weight, from 400 to 700.
         var weight = 600
         var uppercase = false
+        /// The design's allowed Google Fonts family and instance weight, whose downloaded face
+        /// draws when `fontName` isn't registered (`GoogleFontLibrary.downloadedName`).
+        var family: String?
+        var familyWeight: Int?
+        /// Whether the system face draws at its condensed width, for a design in a condensed
+        /// sans family whose face isn't loaded, as on the iPhone.
+        var isCondensed = false
 
         /// The stand-in's registered face nearest `weight`, else `fontName`, else the system
-        /// face for `typeface` and `weight`.
+        /// face for `typeface`, `weight`, and width.
         func font(size: CGFloat) -> UIFont {
             if let font = loadedFont(size: size) { return font }
             let system = UIFont.systemFont(
                 ofSize: size,
                 weight: weight >= 700
-                    ? .bold : weight >= 600 ? .semibold : weight >= 500 ? .medium : .regular)
+                    ? .bold : weight >= 600 ? .semibold : weight >= 500 ? .medium : .regular,
+                width: isCondensed ? .condensed : .standard)
             let design: UIFontDescriptor.SystemDesign =
                 switch typeface {
                 case "serif": .serif
@@ -43,15 +51,20 @@ enum BookWallLocalSpine {
                 .map { UIFont(descriptor: $0, size: size) } ?? system
         }
 
-        /// The stand-in's registered face nearest `weight`, else `fontName`, or `nil` when
-        /// neither is registered and the spine draws in the system face.
+        /// The stand-in's registered face nearest `weight`, else `fontName`, else the face
+        /// downloaded for `family`, or `nil` when none is registered and the spine draws in the
+        /// system face.
         func loadedFont(size: CGFloat) -> UIFont? {
             if let standInFamily,
                 let face = GoogleFontLibrary.registeredFace(family: standInFamily, nearest: weight)
             {
                 return CTFontCreateCopyWithAttributes(face, size, nil, nil) as UIFont
             }
-            return fontName.flatMap { UIFont(name: $0, size: size) }
+            if let font = fontName.flatMap({ UIFont(name: $0, size: size) }) { return font }
+            guard let family, let familyWeight,
+                let name = GoogleFontLibrary.downloadedName(family: family, weight: familyWeight)
+            else { return nil }
+            return UIFont(name: name, size: size)
         }
     }
 
@@ -59,15 +72,26 @@ enum BookWallLocalSpine {
     /// rules block shows in `SpineFontPolicy.allowedFontName(_:)`'s upright replacement, such
     /// as Bebas Neue for Impact. A face that slants by design shows in its stand-in family
     /// (`SpineFontPolicy.standInFamily(for:)`) at the design's weight, or its Regular face, such
-    /// as Patrick Hand for Dancing Script Bold. A face that is not installed shows in the design's system typeface.
+    /// as Patrick Hand for Dancing Script Bold. Any other blocked face, and a face that is not
+    /// installed, shows in the design's system typeface, condensed for a condensed sans family.
     static func typography(for book: Book, design: SpineDesignV1?) -> Typography {
         guard let design else { return Typography(fontName: fontName(for: book)) }
-        let fontName = design.fontPostScriptName.map(SpineFontPolicy.allowedFontName)
+        let request = BookWallPreparation.fontRequest(for: design)
+        let standIn = design.fontPostScriptName.flatMap(SpineFontPolicy.standInFamily)
         return Typography(
-            fontName: fontName,
-            standInFamily: design.fontPostScriptName.flatMap(SpineFontPolicy.standInFamily),
-            typeface: design.typeface, weight: design.weight, uppercase: design.uppercase)
+            fontName: design.fontPostScriptName.flatMap(SpineFontPolicy.uprightName),
+            standInFamily: standIn, typeface: design.typeface, weight: design.weight,
+            uppercase: design.uppercase, family: standIn == nil ? request?.family : nil,
+            familyWeight: standIn == nil ? request?.weight : nil,
+            isCondensed: design.fontFamily.map(condensedFamilies.contains) ?? false)
     }
+
+    /// The Google Fonts families the iPhone companion's catalog files as condensed sans
+    /// (`SpineFamilyStyle.condensedSans`), whose system stand-in draws condensed.
+    static let condensedFamilies: Set<String> = [
+        "Bebas Neue", "Anton", "Oswald", "Teko", "Fjalla One", "Staatliches", "Archivo Narrow",
+        "Barlow Condensed", "League Gothic", "Six Caps",
+    ]
 
     /// Uses the companion design's colors and type when one exists; otherwise samples the cover.
     /// A design whose colors don't parse keeps its type, which `BookWallLayout` measured the

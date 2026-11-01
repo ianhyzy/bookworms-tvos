@@ -10,6 +10,7 @@ enum ShelfScreenLayout {
 struct ShelfView: View {
     @AppStorage("dateFormat") private var dateFormat = AppDateFormat.monthName
     @AppStorage("woodBackground") private var woodBackground = true
+    @AppStorage("fontStyle") private var fontStyle = AppFontStyle.serif
     /// The profile link the ambient QR code option was turned on for (`AmbientView`).
     @AppStorage("ambientProfileCodeLink") private var profileCodeLink = ""
     let library: LibraryModel
@@ -69,7 +70,8 @@ struct ShelfView: View {
     private var isWallReady: Bool {
         let key = wallPreparationKey
         return bookWallPreparation.isReady(
-            for: key.books, sources: key.sources, designs: key.designs, looks: key.looks)
+            for: key.books, sources: key.sources, designs: key.designs, looks: key.looks,
+            mates: key.mates, fontStyle: key.fontStyle)
     }
     private var wallPreparationKey: BookWallPreparationKey {
         let books = wallBooks
@@ -78,17 +80,19 @@ struct ShelfView: View {
         // rebuild it.
         var designs: [Int: SpineDesignV1] = [:]
         var looks: [Int: SpineDesignV1] = [:]
+        var mates: [Int: [Book]] = [:]
         if BookPresentation.showsCompanionSpines {
             for book in books + sources.values {
                 designs[book.id] = library.spineDesigns[book.id]
                 looks[book.id] = library.lookDesigns[book.id]
+                mates[book.id] = library.seriesMates[book.id]
             }
         }
         return BookWallPreparationKey(
             loaded: library.hasLoadedLibrarySnapshot && library.hasReadCompanionRecords,
             enabled: coordinator.preferences.orderedViews.contains(.bookWall),
-            books: books, sources: sources, designs: designs, looks: looks,
-            retry: bookWallPreparationRetry)
+            books: books, sources: sources, designs: designs, looks: looks, mates: mates,
+            fontStyle: fontStyle, retry: bookWallPreparationRetry)
     }
     private var waitsForBookWall: Binding<Bool> {
         Binding(
@@ -276,7 +280,8 @@ struct ShelfView: View {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
                 await bookWallPreparation.prepare(
-                    key.books, sources: key.sources, designs: key.designs, looks: key.looks)
+                    key.books, sources: key.sources, designs: key.designs, looks: key.looks,
+                    mates: key.mates, fontStyle: key.fontStyle)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
@@ -467,6 +472,8 @@ struct ShelfView: View {
         let sources: [Int: Book]
         let designs: [Int: SpineDesignV1]
         let looks: [Int: SpineDesignV1]
+        let mates: [Int: [Book]]
+        let fontStyle: AppFontStyle
         let retry: Int
     }
 
