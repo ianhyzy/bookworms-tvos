@@ -110,7 +110,14 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         sources?.contains(.hardcover) ?? (id < CWAConfiguration.firstBookID)
     }
 
-    var spineTitle: String { title.components(separatedBy: ":").first ?? title }
+    /// The title without a subtitle, as spines letter it: the text before the first colon,
+    /// trimmed, or the whole title when nothing comes before the colon. The iPhone companion's
+    /// `CloudBook.spineTitle` uses the same rule.
+    var spineTitle: String {
+        guard let colon = title.firstIndex(of: ":") else { return title }
+        let head = title[..<colon].trimmingCharacters(in: .whitespaces)
+        return head.isEmpty ? title : head
+    }
 
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
 
