@@ -35,6 +35,9 @@ struct ShelfView: View {
     @State private var artworkGeneration = 0
     @State private var presentationStyles: [Int: SpineStyle] = [:]
     @State private var socialReturnRevision = 0
+    /// Whether the next close of book details returns focus to the item that opened them
+    /// (`restoreSelection()`).
+    @State private var returnsFocusFromDetails = true
     @State private var bookWallScene = BookWallScene()
     @State private var wallRenderer = BookWallRendererStatus()
     @State private var bookWallPreparation = BookWallPreparation()
@@ -139,6 +142,10 @@ struct ShelfView: View {
                 "hasEnteredShelf": hasEnteredShelf,
                 "focusedBook": shelfFocus.focused ?? -1,
                 "requestedBook": bookFocusRequest?.id ?? -1,
+                "focusRequests": bookFocusRequest?.revision ?? 0,
+                "returnRevision": socialReturnRevision,
+                "preparedBooks": preparedArtwork?.books.map(\.id) ?? [],
+                "reviewBooks": library.yearInReview(coordinator.reviewYear)?.shelf.map(\.id) ?? [],
             ]
         }
     #endif
@@ -256,13 +263,10 @@ struct ShelfView: View {
             if !sidebarViews.contains(coordinator.current) { coordinator.current = sidebarViews[0] }
             // Selections and the detail filter's entry book point at the example's books and
             // years, so Back must not reopen an example book, and details that an iCloud restore
-            // ended the example under close. Connecting closes them itself once its sheet
-            // finishes. None of this requests focus.
+            // ended the example under close. An open sign-in closes them when it closes. None of
+            // this requests focus.
             if !library.isExample {
-                if !connectsFromExample {
-                    showsDetailFilter = false
-                    selectedBook = nil
-                }
+                if !connectsFromExample { closeEndedExampleDetails() }
                 detailFilterEntryID = nil
                 filteredShelfBook = nil
                 shelfFocus.last = nil
@@ -271,6 +275,22 @@ struct ShelfView: View {
                 coordinator.reviewSelection = nil
                 coordinator.wallSelection = nil
             }
+        }
+        .onChange(of: connectsFromExample) {
+            // A connection closes the details itself; Back from the sign-in after a restore
+            // ended the example closes them here.
+            if !connectsFromExample && !library.isExample { closeEndedExampleDetails() }
+        }
+    }
+
+    /// Closes book details and the shelf they filtered once the example ends under them. A data
+    /// change closes them, so focus goes where the focus engine places it, not back to the
+    /// item that opened them (`restoreSelection()`).
+    private func closeEndedExampleDetails() {
+        showsDetailFilter = false
+        if selectedBook != nil {
+            returnsFocusFromDetails = false
+            selectedBook = nil
         }
     }
 
@@ -551,8 +571,7 @@ struct ShelfView: View {
         // Book details list the readers with synced libraries who have the book.
         avatars += social.presentation.libraryReaders.compactMap(\.avatarURL)
         // The example's sidebar replaces the reader's choice of views.
-        let enabled =
-            coordinator.preferences.activeViews + (library.isExample ? sidebarViews : [])
+        let enabled = library.isExample ? sidebarViews : coordinator.preferences.activeViews
         if enabled.contains(.following) {
             books += social.activities.prefix(20).compactMap(\.book)
             avatars += social.activities.prefix(20).compactMap { $0.reader.avatarURL }
@@ -857,6 +876,10 @@ struct ShelfView: View {
 
     private func restoreSelection() {
         recordActivity()
+        guard returnsFocusFromDetails else {
+            returnsFocusFromDetails = true
+            return
+        }
         guard isShowingMainView else { return }
         if coordinator.current == .shelf {
             requestBookFocus(shelfFocus.last ?? lastSelectedID)

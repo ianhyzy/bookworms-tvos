@@ -175,7 +175,7 @@ struct ShelfPreferences: Codable, Equatable {
         let eligible = books.filter {
             guard !pinned.contains($0.id) else { return false }
             switch collection {
-            case .standard: return $0.isReading != true && ($0.isRead == true || $0.finished != nil)
+            case .standard: return $0.isReading != true && $0.isMarkedRead
             case .owned: return $0.isOwned == true
             case .all: return true
             }

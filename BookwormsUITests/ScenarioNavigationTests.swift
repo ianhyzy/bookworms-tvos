@@ -8,14 +8,15 @@ final class ScenarioNavigationTests: XCTestCase {
 
     private func launch(
         _ scenario: String = "artwork", appearance: String = "dark", preserve: Bool = false,
-        settingsTab: String = "Shelf", focusProbe: Bool = false
+        settingsTab: String = "Shelf", focusProbe: Bool = false, arguments: [String] = []
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BOOKWORMS_SCENARIO_CONTROL"] = UUID().uuidString
-        app.launchArguments = [
-            "--test-scenario=\(scenario)", "--settings-tab=\(settingsTab)",
-            "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-        ]
+        app.launchArguments =
+            [
+                "--test-scenario=\(scenario)", "--settings-tab=\(settingsTab)",
+                "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            ] + arguments
         app.launchEnvironment["TZ"] = "UTC"
         if focusProbe { app.launchArguments.append("--focus-probe") }
         if preserve {
@@ -43,10 +44,8 @@ final class ScenarioNavigationTests: XCTestCase {
             XCTWaiter.wait(for: [dismissed], timeout: 5), .completed, file: file, line: line)
     }
 
-    @discardableResult
-    private func probe(
-        _ app: XCUIApplication, sample: Bool = false, example: Bool = false
-    ) throws -> [String: Any] {
+    /// The scenario's current evidence, unchecked.
+    private func evidence(_ app: XCUIApplication) throws -> [String: Any] {
         let element = app.staticTexts["scenario-probe"].firstMatch
         let previous = element.exists ? element.label : ""
         command("probe", app: app)
@@ -54,8 +53,15 @@ final class ScenarioNavigationTests: XCTestCase {
             predicate: NSPredicate { _, _ in element.exists && element.label != previous },
             object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
-        let evidence = try XCTUnwrap(
+        return try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(element.label.utf8)) as? [String: Any])
+    }
+
+    @discardableResult
+    private func probe(
+        _ app: XCUIApplication, sample: Bool = false, example: Bool = false
+    ) throws -> [String: Any] {
+        let evidence = try evidence(app)
         let network = try XCTUnwrap(evidence["network"] as? [String: Any])
         XCTAssertEqual(
             network["unexpected"] as? Int, 0,
@@ -119,6 +125,27 @@ final class ScenarioNavigationTests: XCTestCase {
         } while Date() < deadline
         XCTFail("The scenario did not reach the required state before the timeout.")
         return try probe(app)
+    }
+
+    /// The shelf's book focus requests and the other views' return revision, which together
+    /// count the focus the app requested as details close (`ShelfView.restoreSelection()`).
+    private func focusRequests(_ app: XCUIApplication, example: Bool = false) throws -> [Int] {
+        let shelf = try XCTUnwrap(
+            try probe(app, sample: example, example: example)["shelf"] as? [String: Any])
+        return [
+            try XCTUnwrap(shelf["focusRequests"] as? Int),
+            try XCTUnwrap(shelf["returnRevision"] as? Int),
+        ]
+    }
+
+    /// Waits for the library that `release-cloud` restores to end the example profile.
+    @discardableResult
+    private func waitForRestoredLibrary(_ app: XCUIApplication) throws -> [String: Any] {
+        let deadline = Date().addingTimeInterval(15)
+        while try evidence(app)["example"] as? Bool != false, Date() < deadline {}
+        let restored = try probe(app)
+        XCTAssertEqual(Set(restored["bookIDs"] as? [Int] ?? []), Set(1...8))
+        return restored
     }
 
     private func openWelcomeHardcover(_ app: XCUIApplication) throws {
@@ -186,6 +213,9 @@ final class ScenarioNavigationTests: XCTestCase {
     /// closing sheet's focus leaves before the status row's button takes it.
     private let sheetEntryUpdates = 1
     private let sheetExitUpdates = 2
+    /// Focus updates as details that a restore closed leave, as for the sheet: focus leaves the
+    /// closing presentation before the focus engine places it in the tabs.
+    private let restoreExitUpdates = 2
 
     func testWelcomeDefaultFocusAndExampleChoicePersistAcrossRelaunch() throws {
         let app = launch("welcome", focusProbe: true)
@@ -306,6 +336,105 @@ final class ScenarioNavigationTests: XCTestCase {
         // Back from the filtered shelf still reveals the details beneath it.
         XCUIRemote.shared.press(.menu)
         RemoteNavigation.waitForFocus(author)
+    }
+
+    /// A library that the launch sync restores ends the example under details opened from
+    /// Year in Review, which the reader shows. The details close, and only the focus engine
+    /// moves focus as they leave.
+    func testARestoreThatEndsTheExampleClosesDetailsWithoutRequestingFocus() throws {
+        let app = launch(
+            "welcome", focusProbe: true,
+            arguments: ["--test-cloud-restore", "--test-enable-year-in-review"])
+        let example = app.buttons["welcome-example-profile"]
+        XCTAssertTrue(example.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        selectExample(in: app, expecting: app.buttons["book-1"])
+        RemoteNavigation.selectView("Year in Review", in: app)
+        let reviewBook = app.descendants(matching: .any)
+            .matching(
+                NSPredicate(format: "identifier BEGINSWITH 'year-book-' AND hasFocus == true")
+            )
+            .firstMatch
+        XCTAssertTrue(reviewBook.waitForExistence(timeout: 5))
+        XCUIRemote.shared.press(.select)
+        let back = app.buttons["back-to-shelf"]
+        RemoteNavigation.waitForFocus(back, timeout: 15)
+        command("release-artwork", app: app)
+        let requests = try focusRequests(app, example: true)
+
+        let before = RemoteNavigation.transitions(app)
+        command("release-cloud", app: app)
+        waitForAbsence(back)
+        RemoteNavigation.assertSettled(
+            app, after: before, expectedUpdates: restoreExitUpdates, file: #filePath, line: #line)
+        try waitForRestoredLibrary(app)
+        XCTAssertEqual(try focusRequests(app), requests, "Closing the details requested focus")
+    }
+
+    /// A restore that ends the example while its sign-in covers the filtered shelf over details
+    /// leaves them to the sign-in; Back from the sign-in closes all three.
+    func testBackFromTheSignInClosesDetailsThatARestoreEndedTheExampleUnder() throws {
+        let app = launch("welcome", focusProbe: true, arguments: ["--test-cloud-restore"])
+        let example = app.buttons["welcome-example-profile"]
+        XCTAssertTrue(example.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        let first = app.buttons["book-1"]
+        selectExample(in: app, expecting: first)
+        XCUIRemote.shared.press(.select)
+        let back = app.buttons["back-to-shelf"]
+        RemoteNavigation.waitForFocus(back, timeout: 15)
+        RemoteNavigation.press(.right, in: app, expecting: app.buttons["detail-author"])
+        XCUIRemote.shared.press(.select)
+        let clear = app.buttons["clear-shelf-filter"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(first)
+        RemoteNavigation.press(.down, in: app, expecting: clear)
+        RemoteNavigation.press(
+            .right, in: app, expecting: app.buttons["example-connect-hardcover"])
+        let newCode = app.buttons["hardcover-new-code"]
+        RemoteNavigation.press(
+            .select, in: app, expecting: newCode, updates: sheetEntryUpdates)
+        command("release-artwork", app: app)
+
+        command("release-cloud", app: app)
+        try waitForRestoredLibrary(app)
+        XCTAssertTrue(newCode.exists, "The sign-in stays open over the restored library")
+        let requests = try focusRequests(app)
+        let before = RemoteNavigation.transitions(app)
+        XCUIRemote.shared.press(.menu)
+        waitForAbsence(newCode)
+        waitForAbsence(back)
+        XCTAssertFalse(clear.exists)
+        RemoteNavigation.assertSettled(
+            app, after: before, expectedUpdates: restoreExitUpdates, file: #filePath, line: #line)
+        XCTAssertEqual(try focusRequests(app), requests, "Closing the details requested focus")
+    }
+
+    /// Year in Review shows in the example's sidebar though the reader turned it off, so its
+    /// covers prepare with the shelf's, including books the shelf leaves out.
+    func testExamplePreparesYearInReviewCoversTheReaderTurnedOff() throws {
+        let app = launch("welcome", focusProbe: true, arguments: ["--test-book-count=3"])
+        let example = app.buttons["welcome-example-profile"]
+        XCTAssertTrue(example.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        selectExample(in: app, expecting: app.buttons["book-1"])
+        var evidence = try probe(app, sample: true, example: true)
+        let deadline = Date().addingTimeInterval(15)
+        while (evidence["shelf"] as? [String: Any])?["artworkReady"] as? Bool != true,
+            Date() < deadline
+        {
+            evidence = try probe(app, sample: true, example: true)
+        }
+        let shelf = try XCTUnwrap(evidence["shelf"] as? [String: Any])
+        XCTAssertEqual(shelf["artworkReady"] as? Bool, true)
+        let review = Set(try XCTUnwrap(shelf["reviewBooks"] as? [Int]))
+        let prepared = Set(try XCTUnwrap(shelf["preparedBooks"] as? [Int]))
+        let shelfBooks = Set(try XCTUnwrap(evidence["bookIDs"] as? [Int]))
+        XCTAssertFalse(review.isSubset(of: shelfBooks), "The review shows books the shelf omits")
+        XCTAssertTrue(review.isSubset(of: prepared))
     }
 
     func testWelcomeHardcoverDownloadAndArtworkStayInModalUntilReady() throws {

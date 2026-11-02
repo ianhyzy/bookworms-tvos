@@ -553,6 +553,7 @@ final class LibraryWorkflowTests: XCTestCase {
         var savesFail = false
         var heldSave: ControlledLibraryResponse<Void>?
         var duringUserRead: (@MainActor () async -> Void)?
+        var cloudUser = "_fictional_user_1"
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
         dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
@@ -560,7 +561,7 @@ final class LibraryWorkflowTests: XCTestCase {
             let hook = duringUserRead
             duringUserRead = nil
             await hook?()
-            return "_fictional_user_1"
+            return cloudUser
         }
         dependencies.fetchSeriesLinks = { _, _ in (stored, true) }
         dependencies.saveSeriesLink = { link, accountID, bookID in
@@ -634,20 +635,53 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.waitForCompanionRecords()
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
-        // A pick made while an account change reads the iCloud user saves nothing, since the
-        // user may be another account's.
+        // A pick made while an account change reads the iCloud user waits for the check, then
+        // saves when the user is unchanged.
         savesFail = false
-        let savesBefore = saves.count
+        var savesBefore = saves.count
         fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         duringUserRead = {
             model.pickSeries(8, for: book)
-            await model.waitForSeriesLinkSaves()
+            for _ in 0..<20 { await Task.yield() }
+            XCTAssertEqual(saves.count, savesBefore, "The save waits for the check")
         }
         await model.cloudAccountChanged()
         XCTAssertNil(duringUserRead)
-        XCTAssertEqual(saves.count, savesBefore)
-        XCTAssertEqual(model.series(for: book)?.membership, saga)
+        await model.waitForSeriesLinkSaves()
+        XCTAssertEqual(saves.count, savesBefore + 1)
+        XCTAssertEqual(saves.last?.changesNothing, true)
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
         await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+
+        // A save already under way when the notice arrives keeps its pick once the check
+        // confirms the user.
+        savesBefore = saves.count
+        let pending = ControlledLibraryResponse<Void>("Series link save under way")
+        heldSave = pending
+        model.pickSeries(7, for: book)
+        await fulfillment(of: [pending.started], timeout: 5)
+        duringUserRead = {
+            heldSave = nil
+            pending.resolve(())
+            for _ in 0..<20 { await Task.yield() }
+        }
+        await model.cloudAccountChanged()
+        XCTAssertNil(duringUserRead)
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(saves.count, savesBefore + 1)
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+
+        // A pick made while the check finds another user is never saved: storage turns off.
+        savesBefore = saves.count
+        cloudUser = "_fictional_user_2"
+        duringUserRead = { model.pickSeries(8, for: book) }
+        await model.cloudAccountChanged()
+        await model.waitForSeriesLinkSaves()
+        XCTAssertFalse(model.iCloudEnabled)
+        XCTAssertEqual(saves.count, savesBefore)
+        XCTAssertFalse(model.canPickSeries(for: book))
     }
 
     func testAPickKeepsTheBooksOwnLookAndReplacesNotInASeries() async throws {

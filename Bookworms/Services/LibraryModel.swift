@@ -195,9 +195,13 @@ final class LibraryModel {
             await previous?.value
             guard let self else { return }
             do {
-                // The iCloud user may have changed, so the pick fails rather than reach it.
-                guard cloudUserChecks == 0 else { throw CancellationError() }
+                // A check that finds another iCloud user turns storage off, which clears the
+                // pick, so the save waits for it and never reaches that user's records.
+                await waitForCloudUserChecks()
+                guard iCloudEnabled else { return }
                 try await dependencies.saveSeriesLink(chosen, accountID, book.id)
+                // A check that began during the save decides whether the pick stays.
+                await waitForCloudUserChecks()
             } catch {
                 // Turning iCloud storage off or changing accounts clears the links; keep them clear.
                 guard iCloudEnabled, activeHardcoverAccountID == accountID,
@@ -281,6 +285,8 @@ final class LibraryModel {
     @ObservationIgnored private var cloudRevision = 0
     /// The `cloudAccountChanged()` calls still reading the iCloud user; cloud work waits for them.
     @ObservationIgnored private var cloudUserChecks = 0
+    /// Work waiting for `cloudUserChecks` to reach zero (`waitForCloudUserChecks()`).
+    @ObservationIgnored private var cloudUserCheckWaiters: [CheckedContinuation<Void, Never>] = []
     /// Counts `iCloudEnabled` changes, so `cloudAccountChanged()` sees a toggle that ends where
     /// it began.
     @ObservationIgnored private var iCloudToggles = 0
@@ -1521,11 +1527,19 @@ final class LibraryModel {
     /// otherwise, including when the user can't be read, it turns off.
     ///
     /// Cloud syncs and companion-record reads and writes stop while the user is read, so none
-    /// of them exchanges this library with another account's iCloud data. Syncs and reads resume
-    /// when the user is unchanged; a series pick saved meanwhile fails and restores the earlier
-    /// choice.
+    /// of them exchanges this library with another account's iCloud data. They resume when the
+    /// user is unchanged, including a series pick's save, which waits for the check
+    /// (`waitForCloudUserChecks()`).
     func cloudAccountChanged() async {
         let toggles = iCloudToggles
+        // Waiters resume after the outcome below, so a changed user's storage is already off.
+        defer {
+            if cloudUserChecks == 0 {
+                let waiters = cloudUserCheckWaiters
+                cloudUserCheckWaiters = []
+                for waiter in waiters { waiter.resume() }
+            }
+        }
         if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
             cloudUserChecks += 1
             if hasStarted {
@@ -1557,6 +1571,13 @@ final class LibraryModel {
         }
         cloudStatus =
             "Your iCloud account changed. Turn iCloud Storage on to sync this library with the current account."
+    }
+
+    /// Returns once no `cloudAccountChanged()` call is reading the iCloud user.
+    private func waitForCloudUserChecks() async {
+        while cloudUserChecks > 0 {
+            await withCheckedContinuation { cloudUserCheckWaiters.append($0) }
+        }
     }
 
     /// Restarts the cloud sync and companion-record read that `cloudAccountChanged()` held back.
