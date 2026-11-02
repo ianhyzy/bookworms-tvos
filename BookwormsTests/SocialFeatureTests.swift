@@ -88,7 +88,7 @@ final class SocialFeatureTests: XCTestCase {
         try FileManager.default.removeItem(at: root)
         let restored = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
         await restored.load(token: token, readerID: 2)
-        XCTAssertFalse(restored.mine.isEmpty)
+        XCTAssertFalse(restored.snapshot?.mine.isEmpty ?? true)
         XCTAssertFalse(restored.books(for: 2).isEmpty)
         let counts = await client.counts
         XCTAssertEqual(counts["following"], 2)
@@ -110,7 +110,7 @@ final class SocialFeatureTests: XCTestCase {
                 return "hc_at_fixture_new"
             })
         XCTAssertEqual(renewals, ["hc_at_fixture_old"])
-        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertFalse(model.snapshot?.mine.isEmpty ?? true)
         XCTAssertFalse(model.books(for: 2).isEmpty)
         let tokens = await client.tokens
         XCTAssertEqual(tokens.first, "hc_at_fixture_old")
@@ -153,6 +153,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(model.following.isEmpty, "A failed renewal keeps the cached snapshot")
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
         XCTAssertTrue(model.status.contains("Cached data is retained"))
+        XCTAssertTrue(model.status.contains("Hardcover did not respond in time"), model.status)
         let tokens = await client.tokens
         XCTAssertEqual(
             tokens.count - sent, 1, "The load stops instead of sending the rejected token again")
@@ -176,15 +177,11 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(counts["feed"], 2)
     }
 
-    func testCoverPolicyRequiresSavedKeyDesignAndAvailableFont() {
+    func testCoverPolicyRequiresSavedKeyAndAvailableFont() {
         for key in [false, true] {
-            for design in [false, true] {
-                for font in [false, true] {
-                    XCTAssertEqual(
-                        BookPresentation.usesSpine(
-                            hasSavedKey: key, hasDesign: design, fontAvailable: font),
-                        key && design && font)
-                }
+            for font in [false, true] {
+                XCTAssertEqual(
+                    BookPresentation.usesSpine(hasSavedKey: key, fontAvailable: font), key && font)
             }
         }
     }
@@ -385,7 +382,10 @@ final class SocialFeatureTests: XCTestCase {
         let second = await client.counts
         XCTAssertEqual(first, second)
         XCTAssertEqual(model.revision, revision, "A load with nothing due doesn't reinstall")
-        XCTAssertEqual(model.shared(with: 2, limit: 20).count, 1)
+        var preferences = ViewPreferences()
+        preferences.readerID = 2
+        model.prepare(preferences)
+        XCTAssertEqual(model.presentation.shared.count, 1)
         await model.load(token: token, readerID: 3)
         let third = await client.counts
         XCTAssertEqual(third["reader3"], 1)
@@ -396,7 +396,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertEqual(fourth["feed"], 2)
         let restored = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
         await restored.load(token: token, readerID: 3)
-        XCTAssertEqual(restored.mine.count, 1)
+        XCTAssertEqual(restored.snapshot?.mine.count, 1)
         XCTAssertEqual(restored.books(for: 3).count, 1)
     }
 
@@ -417,12 +417,90 @@ final class SocialFeatureTests: XCTestCase {
         await client.fail(with: .offline)
         time += 11
         await model.load(token: token, readerID: 2, manual: true)
-        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertFalse(model.snapshot?.mine.isEmpty ?? true)
         await client.fail(with: .denied)
         time += 11
         await model.load(token: token, readerID: 2, manual: true)
         XCTAssertNil(model.snapshot)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+    }
+
+    /// A first load that reads the cache file and is then denied deletes that file, though it
+    /// never installed it.
+    func testDeniedFirstLoadDeletesTheCacheFileItRead() async throws {
+        let suite = "SocialDeniedFirst.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let client = SocialFixtureClient()
+        let token = "hc_pat_" + String(repeating: "x", count: 32)
+        let cached = SocialSnapshot(
+            owner: ReaderProfile(id: 1, username: "reader1", name: nil, avatarURL: nil))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try JSONEncoder().encode(cached).write(to: root.appending(path: "1.json"))
+        await client.fail(with: .denied)
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(token: token, readerID: 2)
+        XCTAssertNil(model.snapshot)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
+    }
+
+    /// A manual load during a matching automatic load runs its own requests instead of waiting
+    /// for the automatic one, which skipped datasets that aren't due.
+    func testManualLoadDuringAnAutomaticLoadBypassesTheDailyGates() async throws {
+        let suite = "SocialManualInFlight.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let client = SocialFixtureClient()
+        let time = Date()
+        let model = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root, now: { time })
+        let token = "hc_pat_" + String(repeating: "x", count: 32)
+        await client.holdReaderTwo()
+        let automatic = Task { await model.load(token: token, readerID: 2) }
+        while await client.counts["reader2"] == nil { await Task.yield() }
+        let manual = Task { await model.load(token: token, readerID: 2, manual: true) }
+        // A manual load that waited on the automatic one would never request Following again.
+        for _ in 0..<10_000 where await client.counts["following"] != 2 { await Task.yield() }
+        await client.releaseReaderTwo()
+        await automatic.value
+        await manual.value
+        let counts = await client.counts
+        XCTAssertEqual(counts["following"], 2, "The manual load skips the daily gate")
+    }
+
+    /// Settings → Sources shows the status, so it names neither Settings nor raw scopes. A missing
+    /// permission names Disconnect, the button that state shows, and a rejected login doesn't
+    /// blame social permissions.
+    func testRejectedLoginAndMissingPermissionExplainThemselvesPlainly() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SocialStatus.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.reject("hc_at_fixture_old")
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(
+            token: "hc_at_fixture_old", readerID: 2,
+            renewToken: { _ in throw HardcoverError.invalidToken })
+        XCTAssertEqual(model.status, "The Hardcover login is invalid or expired.")
+
+        let scoped = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root.appending(path: "scope"))
+        await client.fail(with: .scope)
+        await scoped.load(token: "hc_at_fixture_new", readerID: 2)
+        XCTAssertTrue(scoped.status.contains("permission to see the readers you follow"))
+        XCTAssertTrue(scoped.status.contains("Disconnect Hardcover"))
+        for status in [model.status, scoped.status] {
+            XCTAssertFalse(status.contains("Settings"), status)
+            XCTAssertFalse(status.contains("read:"), status)
+        }
     }
 
     func testDeniedReaderLibraryIsEmptyAndKeepsOtherSocialData() async throws {
@@ -448,7 +526,7 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertNotNil(model.reader(2))
         XCTAssertTrue(model.books(for: 2).isEmpty)
         XCTAssertFalse(model.books(for: 3).isEmpty)
-        XCTAssertFalse(model.mine.isEmpty)
+        XCTAssertFalse(model.snapshot?.mine.isEmpty ?? true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appending(path: "1.json").path))
         let counts = await client.counts
         XCTAssertEqual(counts["reader2"], 1, "The empty library counts as synced for the day")
@@ -533,6 +611,11 @@ final class SocialFeatureTests: XCTestCase {
         XCTAssertFalse(library.isBookReadByUser(4))
         // Non-existent book
         XCTAssertFalse(library.isBookReadByUser(9999))
+
+        XCTAssertFalse(SpoilerPolicy.alwaysHide.hides(hasSpoilers: false, isRead: false))
+        XCTAssertTrue(SpoilerPolicy.alwaysHide.hides(hasSpoilers: true, isRead: true))
+        XCTAssertFalse(SpoilerPolicy.showIfRead.hides(hasSpoilers: true, isRead: true))
+        XCTAssertTrue(SpoilerPolicy.showIfRead.hides(hasSpoilers: true, isRead: false))
     }
 
     func testFriendPicksRankUnreadBooksByFansThenRating() {
@@ -570,6 +653,9 @@ final class SocialFeatureTests: XCTestCase {
                 + "readers are left out; Want to Read stays")
         XCTAssertEqual(picks[0].fans.map(\.id), [2, 4, 3], "Feed ratings count as fans")
         XCTAssertEqual(picks[1].averageRating, 4.5)
+        XCTAssertEqual(
+            FriendPick.ranked(snapshot, alsoRead: [13], limit: 40).map(\.id), [12, 11],
+            "A book the library marks Read without a rating or date isn't in mine but is left out")
         XCTAssertEqual(
             FriendPick.readersToSync(snapshot, limit: 2), [4, 2],
             "The most active readers in the feed sync first")
@@ -610,7 +696,7 @@ final class SocialFeatureTests: XCTestCase {
 }
 
 private actor SocialFixtureClient: SocialLibraryFetching {
-    enum Failure { case offline, denied }
+    enum Failure { case offline, denied, scope }
     var counts: [String: Int] = [:]
     /// Every token a request sent, in order.
     var tokens: [String] = []
@@ -624,13 +710,13 @@ private actor SocialFixtureClient: SocialLibraryFetching {
     private var failure: Failure?
     private var unfollowed = false
     private var holdsReaderTwo = false
-    private var readerTwoGate: CheckedContinuation<Void, Never>?
-    /// Holds reader 2's library response until `releaseReaderTwo()`.
+    private var readerTwoGates: [CheckedContinuation<Void, Never>] = []
+    /// Holds every reader 2 library response until `releaseReaderTwo()`.
     func holdReaderTwo() { holdsReaderTwo = true }
     func releaseReaderTwo() {
         holdsReaderTwo = false
-        readerTwoGate?.resume()
-        readerTwoGate = nil
+        for gate in readerTwoGates { gate.resume() }
+        readerTwoGates = []
     }
     private var feedFailure: Error?
     func fail(with failure: Failure) { self.failure = failure }
@@ -653,6 +739,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
             switch failure {
             case .offline: throw URLError(.notConnectedToInternet)
             case .denied: throw HardcoverError.forbidden
+            case .scope: throw HardcoverError.insufficientScope
             }
         }
         return unfollowed ? [profile(3)] : [profile(2), profile(3)]
@@ -668,7 +755,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         counts["reader\(user)", default: 0] += 1
         if deniedReaders.contains(user) { throw HardcoverError.forbidden }
         if user == 2 && holdsReaderTwo {
-            await withCheckedContinuation { readerTwoGate = $0 }
+            await withCheckedContinuation { readerTwoGates.append($0) }
         }
         return [
             ReaderBook(

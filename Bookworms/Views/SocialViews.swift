@@ -266,7 +266,7 @@ struct SocialViews: View {
             if let text = activity.review {
                 let isRead = isBookReadByUser(activity.book?.id ?? activity.id)
                 let hidesSpoilers =
-                    activity.hasSpoilers && (spoilerPolicy == .alwaysHide || !isRead)
+                    spoilerPolicy.hides(hasSpoilers: activity.hasSpoilers, isRead: isRead)
                 Button("Read review") {
                     review = ReviewPresentation(
                         title: activity.reader.displayName, text: text,
@@ -691,7 +691,7 @@ private struct SharedReviewCard: View {
 
     var body: some View {
         let hidesSpoilers =
-            item.hasSpoilers && (spoilerPolicy == .alwaysHide || !isBookRead)
+            spoilerPolicy.hides(hasSpoilers: item.hasSpoilers, isRead: isBookRead)
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 ReaderLabel(name: name, avatarURL: avatarURL, size: 34)
@@ -816,7 +816,7 @@ struct ActivityCard: View {
                 if let rating = activity.rating { Text(String(format: "%.1f ★", rating)) }
                 if let review = activity.review, !isCompact {
                     let hidesSpoilers =
-                        activity.hasSpoilers && (spoilerPolicy == .alwaysHide || !isBookRead)
+                        spoilerPolicy.hides(hasSpoilers: activity.hasSpoilers, isRead: isBookRead)
                     BookText(
                         hidesSpoilers ? "Review contains spoilers" : review, of: activity.book
                     )
@@ -945,12 +945,14 @@ struct ReaderLabel: View {
     /// The photo's diameter relative to `size`. Header pills use a smaller photo so they keep
     /// the same height as the pills beside them.
     var avatarScale: CGFloat = 1.5
+    /// Downloads a photo the cache lacks (`CachedAvatarView.allowsNetwork`).
+    var allowsNetwork = false
 
     var body: some View {
         HStack(spacing: size * 0.4) {
             Group {
                 if let avatarURL {
-                    CachedAvatarView(url: avatarURL)
+                    CachedAvatarView(url: avatarURL, allowsNetwork: allowsNetwork)
                 } else {
                     Image(systemName: "person.crop.circle.fill")
                         .resizable().scaledToFit().foregroundStyle(.secondary)
@@ -966,11 +968,21 @@ struct ReaderLabel: View {
 
 struct CachedAvatarView: View {
     let url: URL
+    /// Whose photo it is. While the photo loads, or when it can't, their initial stands in for
+    /// it; without a name, a generic person symbol does.
+    var name: String? = nil
+    /// Downloads a photo the cache lacks. Browsing and ambient playback read only the photos
+    /// that artwork preparation cached, and reload them when `artworkGeneration` changes; only
+    /// community reviews, whose readers preparation can't know, download.
+    var allowsNetwork = false
+    @Environment(\.artworkGeneration) private var artworkGeneration
     @State private var image: UIImage?
     var body: some View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+            } else if let name {
+                ReaderMonogram(name: name)
             } else {
                 Image(systemName: "person.crop.circle.fill")
                     .resizable()
@@ -978,13 +990,28 @@ struct CachedAvatarView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .task(id: url) {
+        .task(id: "\(url.absoluteString):\(artworkGeneration)") {
             guard
                 let data = try? await ArtworkStore.shared.data(
-                    for: url, maximumPixelSize: 400, allowsNetwork: true),
+                    for: url, maximumPixelSize: 400, allowsNetwork: allowsNetwork),
                 !Task.isCancelled
             else { return }
             image = UIImage(data: data)
         }
+    }
+}
+
+/// A reader's initial on a filled circle, in place of a profile photo they don't have.
+struct ReaderMonogram: View {
+    let name: String
+
+    var body: some View {
+        Circle()
+            .fill(.primary.opacity(0.24))
+            .overlay {
+                Text(name.first.map { String($0).uppercased() } ?? "")
+                    .appFont(size: 23, weight: .semibold)
+            }
+            .accessibilityHidden(true)
     }
 }

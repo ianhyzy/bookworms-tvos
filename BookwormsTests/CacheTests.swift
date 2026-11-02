@@ -100,7 +100,7 @@ final class CacheTests: XCTestCase {
     }
 
     private func lettering(
-        _ title: String, author: String = "Frank Herbert", length: CGFloat = 420,
+        _ title: String, author: String = "Tamsin Vellor", length: CGFloat = 420,
         thickness: CGFloat
     ) -> SpineLettering {
         SpineTextMetrics.lettering(
@@ -117,10 +117,10 @@ final class CacheTests: XCTestCase {
 
     func testTitleStartsFromTheBoxWithoutACap() {
         // An 88% box on a thick spine letters a short title larger than 58 points.
-        let result = lettering("Dune", thickness: 110)
+        let result = lettering("Wyke", thickness: 110)
         XCTAssertGreaterThan(result.titleSize, 58)
         XCTAssertLessThanOrEqual(result.titleSize, 110 * 0.88)
-        XCTAssertEqual(result.title, "Dune")
+        XCTAssertEqual(result.title, "Wyke")
     }
 
     func testTitleBreaksBetweenWordsAndFitsItsWidth() {
@@ -210,7 +210,7 @@ final class CacheTests: XCTestCase {
             SpineView.shortAuthor("Neil Gaiman, Terry Pratchett"), "Neil Gaiman, Terry Pratchett")
         XCTAssertEqual(SpineView.shortAuthor("A One, B Two, C Three"), "A One et al.")
         XCTAssertEqual(SpineView.twoLines("David Foster Wallace"), "David Foster\nWallace")
-        XCTAssertEqual(SpineView.surname("Ursula K. Le Guin"), "Le Guin")
+        XCTAssertEqual(SpineView.surname("Mirela K. Le Vant"), "Le Vant")
         XCTAssertEqual(SpineView.surname("Walter M. Miller Jr."), "Miller Jr.")
         XCTAssertNil(SpineView.surname("Homer"))
     }
@@ -235,14 +235,16 @@ final class CacheTests: XCTestCase {
     }
 
     func testFormatIconReservesTailRoom() {
-        var book = Book(id: 1, title: "Dune: Deluxe Edition", author: "Frank Herbert")
+        var book = Book(id: 1, title: "Wyke: Deluxe Edition", author: "Tamsin Vellor")
         let style = SpineStyle.fallback(for: book)
         let dimensions = SpineDimensions(width: 70, height: 420)
         let plain = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
         book.format = "Ebook"
         let withIcon = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
         XCTAssertEqual(plain.length, 420)
-        XCTAssertEqual(withIcon.length, 420 - SpineTextMetrics.formatIconRoom)
+        XCTAssertEqual(
+            withIcon.length,
+            420 - SpineTextMetrics.formatIconMargin - SpineTextMetrics.formatIconSize)
         // The shelf spine stops a title at its first colon and draws no subtitle.
         XCTAssertFalse(plain.title.localizedCaseInsensitiveContains("deluxe"))
     }
@@ -277,7 +279,7 @@ final class CacheTests: XCTestCase {
     }
 
     func testReadableTitleKeepsNaturalBookHeight() {
-        let book = Book(id: 1, title: "Dune", author: "Frank Herbert")
+        let book = Book(id: 1, title: "Wyke", author: "Tamsin Vellor")
         let style = SpineStyle.fallback(for: book)
         let natural = SpineDimensions(width: 90, height: 480)
         XCTAssertEqual(

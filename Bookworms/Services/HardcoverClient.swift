@@ -35,12 +35,14 @@ enum HardcoverError: LocalizedError {
     case rejected, incomplete
     var errorDescription: String? {
         switch self {
+        // Settings → Sources shows these beside its Hardcover button, so they name that button
+        // rather than Settings. Views outside Settings say where to go themselves.
         case .invalidToken:
-            "The Hardcover login is invalid or expired. Reconnect in Settings."
+            "The Hardcover login is invalid or expired."
         case .invalidAuthorizationCode:
             "Hardcover rejected this sign-in code. Select New code to try again."
         case .insufficientScope:
-            "This token needs read:me:content, read:library, and read:catalog:data. Create a token with these read permissions and reconnect."
+            "Hardcover didn't give Bookworms permission to read your library. Disconnect Hardcover, then connect it again to allow it."
         case .forbidden:
             "Hardcover denied access to this request. Your saved shelf is unchanged."
         case .http(429):
@@ -444,10 +446,6 @@ actor HardcoverClient {
             throw HardcoverError.invalidToken
         }
         return String(user.id)
-    }
-
-    func fetchBooks(token: String) async throws -> [Book] {
-        try await fetchLibrary(token: token).books
     }
 
     /// Returns the authenticated account with its complete library so saved books keep provenance.

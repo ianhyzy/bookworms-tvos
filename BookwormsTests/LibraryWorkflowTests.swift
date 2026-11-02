@@ -356,6 +356,25 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertFalse(model.hasCompletedWelcome)
     }
 
+    /// A login refused for a missing permission isn't saved, so its message asks the reader to
+    /// connect again rather than to use a Disconnect button that isn't shown.
+    func testFailedConnectionForMissingPermissionAsksToConnectAgain() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.secrets.removeAll()
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        var dependencies = fixture.dependencies()
+        dependencies.validateHardcover = { _ in throw HardcoverError.insufficientScope }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let connected = await model.connect("hc_pat_fictional_original")
+        XCTAssertFalse(connected)
+        XCTAssertFalse(model.hardcoverConnected)
+        XCTAssertEqual(model.message, LibraryModel.unsavedScopeMessage)
+        XCTAssertEqual(
+            model.sourceErrors[LibrarySource.hardcover.rawValue], LibraryModel.unsavedScopeMessage)
+    }
+
     func testCachedOfflineStartupRetainsBooksAndErrorAcrossRelaunch() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -382,6 +401,19 @@ final class LibraryWorkflowTests: XCTestCase {
         fixture.time += 300
         await restored.becameActive()
         XCTAssertEqual(fetches, 2)
+    }
+
+    func testHardcoverSyncTimeoutNamesHardcover() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86401)])
+        var dependencies = fixture.dependencies()
+        dependencies.fetchHardcover = { _, _ in throw URLError(.timedOut) }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let text = "Hardcover did not respond in time. Check your network and try again."
+        XCTAssertEqual(model.sourceErrors["hardcover"], text)
+        XCTAssertEqual(model.message, text)
     }
 
     func testPartialProviderFailureSavesSuccessfulSourceAndKeepsOtherCache() async throws {
@@ -783,6 +815,9 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.books.map(\.id), [1])
         XCTAssertEqual(model.connectionRevision, 1)
         XCTAssertEqual(dependencies.sourceStore.load().first?.syncedAt, fixture.time)
+        XCTAssertEqual(model.message, "Hardcover token verified. Loading library…")
+        model.clearVerifiedTokenMessage()
+        XCTAssertNil(model.message)
     }
 
     func testSyncRenewsAnExpiringTokenAndSpendsEachRefreshTokenOnce() async throws {
@@ -1190,6 +1225,34 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(revocations, ["hc_rt_fictional_1"])
         XCTAssertFalse(model.hardcoverConnected)
         XCTAssertFalse(model.hardcoverSessionExpired)
+        XCTAssertNil(model.message)
+    }
+
+    func testDisconnectReportsAKeychainTokenItCouldNotRemove() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.signInWithOAuth(expiringIn: 5 * 86_400)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.removeCredential = { account in
+            guard account == HardcoverSession.refreshAccount else {
+                throw CredentialStore.CredentialError.removeFailed
+            }
+            fixture.secrets.removeValue(forKey: account)
+        }
+        let revoked = expectation(description: "Disconnecting still revokes the login")
+        dependencies.revokeHardcoverToken = { refreshToken in
+            XCTAssertEqual(refreshToken, "hc_rt_fictional_1")
+            revoked.fulfill()
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.disconnect()
+        await fulfillment(of: [revoked], timeout: 5)
+        XCTAssertNil(fixture.secrets["hardcover-refresh-token"])
+        XCTAssertNotNil(fixture.secrets["hardcover-token"])
+        XCTAssertEqual(model.message, "The saved Hardcover login could not be removed.")
+        XCTAssertFalse(model.hardcoverConnected)
     }
 
     func testTokenWithoutRefreshReplacesTheSavedRefreshToken() async throws {
@@ -1759,6 +1822,84 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(model.cloudStatus.contains("Local data is retained"))
     }
 
+    func testUnchangedShelfKeepsItsPresentationRevision() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1), fixture.book(2)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        let revision = model.presentationRevision
+        // Reapplying the same preferences selects the same books with the same styles.
+        model.shelfPreferences = model.shelfPreferences
+        XCTAssertEqual(model.presentationRevision, revision)
+    }
+
+    func testBookWallWaitsForTheLaunchCompanionRead() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        // The wall's time limit holds until the test ends.
+        let (deadline, passDeadline) = AsyncStream.makeStream(of: Void.self)
+        defer { passDeadline.finish() }
+        dependencies.sleep = { _ in }
+        dependencies.companionReadLimit = { for await _ in deadline {} }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        let (held, release) = AsyncStream.makeStream(of: Void.self)
+        dependencies.fetchSpineDesigns = { _, _ in
+            for await _ in held {}
+            return ([:], true)
+        }
+
+        let offline = LibraryModel(dependencies: dependencies)
+        await offline.start()
+        XCTAssertTrue(offline.hasReadCompanionRecords, "No read runs with iCloud storage off")
+
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.hasLoadedLibrarySnapshot)
+        XCTAssertFalse(model.hasReadCompanionRecords)
+        release.finish()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.hasReadCompanionRecords)
+    }
+
+    func testBookWallStopsWaitingForAStalledCompanionRead() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        dependencies.companionReadLimit = {}
+        let (held, release) = AsyncStream.makeStream(of: Void.self)
+        defer { release.finish() }
+        dependencies.fetchSpineDesigns = { _, _ in
+            for await _ in held {}
+            return ([:], true)
+        }
+
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        for _ in 0..<100 where !model.hasReadCompanionRecords { await Task.yield() }
+        XCTAssertTrue(model.hasReadCompanionRecords, "The read is still running")
+    }
+
+    func testRemovingTheAIKeyReportsAFailedDelete() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(try JSONEncoder().encode(AIConfiguration()), forKey: "aiConfiguration")
+        var dependencies = fixture.dependencies()
+        dependencies.removeCredential = { _ in throw CredentialStore.CredentialError.removeFailed }
+        let model = LibraryModel(dependencies: dependencies)
+        model.removeAIKey()
+        XCTAssertEqual(model.generationStatus, "The API key could not be removed. Try again.")
+    }
+
     func testCompanionCoverChoiceLeadsDisplayedCoversWithoutChangingDesignInputs() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -2175,6 +2316,121 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(fixture.defaults.string(forKey: "activeHardcoverAccountID"), "other-account")
     }
 
+    /// CloudKit posts `CKAccountChanged` for the same account too; only another user, or one
+    /// that can't be read, turns iCloud storage off.
+    func testCloudAccountChangeKeepsStorageForTheSameUser() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { $0 }
+        var user: String? = "_fictional_user_1"
+        dependencies.cloudUserRecordName = { user }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            fixture.defaults.string(forKey: LibraryModel.cloudUserKey), "_fictional_user_1")
+
+        await model.cloudAccountChanged()
+        XCTAssertTrue(model.iCloudEnabled)
+
+        user = "_fictional_user_2"
+        await model.cloudAccountChanged()
+        XCTAssertFalse(model.iCloudEnabled)
+        XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+    }
+
+    /// No sync starts while `cloudAccountChanged()` reads the user, so a sync queued then can't
+    /// upload this library to another account. The held-back sync runs once the user matches.
+    func testCloudAccountChangeHoldsSyncsWhileReadingTheUser() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        var syncs = 0
+        dependencies.syncCloud = {
+            syncs += 1
+            return $0
+        }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        var model: LibraryModel?
+        var queueDuringRead = false
+        var syncsDuringRead: Int?
+        var user = "_fictional_user_1"
+        dependencies.cloudUserRecordName = {
+            if queueDuringRead, let model {
+                queueDuringRead = false
+                model.queueCloudSync(delay: .zero)
+                await model.waitForCloudSync()
+                syncsDuringRead = syncs
+            }
+            return user
+        }
+        model = LibraryModel(dependencies: dependencies)
+        let library = try XCTUnwrap(model)
+        await library.start()
+        await library.waitForCloudSync()
+        let before = syncs
+
+        queueDuringRead = true
+        await library.cloudAccountChanged()
+        XCTAssertEqual(syncsDuringRead, before)
+        await library.waitForCloudSync()
+        XCTAssertEqual(syncs, before + 1)
+
+        user = "_fictional_user_2"
+        queueDuringRead = true
+        await library.cloudAccountChanged()
+        XCTAssertEqual(syncsDuringRead, before + 1)
+        await library.waitForCloudSync()
+        XCTAssertEqual(syncs, before + 1)
+        XCTAssertFalse(library.iCloudEnabled)
+    }
+
+    /// A user that changes during a sync isn't recorded, and a storage toggle made while
+    /// CloudKit reads the user outlasts the notice.
+    func testCloudAccountChangeChecksTheUserAroundEachSync() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { $0 }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        // Every read before a sync sees one user and every read after it another.
+        var reads = 0
+        var model: LibraryModel?
+        var turnOnDuringRead = false
+        dependencies.cloudUserRecordName = {
+            reads += 1
+            if turnOnDuringRead {
+                turnOnDuringRead = false
+                model?.iCloudEnabled = true
+            }
+            return reads.isMultiple(of: 2) ? "_fictional_user_2" : "_fictional_user_1"
+        }
+        model = LibraryModel(dependencies: dependencies)
+        let library = try XCTUnwrap(model)
+        await library.start()
+        await library.waitForCloudSync()
+        XCTAssertGreaterThan(reads, 1)
+        XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+
+        fixture.defaults.set("_fictional_user_0", forKey: LibraryModel.cloudUserKey)
+        library.iCloudEnabled = false
+        turnOnDuringRead = true
+        await library.cloudAccountChanged()
+        XCTAssertTrue(library.iCloudEnabled)
+        await library.waitForCloudSync()
+    }
+
     func testCloudAccountChangeRejectsOldReplyAfterNewSyncCompletes() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -2201,7 +2457,7 @@ final class LibraryWorkflowTests: XCTestCase {
             oldFinished.fulfill()
         }
         await fulfillment(of: [waiting], timeout: 5)
-        model.cloudAccountChanged()
+        await model.cloudAccountChanged()
         model.iCloudEnabled = true
         await fulfillment(of: [current.started], timeout: 5)
         current.resolve(
@@ -2729,8 +2985,7 @@ final class ExampleProfileWorkflowTests: XCTestCase {
 
         let connected = await model.connect("hc_pat_fictional_original")
         XCTAssertTrue(connected)
-        XCTAssertEqual(
-            model.message, "Hardcover token verified. Library sync keeps its daily schedule.")
+        XCTAssertEqual(model.message, LibraryModel.verifiedTokenMessage)
         XCTAssertFalse(model.isExample)
         XCTAssertEqual(model.books.map(\.id), [1], "The saved library replaces the example's books")
         XCTAssertTrue(model.spineDesigns.isEmpty)

@@ -6,7 +6,7 @@ import XCTest
 final class SpineCloudTests: XCTestCase {
     private func book(id: Int = 7) -> Book {
         Book(
-            id: id, title: "Dune", author: "Frank Herbert",
+            id: id, title: "Wyke", author: "Tamsin Vellor",
             coverURL: URL(string: "https://example.test/catalog.jpg"),
             detailCoverURL: URL(string: "https://example.test/edition.jpg"))
     }
@@ -31,7 +31,7 @@ final class SpineCloudTests: XCTestCase {
             "spine-design-v1-755dac3729029e2e2976249c4e03b160c699ef71f296c346e22183dc23503c33")
         XCTAssertEqual(
             SpineCloudIdentity.workItemHash(accountID: "42", book: book),
-            "386ce6995b77bb7377a199ec8f0b506e04fb5d0c14b995b6e8287b5bd65ff6ee")
+            "aefaaf3fe90bbd71ba5963a0fcbd0671eaa32cf5cc0d14938dfc68e4500cddac")
     }
 
     func testDesignRejectsWrongAccountMetadataAndUnreadableStyle() {
@@ -654,7 +654,7 @@ final class SpineCloudTests: XCTestCase {
         let store = SpineCloudStore(database: database, cacheURL: cacheURL)
         let offline = SpineCloudStore(
             database: FakeSpineDatabase(status: .noAccount), cacheURL: cacheURL)
-        let other = SeriesLookKey(seriesID: 2001, group: "|frankherbert")
+        let other = SeriesLookKey(seriesID: 2001, group: "|tamsinvellor")
 
         // A read of book 7's link is suspended while book 8's link saves.
         let seven = book()

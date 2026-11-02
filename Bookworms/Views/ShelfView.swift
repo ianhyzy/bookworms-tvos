@@ -36,6 +36,7 @@ struct ShelfView: View {
     @State private var presentationStyles: [Int: SpineStyle] = [:]
     @State private var socialReturnRevision = 0
     @State private var bookWallScene = BookWallScene()
+    @State private var wallRenderer = BookWallRendererStatus()
     @State private var bookWallPreparation = BookWallPreparation()
     @State private var bookWallPreparationRetry = 0
     @State private var wallDetail = BookWallDetailState()
@@ -58,7 +59,6 @@ struct ShelfView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.scenePhase) private var scenePhase
-    private var controlsVisible: Bool { activity.controlsVisible }
     private var wallBooks: [Book] {
         let year = Calendar.current.component(.year, from: library.now)
         return library.readingYears.first { $0.year == year }?.books ?? []
@@ -88,7 +88,7 @@ struct ShelfView: View {
             }
         }
         return BookWallPreparationKey(
-            loaded: library.hasLoadedLibrarySnapshot,
+            loaded: library.hasLoadedLibrarySnapshot && library.hasReadCompanionRecords,
             enabled: sidebarViews.contains(.bookWall),
             books: books, sources: sources, designs: designs, looks: looks,
             retry: bookWallPreparationRetry)
@@ -108,8 +108,14 @@ struct ShelfView: View {
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
     @State private var selectedBook: Book?
-    /// The book whose details applied the shelf filter, and the view those details opened over.
-    @State private var filterOrigin: (book: Book, view: BookwormsView)?
+    /// Whether My Shelf, filtered from book details, covers those details. The details stay
+    /// presented beneath it, so Back reveals them as they were, with focus on the chosen filter.
+    @State private var showsDetailFilter = false
+    /// A book chosen on the filtered shelf, whose details open over it.
+    @State private var filteredShelfBook: Book?
+    /// The book whose details applied the current detail filter, where focus enters the
+    /// filtered shelf. `shelfFocus.last` keeps the book that opened the first details.
+    @State private var detailFilterEntryID: Int?
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
         case ambient
@@ -119,8 +125,9 @@ struct ShelfView: View {
         if case .view = sidebarItem { true } else { false }
     }
     @State private var lastSelectedID: Int?
-    @State private var lastFocusedID: Int?
-    @State private var focusedBook: Int?
+    /// My Shelf's focused and last focused books. Only the row and caption read them, so focus
+    /// movement doesn't evaluate this view's body.
+    @State private var shelfFocus = ShelfFocus()
     @State private var bookFocusRequest: ShelfBookFocusRequest?
 
     #if DEBUG && targetEnvironment(simulator)
@@ -130,7 +137,7 @@ struct ShelfView: View {
                 "pagesReady": !preparedPages.isEmpty,
                 "pagesCurrent": shelfPagesAreReady,
                 "hasEnteredShelf": hasEnteredShelf,
-                "focusedBook": focusedBook ?? -1,
+                "focusedBook": shelfFocus.focused ?? -1,
                 "requestedBook": bookFocusRequest?.id ?? -1,
             ]
         }
@@ -211,9 +218,13 @@ struct ShelfView: View {
             if sidebarItem == .view(.bookWall) {
                 ZStack {
                     WoodBackground(palette: palette)
-                    BookWallRendererView(scene: bookWallScene)
-                        .accessibilityHidden(true)
-                        .allowsHitTesting(false)
+                    // The opaque shelf a detail filter shows covers the wall, which keeps its
+                    // last frame and stops drawing until Back reveals it.
+                    BookWallRendererView(
+                        scene: bookWallScene, status: wallRenderer, isCovered: showsDetailFilter
+                    )
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
                 }
                 .ignoresSafeArea()
                 .task(
@@ -227,49 +238,29 @@ struct ShelfView: View {
         }
         .environment(\.artworkGeneration, artworkGeneration)
         .tvOSSidebarHeader {
-            sidebarHeader
+            // The header sits outside the content that carries the environment value.
+            sidebarHeader.environment(\.artworkGeneration, artworkGeneration)
         }
         .overlay { BookWallDetailOverlay(state: wallDetail, palette: palette) }
-        .overlay(alignment: .top) {
-            // Names the example profile over each view, level with the view's title, without
-            // taking focus; VoiceOver hears it from My Shelf's Connect Hardcover instead.
-            if library.isExample && isShowingMainView {
-                Text("Example profile")
-                    .appFont(size: 24, weight: .medium)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.55), in: .capsule)
-                    .padding(.top, 56)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
+        .fullScreenCover(
+            isPresented: detailFilterBinding(when: false), onDismiss: finishDetailFilter
+        ) {
+            filteredShelf
         }
-        .sheet(isPresented: $connectsFromExample) {
-            // The same sign-in as Settings → Sources; connecting ends the example profile.
-            HardcoverConnectionView(library: library) { connectsFromExample = false }
-                .frame(width: 1380)
-                .padding(64)
-                .appTypography()
-                .onExitCommand { connectsFromExample = false }
-                #if DEBUG && targetEnvironment(simulator)
-                    .background(alignment: .topLeading) {
-                        if FocusTransitionProbe.isEnabled {
-                            FocusTransitionProbe().frame(width: 1, height: 1)
-                        }
-                    }
-                #endif
+        .overlay(alignment: .top) { if isShowingMainView { exampleCapsule } }
+        .sheet(isPresented: exampleConnectionBinding(overDetailFilter: false)) {
+            exampleConnection
         }
         .onChange(of: library.isExample) {
             // Book Wall leaves the sidebar with the example unless the reader shows it.
             if !sidebarViews.contains(coordinator.current) { coordinator.current = sidebarViews[0] }
-            // Selections and the filter origin point at the example's books and years, so Back
-            // must not reopen an example book. This clears stored state only and requests no
+            // Selections and the detail filter's entry book point at the example's books and
+            // years, so Back must not reopen an example book. This clears stored state only and requests no
             // focus.
             if !library.isExample {
-                filterOrigin = nil
-                lastFocusedID = nil
+                detailFilterEntryID = nil
+                filteredShelfBook = nil
+                shelfFocus.last = nil
                 lastSelectedID = nil
                 coordinator.reviewYear = nil
                 coordinator.reviewSelection = nil
@@ -311,10 +302,6 @@ struct ShelfView: View {
                     }
                 }
             #endif
-            .onChange(of: canHideControls, initial: true) {
-                activity.scheduleHiding(allowed: canHideControls)
-            }
-            .onDisappear { activity.scheduleHiding(allowed: false) }
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
@@ -324,6 +311,9 @@ struct ShelfView: View {
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
                 social.prepare(coordinator.preferences)
+            }
+            .onChange(of: library.readBookIDs, initial: true) {
+                social.setReadBooks(library.readBookIDs)
             }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
@@ -348,7 +338,10 @@ struct ShelfView: View {
             ) { await loadSocial() }
             .task(id: library.connectionRevision) {
                 // Explicit reconnection retries social permissions even after a denied daily attempt.
-                if library.connectionRevision > 0 { await loadSocial(manual: true) }
+                if library.connectionRevision > 0 {
+                    await loadSocial(manual: true)
+                    library.clearVerifiedTokenMessage()
+                }
             }
             .task(
                 id: SocialLoadKey(
@@ -365,7 +358,7 @@ struct ShelfView: View {
                     ensureComparisonReader()
                 }
                 recordActivity()
-                focusedBook = nil
+                shelfFocus.focus(nil)
                 bookFocusRequest = nil
             }
             .onPlayPauseCommand { recordActivity() }
@@ -387,34 +380,29 @@ struct ShelfView: View {
             .fullScreenCover(
                 item: $selectedBook, onDismiss: restoreSelection
             ) { book in
-                BookDetailView(
-                    book: library.book(withID: book.id) ?? book,
-                    style: library.style(for: book),
-                    loadReviews: reviewLoader(for: book),
-                    onShowShelf: { filter in
-                        // The book matches its own author and genres, so focus returns to it.
-                        lastFocusedID = book.id
-                        filterOrigin = (book, coordinator.current)
-                        library.shelfFilter = filter
-                        showView(.shelf)
-                        selectedBook = nil
-                    },
-                    series: library.series(for: library.book(withID: book.id) ?? book),
-                    onPickSeries: library.canPickSeries(for: book)
-                        ? { library.pickSeries($0, for: library.book(withID: book.id) ?? book) }
-                        : nil,
-                    libraryBook: { library.book(withID: $0) },
+                bookDetails(
+                    book, onShowShelf: { showDetailFilter($0, from: book) },
                     onOpenBook: { chosen in
-                        lastFocusedID = chosen.id
+                        shelfFocus.last = chosen.id
                         selectedBook = chosen
-                    },
-                    friendReads: social.presentation.friendReads[book.id] ?? [],
-                    // Sample books are fictional, so their IDs aren't their Hardcover pages. The
-                    // example profile's books are real.
-                    hardcoverURL: library.isSample && !library.isExample ? nil : book.hardcoverURL
+                    }
                 )
-                .appTypography()
-                .id(book.id)
+                // A filter from these details covers them here; Book Wall's details, which
+                // aren't presented, use the cover on `tabs`.
+                .background {
+                    Color.clear
+                        .fullScreenCover(
+                            isPresented: detailFilterBinding(when: true),
+                            onDismiss: finishDetailFilter
+                        ) {
+                            filteredShelf
+                        }
+                        // These details update in their own presentation, which doesn't
+                        // receive the transaction that closed the filter, so restate it: the
+                        // shelf leaves at once. The empty view keeps the details' own
+                        // animations out of its reach.
+                        .transaction { $0.disablesAnimations = !showsDetailFilter }
+                }
             }
             .fullScreenCover(
                 isPresented: Binding(get: { ambient.isActive }, set: { if !$0 { ambient.stop() } }),
@@ -425,6 +413,7 @@ struct ShelfView: View {
                     preferences: coordinator.preferences, reviewYear: coordinator.reviewYear
                 )
                 .appTypography()
+                .environment(\.artworkGeneration, artworkGeneration)
                 #if DEBUG && targetEnvironment(simulator)
                     .overlay(alignment: .topLeading) {
                         if let scenario = ScenarioRuntime.current {
@@ -475,7 +464,7 @@ struct ShelfView: View {
         let entry = preparedPages.first?.books.first?.id ?? library.books.first?.id
         if let entry {
             hasEnteredShelf = true
-            requestBookFocus(lastFocusedID ?? entry)
+            requestBookFocus(shelfFocus.last ?? entry)
         }
     }
 
@@ -523,9 +512,11 @@ struct ShelfView: View {
                 } else {
                     ProgressView()
                     Text(
-                        library.hasLoadedLibrarySnapshot
-                            ? "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
-                            : "Loading your library…"
+                        !library.hasLoadedLibrarySnapshot
+                            ? "Loading your library…"
+                            : !library.hasReadCompanionRecords
+                                ? "Loading spine designs…"
+                                : "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
                     )
                     .appFont(size: 28)
                 }
@@ -637,12 +628,6 @@ struct ShelfView: View {
         }
     }
 
-    private var canHideControls: Bool {
-        (focusedBook != nil || coordinator.current != .shelf) && !voiceOver
-            && !library.books.isEmpty && isShowingMainView && selectedBook == nil
-            && !ambient.isActive && !isWelcomePresented
-    }
-
     private func recordActivity() {
         PerformanceDiagnostics.event("RecordActivity")
         activity.record()
@@ -712,51 +697,162 @@ struct ShelfView: View {
         // Browsing covers follow the library's and don't wait for the retry below; a newer
         // preparation cancels this one and resumes after the covers already saved.
         _ = await ArtworkStore.shared.prefetchBrowsing(library.browsingCoverURLs)
-        // Retry covers that failed, such as after a timeout, once. Mounted covers reload from the
-        // local cache when the generation changes; browsing itself never downloads.
-        if !preparation.failed.isEmpty {
+        // Retry covers and photos that failed, such as after a timeout, once. Mounted covers and
+        // photos reload from the local cache when the generation changes; browsing itself never
+        // downloads.
+        if !preparation.failed.isEmpty || !preparation.failedAvatars.isEmpty {
             guard (try? await Task.sleep(for: .seconds(30))) != nil, key == artworkKey else {
                 return
             }
             await ArtworkStore.shared.forgetFailures()
             let retry = await ArtworkStore.shared.prefetch(
-                books: preparation.failed, avatarURLs: [])
+                books: preparation.failed, avatarURLs: preparation.failedAvatars)
             guard !Task.isCancelled, key == artworkKey else { return }
-            if !retry.ratios.isEmpty {
-                for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
+            for (id, ratio) in retry.ratios { library.recordCoverRatio(ratio, for: id) }
+            if !retry.ratios.isEmpty
+                || retry.failedAvatars.count < preparation.failedAvatars.count
+            {
                 artworkGeneration &+= 1
             }
         }
 
     }
 
-    /// Reopens the details that filtered My Shelf, over the view they opened from, and clears the
-    /// filter. `nil` without such a filter, so Back keeps opening the sidebar.
-    // ponytail: one level of history; after chained filters, Back reopens the latest origin.
-    private var returnToFilterOrigin: (() -> Void)? {
-        guard let origin = filterOrigin, library.shelfFilter != nil else { return nil }
-        return {
-            filterOrigin = nil
-            library.shelfFilter = nil
-            lastFocusedID = origin.book.id
-            showView(origin.view)
-            // Book Wall reopens its own details for a book it holds; other views use the cover.
-            if coordinator.current == .bookWall,
-                wallBooks.contains(where: { $0.id == origin.book.id })
-            {
-                coordinator.wallSelection = origin.book.id
-                wallDetail.requestedBookID = origin.book.id
-            } else {
-                selectedBook = origin.book
-            }
+    /// Book details with the library's current copy of `book` and its series.
+    private func bookDetails(
+        _ book: Book, onShowShelf: @escaping (ShelfFilter) -> Void,
+        onOpenBook: @escaping (Book) -> Void
+    ) -> some View {
+        let current = library.book(withID: book.id) ?? book
+        return BookDetailView(
+            book: current,
+            style: library.style(for: book),
+            loadReviews: reviewLoader(for: book),
+            onShowShelf: onShowShelf,
+            series: library.series(for: current),
+            onPickSeries: library.canPickSeries(for: book)
+                ? { library.pickSeries($0, for: library.book(withID: book.id) ?? book) }
+                : nil,
+            libraryBook: { library.book(withID: $0) },
+            onOpenBook: onOpenBook,
+            friendReads: social.presentation.friendReads[book.id] ?? [],
+            isRead: library.isBookReadByUser(book.id)
+        )
+        .appTypography()
+        // Full-screen covers present outside the content that carries the value.
+        .environment(\.artworkGeneration, artworkGeneration)
+        .overlay(alignment: .top) { exampleCapsule }
+        .id(book.id)
+    }
+
+    /// Shows My Shelf filtered to `filter` over the details of `book`, which matches its own
+    /// author and genres, so focus enters the shelf on it.
+    private func showDetailFilter(_ filter: ShelfFilter, from book: Book) {
+        detailFilterEntryID = book.id
+        library.shelfFilter = filter
+        showsDetailFilter = true
+    }
+
+    /// Names the example profile at the top of the screen, level with a view's title, without
+    /// taking focus; VoiceOver hears it from My Shelf's Connect Hardcover instead. The tabs and
+    /// each cover over them show it, since a full-screen cover hides the tabs' overlay.
+    @ViewBuilder private var exampleCapsule: some View {
+        if library.isExample {
+            Text("Example profile")
+                .appFont(size: 24, weight: .medium)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .background(.black.opacity(0.55), in: .capsule)
+                .padding(.top, 56)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
+    }
+
+    /// Presents the example's sign-in from the topmost presentation that shows Connect
+    /// Hardcover: the filtered shelf over details when `overDetailFilter`, otherwise the tabs. A
+    /// sheet on the tabs can't present while a full-screen cover is up.
+    private func exampleConnectionBinding(overDetailFilter: Bool) -> Binding<Bool> {
+        Binding(
+            get: { connectsFromExample && showsDetailFilter == overDetailFilter },
+            set: { if !$0 { connectsFromExample = false } })
+    }
+
+    /// The same sign-in as Settings → Sources. Connecting ends the example profile, so it also
+    /// closes any filtered shelf and the example details beneath it.
+    private var exampleConnection: some View {
+        HardcoverConnectionView(library: library) {
+            connectsFromExample = false
+            clearShelfFilter()
+        }
+        .frame(width: 1380)
+        .padding(64)
+        .appTypography()
+        .onExitCommand { connectsFromExample = false }
+        #if DEBUG && targetEnvironment(simulator)
+            .background(alignment: .topLeading) {
+                if FocusTransitionProbe.isEnabled {
+                    FocusTransitionProbe().frame(width: 1, height: 1)
+                }
+            }
+        #endif
+    }
+
+    /// Presents the filtered shelf from cover details when `fromCoverDetails`, otherwise from
+    /// the tabs, over Book Wall's details. Only one of the two presents it at a time.
+    private func detailFilterBinding(when fromCoverDetails: Bool) -> Binding<Bool> {
+        Binding(
+            get: { showsDetailFilter && (selectedBook != nil) == fromCoverDetails },
+            set: { if !$0 { showsDetailFilter = false } })
+    }
+
+    /// Back from the filtered shelf. The details beneath it never closed, so it leaves at once,
+    /// and the focus engine returns to the author or genre that applied the filter.
+    private func closeDetailFilter() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { showsDetailFilter = false }
+    }
+
+    /// Clears the filter once its shelf has left, so the shelf never redraws unfiltered on its
+    /// way out.
+    private func finishDetailFilter() {
+        guard !showsDetailFilter else { return }
+        filteredShelfBook = nil
+        library.shelfFilter = nil
+    }
+
+    /// My Shelf filtered from book details. Its books open details over it, and a filter chosen
+    /// there replaces this one.
+    // ponytail: one filter over the first details; chain further presentations if readers need
+    // Back to step through every filter.
+    private var filteredShelf: some View {
+        tabContent(for: .shelf, coversDetails: true)
+            .environment(\.artworkGeneration, artworkGeneration)
+            .appTypography()
+            .overlay(alignment: .top) { exampleCapsule }
+            .sheet(isPresented: exampleConnectionBinding(overDetailFilter: true)) {
+                exampleConnection
+            }
+            .fullScreenCover(item: $filteredShelfBook) { book in
+                bookDetails(
+                    book,
+                    onShowShelf: { filter in
+                        detailFilterEntryID = book.id
+                        library.shelfFilter = filter
+                        filteredShelfBook = nil
+                    },
+                    onOpenBook: { filteredShelfBook = $0 })
+            }
     }
 
     private func restoreSelection() {
         recordActivity()
         guard isShowingMainView else { return }
         if coordinator.current == .shelf {
-            requestBookFocus(lastFocusedID ?? lastSelectedID)
+            requestBookFocus(shelfFocus.last ?? lastSelectedID)
         } else {
             socialReturnRevision += 1
         }
@@ -767,7 +863,9 @@ struct ShelfView: View {
             let book = library.book(withID: id)
         else { return }
         lastSelectedID = id
-        lastFocusedID = id
+        shelfFocus.last = id
+        showsDetailFilter = false
+        library.shelfFilter = nil
         selectedBook = book
         library.requestedBookID = nil
     }
@@ -777,8 +875,10 @@ struct ShelfView: View {
             library: library, social: social, preferences: coordinator.preferences)
     }
 
+    /// The content of `view`'s tab. With `coversDetails`, My Shelf shows over the details that
+    /// filtered it (`filteredShelf`).
     @ViewBuilder
-    private func tabContent(for view: BookwormsView) -> some View {
+    private func tabContent(for view: BookwormsView, coversDetails: Bool = false) -> some View {
         GeometryReader { geometry in
             let rowHeight = geometry.size.height * 0.60
             // Matches the shelf's horizontal padding and PagedRow's inner edge insets.
@@ -800,15 +900,11 @@ struct ShelfView: View {
                         {
                             BookWallView(
                                 library: library, coordinator: coordinator, scene: bookWallScene,
-                                prepared: prepared, viewportFrame: wallViewportFrame,
+                                rendererStatus: wallRenderer, prepared: prepared,
+                                viewportFrame: wallViewportFrame,
                                 isActive: sidebarItem == .view(.bookWall),
                                 reviewLoader: reviewLoader(for:),
-                                onShowShelf: { book, filter in
-                                    lastFocusedID = book.id
-                                    filterOrigin = (book, .bookWall)
-                                    library.shelfFilter = filter
-                                    showView(.shelf)
-                                },
+                                onShowShelf: { showDetailFilter($1, from: $0) },
                                 series: { library.series(for: library.book(withID: $0.id) ?? $0) },
                                 libraryBook: { library.book(withID: $0) },
                                 // A series book opens in the cover details, even one on the wall.
@@ -843,12 +939,16 @@ struct ShelfView: View {
                             returnRevision: socialReturnRevision
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if showsDetailFilter && !coversDetails {
+                        // The filtered shelf over the details shows these books; one copy keeps
+                        // their identifiers unique and focus in one place.
+                        Spacer()
                     } else if library.books.isEmpty {
                         emptyShelf.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         Spacer(minLength: 30)
                         if !preparedPages.isEmpty {
-                            shelfRow(rowHeight: rowHeight)
+                            shelfRow(rowHeight: rowHeight, coversDetails: coversDetails)
                         } else {
                             ProgressView("Preparing shelf…").frame(height: rowHeight)
                         }
@@ -881,15 +981,19 @@ struct ShelfView: View {
                 }
             }
             .ignoresSafeArea(edges: view.hasHeader ? .top : [])
-            // The one place main content handles Back: a shelf that details filtered returns to
+            // The one place shelf content handles Back: a shelf that details filtered returns to
             // those details. Everywhere else the handler is `nil` and Back opens the sidebar.
-            .onExitCommand(perform: view == .shelf ? returnToFilterOrigin : nil)
+            .onExitCommand(perform: coversDetails ? { closeDetailFilter() } : nil)
             .task(id: shelfPreparationKey) {
+                // While a detail filter is up, only its shelf prepares the filtered pages.
                 guard !Task.isCancelled, available > 0, rowHeight > 0,
+                    !showsDetailFilter || coversDetails,
                     shelfPreparationKey.revision == library.presentationRevision,
                     shelfPreparationKey.fontRevision == library.fontRevision
                 else { return }
                 requestedShelfPreparationKey = shelfPreparationKey
+                // Pages prepared for this key, as when the tab appears again, stay as they are.
+                guard preparedShelf?.key != shelfPreparationKey else { return }
                 if !preparedPages.isEmpty {
                     do { try await activity.waitUntilQuiet() } catch { return }
                 }
@@ -898,13 +1002,15 @@ struct ShelfView: View {
                 }
                 let measurement = PerformanceDiagnostics.begin("DeferredRepack")
                 defer { measurement.end() }
-                let candidates = Dictionary(
-                    library.books.compactMap { book in
-                        library.savedSpineStyle(for: book).map { (book.id, $0) }
-                    }, uniquingKeysWith: { first, _ in first })
-                let styles =
-                    BookPresentation.showsGeneratedSpines
-                    ? BookPresentation.uniformStyles(books: library.books, styles: candidates) : [:]
+                var styles: [Int: SpineStyle] = [:]
+                if BookPresentation.showsGeneratedSpines {
+                    let candidates = Dictionary(
+                        library.books.compactMap { book in
+                            library.savedSpineStyle(for: book).map { (book.id, $0) }
+                        }, uniquingKeysWith: { first, _ in first })
+                    styles = BookPresentation.uniformStyles(
+                        books: library.books, styles: candidates)
+                }
                 let updated = BookPresentation.pages(
                     books: library.books, styles: styles, coverRatios: library.coverRatios,
                     width: available, rowHeight: rowHeight)
@@ -922,8 +1028,8 @@ struct ShelfView: View {
                         preparedPages.indices.contains(requestedPage)
                     {
                         appliedDevelopmentPage = true
-                        lastFocusedID = preparedPages[requestedPage].books.first?.id
-                        requestBookFocus(lastFocusedID)
+                        shelfFocus.last = preparedPages[requestedPage].books.first?.id
+                        requestBookFocus(shelfFocus.last)
                     }
                     if !openedDevelopmentDetail,
                         let argument = ProcessInfo.processInfo.arguments.first(where: {
@@ -946,25 +1052,27 @@ struct ShelfView: View {
     /// The Hardcover profile above the sidebar list. The photo centers on the rows' icons and the
     /// name starts where their titles start; the name takes the sidebar's font, like the rows.
     /// Offsets measured from the tvOS 27 sidebar on Apple TV.
-    private var sidebarHeader: some View {
-        HStack(spacing: 14) {
-            Group {
-                if let avatarURL = social.snapshot?.owner.avatarURL {
-                    CachedAvatarView(url: avatarURL)
-                } else {
-                    Image(systemName: "person.crop.circle.fill")
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(.secondary)
+    ///
+    /// Without a profile, such as while signed out or after Hardcover rejects the login, the
+    /// sidebar has no header. A reader without a photo gets their initial.
+    @ViewBuilder private var sidebarHeader: some View {
+        if let owner = social.snapshot?.owner {
+            HStack(spacing: 14) {
+                Group {
+                    if let avatarURL = owner.avatarURL {
+                        CachedAvatarView(url: avatarURL, name: owner.displayName)
+                    } else {
+                        ReaderMonogram(name: owner.displayName)
+                    }
                 }
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+                Text(owner.displayName)
+                    .lineLimit(1)
+                Spacer()
             }
-            .frame(width: 40, height: 40)
-            .clipShape(Circle())
-            Text(social.snapshot?.owner.displayName ?? "Bookworms")
-                .lineLimit(1)
-            Spacer()
+            .padding(.leading, 12)
         }
-        .padding(.leading, 12)
     }
 
     /// Chooses ambient timing and starts playback. The sidebar item opens this page instead of
@@ -1092,8 +1200,14 @@ struct ShelfView: View {
     }
 
     private var selectionCaption: some View {
-        let book = library.books.first { $0.id == (focusedBook ?? lastFocusedID) }
-        return Group {
+        ShelfFocusReader(focus: shelfFocus) { focus in
+            selectionCaption(
+                for: library.books.first { $0.id == (focus.focused ?? focus.last) })
+        }
+    }
+
+    private func selectionCaption(for book: Book?) -> some View {
+        Group {
             if let book {
                 BookCaption(
                     book: book, dateFormat: dateFormat,
@@ -1112,9 +1226,7 @@ struct ShelfView: View {
     private var shelfStatus: some View {
         HStack(spacing: 22) {
             if let filter = library.shelfFilter {
-                Button {
-                    library.shelfFilter = nil
-                } label: {
+                Button(action: clearShelfFilter) {
                     Label(filter.name, systemImage: "xmark")
                 }
                 .buttonStyle(.glass)
@@ -1140,25 +1252,57 @@ struct ShelfView: View {
         .focusSection()
     }
 
-    private func shelfRow(rowHeight: CGFloat) -> some View {
+    /// The shelf's books. Over details, focus enters on the book whose details applied the
+    /// filter, a selected book opens details over the shelf, and focus leaves `shelfFocus.last` on
+    /// the book that opened the first details.
+    private func shelfRow(rowHeight: CGFloat, coversDetails: Bool) -> some View {
+        let filterEntryID = detailFilterEntryID
+        return ShelfFocusReader(focus: shelfFocus) { focus in
+            shelfRow(
+                rowHeight: rowHeight, coversDetails: coversDetails,
+                entryBookID: coversDetails ? filterEntryID : focus.last)
+        }
+        // The shelf over details keeps My Shelf's photo.
+        .onAppear { if !coversDetails { photoSeed = Int.random(in: 0..<1000) } }
+    }
+
+    private func shelfRow(rowHeight: CGFloat, coversDetails: Bool, entryBookID: Int?)
+        -> ShelfRow
+    {
         ShelfRow(
             library: library, pages: preparedPages, rowHeight: rowHeight, palette: palette,
-            entryBookID: lastFocusedID,
+            entryBookID: entryBookID,
             focusRequest: bookFocusRequest,
             presentationStyles: presentationStyles,
             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[0],
             onFocus: { id in
-                focusedBook = id
-                if let id { lastFocusedID = id }
+                shelfFocus.focus(id)
+                if let id, !coversDetails { shelfFocus.last = id }
                 recordActivity()
             },
             onSelect: { book in
                 recordActivity()
-                lastSelectedID = book.id
-                selectedBook = book
+                if coversDetails {
+                    filteredShelfBook = book
+                } else {
+                    lastSelectedID = book.id
+                    selectedBook = book
+                }
             }
         )
-        .onAppear { photoSeed = Int.random(in: 0..<1000) }
+    }
+
+    /// Shows the whole of My Shelf, closing any details the filter covered, with focus on the
+    /// book whose details applied the filter.
+    private func clearShelfFilter() {
+        if showsDetailFilter {
+            shelfFocus.last = detailFilterEntryID ?? shelfFocus.last
+            showsDetailFilter = false
+            filteredShelfBook = nil
+            selectedBook = nil
+            showView(.shelf)
+        }
+        library.shelfFilter = nil
     }
 
     private var emptyShelf: some View {
@@ -1181,7 +1325,7 @@ struct ShelfView: View {
             .frame(maxWidth: 900)
             // The buttons keep the glass styles' own label colors, which change with focus.
             if let filter = library.shelfFilter {
-                Button("Show all books") { library.shelfFilter = nil }
+                Button("Show all books", action: clearShelfFilter)
                     .buttonStyle(.glassProminent)
                     .accessibilityLabel("Clear filter: \(filter.name)")
                     .accessibilityIdentifier("clear-shelf-filter")
@@ -1717,6 +1861,29 @@ struct PagedRow<Item: Identifiable, Content: View>: View where Item.ID == Int {
     }
 }
 
+/// My Shelf's focused book and the book focus last rested on, kept apart from `ShelfView`'s
+/// state so focus movement redraws only the views that read them (`ShelfFocusReader`).
+@MainActor @Observable
+final class ShelfFocus {
+    /// The focused shelf book, or `nil` while focus is elsewhere.
+    private(set) var focused: Int?
+    /// The book focus last rested on, where focus returns.
+    var last: Int?
+
+    func focus(_ id: Int?) {
+        focused = id
+    }
+}
+
+/// Builds `content` from `focus` in its own body, so focus changes update this view rather
+/// than the view that creates it.
+struct ShelfFocusReader<Content: View>: View {
+    let focus: ShelfFocus
+    @ViewBuilder let content: (ShelfFocus) -> Content
+
+    var body: some View { content(focus) }
+}
+
 /// Presents prepared shelf pages as one paged row of book buttons.
 ///
 /// Native focus handles movement within and between pages. The row assigns focus only when it
@@ -1823,7 +1990,7 @@ struct ShelfRow: View {
         .focused($focusedBook, equals: book.id)
         .accessibilityLabel("\(book.title), by \(book.author)")
         .accessibilityHint(
-            endsPage ? "Open book details. Move right for more books." : "Open book details"
+            endsPage ? "Opens book details. Move right for more books." : "Opens book details."
         )
         .accessibilityIdentifier("book-\(book.id)")
     }

@@ -128,15 +128,10 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(books.first { $0.id == 3 }?.readCount, 0)
     }
 
-    @MainActor func testHardcoverLinksUsePermanentIDPagesAndEncodeAsQRCodes() throws {
-        XCTAssertEqual(
-            Book(id: 312_460, title: "Book", author: "Author").hardcoverURL?.absoluteString,
-            "https://hardcover.app/id/books/312460")
-        let cwa = Book(id: 1_000_000_000_000_001, title: "Book", author: "Author", sources: [.cwa])
-        XCTAssertNil(cwa.hardcoverURL, "Hardcover doesn't list CWA-only books")
+    @MainActor func testHardcoverProfileLinksUsePermanentIDsAndEncodeAsQRCodes() throws {
         XCTAssertEqual(HardcoverLink.user(42).absoluteString, "https://hardcover.app/id/user/42")
         let renderer = QRCodeRenderer()
-        let link = "https://hardcover.app/id/books/312460"
+        let link = HardcoverLink.user(123_456).absoluteString
         let code = try XCTUnwrap(renderer.image(for: link))
         XCTAssertEqual(code.width, code.height)
         XCTAssertEqual(

@@ -370,8 +370,13 @@ enum SpineCloudIdentity {
     }
 
     private static func sha256(_ text: String) -> String {
-        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(text.utf8)).hex
     }
+}
+
+extension SHA256.Digest {
+    /// The digest as lowercase hexadecimal, as record names, cache keys, and file names use it.
+    var hex: String { map { String(format: "%02x", $0) }.joined() }
 }
 
 /// Makes the CloudKit boundary replaceable for deterministic record and conflict checks.

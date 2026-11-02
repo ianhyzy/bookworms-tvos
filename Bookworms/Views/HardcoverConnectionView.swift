@@ -9,10 +9,14 @@ struct HardcoverConnectionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isVisible = false
     @State private var didComplete = false
+    /// The last connection step, which stays on screen while the presenter dismisses this view.
+    @State private var lastPhase: HardcoverConnectionPhase?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if isConnecting {
+            // A completed connection keeps its progress card so the sign-in card doesn't
+            // reappear while the sheet closes.
+            if isConnecting || didComplete {
                 connectionProgress
                     .transition(.opacity)
             } else {
@@ -29,6 +33,9 @@ struct HardcoverConnectionView: View {
         }
         .onChange(of: needsHardcoverLink) {
             startDeviceAuthIfNeeded()
+        }
+        .onChange(of: library.hardcoverConnectionPhase) { _, phase in
+            if let phase { lastPhase = phase }
         }
         .onChange(of: library.hardcoverConnected) {
             completeIfReady()
@@ -53,17 +60,21 @@ struct HardcoverConnectionView: View {
         library.hardcoverConnectionPhase != nil || library.isLoading
     }
 
+    private var shownPhase: HardcoverConnectionPhase? {
+        library.hardcoverConnectionPhase ?? (didComplete ? lastPhase : nil)
+    }
+
     private var connectionProgress: some View {
         VStack(spacing: 28) {
             ProgressView().controlSize(.large)
             VStack(spacing: 14) {
-                Text(library.hardcoverConnectionPhase?.title ?? "Connecting to Hardcover")
+                Text(shownPhase?.title ?? "Connecting to Hardcover")
                     .appFont(size: 46, weight: .semibold)
                     .contentTransition(.opacity)
                     .animation(
                         reduceMotion ? nil : .easeInOut(duration: 0.18),
-                        value: library.hardcoverConnectionPhase)
-                Text(library.hardcoverConnectionPhase?.detail ?? "Checking your sign-in…")
+                        value: shownPhase)
+                Text(shownPhase?.detail ?? "Checking your sign-in…")
                     .appFont(size: 26)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

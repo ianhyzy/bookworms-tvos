@@ -19,7 +19,7 @@ final class LiveServiceTests: XCTestCase {
         let session = makeSession()
         defer { session.invalidateAndCancel() }
         do {
-            let books = try await HardcoverClient(session: session).fetchBooks(token: token)
+            let books = try await HardcoverClient(session: session).fetchLibrary(token: token).books
             assertDecodedContract(books, source: .hardcover)
             // Followed readers and community reviews both read the account's block list first.
             let social = HardcoverSocialClient(client: HardcoverClient(session: session))

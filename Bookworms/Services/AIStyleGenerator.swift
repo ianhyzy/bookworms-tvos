@@ -57,7 +57,9 @@ actor AIStyleGenerator {
         let response = try await send(
             prompt: prompt, images: [cover], configuration: configuration, key: key)
         let proposal = try Self.decode(StyleProposal.self, text: response)
-        guard (1...5).contains(proposal.candidateFamilies.count), proposal.reason.count <= 4000
+        // The prompt asks for four. A shorter list is still usable; a longer one is rejected on
+        // purpose, so every comparison sheet the model judges holds at most the four it asked for.
+        guard (1...4).contains(proposal.candidateFamilies.count), proposal.reason.count <= 4000
         else { throw AIError.invalidResponse }
         var candidates: [(FontCandidate, DownloadedFont)] = []
         var seen = Set<String>()
@@ -94,7 +96,7 @@ actor AIStyleGenerator {
             uppercase: proposal.uppercase, recognizedTitle: true,
             provenance:
                 "\(configuration.provider.title) · \(configuration.model) · \(chosen.0.family)")
-        let hash = SHA256.hash(data: cover).map { String(format: "%02x", $0) }.joined()
+        let hash = SHA256.hash(data: cover).hex
         return AIStyleRecord(
             bookID: book.id, style: style, font: chosen.1, weight: chosen.0.weight,
             provider: configuration.provider, model: configuration.model, coverHash: hash,

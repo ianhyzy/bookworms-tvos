@@ -66,8 +66,7 @@ actor GoogleFontLibrary {
     private func directory(family: String, weight: Int) -> URL {
         // The key names the file rule (`fileName(for:in:)`), so a file that an earlier rule
         // chose, such as League Gothic's condensed width, downloads again.
-        let key = SHA256.hash(data: Data("files-v2:\(family):\(weight)".utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let key = SHA256.hash(data: Data("files-v2:\(family):\(weight)".utf8)).hex
         return root.appending(path: key)
     }
 
@@ -87,12 +86,16 @@ actor GoogleFontLibrary {
 
     /// Downloads and registers `family`, and returns its upright face nearest `weight`. Throws
     /// `AIError.invalidFont` for a blocked family, such as Impact, before reading the cache or
-    /// the network.
-    func download(family: String, weight: Int = 400) async throws -> DownloadedFont {
+    /// the network. Without `allowsNetwork`, it reads only the cache and throws
+    /// `URLError(.notConnectedToInternet)` for a face that isn't there.
+    func download(
+        family: String, weight: Int = 400, allowsNetwork: Bool = true
+    ) async throws -> DownloadedFont {
         guard SpineFontPolicy.allows(family) else { throw AIError.invalidFont }
         if let font = cached(family: family, weight: weight) {
             if (try? register(font)) != nil { return font }
         }
+        guard allowsNetwork else { throw URLError(.notConnectedToInternet) }
         let catalog = try await catalog()
         guard let entry = catalog.first(where: { $0.family == family }), entry.isOpenSource != false
         else { throw AIError.invalidFont }

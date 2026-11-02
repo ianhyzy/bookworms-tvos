@@ -63,7 +63,7 @@ final class HardcoverSession {
             if let previousRefreshToken {
                 try? dependencies.saveCredential(previousRefreshToken, Self.refreshAccount)
             } else {
-                dependencies.removeCredential(Self.refreshAccount)
+                try? dependencies.removeCredential(Self.refreshAccount)
             }
             throw error
         }
@@ -74,21 +74,24 @@ final class HardcoverSession {
     /// Removes the saved login and revokes it at Hardcover, so Hardcover's Authorized Apps page
     /// stops listing the Apple TV. Reads Keychain.
     ///
-    /// The revocation is one request in its own task, and a failure is ignored: the login is
-    /// removed from the Apple TV either way, and the reader can still revoke it on Hardcover. A
-    /// personal access token has no refresh token and isn't revoked, since the reader may use it
-    /// elsewhere.
-    func remove() {
+    /// The revocation is one request in its own task, and a failure is ignored: the reader can
+    /// still revoke the login on Hardcover. A personal access token has no refresh token and isn't
+    /// revoked, since the reader may use it elsewhere.
+    ///
+    /// Throws when Keychain keeps either token, after trying both deletes and the revocation.
+    func remove() throws {
         let refreshToken =
             unsaved?.tokens.refreshToken ?? dependencies.readCredential(Self.refreshAccount)
         generation += 1
         unsaved = nil
-        dependencies.removeCredential(Self.refreshAccount)
-        dependencies.removeCredential(Self.accessAccount)
+        let refreshRemoval = Result { try dependencies.removeCredential(Self.refreshAccount) }
+        let accessRemoval = Result { try dependencies.removeCredential(Self.accessAccount) }
         dependencies.defaults.removeObject(forKey: Self.renewalKey)
         if let refreshToken {
             Task { try? await self.dependencies.revokeHardcoverToken(refreshToken) }
         }
+        try refreshRemoval.get()
+        try accessRemoval.get()
     }
 
     /// The access token for a sync, renewed first when it's due (`renewalDate(of:issued:)`).
@@ -203,7 +206,7 @@ final class HardcoverSession {
         if let refreshToken = tokens.refreshToken {
             try dependencies.saveCredential(refreshToken, Self.refreshAccount)
         } else {
-            dependencies.removeCredential(Self.refreshAccount)
+            try dependencies.removeCredential(Self.refreshAccount)
         }
     }
 

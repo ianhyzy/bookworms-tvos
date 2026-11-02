@@ -263,6 +263,46 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(afterBack["hardcoverConnected"] as? Bool, false)
     }
 
+    /// The shelf an author filtered over the example's book details offers Connect Hardcover too,
+    /// and its sign-in presents over that shelf, which covers the tabs.
+    func testExampleFilteredShelfConnectHardcoverOpensSignInAndBackReturns() throws {
+        let app = launch("welcome", focusProbe: true)
+        let example = app.buttons["welcome-example-profile"]
+        XCTAssertTrue(example.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        let first = app.buttons["book-1"]
+        RemoteNavigation.press(
+            .select, in: app, expecting: first, updates: exampleEntryUpdates, timeout: 15)
+        XCUIRemote.shared.press(.select)
+        let author = app.buttons["detail-author"]
+        RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"], timeout: 15)
+        // The details cover the tabs, so they show the example's capsule themselves.
+        capture(app, "scenario-example-details")
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+        let clear = app.buttons["clear-shelf-filter"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(first)
+        capture(app, "scenario-example-filtered-shelf")
+        let exampleConnect = app.buttons["example-connect-hardcover"]
+        RemoteNavigation.press(.down, in: app, expecting: clear)
+        RemoteNavigation.press(.right, in: app, expecting: exampleConnect)
+        RemoteNavigation.press(
+            .select, in: app, expecting: app.buttons["hardcover-new-code"],
+            updates: sheetEntryUpdates)
+        XCTAssertTrue(app.staticTexts["hardcover-device-code"].waitForExistence(timeout: 5))
+        capture(app, "scenario-example-filtered-connect-hardcover")
+        RemoteNavigation.press(
+            .menu, in: app, expecting: exampleConnect, updates: sheetExitUpdates)
+        XCTAssertTrue(clear.exists, "Back from the sign-in left the filtered shelf")
+        XCTAssertEqual(
+            try probe(app, sample: true, example: true)["hardcoverConnected"] as? Bool, false)
+        // Back from the filtered shelf still reveals the details beneath it.
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(author)
+    }
+
     func testWelcomeHardcoverDownloadAndArtworkStayInModalUntilReady() throws {
         let app = launch("welcome", focusProbe: true)
         let connect = app.buttons["welcome-connect-hardcover"]
@@ -308,6 +348,39 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertTrue(restored.buttons["book-1"].waitForExistence(timeout: 15))
         XCTAssertFalse(restored.descendants(matching: .any)["library-welcome"].exists)
         XCTAssertEqual(try probe(restored)["sourceCalls"] as? Int, 0)
+    }
+
+    /// Reconnecting with a fresh snapshot validates the login, closes the sheet, and keeps the
+    /// daily download schedule.
+    func testSettingsReconnectClosesTheSheetWithoutDownloading() throws {
+        let app = launch("welcome", settingsTab: "Sources")
+        try openWelcomeHardcover(app)
+        command("approve-hardcover", app: app)
+        _ = try waitForProbe(app) {
+            ($0["network"] as? [String: Any])?["heldLibrary"] as? Int == 1
+        }
+        command("release-library", app: app)
+        _ = try waitForProbe(app) {
+            ($0["network"] as? [String: Any])?["heldArtwork"] as? Int == 1
+        }
+        command("release-artwork", app: app)
+        XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
+        let downloads = try XCTUnwrap(try probe(app)["sourceCalls"] as? Int)
+
+        RemoteNavigation.openSettings(app)
+        let disconnect = app.buttons["Disconnect Hardcover"]
+        RemoteNavigation.moveFocus(to: disconnect, in: app)
+        XCUIRemote.shared.press(.select)
+        let connect = app.buttons["Connect Hardcover"]
+        RemoteNavigation.waitForFocus(connect)
+        XCUIRemote.shared.press(.select)
+        // The scenario already approved this Apple TV, so the first poll returns a token.
+        XCTAssertTrue(app.buttons["Disconnect Hardcover"].waitForExistence(timeout: 15))
+        waitForAbsence(app.descendants(matching: .any)["hardcover-connection-progress"])
+        XCTAssertFalse(app.staticTexts["hardcover-instructions"].exists)
+        let evidence = try probe(app)
+        XCTAssertEqual(evidence["sourceCalls"] as? Int, downloads)
+        XCTAssertEqual(evidence["hardcoverConnected"] as? Bool, true)
     }
 
     func testWelcomeDownloadFailureKeepsChoicesAvailableAndDoesNotCompleteSetup() throws {
@@ -511,8 +584,7 @@ final class ScenarioNavigationTests: XCTestCase {
                     error =
                         "The network connection is unavailable. Check Apple TV's connection and try again."
                 default:
-                    error =
-                        "The Hardcover login is invalid or expired. Reconnect in Settings."
+                    error = "The Hardcover login is invalid or expired."
                 }
                 XCTAssertTrue(app.staticTexts[error].waitForExistence(timeout: 5))
                 // A rejected login must be reconnected before syncing again, and its error
@@ -583,17 +655,14 @@ final class ScenarioNavigationTests: XCTestCase {
         capture(restored, "scenario-reenabled-cached-shelf")
     }
 
-    /// Cover details of a Hardcover book show an unfocusable QR code under the cover. Sample books
-    /// have no Hardcover page, so this runs on the scenario library. Its first book has no genres
-    /// and a description that fits, so the histogram is the metadata row's only control.
-    func testDetailsWithHardcoverCodeHaveCountedDirectionalBoundaries() {
+    /// Cover details of a Hardcover book on the scenario library. Its first book has no genres and
+    /// a description that fits, so the histogram is the metadata row's only control.
+    func testHardcoverBookDetailsHaveCountedDirectionalBoundaries() {
         let app = launch(focusProbe: true)
         let first = app.buttons["book-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 20))
         RemoteNavigation.waitForFocus(first)
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(
-            app.descendants(matching: .any)["detail-hardcover-code"].waitForExistence(timeout: 5))
         let back = app.buttons["back-to-shelf"]
         let author = app.buttons["detail-author"]
         let reviews = app.buttons["community-reviews"]
@@ -605,7 +674,7 @@ final class ScenarioNavigationTests: XCTestCase {
         RemoteNavigation.press(.up, in: app, expecting: author)
         RemoteNavigation.press(.down, in: app, expecting: reviews)
         RemoteNavigation.press(.left, in: app, expecting: back)
-        capture(app, "scenario-detail-hardcover-code")
+        capture(app, "scenario-detail-hardcover-book")
         XCUIRemote.shared.press(.menu)
         RemoteNavigation.waitForFocus(first)
     }

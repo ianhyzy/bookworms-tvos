@@ -52,10 +52,16 @@ final class LibraryModel {
             let offersOwned =
                 BookPresentation.offersCWA && allBooks.contains { $0.isOwned == true }
             if offersOwned != offersOwnedBooks { offersOwnedBooks = offersOwned }
+            let read = Set(
+                allBooks.filter { $0.isHardcoverBook && ($0.isRead == true || $0.finished != nil) }
+                    .map(\.id))
+            if read != readBookIDs { readBookIDs = read }
             refreshSeriesSources()
             refreshOnThisDay()
         }
     }
+    /// The Hardcover books the library marks read or finished, for Friends' Picks.
+    private(set) var readBookIDs: Set<Int> = []
     /// Each book that shares a series design, by ID, mapped to the book whose design it draws
     /// with (`SeriesDesigns.sources`); a source maps to itself. Prepared with the library, never
     /// on focus or remote input.
@@ -246,6 +252,12 @@ final class LibraryModel {
         return preferences
     }
     private(set) var hasLoadedLibrarySnapshot = false
+    /// Whether launch's companion record read has applied, no read will run, as with iCloud
+    /// storage off, or 10 seconds have passed since launch started the read. Book Wall waits for
+    /// it, so its first preparation includes the companion designs and series looks instead of
+    /// preparing every spine again when they arrive. The time limit covers a stalled read and a
+    /// read that a newer snapshot replaced; records that arrive later rebuild the wall.
+    private(set) var hasReadCompanionRecords = false
     /// The connected Hardcover account's permanent profile link, for the profile code in ambient
     /// mode. `nil` without a connected, enabled account.
     var hardcoverProfileURL: URL? {
@@ -267,6 +279,8 @@ final class LibraryModel {
     @ObservationIgnored private var topShelfRevision = 0
     @ObservationIgnored private var topShelfTask: Task<Void, Never>?
     @ObservationIgnored private var cloudRevision = 0
+    /// The `cloudAccountChanged()` calls still reading the iCloud user; cloud work waits for them.
+    @ObservationIgnored private var cloudUserChecks = 0
     @ObservationIgnored private var activeHardcoverAccountID: String?
     @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
     @ObservationIgnored private var spineDesignTaskIdentity:
@@ -353,7 +367,7 @@ final class LibraryModel {
         let font = aiRecords[book.id].flatMap { UIFont(name: $0.style.fontName, size: 23) }
         guard let record = aiRecords[book.id],
             BookPresentation.usesSpine(
-                hasSavedKey: savedAIKeyAvailable, hasDesign: true, fontAvailable: font != nil)
+                hasSavedKey: savedAIKeyAvailable, fontAvailable: font != nil)
         else { return nil }
         var style = styles[book.id] ?? record.style
         // A registered face with the italic trait or a slant never renders, whatever its name.
@@ -426,7 +440,12 @@ final class LibraryModel {
             let saved = try? JSONDecoder().decode(AIConfiguration.self, from: data)
         else { return }
         cancelGeneration()
-        dependencies.removeCredential(saved.credentialAccount)
+        do {
+            try dependencies.removeCredential(saved.credentialAccount)
+        } catch {
+            generationStatus = "The API key could not be removed. Try again."
+            return
+        }
         reloadSavedAIAvailability()
         generationStatus = "API key removed. Saved designs are retained; books use covers."
     }
@@ -439,7 +458,9 @@ final class LibraryModel {
         }
     }
 
-    private(set) var styles: [Int: SpineStyle] = [:]
+    private(set) var styles: [Int: SpineStyle] = [:] {
+        didSet { if styles != oldValue { presentationRevision += 1 } }
+    }
     private(set) var isLoading = false
     private(set) var hardcoverConnectionPhase: HardcoverConnectionPhase?
     private(set) var hasCompletedWelcome: Bool
@@ -464,8 +485,8 @@ final class LibraryModel {
     /// Other provider accounts, artwork, saved designs, and display preferences are retained.
     func resetHardcoverSetup() async throws {
         guard !hasStarted else { throw SetupResetError.alreadyStarted }
-        hardcoverSession.remove()
-        guard dependencies.readCredential(HardcoverSession.accessAccount) == nil,
+        guard (try? hardcoverSession.remove()) != nil,
+            dependencies.readCredential(HardcoverSession.accessAccount) == nil,
             dependencies.readCredential(HardcoverSession.refreshAccount) == nil
         else {
             throw SetupResetError.credentialRemovalFailed
@@ -681,6 +702,8 @@ final class LibraryModel {
         spineDesignTask?.cancel()
         spineDesignTask = nil
         spineDesignTaskIdentity = nil
+        // Book Wall stops waiting for the cancelled read; a later read rebuilds it.
+        hasReadCompanionRecords = true
     }
 
     func start() async {
@@ -702,6 +725,7 @@ final class LibraryModel {
         {
             showSample()
             hasLoadedLibrarySnapshot = true
+            hasReadCompanionRecords = true
             return
         }
         aiRecords = dependencies.styleStore.load()
@@ -765,6 +789,15 @@ final class LibraryModel {
             }
         } else {
             cloudStatus = "iCloud storage is off."
+        }
+        if spineDesignTask == nil {
+            hasReadCompanionRecords = true
+        } else {
+            let limit = dependencies.companionReadLimit
+            Task { [weak self] in
+                await limit()
+                self?.hasReadCompanionRecords = true
+            }
         }
         #if DEBUG
             if dependencies.allowLaunchOverrides,
@@ -880,7 +913,7 @@ final class LibraryModel {
                         }
                     } catch {
                         guard !Task.isCancelled else { break }
-                        self.hardcoverDeviceAuthMessage = self.readable(error)
+                        self.hardcoverDeviceAuthMessage = UserFacingError.hardcoverMessage(error)
                         // Hardcover won't accept a rejected code again; the message offers a new one.
                         if case HardcoverError.invalidAuthorizationCode = error { return }
                     }
@@ -888,7 +921,7 @@ final class LibraryModel {
             } catch {
                 guard !Task.isCancelled else { return }
                 self.hardcoverDeviceAuthLoading = false
-                self.hardcoverDeviceAuthMessage = self.readable(error)
+                self.hardcoverDeviceAuthMessage = UserFacingError.hardcoverMessage(error)
             }
         }
     }
@@ -952,8 +985,7 @@ final class LibraryModel {
                 isSample = false
                 hardcoverEnabled = true
                 sourceErrors[LibrarySource.hardcover.rawValue] = nil
-                message =
-                    "Hardcover token verified. Library sync keeps its daily schedule."
+                message = Self.verifiedTokenMessage
                 return true
             }
             try schedule
@@ -983,8 +1015,14 @@ final class LibraryModel {
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
-            message = readable(error)
-            sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
+            // This login isn't saved, so no Disconnect button appears; the reader connects again.
+            message =
+                if case HardcoverError.insufficientScope = error {
+                    Self.unsavedScopeMessage
+                } else {
+                    UserFacingError.hardcoverMessage(error)
+                }
+            sourceErrors[LibrarySource.hardcover.rawValue] = message
             return false
         }
     }
@@ -1069,8 +1107,9 @@ final class LibraryModel {
                     series: result.series)
             } catch {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
-                sourceErrors[LibrarySource.hardcover.rawValue] = readable(error)
-                failures.append("Hardcover: " + readable(error))
+                let text = UserFacingError.hardcoverMessage(error)
+                sourceErrors[LibrarySource.hardcover.rawValue] = text
+                failures.append(text.hasPrefix("Hardcover") ? text : "Hardcover: " + text)
                 switch error as? HardcoverError {
                 case .invalidToken: hardcoverSessionExpired = true
                 default: break
@@ -1264,15 +1303,27 @@ final class LibraryModel {
         updateShelf()
     }
 
+    /// The status after a replacement login is verified between daily syncs, shown while the
+    /// reconnection's social load runs.
+    static let verifiedTokenMessage = "Hardcover token verified. Loading library…"
+    static let unsavedScopeMessage =
+        "Hardcover didn't give Bookworms permission to read your library. Connect again and allow access to your library."
+
+    /// Removes `verifiedTokenMessage` once the reconnection's social load ends, keeping any
+    /// later message.
+    func clearVerifiedTokenMessage() {
+        if message == Self.verifiedTokenMessage { message = nil }
+    }
+
     func disconnect() {
         guard !isLoading else { return }
         cancelShelfWork()
-        hardcoverSession.remove()
+        message = nil
+        do { try hardcoverSession.remove() } catch { message = readable(error) }
         hardcoverConnected = false
         hardcoverSessionExpired = false
         hardcoverEnabled = false
         isSample = false
-        message = nil
         rebuildLibrary()
     }
 
@@ -1390,7 +1441,6 @@ final class LibraryModel {
         allBooks = merged
         seriesByID = Dictionary(
             (hardcover?.series ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        updateBrowsingCovers()
         syncedAt = enabled.map(\.syncedAt).max()
         styles = aiRecords.mapValues(\.style)
         updateShelf()
@@ -1460,7 +1510,34 @@ final class LibraryModel {
         #endif
     }
 
-    func cloudAccountChanged() {
+    /// The iCloud user that the last successful sync used (`cloudAccountChanged()`).
+    static let cloudUserKey = "iCloudUserRecordName"
+
+    /// Handles `CKAccountChanged`, which CloudKit also posts when the same account's state
+    /// changes. Storage stays on while the signed-in user is the one the last sync used;
+    /// otherwise, including when the user can't be read, it turns off.
+    ///
+    /// Cloud syncs and companion-record reads and writes stop while the user is read, so none
+    /// of them exchanges this library with another account's iCloud data. They resume when the
+    /// user is unchanged.
+    func cloudAccountChanged() async {
+        let enabled = iCloudEnabled
+        if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
+            cloudUserChecks += 1
+            if hasStarted { invalidateCloudSync() }
+            let sameUser = await dependencies.cloudUserRecordName() == previous
+            cloudUserChecks -= 1
+            if sameUser {
+                resumeCloudWork()
+                return
+            }
+        }
+        // A storage toggle made while CloudKit answered is the reader's newer choice.
+        guard iCloudEnabled == enabled else {
+            resumeCloudWork()
+            return
+        }
+        dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
         cloudBacked = false
         iCloudEnabled = false
         if !hardcoverConnected {
@@ -1472,13 +1549,20 @@ final class LibraryModel {
             "Your iCloud account changed. Turn iCloud Storage on to sync this library with the current account."
     }
 
+    /// Restarts the cloud sync and companion-record read that `cloudAccountChanged()` held back.
+    private func resumeCloudWork() {
+        guard hasStarted else { return }
+        queueCloudSync()
+        queueSpineDesignRefresh()
+    }
+
     /// Queues a cloud sync, which uploads local snapshots and merges the archive's newer ones.
     /// `delay` batches the changes that follow one another; a sync already queued keeps its own.
     func queueCloudSync(delay: Duration = .seconds(2)) {
         guard !PerformanceDiagnostics.isolates("background") else { return }
         guard hasStarted, iCloudEnabled, !isSample, !cloudSyncSuppressedForWelcome else { return }
         cloudPending = true
-        guard cloudTask == nil else { return }
+        guard cloudTask == nil, cloudUserChecks == 0 else { return }
         let revision = cloudRevision
         cloudTask = Task { [weak self] in
             guard let self else { return }
@@ -1491,7 +1575,13 @@ final class LibraryModel {
                 cloudStatus = "Syncing with iCloud…"
                 do {
                     let archive = CloudLibraryArchive(sources: sourceSnapshots, designs: aiRecords)
+                    // The user is read on both sides of the sync and saved only when both reads
+                    // agree, so an account switch during the sync can't record the new user as
+                    // the one this library synced with (`cloudAccountChanged()`).
+                    let userBefore = await dependencies.cloudUserRecordName()
                     let remote = try await dependencies.syncCloud(archive)
+                    let userAfter = await dependencies.cloudUserRecordName()
+                    let cloudUser = userBefore == userAfter ? userAfter : nil
                     // Disabling storage or changing accounts invalidates even uncancellable replies.
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return
@@ -1520,6 +1610,9 @@ final class LibraryModel {
                         setActiveHardcoverAccountID(worklist.accountID)
                     }
                     cloudBacked = true
+                    if let cloudUser {
+                        dependencies.defaults.set(cloudUser, forKey: Self.cloudUserKey)
+                    }
                     do {
                         let savedSourceRevision = try await saveSources()
                         guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
@@ -1616,7 +1709,7 @@ final class LibraryModel {
     /// account and sync date; a newer selection cancels an older one, as does `restarting`, which
     /// a saved series pick sets because a running read may have missed its new look group.
     private func queueSpineDesignRefresh(restarting: Bool = false) {
-        guard !PerformanceDiagnostics.isolates("background") else { return }
+        guard !PerformanceDiagnostics.isolates("background"), cloudUserChecks == 0 else { return }
         // Sample mode draws its own records; an account that a disconnect kept must not replace
         // them or save looks for the sample's books.
         guard !isSample, iCloudEnabled, hardcoverEnabled,
@@ -1676,6 +1769,7 @@ final class LibraryModel {
                 if !rebuild { refreshSeriesSources() }
             }
             if rebuild { rebuildLibrary() }
+            hasReadCompanionRecords = true
             // A design or link missing from a partial read could decide a look for good, and a
             // look missing from one would be created again.
             if designs?.isComplete == true, links?.isComplete == true, looks?.isComplete == true {
@@ -1753,6 +1847,7 @@ final class LibraryModel {
             seriesLooks = [:]
             refreshSeriesSources()
         }
+        hasReadCompanionRecords = true
         let requestID = UUID()
         spineDesignTaskIdentity = ("", .distantPast, requestID)
         spineDesignTask = Task { [weak self] in
@@ -1843,7 +1938,6 @@ final class LibraryModel {
     private func restoreSavedStyles(_ books: [Book]) {
         // Retain paid choices; books without a saved design are rendered as covers.
         for book in books { if let record = aiRecords[book.id] { styles[book.id] = record.style } }
-        presentationRevision += 1
     }
 
     var hasAIKey: Bool { credentials.contains(aiConfiguration.credentialAccount) }
@@ -1912,13 +2006,14 @@ final class LibraryModel {
         }
         let selected =
             automatically
-            ? AutomaticSpineGeneration().candidates(in: books, savedIDs: Set(aiRecords.keys))
+            ? AutomaticSpineGeneration(defaults: dependencies.defaults)
+                .candidates(in: books, savedIDs: Set(aiRecords.keys))
             : (onlyMissing ? books.filter { aiRecords[$0.id] == nil } : books)
         guard !selected.isEmpty else {
             if !automatically { generationStatus = "All selected spines are saved." }
             return
         }
-        AutomaticSpineGeneration().recordAttempt(selected)
+        AutomaticSpineGeneration(defaults: dependencies.defaults).recordAttempt(selected)
         analysisTask?.cancel()
         fontTask?.cancel()
         isGenerating = true

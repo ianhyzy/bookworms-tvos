@@ -144,7 +144,7 @@ final class BookWallNavigationTests: XCTestCase {
         ] {
             let book = app.buttons["book-wall-\(id)"]
             RemoteNavigation.moveFocus(to: book, in: app)
-            XCTAssertEqual(book.label, "\(title), Alex Rowan")
+            XCTAssertEqual(book.label, "\(title), by Alex Rowan")
             capture(app, name: "Book-Wall-renderer-edge-\(id)-focused")
             XCUIRemote.shared.press(.select)
             let detail = app.staticTexts["detail-title"]
@@ -171,12 +171,78 @@ final class BookWallNavigationTests: XCTestCase {
         }
     }
 
+    /// Back from the shelf that wall details filtered reveals those details, which stayed open
+    /// beneath it: the book never flies out again, and focus returns to the author that applied
+    /// the filter.
+    func testBackFromDetailFilterReturnsToDetailsWithoutAnotherFlight() {
+        let app = openWall()
+        let book = app.buttons["book-wall-8"]
+        RemoteNavigation.waitForFocus(book)
+        XCUIRemote.shared.press(.select)
+        let title = app.staticTexts["detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let back = app.buttons["back-to-shelf"]
+        RemoteNavigation.waitForFocus(back)
+        let flights = app.staticTexts["book-wall-flight-probe"]
+        XCTAssertEqual(flights.label, "1")
+        let author = app.buttons["detail-author"]
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["clear-shelf-filter"].waitForExistence(timeout: 5))
+        let shelfBook = app.buttons["book-8"]
+        RemoteNavigation.waitForFocus(shelfBook)
+        XCTAssertFalse(title.exists && title.isHittable, "The shelf didn't cover the details")
+
+        let before = RemoteNavigation.transitions(app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(title.exists, "Details weren't there at once")
+        XCTAssertEqual(title.label, "Winter in the Orchard")
+        RemoteNavigation.waitForFocus(author)
+        // Observe a full settle window so a late update or flight is counted.
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Details settle")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertEqual(flights.label, "1", "Back from the filter flew the book out again")
+        XCTAssertTrue(RemoteNavigation.isFocused(author))
+        XCTAssertFalse(app.buttons["clear-shelf-filter"].exists)
+        // Two updates: the leaving shelf clears focus, and the details restore it to the author.
+        XCTAssertEqual(RemoteNavigation.transitions(app), before.map { $0 + 2 })
+
+        // Back from the author closes the details onto the same spine.
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(book)
+    }
+
+    /// The clear button on a shelf that wall details filtered closes those details and shows
+    /// the whole of My Shelf on the book whose details applied the filter.
+    func testClearingDetailFilterShowsWholeShelf() {
+        let app = openWall()
+        let book = app.buttons["book-wall-8"]
+        RemoteNavigation.waitForFocus(book)
+        XCUIRemote.shared.press(.select)
+        let back = app.buttons["back-to-shelf"]
+        RemoteNavigation.waitForFocus(back)
+        let author = app.buttons["detail-author"]
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+        let clear = app.buttons["clear-shelf-filter"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        let shelfBook = app.buttons["book-8"]
+        RemoteNavigation.waitForFocus(shelfBook)
+        RemoteNavigation.press(.down, in: app, expecting: clear)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["book-2"].waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(shelfBook)
+        XCTAssertFalse(clear.exists)
+        XCTAssertFalse(app.staticTexts["detail-title"].exists)
+    }
+
     func testRendererExposesBookDescriptionsAndAccessibleDetails() throws {
         let app = openWall()
         for id in 1...8 {
             let book = app.buttons["book-wall-\(id)"]
-            XCTAssertTrue(book.label.hasSuffix(", Alex Rowan"))
-            XCTAssertGreaterThan(book.label.count, ", Alex Rowan".count)
+            XCTAssertTrue(book.label.hasSuffix(", by Alex Rowan"))
+            XCTAssertGreaterThan(book.label.count, ", by Alex Rowan".count)
         }
         XCTAssertEqual(app.buttons["book-wall-replay"].label, "Drop again")
         try audit(app)
@@ -188,17 +254,53 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(app.buttons["book-wall-8"])
     }
 
-    private func openWall(companionDesigns: Bool = false) -> XCUIApplication {
+    func testRetryAfterRendererErrorRestoresTheWall() {
+        let app = launchWithWall(arguments: ["--test-fail-book-wall-renderer"])
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        // The stopped wall's only control is Retry, so Select moves focus once, straight to it.
+        let retry = app.buttons["book-wall-retry"]
+        RemoteNavigation.press(.select, in: app, expecting: retry)
+        XCTAssertFalse(app.buttons["book-wall-8"].exists, "A stopped wall offers no spines")
+        let sidebar = app.staticTexts["Book Wall"].firstMatch
+        RemoteNavigation.press(.left, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: retry)
+        RemoteNavigation.press(.menu, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: retry)
+        // Only the first connection fails, so Retry brings the wall back.
+        RemoteNavigation.press(.select, in: app, expecting: app.buttons["book-wall-8"])
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
+        XCTAssertFalse(retry.exists)
+    }
+
+    func testRetryKeepsFocusWhileTheRendererFailsAgain() {
+        let app = launchWithWall(arguments: ["--test-fail-book-wall-renderer=2"])
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        let retry = app.buttons["book-wall-retry"]
+        RemoteNavigation.press(.select, in: app, expecting: retry)
+        // The second connection fails too, so the press leaves focus on Retry.
+        RemoteNavigation.pressWithoutMoving(.select, in: app, from: retry)
+        XCTAssertFalse(app.buttons["book-wall-8"].exists, "A stopped wall offers no spines")
+        RemoteNavigation.press(.select, in: app, expecting: app.buttons["book-wall-8"])
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
+        XCTAssertFalse(retry.exists)
+    }
+
+    private func launchWithWall(arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = [
-            "--test-scenario=artwork", "--start-view=shelf", "--test-enable-book-wall",
-            "--focus-probe",
-            "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-        ]
-        if companionDesigns { app.launchArguments.append("--test-companion-designs") }
+        app.launchArguments =
+            [
+                "--test-scenario=artwork", "--start-view=shelf", "--test-enable-book-wall",
+                "--focus-probe",
+                "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            ] + arguments
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
+        return app
+    }
+
+    private func openWall(companionDesigns: Bool = false) -> XCUIApplication {
+        let app = launchWithWall(arguments: companionDesigns ? ["--test-companion-designs"] : [])
         // The scenario enables Book Wall; enter it through the native sidebar, as a viewer does.
         // The spines exist in the tab's first render, so Select moves focus once, straight to
         // the entry book.

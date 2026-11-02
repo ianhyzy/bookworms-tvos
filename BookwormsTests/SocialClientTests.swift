@@ -50,6 +50,22 @@ final class SocialClientTests: XCTestCase {
         XCTAssertEqual(following.map(\.id), [2], "Blocked reader 3 is left out")
     }
 
+    /// Without the block list, followed readers and community reviews fail instead of showing
+    /// readers the owner blocked.
+    func testFailedBlockListStopsFollowingAndReviews() async {
+        let client = client()
+        do {
+            _ = try await client.following(owner: 1, token: SocialResponseStub.blockFailureToken)
+            XCTFail("Following must not load without the block list")
+        } catch HardcoverError.forbidden {
+        } catch { XCTFail("Unexpected error: \(error)") }
+        do {
+            _ = try await client.reviews(book: 7, token: SocialResponseStub.blockFailureToken)
+            XCTFail("Reviews must not load without the block list")
+        } catch HardcoverError.forbidden {
+        } catch { XCTFail("Unexpected error: \(error)") }
+    }
+
     func testCommunityReviewsLeaveOutBlockedReadersEvenWithoutProfiles() async throws {
         let reviews = try await client().reviews(book: 7, token: "hc_pat_fixture")
         XCTAssertEqual(reviews.map(\.id), [10, 13])
@@ -58,6 +74,8 @@ final class SocialClientTests: XCTestCase {
 }
 
 private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
+    /// Requests with this token get HTTP 403 for the block list.
+    static let blockFailureToken = "hc_pat_fixture_block_failure"
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -83,6 +101,17 @@ private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
             let query = try XCTUnwrap(payload["query"] as? String)
             XCTAssertTrue(SocialQuery.allDocuments.contains(query))
             XCTAssertFalse(query.contains("mutation"))
+            if query == SocialQuery.blocked.rawValue,
+                request.value(forHTTPHeaderField: "Authorization")
+                    == "Bearer \(Self.blockFailureToken)"
+            {
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: Data("{}".utf8))
+                client?.urlProtocolDidFinishLoading(self)
+                return
+            }
             let profile: [String: Any] = ["id": 2, "username": "fixture"]
             let data: [String: Any]
             if query == SocialQuery.owner.rawValue {

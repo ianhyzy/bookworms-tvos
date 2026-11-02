@@ -51,6 +51,12 @@ enum SpoilerPolicy: String, Codable, CaseIterable, Identifiable {
     case alwaysHide = "Always hide"
     case showIfRead = "Show for read books"
     var id: String { rawValue }
+
+    /// Whether a review or activity with `hasSpoilers` stays hidden. `isRead` must come from the
+    /// reader's own library (`LibraryModel.isBookReadByUser`), never from a friend's copy.
+    func hides(hasSpoilers: Bool, isRead: Bool) -> Bool {
+        hasSpoilers && (self == .alwaysHide || !isRead)
+    }
 }
 
 /// The most books a shelf, comparison row, or shared-reads view shows, and the default count.

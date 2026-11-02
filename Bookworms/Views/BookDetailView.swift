@@ -40,9 +40,9 @@ struct BookDetailView: View {
     var onOpenBook: ((Book) -> Void)?
     /// Followed readers with this book in their synced libraries, shown with their ratings.
     var friendReads: [FriendRead] = []
-    /// The book's Hardcover page, shown as a QR code under the cover. Book Wall details, which
-    /// reserve the column for the 3D book, leave it out.
-    var hardcoverURL: URL?
+    /// Whether the reader's own library marks the book read (`LibraryModel.isBookReadByUser`),
+    /// which decides review spoilers. A friend's copy of the book never counts.
+    let isRead: Bool
     @State private var showsSeries = false
     /// The series book chosen in the pop-up, opened after the pop-up finishes closing so that one
     /// presentation never starts while another is still dismissing.
@@ -70,7 +70,7 @@ struct BookDetailView: View {
         libraryBook: @escaping (Int) -> Book? = { _ in nil },
         onOpenBook: ((Book) -> Void)? = nil,
         friendReads: [FriendRead] = [],
-        hardcoverURL: URL? = nil
+        isRead: Bool = false
     ) {
         self.book = book
         self.style = style
@@ -84,7 +84,7 @@ struct BookDetailView: View {
         self.libraryBook = libraryBook
         self.onOpenBook = onOpenBook
         self.friendReads = friendReads
-        self.hardcoverURL = hardcoverURL
+        self.isRead = isRead
         genres = (book.genres ?? []).filter(HardcoverClient.isEnglishTag).prefix(3)
             .map(Book.displayGenre)
     }
@@ -137,7 +137,7 @@ struct BookDetailView: View {
                         }
                         Group {
                             if showsCover {
-                                CoverView(book: book)
+                                CoverView(book: book, imageIdentifier: "detail-cover")
                             } else {
                                 Color.clear.accessibilityHidden(true)
                             }
@@ -150,15 +150,6 @@ struct BookDetailView: View {
                         Spacer(minLength: 0)
                     }
                     .frame(width: coverColumnWidth)
-                    // An overlay, so the code takes the space below the cover without moving it.
-                    // It reaches halfway into the bottom padding, still inside the TV safe area,
-                    // to leave a gap below the cover.
-                    .overlay(alignment: .bottom) {
-                        if showsCover, let hardcoverURL {
-                            hardcoverCode(hardcoverURL)
-                                .offset(y: BookDetailCoverLayout.verticalPadding / 2)
-                        }
-                    }
                     .focusSection()
                     // Two sibling sections, not nested ones: the header starts level with Back, so
                     // Right from Back reaches the header (the author button, or the histogram when
@@ -166,11 +157,14 @@ struct BookDetailView: View {
                     // from the metadata row.
                     VStack(alignment: .leading, spacing: 22) {
                         VStack(alignment: .leading, spacing: 18) {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 9) {
                                 BookText(book.title, of: book)
                                     .appFont(size: 56, weight: .semibold)
                                     .lineLimit(3).minimumScaleFactor(0.7)
                                     .accessibilityIdentifier("detail-title")
+                                    // The title's line height puts its letters below Back's
+                                    // label; this lifts their tops level with Back's capsule.
+                                    .padding(.top, -12)
                                 // A full-width section, so Up from the histogram reaches the
                                 // author. The series button sits beside the author and wraps
                                 // below it when the row is too narrow.
@@ -212,7 +206,7 @@ struct BookDetailView: View {
         }
         .sheet(isPresented: $showsReviews) {
             if let loadReviews {
-                BookReviewsView(book: book, load: loadReviews).appTypography()
+                BookReviewsView(book: book, isRead: isRead, load: loadReviews).appTypography()
             }
         }
     }
@@ -285,51 +279,44 @@ struct BookDetailView: View {
         return description
     }
 
-    /// The labeled facts under the author: reading format, publication year, and length, such as
-    /// "1098 pages" or "742 minutes" for an audiobook. Missing facts are left out.
-    private var facts: [(symbol: String, label: String, value: String)] {
+    /// The facts under the author: reading format, publication year, length, such as "1098
+    /// pages" or "742 minutes" for an audiobook, and the finish date, with a read count for a
+    /// reread. Missing facts are left out.
+    private var facts: [(symbol: String, id: String, text: String)] {
         [
-            book.formatLabel.map { (book.formatSymbol, "Format", $0) },
-            book.publicationYear.map { ("calendar", "Published", String($0)) },
-            book.lengthLabel.map { ("text.book.closed", "Length", $0) },
+            book.formatLabel.map { (book.formatSymbol, "detail-fact-Format", "Format: \($0)") },
+            book.publicationYear.map { ("calendar", "detail-fact-Published", "Published: \($0)") },
+            book.lengthLabel.map { ("text.book.closed", "detail-fact-Length", "Length: \($0)") },
+            book.finished.map { _ in
+                (
+                    "checkmark.circle", "detail-fact-Finished",
+                    "Finished: \(book.finishedLabel(format: dateFormat))"
+                )
+            },
+            book.readCount > 1
+                ? ("arrow.counterclockwise", "detail-read-count", "Read \(book.readCount) times")
+                : nil,
         ]
         .compactMap(\.self)
     }
 
     /// The facts in one row, which wraps when it is too long for the column.
     private var factsLine: some View {
-        FlowLayout(spacing: 26) {
-            ForEach(facts, id: \.label) { fact in
-                Label("\(fact.label): \(fact.value)", systemImage: fact.symbol)
+        FlowLayout(spacing: 26, lineSpacing: 6) {
+            ForEach(facts, id: \.id) { fact in
+                Label(fact.text, systemImage: fact.symbol)
                     .labelStyle(CompactLabelStyle())
                     .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("detail-fact-\(fact.label)")
+                    .accessibilityIdentifier(fact.id)
             }
         }
         .appFont(size: 26).foregroundStyle(.detailCaption).lineLimit(1)
     }
 
-    /// The finish date when one is recorded, with a read count for a reread, then genres, then
-    /// the ratings and their histogram when the book has a rating, which open reviews when
-    /// Hardcover can supply them.
+    /// Genres, then the ratings and their histogram when the book has a rating, which open
+    /// reviews when Hardcover can supply them. Only these controls sit on cards.
     private var metadata: some View {
-        HStack(alignment: .top, spacing: 44) {
-            if book.finished != nil {
-                VStack(alignment: .leading, spacing: 12) {
-                    metadataItem(
-                        "Finished", value: book.finishedLabel(format: dateFormat),
-                        symbol: "checkmark.circle"
-                    )
-                    if book.readCount > 1 {
-                        Text("Read \(book.readCount) times")
-                            .appFont(size: 24, weight: .semibold)
-                            .padding(.horizontal, 12).padding(.vertical, 4)
-                            .background(.primary.opacity(0.12), in: .capsule)
-                            .accessibilityIdentifier("detail-read-count")
-                    }
-                }
-                .fixedSize()
-            }
+        HStack(alignment: .top, spacing: 20) {
             if !genres.isEmpty {
                 Group {
                     if let onShowShelf {
@@ -343,6 +330,7 @@ struct BookDetailView: View {
                         )
                     }
                 }
+                .detailCard()
                 // Genres size first and wrap only when the chart would drop below its minimum
                 // width; the chart takes what they leave.
                 .layoutPriority(1)
@@ -354,32 +342,18 @@ struct BookDetailView: View {
                     } label: {
                         RatingsView(book: book)
                     }
-                    .buttonStyle(FocusHighlightButtonStyle())
-                    // Keeps the focus highlight clear of the facts line and description.
-                    .padding(.vertical, 12)
+                    .buttonStyle(DetailCardButtonStyle())
                     .focusEffectDisabled()
                     .accessibilityHint("Shows community reviews.")
                     .accessibilityIdentifier("community-reviews")
                 } else {
-                    RatingsView(book: book)
+                    RatingsView(book: book).detailCard()
                 }
             }
         }
+        // Lets each card fill the row's height, so the cards line up top and bottom.
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// A QR code for the book's Hardcover page with a caption beside it. It isn't focusable.
-    private func hardcoverCode(_ url: URL) -> some View {
-        HStack(spacing: 18) {
-            QRCodeView(url: url).frame(width: QRCodeView.linkSide, height: QRCodeView.linkSide)
-                .clipShape(.rect(cornerRadius: 10))
-            Text("Scan to open\non Hardcover")
-                .appFont(size: 23).foregroundStyle(.detailCaption)
-                .fixedSize()
-                .accessibilityHidden(true)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("detail-hardcover-code")
     }
 
     /// Followed readers who have the book, each with their photo and rating. It isn't focusable:
@@ -555,9 +529,23 @@ private struct FlatButtonStyle: ButtonStyle {
     }
 }
 
-/// Shows a rounded highlight behind the label only while focused. The highlight extends past the
-/// label so the content stays aligned with neighboring, unfocusable metadata.
-private struct FocusHighlightButtonStyle: ButtonStyle {
+extension View {
+    /// Sets book-details content, such as a metadata section or a review, on a translucent card
+    /// that fills the height it's offered and brightens while `focused`. A material would read as
+    /// black over the dark details backdrop, and on Book Wall it would blur a 3D scene that
+    /// changes every frame.
+    fileprivate func detailCard(
+        horizontal: CGFloat = 24, vertical: CGFloat = 20, focused: Bool = false
+    ) -> some View {
+        padding(.horizontal, horizontal).padding(.vertical, vertical)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .background(.primary.opacity(focused ? 0.2 : 0.08), in: .rect(cornerRadius: 24))
+    }
+}
+
+/// Sets the label on a detail card that brightens and lifts while focused, so the whole card is
+/// the button rather than a highlight drawn inside it.
+private struct DetailCardButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Highlight(configuration: configuration)
     }
@@ -569,11 +557,9 @@ private struct FocusHighlightButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .padding(18)
-                .background(.primary.opacity(isFocused ? 0.12 : 0), in: .rect(cornerRadius: 20))
+                .detailCard(focused: isFocused)
                 .scaleEffect(isFocused && !reduceMotion ? 1.03 : 1)
                 .opacity(configuration.isPressed ? 0.8 : 1)
-                .padding(-18)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isFocused)
         }
     }
@@ -590,6 +576,8 @@ struct BookReviewsView: View {
 
     @AppStorage("spoilerPolicy") private var spoilerPolicy = SpoilerPolicy.alwaysHide
     let book: Book
+    /// Whether the reader's own library marks `book` read, which decides spoiler warnings.
+    let isRead: Bool
     let load: @MainActor () async throws -> [BookReview]
     @State private var reviews: [BookReview]?
     @State private var failure: String?
@@ -635,8 +623,16 @@ struct BookReviewsView: View {
         .task {
             do {
                 reviews = try await load()
+            } catch HardcoverError.invalidToken {
+                // Settings states the problem beside its Reconnect button; here, say where it is.
+                failure =
+                    HardcoverError.invalidToken.localizedDescription
+                    + " Reconnect in Settings → Sources."
+            } catch HardcoverError.insufficientScope {
+                failure =
+                    "Hardcover didn't give Bookworms permission to read reviews. Disconnect Hardcover in Settings → Sources, then connect it again to allow it."
             } catch {
-                failure = error.localizedDescription
+                failure = UserFacingError.hardcoverMessage(error)
             }
         }
         .onExitCommand {
@@ -669,8 +665,8 @@ struct BookReviewsView: View {
                     ForEach(reviews) { review in
                         BookReviewCard(
                             review: review, book: book,
-                            hidesSpoilers: review.hasSpoilers
-                                && (spoilerPolicy == .alwaysHide || book.isRead != true)
+                            hidesSpoilers: spoilerPolicy.hides(
+                                hasSpoilers: review.hasSpoilers, isRead: isRead)
                         ) {
                             readerScroll = ScrollPosition(y: 0)
                             readerOffset = 0
@@ -720,9 +716,8 @@ struct BookReviewsView: View {
                 readerMaximumOffset = value
             }
         }
-        .padding(30)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.primary.opacity(0.08), in: .rect(cornerRadius: 24))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .detailCard(horizontal: 30, vertical: 30)
         .padding(.horizontal, Self.liftMargin).padding(.vertical, Self.liftMargin)
         .focusable()
         .focusEffectDisabled()
@@ -750,7 +745,8 @@ private struct BookReviewHeader: View {
     var body: some View {
         HStack {
             ReaderLabel(
-                name: review.reader.displayName, avatarURL: review.reader.avatarURL, size: 28)
+                name: review.reader.displayName, avatarURL: review.reader.avatarURL, size: 28,
+                allowsNetwork: true)
             Spacer()
             LikesLabel(count: review.likes).padding(.trailing, 12)
             if let rating = review.rating {
@@ -822,6 +818,8 @@ private struct CompactLabelStyle: LabelStyle {
 /// Places views left to right and wraps to a new line when the next one doesn't fit.
 private struct FlowLayout: Layout {
     var spacing: CGFloat
+    /// The gap between lines; `spacing` when `nil`.
+    var lineSpacing: CGFloat?
 
     private struct Row {
         var indices: [Int] = []
@@ -833,7 +831,8 @@ private struct FlowLayout: Layout {
         let rows = rows(width: proposal.width ?? .infinity, subviews: subviews)
         return CGSize(
             width: rows.map(\.width).max() ?? 0,
-            height: rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1)))
+            height: rows.map(\.height).reduce(0, +)
+                + (lineSpacing ?? spacing) * CGFloat(max(0, rows.count - 1)))
     }
 
     func placeSubviews(
@@ -846,7 +845,7 @@ private struct FlowLayout: Layout {
                 subviews[index].place(at: CGPoint(x: x, y: y), proposal: .unspecified)
                 x += subviews[index].sizeThatFits(.unspecified).width + spacing
             }
-            y += row.height + spacing
+            y += row.height + (lineSpacing ?? spacing)
         }
     }
 

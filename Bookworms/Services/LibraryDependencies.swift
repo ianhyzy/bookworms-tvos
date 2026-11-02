@@ -13,7 +13,7 @@ struct LibraryDependencies {
     var saveCredential: (String, String) throws -> Void = {
         try CredentialStore.save($0, account: $1)
     }
-    var removeCredential: (String) -> Void = { CredentialStore.remove(account: $0) }
+    var removeCredential: (String) throws -> Void = { try CredentialStore.remove(account: $0) }
     /// Fetches the library for a token. The snapshot is the newest one saved for the account the
     /// caller expects, whose covers stay fixed when the token's account matches it.
     var fetchHardcover: @MainActor (String, SourceSnapshot?) async throws -> HardcoverLibrary = {
@@ -41,6 +41,10 @@ struct LibraryDependencies {
     }
     var syncCloud: @MainActor (CloudLibraryArchive) async throws -> CloudLibraryArchive = {
         try await CloudLibraryStore.shared.sync($0)
+    }
+    /// The signed-in iCloud user's record name, or `nil` when it can't be read.
+    var cloudUserRecordName: @MainActor () async -> String? = {
+        await CloudLibraryStore.shared.userRecordName()
     }
     var readSpineWorklist: @MainActor () async throws -> SpineWorklistV1? = {
         try await SpineCloudStore.shared.worklist()
@@ -77,6 +81,11 @@ struct LibraryDependencies {
     var exampleProfile: (@MainActor () async -> ExampleProfile?)? = ExampleProfile.bundledLoader
     var now: () -> Date = { Date() }
     var sleep: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// Returns once Book Wall has waited long enough for launch's companion record read
+    /// (`LibraryModel.hasReadCompanionRecords`). Separate from `sleep`, whose calls tests count.
+    var companionReadLimit: @MainActor () async -> Void = {
+        try? await Task.sleep(for: .seconds(10))
+    }
     var readTopShelf: () -> [TopShelfBook] = { TopShelfSnapshot.read() }
     var writeTopShelf: @Sendable ([TopShelfBook]) throws -> Void = {
         try TopShelfSnapshot.write($0)

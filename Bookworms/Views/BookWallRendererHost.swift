@@ -13,6 +13,9 @@ import UIKit
 struct BookWallRendererView: UIViewRepresentable {
     @Environment(\.scenePhase) private var scenePhase
     let scene: BookWallScene
+    let status: BookWallRendererStatus
+    /// Whether an opaque view covers the surface. A covered surface stops drawing.
+    var isCovered = false
 
     func makeCoordinator() -> BookWallRendererCoordinator {
         BookWallRendererCoordinator()
@@ -20,14 +23,15 @@ struct BookWallRendererView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> BookWallRendererSurface {
         let surface = BookWallRendererSurface(frame: .zero)
+        context.coordinator.status = status
         context.coordinator.connect(scene: scene, surface: surface)
-        context.coordinator.setSceneActive(scenePhase == .active)
+        context.coordinator.setSceneActive(scenePhase == .active && !isCovered)
         return surface
     }
 
     func updateUIView(_ surface: BookWallRendererSurface, context: Context) {
         context.coordinator.connect(scene: scene, surface: surface)
-        context.coordinator.setSceneActive(scenePhase == .active)
+        context.coordinator.setSceneActive(scenePhase == .active && !isCovered)
     }
 
     static func dismantleUIView(
@@ -38,7 +42,25 @@ struct BookWallRendererView: UIViewRepresentable {
     }
 }
 
-/// Keeps rendering lifecycle and errors inside the representable's noninteractive surface.
+/// Why the wall's renderer stopped, shared with the Retry button in Book Wall's tab. The surface
+/// is noninteractive and hidden from accessibility, so the tab shows the error.
+@MainActor @Observable
+final class BookWallRendererStatus {
+    /// The renderer's error, or nil while it runs.
+    var failure: String?
+    /// The renderer that reports here, which `retry()` reconnects.
+    @ObservationIgnored fileprivate weak var host: BookWallRendererCoordinator?
+
+    /// Connects a new renderer on the current surface before returning, so the press that
+    /// calls this knows whether the wall runs again. Returns `true` when it does. A renderer
+    /// that fails again sets `failure` and waits for the next Retry.
+    func retry() -> Bool {
+        host?.reconnect()
+        return failure == nil
+    }
+}
+
+/// Keeps the rendering lifecycle inside the representable's noninteractive surface.
 @MainActor
 final class BookWallRendererSurface: UIView {
     override class var layerClass: AnyClass { CAMetalLayer.self }
@@ -49,7 +71,6 @@ final class BookWallRendererSurface: UIView {
     // UIView constructs this layer from layerClass, so the cast follows that invariant.
     var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
     weak var coordinator: BookWallRendererCoordinator?
-    private let errorLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -64,13 +85,6 @@ final class BookWallRendererSurface: UIView {
         // RealityRenderer's output uses Display P3 primaries with the sRGB transfer curve.
         // Tag those primaries so Core Animation preserves the scene's saturated colors.
         metalLayer.colorspace = CGColorSpace(name: CGColorSpace.displayP3)
-        errorLabel.numberOfLines = 0
-        errorLabel.textAlignment = .center
-        errorLabel.textColor = .white
-        errorLabel.font = .preferredFont(forTextStyle: .body)
-        errorLabel.backgroundColor = UIColor.black.withAlphaComponent(0.85)
-        errorLabel.isHidden = true
-        addSubview(errorLabel)
     }
 
     required init?(coder: NSCoder) {
@@ -79,7 +93,6 @@ final class BookWallRendererSurface: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        errorLabel.frame = bounds.insetBy(dx: 120, dy: 120)
         coordinator?.viewportChanged(size: bounds.size)
     }
 
@@ -87,22 +100,12 @@ final class BookWallRendererSurface: UIView {
         super.didMoveToWindow()
         coordinator?.setAttached(window != nil)
     }
-
-    func showError(_ message: String) {
-        errorLabel.text = "Book Wall renderer could not continue.\n\(message)"
-        errorLabel.isHidden = false
-        bringSubviewToFront(errorLabel)
-    }
-
-    func clearError() {
-        errorLabel.text = nil
-        errorLabel.isHidden = true
-    }
 }
 
 /// Serializes scene updates while allowing two GPU frames to overlap presentation.
 @MainActor
 final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
+    var status: BookWallRendererStatus?
     private weak var surface: BookWallRendererSurface?
     private var scene: BookWallScene?
     private var renderer: RealityRenderer?
@@ -168,7 +171,8 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         self.scene = scene
         self.surface = surface
         surface.coordinator = self
-        surface.clearError()
+        status?.host = self
+        if status?.failure != nil { status?.failure = nil }
         isAttached = surface.window != nil
         failed = false
         do {
@@ -187,6 +191,13 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         }
     }
 
+    /// Replaces the renderer on the current surface, as a new surface would.
+    func reconnect() {
+        guard let scene, let surface else { return }
+        dispose()
+        connect(scene: scene, surface: surface)
+    }
+
     private func prepare(scene: BookWallScene, surface: BookWallRendererSurface) throws {
         #if BOOKWORMS_DIAGNOSTICS
             // Startup cost on the main thread, written to the pipeline log that profiles copy.
@@ -203,6 +214,13 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
                         "startupRendererMS": (finishedAt - rendererStartedAt) * 1000,
                     ])
                 }
+            }
+        #endif
+        #if DEBUG && targetEnvironment(simulator)
+            // Scenario hook: fails the first connections so UI tests can reach Retry.
+            if Self.failuresForScenario > 0 {
+                Self.failuresForScenario -= 1
+                throw RendererError.unavailableMetal
             }
         #endif
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -261,6 +279,19 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         scene.attachHost(self)
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+        /// `--test-fail-book-wall-renderer` fails the first connection;
+        /// `--test-fail-book-wall-renderer=N` fails the first N.
+        private static var failuresForScenario: Int = {
+            let arguments = ProcessInfo.processInfo.arguments
+            let prefix = "--test-fail-book-wall-renderer="
+            if let argument = arguments.first(where: { $0.hasPrefix(prefix) }) {
+                return Int(argument.dropFirst(prefix.count)) ?? 0
+            }
+            return arguments.contains("--test-fail-book-wall-renderer") ? 1 : 0
+        }()
+    #endif
+
     func subscribe<E: RealityKit.Event>(
         to event: E.Type, handler: @escaping (E) -> Void
     ) -> Cancellable {
@@ -302,7 +333,8 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         updatePauseState()
     }
 
-    /// Follows the representable's `scenePhase`, the clock's only source of app activity.
+    /// Follows the representable's `scenePhase` and whether a view covers the surface, the
+    /// clock's only sources of activity.
     func setSceneActive(_ active: Bool) {
         isApplicationActive = active
         updatePauseState()
@@ -562,7 +594,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         displayLink?.isPaused = true
         // A stopped render clock cannot finish a flight's continuation.
         scene?.detachHost(self)
-        surface?.showError(message)
+        status?.failure = message
         Self.log("BookWallRendererError \(message)")
     }
 

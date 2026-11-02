@@ -34,11 +34,21 @@ final class SocialLibraryModel {
         rebuildPresentation()
     }
 
+    /// Hardcover books the reader's library marks read, which Friends' Picks leaves out.
+    func setReadBooks(_ ids: Set<Int>) {
+        guard ids != readBookIDs else { return }
+        readBookIDs = ids
+        rebuildPresentation()
+    }
+
+    @ObservationIgnored private var readBookIDs: Set<Int> = []
+
     private func rebuildPresentation() {
-        presentation = SocialPresentation(snapshot: snapshot, preferences: presentationPreferences)
+        presentation = SocialPresentation(
+            snapshot: snapshot, preferences: presentationPreferences, readBookIDs: readBookIDs)
         presentationRevision += 1
     }
-    private(set) var status = "Connect Hardcover in Sources to use social views."
+    private(set) var status = "Connect Hardcover to use social views."
     private(set) var isLoading = false
     private(set) var revision = 0
     @ObservationIgnored private let client: any SocialLibraryFetching
@@ -66,14 +76,10 @@ final class SocialLibraryModel {
     }
     var following: [ReaderProfile] { snapshot?.following ?? [] }
     private(set) var activities: [FeedActivity] = []
-    var mine: [ReaderBook] { snapshot?.mine ?? [] }
     func reader(_ id: Int?) -> ReaderProfile? { following.first { $0.id == id } }
     func books(for id: Int?) -> [ReaderBook] {
         guard let id, reader(id) != nil else { return [] }
         return snapshot?.readerBooks[id] ?? []
-    }
-    func shared(with id: Int?, limit: Int) -> [SharedRead] {
-        SharedRead.ranked(mine: mine, theirs: books(for: id), limit: limit)
     }
 
     /// Loads the social datasets the enabled views need, each on its own daily gate.
@@ -93,7 +99,7 @@ final class SocialLibraryModel {
             identity = nil
             snapshot = nil
             isLoading = false
-            status = "Connect Hardcover in Sources to use social views."
+            status = "Connect Hardcover to use social views."
             return
         }
         let socialViews = enabledViews.filter(\.isSocial)
@@ -105,9 +111,10 @@ final class SocialLibraryModel {
             status = "Social views are disabled."
             return
         }
-        let fingerprint = SHA256.hash(data: Data((account ?? token).utf8))
-            .map { String(format: "%02x", $0) }.joined()
-        if identity == fingerprint, requestedReader == readerID,
+        let fingerprint = SHA256.hash(data: Data((account ?? token).utf8)).hex
+        // A manual load replaces a matching load in flight, so its bypass of the daily gates
+        // isn't lost.
+        if !manual, identity == fingerprint, requestedReader == readerID,
             requestedViews == socialViews, let activeTask
         {
             await activeTask.value
@@ -282,18 +289,32 @@ final class SocialLibraryModel {
                 switch error {
                 case HardcoverError.insufficientScope, HardcoverError.forbidden,
                     HardcoverError.invalidToken:
-                    if let owner = snapshot?.owner.id {
+                    // A first load can be denied before it installs the cache file it read.
+                    if let owner = snapshot?.owner.id
+                        ?? defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int
+                    {
                         try? FileManager.default.removeItem(
                             at: cacheRoot.appending(path: "\(owner).json"))
                     }
                     snapshot = nil
                     revision += 1
+                    // Only Settings → Sources shows this, so it names that page's buttons. A
+                    // missing permission leaves the login working, so the button there is
+                    // Disconnect Hardcover. A rejected login gets the library's message rather
+                    // than one blaming social access.
                     status =
-                        "Hardcover social access was denied. Reconnect with read:social and read:users as well as the library read permissions, then select Sync now in Settings → Sources."
+                        switch error {
+                        case HardcoverError.insufficientScope:
+                            "Bookworms needs permission to see the readers you follow. Disconnect Hardcover, then connect it again to allow it."
+                        case HardcoverError.invalidToken:
+                            HardcoverError.invalidToken.localizedDescription
+                        default:
+                            "Hardcover denied access to social data."
+                        }
                 default:
                     status =
                         "Social data could not refresh. Cached data is retained. "
-                        + UserFacingError.message(error)
+                        + UserFacingError.hardcoverMessage(error)
                 }
             }
         }
@@ -366,6 +387,9 @@ final class SocialLibraryModel {
         }
     }
 
+    /// The sample's first followed reader, whom UI tests start with.
+    static let sampleReaderID = -2
+
     func useSample(books: [Book] = SampleLibrary.books) {
         guard !isSample else { return }
         activeTask?.cancel()
@@ -374,7 +398,10 @@ final class SocialLibraryModel {
         isLoading = false
         let me = ReaderProfile(id: -1, username: "sample", name: "You", avatarURL: nil)
         let other = ReaderProfile(
-            id: -2, username: "sample-reader", name: "Sample reader", avatarURL: nil)
+            id: Self.sampleReaderID, username: "sample-reader", name: "Sample reader",
+            avatarURL: nil)
+        let second = ReaderProfile(
+            id: -3, username: "sample-reader-2", name: "Theo Marsh", avatarURL: nil)
         let mine =
             books
             .map { book in
@@ -402,8 +429,22 @@ final class SocialLibraryModel {
                 ReaderBook(
                     book: $0, rating: 4, review: nil, hasSpoilers: false, finished: $0.finished)
             }
+        // The second reader shares every other book, rated differently, so the reader picker
+        // offers a real choice. Their own books stay below Friends' Picks' rating threshold.
+        let ratings = [3, 5, 3.5, 4.5]
+        let secondBooks =
+            stride(from: 0, to: mine.count, by: 2)
+            .map { index in
+                ReaderBook(
+                    book: mine[index].book, rating: ratings[index / 2 % ratings.count],
+                    review: nil, hasSpoilers: false, finished: mine[index].finished)
+            }
+            + SampleLibrary.secondReaderBooks.map {
+                ReaderBook(
+                    book: $0, rating: 3.5, review: nil, hasSpoilers: false, finished: $0.finished)
+            }
         snapshot = SocialSnapshot(
-            owner: me, following: [other],
+            owner: me, following: [other, second],
             activities: mine.map {
                 FeedActivity(
                     id: $0.id, reader: other,
@@ -412,7 +453,7 @@ final class SocialLibraryModel {
                     summary: "Finished reading",
                     book: $0.book, likes: 2, rating: $0.rating, review: $0.review,
                     hasSpoilers: $0.hasSpoilers)
-            }, mine: mine, readerBooks: [other.id: theirs])
+            }, mine: mine, readerBooks: [other.id: theirs, second.id: secondBooks])
         status = "Sample social data. No accounts or AI requests are used."
         revision += 1
     }

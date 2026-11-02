@@ -34,8 +34,9 @@ struct RatingsView: View {
 
     var body: some View {
         // The chart sits beside the text, not under it, which keeps the block short and leaves the
-        // height to the description. Stacking the two ratings keeps the text narrow for the chart.
-        HStack(alignment: .top, spacing: 24) {
+        // height to the description. Stacking the two ratings keeps the text narrow for the chart,
+        // which fills the card's height: its star labels share a baseline with the count.
+        HStack(alignment: .top, spacing: 32) {
             VStack(alignment: .leading, spacing: 4) {
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                     ForEach(ratings, id: \.label) { rating in
@@ -48,16 +49,17 @@ struct RatingsView: View {
                 .appFont(size: 26, weight: .medium)
                 .accessibilityElement(children: .combine)
                 if book.communityRating != nil {
+                    Spacer(minLength: 8)
                     Text("\((book.ratingsCount ?? 0).formatted()) ratings")
-                        .appFont(size: 23).foregroundStyle(.detailCaption).padding(.top, 4)
+                        .appFont(size: 23).foregroundStyle(.detailCaption)
                 }
             }
-            .lineLimit(1).fixedSize()
+            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
             if let distribution = book.ratingDistribution, !distribution.isEmpty {
                 Chart(buckets) { bucket in
                     BarMark(
                         x: .value("Rating", bucket.rating), y: .value("Readers", bucket.count),
-                        width: .fixed(16)
+                        width: .fixed(20)
                     )
                     .foregroundStyle(Color.primary.opacity(bucket.rating == yourBucket ? 1 : 0.45))
                     .cornerRadius(3)
@@ -67,15 +69,31 @@ struct RatingsView: View {
                     )
                 }
                 .chartXScale(domain: 0.25...5.25)
-                .chartXAxis {
-                    AxisMarks(values: [1, 2, 3, 4, 5]) { _ in
-                        // Hierarchical chart styles can inherit the series palette.
-                        AxisValueLabel(anchor: .top).foregroundStyle(Color.detailCaption)
-                    }
-                }
+                // The axis's own labels sat about 10 points right of their bars, so a highlighted
+                // 3 read as 2.5. Placing each star's label with the chart's scale centers it under
+                // the bar for that rating.
+                .chartXAxis(.hidden)
                 .chartYAxis(.hidden)
-                // Takes the width the genres beside the block leave, within these bounds.
-                .frame(minWidth: 220, maxWidth: 340).frame(height: 88)
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        if let plot = proxy.plotFrame.map({ geometry[$0] }) {
+                            ForEach(1...5, id: \.self) { star in
+                                if let x = proxy.position(forX: Double(star)) {
+                                    Text(String(star))
+                                        .appFont(size: 23).foregroundStyle(.detailCaption)
+                                        .fixedSize()
+                                        .position(x: plot.minX + x, y: plot.maxY + 18)
+                                }
+                            }
+                        }
+                    }
+                    .accessibilityHidden(true)
+                }
+                .padding(.bottom, 32)
+                // Takes the width the genres beside the block leave, within these bounds, and the
+                // height the card offers; the text beside it sets that height.
+                .frame(minWidth: 240, maxWidth: 480)
+                .frame(minHeight: 104, idealHeight: 104, maxHeight: .infinity)
                 .accessibilityLabel("Community rating distribution")
                 .accessibilityIdentifier("rating-distribution")
             }

@@ -7,6 +7,8 @@ struct CoverView: View {
     /// How a current read shows `Book.progress` on the cover.
     var progressStyle = ProgressStyle.hidden
     var onAspectRatio: ((Double) -> Void)? = nil
+    /// The loaded image's accessibility identifier, which UI tests find the cover by.
+    var imageIdentifier = ""
     @Environment(\.isFocused) private var isFocused
     @Environment(\.coverIsPressed) private var isPressed
     @Environment(\.artworkGeneration) private var artworkGeneration
@@ -167,7 +169,7 @@ struct CoverView: View {
                             ? book.progress.map { "\(Int(($0 * 100).rounded())) percent read" }
                                 ?? "" : ""
                     )
-                    .accessibilityIdentifier("detail-cover")
+                    .accessibilityIdentifier(imageIdentifier)
             } else {
                 Rectangle().fill(.gray.opacity(0.18))
                 // Compact placeholders keep the title and author at the 23-point minimum, so the

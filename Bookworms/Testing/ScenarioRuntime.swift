@@ -114,7 +114,7 @@
                         SHA256.hash(
                             data: Data("https://artwork.fixture.invalid/\(path)@source2400".utf8)
                         )
-                        .map { String(format: "%02x", $0) }.joined()
+                        .hex
                     try! data.write(to: root.appending(path: key), options: .atomic)
                 }
                 try! SourceLibraryStore(url: storageDirectory.appending(path: "sources.json"))

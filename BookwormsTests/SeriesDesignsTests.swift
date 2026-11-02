@@ -15,17 +15,22 @@ final class SeriesDesignsTests: XCTestCase {
         return book
     }
 
+    private func sameLook(_ book: Book, _ other: Book) -> Bool {
+        guard let key = SeriesDesigns.lookKey(of: book, link: nil) else { return false }
+        return key == SeriesDesigns.lookKey(of: other, link: nil)
+    }
+
     func testBooksMatchOnTheSameSeriesAndFirstAuthor() {
         let carl = book(1)
-        XCTAssertTrue(SeriesDesigns.matches(carl, book(2, author: "matt dinnimán")))
-        XCTAssertTrue(SeriesDesigns.matches(carl, book(3, author: "Matt Dinniman, Jeff Hays")))
+        XCTAssertTrue(sameLook(carl, book(2, author: "matt dinnimán")))
+        XCTAssertTrue(sameLook(carl, book(3, author: "Matt Dinniman, Jeff Hays")))
         XCTAssertFalse(
-            SeriesDesigns.matches(carl, book(3, author: "Jeff Hays, Matt Dinniman")),
+            sameLook(carl, book(3, author: "Jeff Hays, Matt Dinniman")),
             "Only the first author counts, so a look group has one key")
-        XCTAssertTrue(SeriesDesigns.matches(carl, book(4, author: "Matt  Dinniman.")))
-        XCTAssertFalse(SeriesDesigns.matches(carl, book(5, author: "Someone Else")))
-        XCTAssertFalse(SeriesDesigns.matches(carl, book(6, series: 8)))
-        XCTAssertFalse(SeriesDesigns.matches(book(7, series: nil), book(8, series: nil)))
+        XCTAssertTrue(sameLook(carl, book(4, author: "Matt  Dinniman.")))
+        XCTAssertFalse(sameLook(carl, book(5, author: "Someone Else")))
+        XCTAssertFalse(sameLook(carl, book(6, series: 8)))
+        XCTAssertFalse(sameLook(book(7, series: nil), book(8, series: nil)))
     }
 
     func testDiscworldBooksShareADesignOnlyWithinTheirGroup() {
@@ -33,16 +38,16 @@ final class SeriesDesignsTests: XCTestCase {
             book(id, series: 1018, author: "Terry Pratchett", title: title)
         }
         let guards = discworld(1, "Guards! Guards!")
-        XCTAssertTrue(SeriesDesigns.matches(guards, discworld(2, "THUD")))
-        XCTAssertTrue(SeriesDesigns.matches(guards, discworld(3, "Night Watch: A Discworld Novel")))
-        XCTAssertFalse(SeriesDesigns.matches(guards, discworld(4, "Mort")))
+        XCTAssertTrue(sameLook(guards, discworld(2, "THUD")))
+        XCTAssertTrue(sameLook(guards, discworld(3, "Night Watch: A Discworld Novel")))
+        XCTAssertFalse(sameLook(guards, discworld(4, "Mort")))
         XCTAssertTrue(
-            SeriesDesigns.matches(
+            sameLook(
                 discworld(5, "The Science of Discworld II: The Globe"),
                 discworld(6, "The Science of Discworld")))
         // A book no group names keeps its own design.
         let maurice = discworld(7, "The Amazing Maurice and His Educated Rodents")
-        XCTAssertFalse(SeriesDesigns.matches(maurice, discworld(8, "The Amazing Maurice")))
+        XCTAssertFalse(sameLook(maurice, discworld(8, "The Amazing Maurice")))
     }
 
     private func link(
@@ -504,6 +509,101 @@ final class SeriesDesignsTests: XCTestCase {
         for standIn in Set(SpineFontPolicy.slantedReplacements.values) {
             XCTAssertNotNil(SpineFontPolicy.standInFamilies[standIn], standIn)
         }
+    }
+
+    @MainActor
+    func testFontLoadStopsDownloadsAtANetworkFailureAndReportsWhatRegistered() async {
+        // Fictional faces that no test host registers.
+        let designs = [
+            companionDesign(1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold"),
+            companionDesign(2, family: "Fictional Sans", postScriptName: "FictionalSans-Bold"),
+            companionDesign(3, family: "Fictional Slab", postScriptName: "FictionalSlab-Bold"),
+        ]
+        var requested: [String] = []
+        let offline = await BookWallPreparation.loadFonts(for: designs) { family, _, network in
+            requested.append("\(family):\(network)")
+            throw URLError(.timedOut)
+        }
+        XCTAssertEqual(offline, .init(registered: false, interruption: .timedOut))
+        XCTAssertEqual(
+            requested,
+            ["Fictional Serif:true", "Fictional Sans:false", "Fictional Slab:false"],
+            "A network failure stops the downloads but not the cache reads")
+
+        // A face cached on disk registers after another face's network failure.
+        let cached = await BookWallPreparation.loadFonts(for: designs) { family, _, network in
+            if network { throw URLError(.notConnectedToInternet) }
+            if family != "Fictional Slab" { throw URLError(.notConnectedToInternet) }
+        }
+        XCTAssertEqual(cached, .init(registered: true, interruption: .notConnectedToInternet))
+
+        requested = []
+        let retried = await BookWallPreparation.loadFonts(for: designs) { family, _, _ in
+            requested.append(family)
+        }
+        XCTAssertEqual(retried, .init(registered: true))
+        XCTAssertEqual(requested, ["Fictional Serif", "Fictional Sans", "Fictional Slab"])
+
+        let rejected = await BookWallPreparation.loadFonts(for: designs) { _, _, _ in
+            throw AIError.unavailableFont
+        }
+        XCTAssertEqual(rejected, .init(registered: false))
+    }
+
+    /// Prepares one coverless book whose companion design names a fictional face, so every
+    /// font request goes to `download`, and returns the preparation and the requests it made.
+    @MainActor
+    private func prepareWall(
+        download: @escaping (_ call: Int, _ preparation: BookWallPreparation) throws -> Void
+    ) async -> (preparation: BookWallPreparation, calls: Int) {
+        // The download closure reads the preparation it belongs to through this reference.
+        @MainActor final class Reference { weak var preparation: BookWallPreparation? }
+        let reference = Reference()
+        var calls = 0
+        let preparation = BookWallPreparation { _, _, _ in
+            calls += 1
+            try download(calls, reference.preparation!)
+        }
+        reference.preparation = preparation
+        let design = companionDesign(
+            1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold")
+        await preparation.prepare([book(1, series: nil)], sources: [:], designs: [1: design])
+        return (preparation, calls)
+    }
+
+    @MainActor
+    func testPreparationRetriesSkippedFontsOnceBeforeTheWallShows() async {
+        let (preparation, calls) = await prepareWall { call, preparation in
+            if call == 1 { throw URLError(.notConnectedToInternet) }
+            XCTAssertNil(preparation.prepared, "The wall waits for the retry")
+            XCTAssertEqual(preparation.completedCount, 1, "The retry keeps the progress")
+        }
+        XCTAssertEqual(calls, 2)
+        XCTAssertNotNil(preparation.prepared)
+        XCTAssertEqual(preparation.completedCount, 1)
+        XCTAssertNil(preparation.failure)
+    }
+
+    @MainActor
+    func testPreparationSkipsTheFontRetryAfterATimeout() async {
+        let (preparation, calls) = await prepareWall { _, _ in throw URLError(.timedOut) }
+        XCTAssertEqual(calls, 1)
+        XCTAssertNotNil(preparation.prepared)
+    }
+
+    @MainActor
+    func testPreparationCancelledDuringTheFontRetryPublishesNothing() async {
+        let task = Task { @MainActor in
+            await prepareWall { call, _ in
+                if call == 1 { throw URLError(.notConnectedToInternet) }
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw URLError(.cancelled)
+            }
+        }
+        let (preparation, calls) = await task.value
+        XCTAssertEqual(calls, 2)
+        XCTAssertNil(preparation.prepared, "A cancelled preparation never publishes its wall")
+        XCTAssertNil(preparation.failure)
     }
 
     func testSeriesSourcesJudgeCompanionDesignsByTheirFace() {

@@ -1,3 +1,4 @@
+import Metal
 import RealityKit
 import SwiftUI
 import XCTest
@@ -76,8 +77,14 @@ final class BookWallLayoutTests: XCTestCase {
         // Per-book variety keeps size loosely tied to page count.
         XCTAssertGreaterThan(long.spineThickness, ordinary.spineThickness * 1.5)
         XCTAssertGreaterThanOrEqual(ordinary.spineThickness, BookWallLayout.minimumSpineThickness)
-        XCTAssertGreaterThan(ordinary.bookHeight, ordinary.spineThickness * 2)
-        XCTAssertGreaterThan(long.bookHeight, long.spineThickness * 2.1)
+        // At least 6:1, except where the length cap stops a thick book first.
+        for slot in slots {
+            XCTAssertGreaterThanOrEqual(
+                slot.bookHeight,
+                min(
+                    BookWallLayout.maximumBookLength,
+                    slot.spineThickness * BookWallLayout.minimumLengthToThickness) - 0.0001)
+        }
         XCTAssertGreaterThanOrEqual(long.bookHeight, ordinary.bookHeight)
         XCTAssertLessThanOrEqual(long.bookHeight, BookWallLayout.maximumBookLength + 0.0001)
     }
@@ -95,11 +102,13 @@ final class BookWallLayoutTests: XCTestCase {
         let books = [
             Book(id: 1, title: "Termush", author: "Sven Holm", pages: 120),
             Book(
-                id: 2, title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", pages: 300),
+                id: 2, title: "The Long Hall of Lanterns", author: "Mirela K. Le Vant", pages: 300),
             Book(id: 3, title: "The Tainted Cup", author: "Robert Jackson Bennett", pages: 390),
         ]
         for slot in BookWallLayout(books: books).slots {
-            XCTAssertGreaterThanOrEqual(slot.bookHeight, BookWallLayout.minimumBookHeight)
+            XCTAssertGreaterThanOrEqual(
+                slot.bookHeight,
+                BookWallLayout.minimumSpineThickness * BookWallLayout.minimumLengthToThickness)
             XCTAssertEqual(
                 slot.coverWidth / slot.bookHeight,
                 BookWallLayout.fallbackCoverAspectRatio, accuracy: 0.0001)
@@ -121,7 +130,7 @@ final class BookWallLayoutTests: XCTestCase {
     func testLongTitleGetsMoreSpineSpace() throws {
         // A shared id gives both books the same seeded thickness and variety, so only the
         // space reserved for their lettering differs.
-        let short = Book(id: 1, title: "Dune", author: "Frank Herbert", pages: 300)
+        let short = Book(id: 1, title: "Wyke", author: "Tamsin Vellor", pages: 300)
         let long = Book(
             id: 1, title: "A Very Long Book Title About the World and Everything in It",
             author: "A Writer With a Long Name", pages: 300)
@@ -139,6 +148,103 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertEqual(
             CGFloat(image.width) / CGFloat(image.height),
             CGFloat(slot.spineWallWidth) / CGFloat(slot.spineWallHeight), accuracy: 0.03)
+        // Two pixels per point at the wall's viewing scale.
+        let points = CGFloat(slot.pointsPerUnit) * BookWallSpineTexture.pixelsPerPoint
+        XCTAssertEqual(CGFloat(image.width), CGFloat(slot.spineWallWidth) * points, accuracy: 1)
+        XCTAssertEqual(CGFloat(image.height), CGFloat(slot.spineWallHeight) * points, accuracy: 1)
+    }
+
+    /// Dark lettering on light cloth keeps its weight at the mip level the resting wall shows:
+    /// the uploaded level 1 is as dark as a half-size Core Graphics drawing of the spine, and
+    /// darker than the level RealityKit generates, which averages in linear light.
+    @MainActor
+    func testSpineMipKeepsDarkLetteringWeight() async throws {
+        let book = Book(
+            id: 9, title: "The Steel Remains", author: "Richard K. Morgan", pages: 900,
+            format: "Ebook")
+        let cloth = try StyleColor(hex: "#E8E7E8")
+        let slot = try XCTUnwrap(BookWallLayout(books: [book]).slots.first)
+        let lettered = try XCTUnwrap(
+            BookWallSpineTexture.make(
+                for: slot,
+                style: BookWallLocalSpine.Style(
+                    background: cloth, foreground: try StyleColor(hex: "#161618"),
+                    typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
+        let spine = try XCTUnwrap(
+            BookWallSpineTexture.filled(lettered, book: book, cloth: cloth, edgeColors: []))
+        let mips = try XCTUnwrap(BookWallSpineTexture.Mips(spine))
+        XCTAssertEqual(
+            mips.levels.count, Int(log2(Double(max(spine.width, spine.height)))) + 1,
+            "The chain runs down to one pixel")
+
+        let (width, height) = (spine.width / 2, spine.height / 2)
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        let half = try XCTUnwrap(
+            CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        half.interpolationQuality = .high
+        half.draw(spine, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let drawn = try XCTUnwrap(half.data).assumingMemoryBound(to: UInt8.self)
+        /// The mean of the color channels, 0 to 255; lower is darker.
+        func lightness(_ bytes: UnsafeBufferPointer<UInt8>) -> Double {
+            var sum = 0.0
+            for (index, byte) in bytes.enumerated() where index % 4 != 3 { sum += Double(byte) }
+            return sum / Double(bytes.count / 4 * 3)
+        }
+        let expected = lightness(UnsafeBufferPointer(start: drawn, count: width * height * 4))
+        let ours = try await Self.level(1, of: try await mips.texture(), spine: spine)
+        let generatedTexture = try await TextureResource.generate(
+            from: spine, options: .init(semantic: .color))
+        let generated = try await Self.level(1, of: generatedTexture, spine: spine)
+        let oursLightness = ours.withUnsafeBufferPointer(lightness)
+        XCTAssertEqual(oursLightness, expected, accuracy: 2)
+        XCTAssertLessThan(
+            oursLightness, generated.withUnsafeBufferPointer(lightness),
+            "RealityKit's generated level thins the dark lettering")
+    }
+
+    /// `texture`'s mip `level`, read back as sRGB-encoded RGBA bytes.
+    @MainActor
+    private static func level(_ level: Int, of texture: TextureResource, spine: CGImage)
+        async throws -> [UInt8]
+    {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm_srgb, width: spine.width, height: spine.height,
+            mipmapped: true)
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        descriptor.storageMode = .private
+        let target = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        try await texture.copy(to: target)
+        return try read(
+            level, of: target, device: device, width: max(1, spine.width >> level),
+            height: max(1, spine.height >> level))
+    }
+
+    /// `target`'s mip `level`, `width` by `height`, copied into shared memory. It waits for the
+    /// GPU, so it runs outside asynchronous contexts.
+    private nonisolated static func read(
+        _ level: Int, of target: any MTLTexture, device: any MTLDevice, width: Int, height: Int
+    ) throws -> [UInt8] {
+        let buffer = try XCTUnwrap(
+            device.makeBuffer(length: width * height * 4, options: .storageModeShared))
+        let commands = try XCTUnwrap(device.makeCommandQueue()?.makeCommandBuffer())
+        let blit = try XCTUnwrap(commands.makeBlitCommandEncoder())
+        blit.copy(
+            from: target, sourceSlice: 0, sourceLevel: level,
+            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: MTLSize(width: width, height: height, depth: 1), to: buffer,
+            destinationOffset: 0, destinationBytesPerRow: width * 4,
+            destinationBytesPerImage: width * height * 4)
+        blit.endEncoding()
+        commands.commit()
+        commands.waitUntilCompleted()
+        return [UInt8](
+            UnsafeBufferPointer(
+                start: buffer.contents().assumingMemoryBound(to: UInt8.self),
+                count: width * height * 4))
     }
 
     /// The shelf and Book Wall make the same lettering decision for a spine of the same frame
@@ -146,7 +252,7 @@ final class BookWallLayoutTests: XCTestCase {
     @MainActor
     func testBookWallLettersASpineAsTheShelfDoesAtTheSameFrame() {
         let books = [
-            Book(id: 7, title: "Dune: Deluxe Edition", author: "Frank Herbert", pages: 600),
+            Book(id: 7, title: "Wyke: Deluxe Edition", author: "Tamsin Vellor", pages: 600),
             Book(
                 id: 446730, title: "The Dungeon Anarchist's Cookbook", author: "Matt Dinniman",
                 format: "Ebook"),
@@ -198,12 +304,12 @@ final class BookWallLayoutTests: XCTestCase {
     /// viewing scale, so a wall seen from farther away gives the same title a larger spine.
     func testWallSpinesGrowTowardTheTitleFloorAtTheirViewingScale() throws {
         let book = Book(
-            id: 2, title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", pages: 300)
+            id: 2, title: "The Long Hall of Lanterns", author: "Mirela K. Le Vant", pages: 300)
         let near = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 90).slots.first)
         XCTAssertGreaterThanOrEqual(near.lettering.titleSize, SpineTextMetrics.minimumTitleSize)
         let natural = try XCTUnwrap(
             BookWallLayout(
-                books: [Book(id: 2, title: "Dune", author: "Ursula K. Le Guin", pages: 300)],
+                books: [Book(id: 2, title: "Wyke", author: "Mirela K. Le Vant", pages: 300)],
                 pointsPerUnit: 90
             )
             .slots.first)
@@ -293,7 +399,7 @@ final class BookWallLayoutTests: XCTestCase {
                 isFocused: false))
         renderer.scale = 1
         let shelf = try XCTUnwrap(renderer.cgImage)
-        let room = SpineTextMetrics.formatIconRoom
+        let room = SpineTextMetrics.formatIconRoom(for: book, length: 420, thickness: 60)
         let shelfIcon = try inkBounds(
             shelf, in: CGRect(x: 0, y: 420 - room, width: 60, height: room))
         let slot = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 64).slots.first)
@@ -303,25 +409,28 @@ final class BookWallLayoutTests: XCTestCase {
                 style: BookWallLocalSpine.Style(
                     background: cloth, foreground: .paper,
                     typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
-        let scale = BookWallSpineTexture.pixelsPerUnit / 64
+        let scale = BookWallSpineTexture.pixelsPerPoint
+        let wallRoom = SpineTextMetrics.formatIconRoom(
+            for: book, length: CGFloat(slot.spineWallWidth * 64),
+            thickness: CGFloat(slot.spineWallHeight * 64))
         let wallIcon = try inkBounds(
             wall,
             in: CGRect(
-                x: CGFloat(wall.width) - room * scale, y: 0, width: room * scale,
+                x: CGFloat(wall.width) - wallRoom * scale, y: 0, width: wallRoom * scale,
                 height: CGFloat(wall.height)))
         XCTAssertFalse(shelfIcon.isNull, book.title)
         XCTAssertFalse(wallIcon.isNull, book.title)
         return (shelf, shelfIcon, wall, wallIcon, scale)
     }
 
-    /// The format icon turns with the lettering, so it reads in the lettering's direction: the
-    /// headphones' band faces the tops of the letters, which point right on the upright shelf
-    /// spine, read top to bottom, and up on the flat Book Wall texture, read left to right.
-    /// Down the symbol's axis, the band has ink, and the gap between the ear cups has none.
+    /// The format icon stands upright on the standing shelf spine, as a printed spine's icon
+    /// does, and the flat Book Wall texture draws it as that spine laid flat with its head on
+    /// the left: the headphones' band faces up on the shelf and toward the head, left, on the
+    /// wall. Down the symbol's axis, the band has ink, and the gap between the ear cups has none.
     @MainActor
-    func testFormatIconReadsInTheLetteringsDirection() throws {
+    func testFormatIconStandsUprightOnTheStandingSpine() throws {
         let book = Book(
-            id: 11, title: "Dune", author: "Frank Herbert", pages: 200, format: "Audiobook")
+            id: 11, title: "Wyke", author: "Tamsin Vellor", pages: 200, format: "Audiobook")
         XCTAssertEqual(book.formatSymbol, "headphones")
         let icons = try formatIcons(of: book)
         func ink(_ bytes: ArraySlice<UInt8>) -> Double {
@@ -329,26 +438,28 @@ final class BookWallLayoutTests: XCTestCase {
         }
 
         let shelf = icons.shelfIcon
-        let third = shelf.width / 3
-        let shelfAxis = CGRect(x: shelf.minX, y: shelf.midY - 1, width: shelf.width, height: 2)
-        let right = try coverage(
-            icons.shelf, in: shelfAxis.divided(atDistance: third, from: .maxXEdge).slice, ink: ink)
-        let left = try coverage(
-            icons.shelf, in: shelfAxis.divided(atDistance: third, from: .minXEdge).slice, ink: ink)
-        XCTAssertGreaterThan(right, 0, "The shelf icon's band faces right")
-        XCTAssertEqual(left, 0, "The shelf icon's ear cups face left")
+        let shelfAxis = CGRect(x: shelf.midX - 1, y: shelf.minY, width: 2, height: shelf.height)
+        let top = try coverage(
+            icons.shelf,
+            in: shelfAxis.divided(atDistance: shelf.height / 3, from: .minYEdge).slice, ink: ink)
+        let bottom = try coverage(
+            icons.shelf,
+            in: shelfAxis.divided(atDistance: shelf.height / 3, from: .maxYEdge).slice, ink: ink)
+        XCTAssertGreaterThan(top, 0, "The shelf icon's band faces up")
+        XCTAssertEqual(bottom, 0, "The shelf icon's ear cups face down")
 
         let wall = icons.wallIcon
-        let wallAxis = CGRect(x: wall.midX - 3, y: wall.minY, width: 6, height: wall.height)
-        let top = try coverage(
-            icons.wall, in: wallAxis.divided(atDistance: wall.height / 3, from: .minYEdge).slice,
+        let wallAxis = CGRect(x: wall.minX, y: wall.midY - 3, width: wall.width, height: 6)
+        let left = try coverage(
+            icons.wall, in: wallAxis.divided(atDistance: wall.width / 3, from: .minXEdge).slice,
             ink: ink)
-        let bottom = try coverage(
-            icons.wall, in: wallAxis.divided(atDistance: wall.height / 3, from: .maxYEdge).slice,
+        let right = try coverage(
+            icons.wall, in: wallAxis.divided(atDistance: wall.width / 3, from: .maxXEdge).slice,
             ink: ink)
-        XCTAssertGreaterThan(top, 0, "The texture's icon band faces up")
-        XCTAssertEqual(bottom, 0, "The texture's icon ear cups face down")
-        // The icon is the shelf's, scaled to the texture.
+        XCTAssertGreaterThan(left, 0, "The texture's icon band faces the head")
+        XCTAssertEqual(right, 0, "The texture's icon ear cups face the tail")
+        // The icon is the shelf's, turned and scaled to the texture.
+        XCTAssertEqual(wall.width / icons.scale, shelf.height, accuracy: 2)
         XCTAssertEqual(wall.height / icons.scale, shelf.width, accuracy: 2)
     }
 
@@ -357,11 +468,12 @@ final class BookWallLayoutTests: XCTestCase {
     /// within 10%. Monochrome rendering leaves about a third less.
     @MainActor
     func testFormatIconInksTheSameOnTheShelfAndTheWall() throws {
-        let book = Book(id: 12, title: "Dune", author: "Frank Herbert", pages: 200, format: "Ebook")
+        let book = Book(id: 12, title: "Wyke", author: "Tamsin Vellor", pages: 200, format: "Ebook")
         let icons = try formatIcons(of: book)
         let shelfData = try pixels(of: icons.shelf)
         // Plain cloth between the lettering and the icon.
-        let clothOffset = (Int(420 - SpineTextMetrics.formatIconRoom - 3) * 60 + 30) * 4
+        let room = SpineTextMetrics.formatIconRoom(for: book, length: 420, thickness: 60)
+        let clothOffset = (Int(420 - room - 3) * 60 + 30) * 4
         let cloth = Double(shelfData[clothOffset + 2])
         let paper = StyleColor.paper.blue * 255
         let shelfInk = try coverage(icons.shelf, in: icons.shelfIcon.insetBy(dx: -2, dy: -2)) {
@@ -372,6 +484,95 @@ final class BookWallLayoutTests: XCTestCase {
                 icons.wall, in: icons.wallIcon.insetBy(dx: -2 * icons.scale, dy: -2 * icons.scale)
             ) { Double($0[$0.startIndex + 3]) / 255 } / Double(icons.scale * icons.scale)
         XCTAssertEqual(wallInk / shelfInk, 1, accuracy: 0.1)
+    }
+
+    /// On a spine with stamped bands, the format icon and the lettering's tail room move toward
+    /// the head, so the icon clears the tail band by `formatIconBandGap` on the shelf and on
+    /// Book Wall alike. The band is found in each view's rendered pixels, and the gap holds
+    /// within the icon's few points of glyph padding. A spine without bands keeps the plain
+    /// margin.
+    @MainActor
+    func testFormatIconClearsTheStampedTailBand() throws {
+        let book = Book(
+            id: 13, title: "Infinite Jest", author: "David Foster Wallace", pages: 1_079,
+            format: "Audiobook")
+        XCTAssertTrue(SpineView.stamps(book))
+        let plain = Book(
+            id: 13, title: "Infinite Jest", author: "David Foster Wallace", pages: 300,
+            format: "Audiobook")
+        XCTAssertFalse(SpineView.stamps(plain))
+        XCTAssertEqual(
+            SpineTextMetrics.formatIconMargin(for: plain, length: 500, thickness: 130),
+            SpineTextMetrics.formatIconMargin)
+        let gap = SpineTextMetrics.formatIconBandGap
+        /// The first pixel from `start` along `step` that differs from the cloth at `start`:
+        /// the head-side edge of the tail band's shadow line.
+        func bandEdge(in image: CGImage, from start: (x: Int, y: Int), step: (x: Int, y: Int))
+            throws -> Int
+        {
+            let data = try pixels(of: image)
+            func rgb(_ x: Int, _ y: Int) -> [Int] {
+                let offset = (y * image.width + x) * 4
+                return (0..<3).map { Int(data[offset + $0]) }
+            }
+            let cloth = rgb(start.x, start.y)
+            var (x, y) = start
+            while x < image.width, y < image.height {
+                if zip(rgb(x, y), cloth).contains(where: { abs($0 - $1) > 2 }) {
+                    return step.x == 0 ? y : x
+                }
+                (x, y) = (x + step.x, y + step.y)
+            }
+            XCTFail("No band toward the tail")
+            return step.x == 0 ? image.height : image.width
+        }
+
+        let cloth = StyleColor(red: 0.1, green: 0.15, blue: 0.3)
+        var style = SpineStyle.fallback(for: book)
+        style.background = cloth
+        style.foreground = .paper
+        let dimensions = SpineDimensions(width: 130, height: 500)
+        let lettering = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
+        let room = SpineTextMetrics.formatIconRoom(for: book, length: 500, thickness: 130)
+        XCTAssertGreaterThan(room, SpineTextMetrics.formatIconMargin + 18)
+        XCTAssertEqual(lettering.length, 500 - room)
+        let renderer = ImageRenderer(
+            content: SpineView(
+                book: book, style: style, dimensions: dimensions, lettering: lettering,
+                isFocused: false))
+        renderer.scale = 1
+        let shelf = try XCTUnwrap(renderer.cgImage)
+        let shelfIcon = try inkBounds(
+            shelf, in: CGRect(x: 0, y: 500 - room, width: 130, height: room))
+        XCTAssertFalse(shelfIcon.isNull)
+        let shelfBand = try bandEdge(
+            in: shelf, from: (65, Int(shelfIcon.maxY) + 4), step: (0, 1))
+        XCTAssertEqual(CGFloat(shelfBand) - shelfIcon.maxY, gap, accuracy: 2)
+
+        let slot = try XCTUnwrap(BookWallLayout(books: [book], pointsPerUnit: 64).slots.first)
+        let length = CGFloat(slot.spineWallWidth * 64)
+        let thickness = CGFloat(slot.spineWallHeight * 64)
+        let wallRoom = SpineTextMetrics.formatIconRoom(
+            for: book, length: length, thickness: thickness)
+        XCTAssertEqual(slot.lettering.length, length - wallRoom, accuracy: 0.001)
+        let lettered = try XCTUnwrap(
+            BookWallSpineTexture.make(
+                for: slot,
+                style: BookWallLocalSpine.Style(
+                    background: cloth, foreground: .paper,
+                    typography: BookWallLocalSpine.Typography(fontName: "Georgia-Bold"))))
+        let wall = try XCTUnwrap(
+            BookWallSpineTexture.filled(lettered, book: book, cloth: cloth, edgeColors: []))
+        let scale = CGFloat(wall.width) / length
+        let wallIcon = try inkBounds(
+            wall,
+            in: CGRect(
+                x: CGFloat(wall.width) - wallRoom * scale, y: 0, width: wallRoom * scale,
+                height: CGFloat(wall.height)))
+        XCTAssertFalse(wallIcon.isNull)
+        let wallBand = try bandEdge(
+            in: wall, from: (Int(wallIcon.maxX) + 4, wall.height / 2), step: (1, 0))
+        XCTAssertEqual((CGFloat(wallBand) - wallIcon.maxX) / scale, gap, accuracy: 2)
     }
 
     @MainActor

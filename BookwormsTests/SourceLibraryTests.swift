@@ -536,4 +536,47 @@ final class SourceLibraryTests: XCTestCase {
             )
         }
     }
+
+    func testMissingSnapshotRecoversAndFailuresUseShortBackoff() {
+        let now = Date()
+        XCTAssertFalse(
+            RefreshPolicy.isDue(
+                lastAttempt: now, lastSuccess: now,
+                hasSnapshot: true, manual: false, now: now + 60))
+        XCTAssertTrue(
+            RefreshPolicy.isDue(
+                lastAttempt: now, lastSuccess: now,
+                hasSnapshot: false, manual: false, now: now + 60))
+        XCTAssertFalse(
+            RefreshPolicy.isDue(
+                lastAttempt: now, lastSuccess: nil,
+                hasSnapshot: false, manual: false, now: now + 299))
+        XCTAssertTrue(
+            RefreshPolicy.isDue(
+                lastAttempt: now, lastSuccess: nil,
+                hasSnapshot: false, manual: false, now: now + 300))
+        XCTAssertTrue(
+            RefreshPolicy.isDue(
+                lastAttempt: now, lastSuccess: now,
+                hasSnapshot: true, manual: true, now: now + 10))
+    }
+
+    @MainActor
+    func testManualSyncBypassesDailyGateAndResetsAutomaticSchedule() throws {
+        let suite = "ManualSyncTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let schedule = SourceSyncSchedule(defaults: defaults)
+        let now = Date()
+        for source in LibrarySource.allCases {
+            try schedule.begin(source, now: now)
+            schedule.seed(source, date: now)
+            XCTAssertThrowsError(try schedule.begin(source, now: now.addingTimeInterval(60)))
+            try schedule.begin(source, now: now.addingTimeInterval(60), manual: true)
+            schedule.seed(source, date: now.addingTimeInterval(60))
+            XCTAssertEqual(schedule.lastAttempt(source), now.addingTimeInterval(60))
+            XCTAssertFalse(schedule.isDue(source, now: now.addingTimeInterval(86400)))
+            XCTAssertTrue(schedule.isDue(source, now: now.addingTimeInterval(86460)))
+        }
+    }
 }

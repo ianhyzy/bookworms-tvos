@@ -79,13 +79,6 @@ enum SeriesDesigns {
         return groups
     }
 
-    /// Returns whether `book` and `other` share a series look: the same look group
-    /// (`lookKey(of:link:)`) without links.
-    static func matches(_ book: Book, _ other: Book) -> Bool {
-        guard let key = lookKey(of: book, link: nil) else { return false }
-        return key == lookKey(of: other, link: nil)
-    }
-
     /// Groups within long series that Hardcover does not record, keyed by Hardcover series ID
     /// and then by `titleKey(_:)`: each group shares a design instead of the whole series.
     /// Books of a listed series that no group names keep their own designs.
@@ -243,8 +236,10 @@ enum SeriesDesigns {
         return sources
     }
 
-    /// The text a Book Wall spine letters for `book`, for glyph checks: its full title, subtitle
-    /// included, and its author, uppercased when the design draws in capitals.
+    /// The text glyph checks cover for `book`: its full title, subtitle included, and its full
+    /// author, uppercased when the design draws in capitals. Shelf and Book Wall spines letter
+    /// only `SpineTextMetrics.text(of:uppercase:)`, the shorter `Book.spineTitle` and
+    /// shortened author, so the check is stricter than the lettering.
     static func lettering(of book: Book, uppercase: Bool = false) -> String {
         let text = book.title + " " + book.author
         return uppercase ? text.uppercased() : text

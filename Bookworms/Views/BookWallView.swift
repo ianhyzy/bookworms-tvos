@@ -6,6 +6,7 @@ struct BookWallView: View {
     let library: LibraryModel
     let coordinator: BookwormsCoordinator
     let scene: BookWallScene
+    let rendererStatus: BookWallRendererStatus
     let prepared: BookWallPreparedWall
     let viewportFrame: CGRect
     let isActive: Bool
@@ -35,6 +36,9 @@ struct BookWallView: View {
     @State private var transitionRevision = 0
     @State private var configurationRevision = 0
     @State private var openingFailed = false
+    /// Keeps Retry mounted after a press until focus reaches a spine, so removing the focused
+    /// button doesn't move focus a second time.
+    @State private var isRetrying = false
     #if DEBUG && targetEnvironment(simulator)
         /// Counts completed falls so UI tests can confirm that Drop again ran a replay. With
         /// Reduce Motion, the status text can clear before a test reads it.
@@ -101,7 +105,8 @@ struct BookWallView: View {
                             ? { library.pickSeries($0, for: detailBook) } : nil,
                         libraryBook: libraryBook,
                         onOpenBook: onOpenBook,
-                        friendReads: friendReads(detailBook)
+                        friendReads: friendReads(detailBook),
+                        isRead: library.isBookReadByUser(detailBook.id)
                     )
                     .padding(.top, topInset)
                     .appTypography()
@@ -110,10 +115,34 @@ struct BookWallView: View {
                         PerformanceDiagnostics.isolates("wall-instant-panel-exit")
                             ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
                 }
-                // Spine targets exist from the tab's first render at each book's resting
-                // position and stay mounted while books fall. Opening details waits for the
-                // books to settle.
-                if detailBook == nil && !isReturning {
+                if rendererStatus.failure != nil || isRetrying, detailBook == nil, !isReturning {
+                    // Retry runs only on a press, so a lasting error can't loop.
+                    VStack(spacing: 40) {
+                        if let failure = rendererStatus.failure {
+                            Text("Book Wall could not continue.\n\(failure)")
+                                .appFont(size: 28)
+                                .multilineTextAlignment(.center)
+                        }
+                        Button("Retry") {
+                            // Retry reconnects before it returns. A renderer that fails again
+                            // leaves focus on Retry. A wall that runs again is an entry event,
+                            // so focus moves to the book the wall enters at, and Retry leaves
+                            // once focus is there. An empty wall has no book to focus.
+                            guard rendererStatus.retry(), let entryID else { return }
+                            isRetrying = true
+                            focusedBook = entryID
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityIdentifier("book-wall-retry")
+                    }
+                    .padding(.horizontal, 120)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .focusSection()
+                }
+                if rendererStatus.failure == nil, detailBook == nil, !isReturning {
+                    // Spine targets exist from the tab's first render at each book's resting
+                    // position and stay mounted while books fall. Opening details waits for the
+                    // books to settle.
                     ZStack(alignment: .topLeading) {
                         ForEach(books) { book in
                             if let frame = spineFrames[book.id] {
@@ -134,8 +163,8 @@ struct BookWallView: View {
                                 // Keep the selected button mounted and focused throughout
                                 // its flight; other books cannot start competing flights.
                                 .disabled(openingBookID != nil && openingBookID != book.id)
-                                .accessibilityLabel("\(book.title), \(book.author)")
-                                .accessibilityHint("Open book details")
+                                .accessibilityLabel("\(book.title), by \(book.author)")
+                                .accessibilityHint("Opens book details.")
                                 .accessibilityIdentifier("book-wall-\(book.id)")
                                 // Position last: modifiers after `.position` apply to a
                                 // container that fills the tab, which accessibility would
@@ -155,15 +184,6 @@ struct BookWallView: View {
                     // detail fade, an animated removal kept all of them updating on the main
                     // thread for the whole animation, which delayed the wall's frames.
                     .transition(.identity)
-                    // Back from a shelf that these details filtered reopens them here, once the
-                    // books have settled.
-                    .task(id: isSettled ? detailState.requestedBookID : nil) {
-                        guard isSettled, let id = detailState.requestedBookID else { return }
-                        detailState.requestedBookID = nil
-                        guard let book = books.first(where: { $0.id == id }) else { return }
-                        openDetail(
-                            book, detailFrame: detailFrame)
-                    }
                     #if DEBUG && targetEnvironment(simulator)
                         // Scenario hook: opens the entry book once so Simulator captures can
                         // show the detail pose without remote input.
@@ -182,6 +202,7 @@ struct BookWallView: View {
                     #endif
                 }
                 if hasSettledOnce && !books.isEmpty && detailBook == nil
+                    && rendererStatus.failure == nil
                     && !(isReturning && PerformanceDiagnostics.isolates("wall-late-replay"))
                     && !PerformanceDiagnostics.isolates("wall-no-replay")
                 {
@@ -192,14 +213,14 @@ struct BookWallView: View {
                         }
                         .buttonStyle(.glass)
                         .disabled(openingBookID != nil || isReturning)
-                        .accessibilityHint("Drop the books onto the shelf again")
+                        .accessibilityHint("Drops the books onto the shelf again.")
                         .accessibilityIdentifier("book-wall-replay")
                     }
                     .padding(.top, 34)
                     .padding(.trailing, 80)
                     .focusSection()
                 }
-                if detailBook == nil {
+                if detailBook == nil && rendererStatus.failure == nil {
                     VStack(alignment: .leading, spacing: 8) {
                         if books.isEmpty {
                             Text("Books finished this year will appear here.")
@@ -237,6 +258,11 @@ struct BookWallView: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("book-wall-design-probe")
+                    Text(String(detailState.flights))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-flight-probe")
                 #endif
             }
         }
@@ -266,6 +292,7 @@ struct BookWallView: View {
             }
         }
         .onChange(of: focusedBook) {
+            if focusedBook != nil { isRetrying = false }
             guard isActive, openingBookID == nil, detailBook == nil, !isReturning else { return }
             if let focusedBook { coordinator.wallSelection = focusedBook }
             scene.highlight(focusedBook, reduceMotion: reduceMotion)
@@ -317,6 +344,9 @@ struct BookWallView: View {
         openingFailed = false
         coordinator.wallSelection = book.id
         onActivity()
+        #if DEBUG && targetEnvironment(simulator)
+            detailState.flights += 1
+        #endif
         transitionTask = Task { @MainActor in
             let completed = await scene.flyToDetail(
                 book, detailFrame: detailFrame, reduceMotion: reduceMotion)
@@ -395,8 +425,11 @@ final class BookWallDetailState {
     var isPresented = false
     /// Increments when the overlay's Back closes details.
     var closeRevision = 0
-    /// A wall book whose details open once the wall settles.
-    var requestedBookID: Int?
     /// The open details' frame in global coordinates, which positions the Back overlay.
     var frame = CGRect.zero
+    #if DEBUG && targetEnvironment(simulator)
+        /// Openings that flew a book out, so UI tests can confirm that Back from a filter
+        /// returns to details without another flight.
+        var flights = 0
+    #endif
 }

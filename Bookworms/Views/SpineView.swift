@@ -27,27 +27,29 @@ struct SpineView: View {
                 Self.stampedBands(on: style.background, length: height, thickness: width)
                     .padding(.horizontal, width * 0.1)
             }
-            // Lettered lying flat, head on the left, then turned to read top to bottom. The
-            // format icon turns with the lettering, so it reads in the same direction.
-            HStack(spacing: 0) {
-                letteringRow
-                    .frame(width: lettering.length, height: width)
-                if book.format != nil {
-                    // Hierarchical, as each format symbol draws by default, and as Book Wall's
-                    // texture draws it (`BookWallSpineTexture`).
-                    Image(systemName: book.formatSymbol)
-                        .symbolRenderingMode(.hierarchical)
-                        .appFont(size: SpineTextMetrics.formatIconSize)
-                        .frame(width: SpineTextMetrics.formatIconSize)
-                        .padding(
-                            .trailing,
-                            SpineTextMetrics.formatIconRoom - SpineTextMetrics.formatIconSize)
-                }
+            // Lettered lying flat, head on the left, then turned to read top to bottom.
+            letteringRow
+                .frame(width: lettering.length, height: width)
+                .frame(width: height, height: width, alignment: .leading)
+                .rotationEffect(.degrees(90))
+                .frame(width: width, height: height)
+                .foregroundStyle(style.foreground.color)
+            if book.format != nil {
+                // Upright on the standing book, in the room the lettering leaves at the tail.
+                // Hierarchical, as each format symbol draws by default, and as Book Wall's
+                // texture draws it (`BookWallSpineTexture`).
+                Image(systemName: book.formatSymbol)
+                    .symbolRenderingMode(.hierarchical)
+                    .appFont(size: SpineTextMetrics.formatIconSize)
+                    .foregroundStyle(style.foreground.color)
+                    .frame(width: width, height: SpineTextMetrics.formatIconSize)
+                    .padding(
+                        .bottom,
+                        SpineTextMetrics.formatIconMargin(
+                            for: book, length: height, thickness: width)
+                    )
+                    .frame(width: width, height: height, alignment: .bottom)
             }
-            .frame(width: height, height: width, alignment: .leading)
-            .rotationEffect(.degrees(90))
-            .frame(width: width, height: height)
-            .foregroundStyle(style.foreground.color)
         }
         .frame(width: width, height: height)
         .overlay {

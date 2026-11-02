@@ -110,9 +110,6 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         sources?.contains(.hardcover) ?? (id < CWAConfiguration.firstBookID)
     }
 
-    /// The book's permanent Hardcover page, or `nil` for a book Hardcover doesn't list.
-    var hardcoverURL: URL? { isHardcoverBook ? HardcoverLink.book(id) : nil }
-
     var spineTitle: String { title.components(separatedBy: ":").first ?? title }
 
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
@@ -203,7 +200,6 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
 /// Permanent Hardcover web links by ID. Hardcover redirects them to the current page, so they
 /// keep working when a slug or username changes.
 enum HardcoverLink {
-    static func book(_ id: Int) -> URL { URL(string: "https://hardcover.app/id/books/\(id)")! }
     static func user(_ id: Int) -> URL { URL(string: "https://hardcover.app/id/user/\(id)")! }
 }
 
@@ -307,8 +303,9 @@ enum SampleLibrary {
             genres: ["Fantasy", "Mystery"], communityRating: 4.24,
             ratingsCount: 100,
             ratingDistribution: [
-                RatingBucket(rating: 3, count: 10), RatingBucket(rating: 4, count: 56),
-                RatingBucket(rating: 5, count: 34),
+                RatingBucket(rating: 3, count: 6), RatingBucket(rating: 3.5, count: 4),
+                RatingBucket(rating: 4, count: 30), RatingBucket(rating: 4.5, count: 36),
+                RatingBucket(rating: 5, count: 24),
             ], publicationYear: 2023),
         Book(
             id: 2, title: "A Field Guide to Elsewhere", author: "Morgan Vale",
@@ -383,6 +380,16 @@ extension SampleLibrary {
         Book(
             id: 102, title: "Salt and Lanterns", author: "Imogen Hale", pages: 288,
             finished: "2026-06-02", communityRating: 3.9),
+    ]
+
+    /// Fictional books only the second sample reader has read.
+    static let secondReaderBooks: [Book] = [
+        Book(
+            id: 103, title: "The Clockmaker's Garden", author: "Nadia Ferro", pages: 320,
+            finished: "2026-08-02", communityRating: 3.7),
+        Book(
+            id: 104, title: "Northern Lines", author: "Elliot Shaw", pages: 256,
+            finished: "2026-05-19", communityRating: 3.8),
     ]
 }
 

@@ -1790,7 +1790,7 @@ final class BookWallScene {
     /// must ask the scene for a frame afterward.
     static func applyArtwork(
         to body: ModelEntity, style: BookWallLocalSpine.Style, spine: TextureResource,
-        cover: TextureResource
+        cover: TextureResource?
     ) {
         let materials: [String: any RealityKit.Material] = [
             casingName: caseMaterial(style),
@@ -2367,9 +2367,11 @@ enum BookWallShelfLabel {
 /// Draws a Book Wall spine: flat cloth, the lettering, and the cover's fold onto the spine,
 /// as the iPhone companion's flat cloth spine draws them.
 enum BookWallSpineTexture {
-    /// Spine texture density, in pixels per scene unit on both axes, so glyphs keep their
-    /// proportions on thick books.
-    static let pixelsPerUnit: CGFloat = 420
+    /// Spine texture pixels per point at the wall's viewing scale (`slot.pointsPerUnit`), on
+    /// both axes, so glyphs keep their proportions on thick books. At twice the screen's
+    /// density, the resting wall samples mip level 1, about one texel per 1080p screen point,
+    /// and a book brought closer in its detail pose samples the sharper level 0.
+    static let pixelsPerPoint: CGFloat = 2
     /// The share of the spine's thickness that the cover's fold covers from the front joint.
     /// It fades out within the lettering's margin and the headroom above its first line's
     /// letters, so the lettering's contrast check against the flat cloth still holds.
@@ -2379,10 +2381,10 @@ enum BookWallSpineTexture {
     /// (`spineWallWidth` by `spineWallHeight`), lying flat with the head on the left and the
     /// front board's edge at the top, as the shelf's `SpineView` draws it before turning it
     /// upright: the title at the head end, the author at the tail end, and the format icon in
-    /// the room at the tail, reading in the lettering's direction.
+    /// the room at the tail, turned as the shelf's upright icon turns when its spine lies flat.
     ///
     /// `slot.lettering` was measured in points at the wall's viewing scale, so the image
-    /// draws in those points, scaled to `pixelsPerUnit`, and every glyph and margin keeps the
+    /// draws in those points, scaled to `pixelsPerPoint`, and every glyph and margin keeps the
     /// place the rule measured for it. `fontStyle` sets the icon's weight, as `appFont` does on
     /// the shelf.
     static func make(
@@ -2392,10 +2394,10 @@ enum BookWallSpineTexture {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
-        let size = CGSize(
-            width: (CGFloat(slot.spineWallWidth) * pixelsPerUnit).rounded(),
-            height: (CGFloat(slot.spineWallHeight) * pixelsPerUnit).rounded())
         let points = CGFloat(slot.pointsPerUnit)
+        let size = CGSize(
+            width: (CGFloat(slot.spineWallWidth) * points * pixelsPerPoint).rounded(),
+            height: (CGFloat(slot.spineWallHeight) * points * pixelsPerPoint).rounded())
         let length = CGFloat(slot.spineWallWidth) * points
         let thickness = CGFloat(slot.spineWallHeight) * points
         let image = UIGraphicsImageRenderer(size: size, format: format)
@@ -2407,7 +2409,8 @@ enum BookWallSpineTexture {
                         for: slot.book, ink: style.foreground, fontStyle: fontStyle,
                         pixelsPerPoint: size.height / thickness,
                         center: CGPoint(
-                            x: SpineTextMetrics.formatIconCenter(height: length),
+                            x: SpineTextMetrics.formatIconCenter(
+                                for: slot.book, length: length, thickness: thickness),
                             y: thickness / 2))
                 }
             }
@@ -2465,11 +2468,13 @@ enum BookWallSpineTexture {
         }
     }
 
-    /// Draws `book`'s format symbol upright in a spine lying flat, centered on `center`, at the
-    /// shelf's icon size, in the hierarchical rendering `SpineView` draws it in, so the Ebook
-    /// symbol's screen keeps its faint fill. The context is scaled to points; the symbol is made
-    /// at the texture's `pixelsPerPoint` and drawn unscaled, since a symbol drawn into a scaled
-    /// context comes out as a magnified bitmap.
+    /// Draws `book`'s format symbol centered on `center`, at the shelf's icon size, in the
+    /// hierarchical rendering `SpineView` draws it in, so the Ebook symbol's screen keeps its
+    /// faint fill. The shelf draws the symbol upright on a standing spine; this spine lies with
+    /// its head on the left, so the symbol turns a quarter turn counterclockwise, its top toward
+    /// the head. The context is scaled to points; the symbol is made at the texture's
+    /// `pixelsPerPoint` and drawn unscaled, since a symbol drawn into a scaled context comes out
+    /// as a magnified bitmap.
     private static func drawFormatIcon(
         for book: Book, ink: StyleColor, fontStyle: AppFontStyle, pixelsPerPoint: CGFloat,
         center: CGPoint
@@ -2485,10 +2490,11 @@ enum BookWallSpineTexture {
         else { return }
         context.saveGState()
         context.scaleBy(x: 1 / pixelsPerPoint, y: 1 / pixelsPerPoint)
+        context.translateBy(x: center.x * pixelsPerPoint, y: center.y * pixelsPerPoint)
+        context.rotate(by: -.pi / 2)
         symbol.draw(
             in: CGRect(
-                x: center.x * pixelsPerPoint - symbol.size.width / 2,
-                y: center.y * pixelsPerPoint - symbol.size.height / 2,
+                x: -symbol.size.width / 2, y: -symbol.size.height / 2,
                 width: symbol.size.width, height: symbol.size.height))
         context.restoreGState()
     }
@@ -2543,6 +2549,63 @@ enum BookWallSpineTexture {
                     jointAtLeft: false, context: cg)
             }
         return image.cgImage
+    }
+
+    /// A spine texture's full mip chain, each level drawn by Core Graphics from the level above
+    /// at half its size.
+    ///
+    /// RealityKit's generated mip levels of an sRGB texture average in linear light, which thins
+    /// dark lettering on light cloth and thickens light lettering on dark cloth; at Book Wall's
+    /// viewing scale, dark SemiBold lettering read like a light face. Core Graphics averages the
+    /// encoded values, as its text antialiasing does, so each level keeps the lettering's weight.
+    /// `BookWallRasterizer` draws the chain off the main actor.
+    struct Mips: Sendable {
+        let width: Int
+        let height: Int
+        /// Each level's premultiplied RGBA bytes in Display P3, rows packed, largest first.
+        let levels: [Data]
+
+        /// Draws `spine`'s chain down to one pixel, or returns `nil` when a level can't be
+        /// drawn.
+        init?(_ spine: CGImage) {
+            guard let space = CGColorSpace(name: CGColorSpace.displayP3) else { return nil }
+            var levels: [Data] = []
+            var source = spine
+            var (width, height) = (spine.width, spine.height)
+            while true {
+                var data = Data(count: width * height * 4)
+                let drawn = data.withUnsafeMutableBytes { buffer -> CGImage? in
+                    guard
+                        let context = CGContext(
+                            data: buffer.baseAddress, width: width, height: height,
+                            bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                    else { return nil }
+                    context.interpolationQuality = .high
+                    context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+                    return context.makeImage()
+                }
+                guard let drawn else { return nil }
+                levels.append(data)
+                guard width > 1 || height > 1 else { break }
+                (source, width, height) = (drawn, max(1, width / 2), max(1, height / 2))
+            }
+            (self.width, self.height, self.levels) = (spine.width, spine.height, levels)
+        }
+
+        /// Uploads the chain as an sRGB-encoded color texture.
+        func texture() async throws -> TextureResource {
+            var width = width
+            var mipmapLevels: [TextureResource.Contents.MipmapLevel] = []
+            for level in levels {
+                mipmapLevels.append(.mip(data: level, bytesPerRow: width * 4))
+                width = max(1, width / 2)
+            }
+            return try await TextureResource(
+                dimensions: .dimensions(width: self.width, height: height),
+                format: .color(.displayP3, pixelFormat: .rgba8Unorm_srgb),
+                contents: .init(mipmapLevels: mipmapLevels))
+        }
     }
 
     /// Draws `colors`, spread evenly along the joint side of `rect` (its top edge, or its left

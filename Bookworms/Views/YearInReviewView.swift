@@ -316,7 +316,7 @@ struct YearInReviewView: View {
                 .focusEffectDisabled()
                 .focused($focusedBook, equals: book.id)
                 .accessibilityLabel("\(book.title), by \(book.author)")
-                .accessibilityHint("Open book details")
+                .accessibilityHint("Opens book details.")
                 .accessibilityIdentifier("year-book-\(book.id)")
             }
             .focusSection()
