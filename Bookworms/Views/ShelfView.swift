@@ -73,12 +73,6 @@ struct ShelfView: View {
         for book in wallBooks { sources[book.id] = library.seriesSources[book.id] }
         return sources
     }
-    private var isWallReady: Bool {
-        let key = wallPreparationKey
-        return bookWallPreparation.isReady(
-            for: key.books, sources: key.sources, designs: key.designs, looks: key.looks,
-            mates: key.mates, fontStyle: key.fontStyle)
-    }
     private var wallPreparationKey: BookWallPreparationKey {
         let books = wallBooks
         let sources = wallSources
@@ -100,16 +94,18 @@ struct ShelfView: View {
             books: books, sources: sources, designs: designs, looks: looks, mates: mates,
             fontStyle: fontStyle, retry: bookWallPreparationRetry)
     }
+    /// Whether Book Wall shows the waiting dialog: before its first wall, or after a rebuild
+    /// fails, so Retry stays reachable. An earlier wall stays on screen while a newer one
+    /// prepares, and a failure waits until open details close.
+    private var needsBookWallDialog: Bool {
+        bookWallPreparation.prepared == nil
+            || (bookWallPreparation.failure != nil && !wallDetail.isPresented)
+    }
     private var waitsForBookWall: Binding<Bool> {
         Binding(
-            get: {
-                coordinator.current == .bookWall
-                    && !isWallReady
-            },
+            get: { coordinator.current == .bookWall && needsBookWallDialog },
             set: { presented in
-                if !presented && !isWallReady {
-                    showView(.shelf)
-                }
+                if !presented && needsBookWallDialog { showView(.shelf) }
             })
     }
     @State private var openedDevelopmentDetail = false
@@ -213,7 +209,11 @@ struct ShelfView: View {
             Tab("Settings", systemImage: "gearshape", value: SidebarItem.settings) {
                 SettingsView(
                     library: library, social: social, coordinator: coordinator,
-                    section: $settingsSection, onShowShelf: { showView(.shelf) })
+                    section: $settingsSection, onShowShelf: { showView(.shelf) },
+                    onSyncNow: {
+                        await library.refresh(manual: true)
+                        await loadSocial(manual: true)
+                    })
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -383,7 +383,8 @@ struct ShelfView: View {
             }
             .onChange(of: ambient.isActive) { library.setAmbientActive(ambient.isActive) }
             .onChange(of: coordinator.current) {
-                // Disabling the current view in Settings falls back to My Shelf without leaving Settings.
+                // Disabling the current view in Settings falls back to the first sidebar view
+                // without leaving Settings.
                 if isShowingMainView { sidebarItem = .view(coordinator.current) }
                 if coordinator.current == .comparison || coordinator.current == .shared {
                     ensureComparisonReader()
@@ -767,7 +768,6 @@ struct ShelfView: View {
             onPickSeries: library.canPickSeries(for: book)
                 ? { library.pickSeries($0, for: library.book(withID: book.id) ?? book) }
                 : nil,
-            libraryBook: { library.book(withID: $0) },
             onOpenBook: onOpenBook,
             friendReads: social.presentation.friendReads[book.id] ?? [],
             isRead: library.isBookReadByUser(book.id)
@@ -933,9 +933,7 @@ struct ShelfView: View {
                         ProgressView("Loading view…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if view == .bookWall {
-                        if let prepared = bookWallPreparation.prepared,
-                            isWallReady
-                        {
+                        if let prepared = bookWallPreparation.prepared {
                             BookWallView(
                                 library: library, coordinator: coordinator, scene: bookWallScene,
                                 rendererStatus: wallRenderer, prepared: prepared,
@@ -944,7 +942,6 @@ struct ShelfView: View {
                                 reviewLoader: reviewLoader(for:),
                                 onShowShelf: { showDetailFilter($1, from: $0) },
                                 series: { library.series(for: library.book(withID: $0.id) ?? $0) },
-                                libraryBook: { library.book(withID: $0) },
                                 // A series book opens in the cover details, even one on the wall.
                                 onOpenBook: { selectedBook = $0 },
                                 friendReads: { social.presentation.friendReads[$0.id] ?? [] },
@@ -1234,7 +1231,7 @@ struct ShelfView: View {
     }
 
     private var controls: some View {
-        ViewSpecificControls(library: library, coordinator: coordinator)
+        ViewSpecificControls(library: library)
     }
 
     private var selectionCaption: some View {
@@ -1364,10 +1361,12 @@ struct ShelfView: View {
             .frame(maxWidth: 900)
             // The buttons keep the glass styles' own label colors, which change with focus.
             if let filter = library.shelfFilter {
-                Button("Show all books", action: clearShelfFilter)
-                    .buttonStyle(.glassProminent)
-                    .accessibilityLabel("Clear filter: \(filter.name)")
-                    .accessibilityIdentifier("clear-shelf-filter")
+                Button(action: clearShelfFilter) {
+                    Text("Show all books").appFont(size: 29, weight: .medium)
+                }
+                .buttonStyle(.glassProminent)
+                .accessibilityLabel("Clear filter: \(filter.name)")
+                .accessibilityIdentifier("clear-shelf-filter")
             } else {
                 HStack(spacing: 24) {
                     Button("Choose sources") {
@@ -1404,12 +1403,6 @@ extension BookwormsView {
     }
 }
 
-struct SpineButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(configuration.isPressed ? 0.85 : 1)
-    }
-}
-
 /// Identifies a rendering of the wall background for the lit 3D backdrop.
 private struct WallBackdropKey: Hashable {
     let isDark: Bool
@@ -1429,6 +1422,8 @@ private struct BookWallDetailOverlay: View {
             BookWallDetailNavigationCover(palette: palette, detailFrame: state.frame) {
                 state.closeRevision += 1
             }
+            // Back sits on the darkened wall in either appearance, as the details do.
+            .environment(\.colorScheme, .dark)
             .transition(
                 PerformanceDiagnostics.isolates("wall-instant-cover-exit")
                     ? .asymmetric(insertion: .opacity, removal: .identity) : .opacity)
@@ -1489,6 +1484,7 @@ private struct BookWallDetailNavigationCover: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Button(action: onBack) {
                             Label("Back to view", systemImage: "chevron.left")
+                                .appFont(size: 29, weight: .medium)
                         }
                         .buttonStyle(.glass)
                         .focused($backFocused)
@@ -1605,11 +1601,11 @@ struct BookCaption: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 16) {
-                if !book.formatParts.isEmpty {
+                if !book.formatSymbols.isEmpty {
                     // One icon per format. Symbols differ in width; fixed frames keep them even.
                     HStack(spacing: 4) {
-                        ForEach(book.formatParts, id: \.self) { format in
-                            Image(systemName: Book.formatSymbol(forLabel: format))
+                        ForEach(book.formatSymbols, id: \.self) { symbol in
+                            Image(systemName: symbol)
                                 .appFont(size: 28, weight: .medium)
                                 .frame(width: 40, height: 40)
                         }
@@ -1638,7 +1634,7 @@ struct BookCaption: View {
                 community > 0
             {
                 Text(
-                    "You ★\(rating.formatted(.number.precision(.fractionLength(0...1)))) · Community ★\(community.formatted(.number.precision(.fractionLength(1))))"
+                    "You \(RatingText.stars(rating)) · Community \(RatingText.stars(community))"
                 )
                 .appFont(size: 29).opacity(0.82).padding(.top, 4)
             } else if let rating = book.rating {
@@ -1658,8 +1654,9 @@ struct ReadingLine: View {
         // A full-size symbol makes this line read larger than the author line at the same point
         // size, so it uses the small scale and sits on the text baseline.
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if book.formatLabel != nil {
-                Image(systemName: book.formatSymbol).imageScale(.small).accessibilityHidden(true)
+            // One icon per format, as the My Shelf caption shows them.
+            ForEach(book.formatSymbols, id: \.self) {
+                Image(systemName: $0).imageScale(.small).accessibilityHidden(true)
             }
             Text(book.readingSummary(dateFormat: dateFormat))
         }

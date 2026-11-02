@@ -150,8 +150,7 @@ struct AmbientView: View {
             if !social.activities.isEmpty {
                 ActivityCard(
                     activity: social.activities[
-                        controller.contentIndex % min(10, social.activities.count)],
-                    isAmbient: true
+                        controller.contentIndex % min(10, social.activities.count)]
                 )
                 .frame(maxHeight: .infinity, alignment: .center)
             }
@@ -204,9 +203,7 @@ struct AmbientView: View {
                 ambientStat("Books read", review.books.count.formatted())
                 if review.pages > 0 { ambientStat("Pages", review.pages.formatted()) }
                 if let average = review.averageRating {
-                    ambientStat(
-                        "Average rating",
-                        average.formatted(.number.precision(.fractionLength(1))) + " ★")
+                    ambientStat("Average rating", RatingText.stars(average))
                 }
                 if let month = review.busiestMonth {
                     ambientStat("Busiest month", Self.monthNames[month - 1])
@@ -352,7 +349,7 @@ struct AmbientView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 ReaderLabel(name: name, avatarURL: avatarURL, size: 30, weight: .regular)
-                Text("· \(item.rating.map { String(format: "%.1f ★", $0) } ?? "Not rated")")
+                Text("· \(item.rating.map(RatingText.stars) ?? "Not rated")")
                     .appFont(size: 30)
             }
             BookText(

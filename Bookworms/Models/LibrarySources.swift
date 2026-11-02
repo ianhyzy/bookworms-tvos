@@ -75,14 +75,14 @@ enum SourceError: LocalizedError {
 
 enum ShelfCollection: String, Codable, CaseIterable, Identifiable {
     /// Up to `ShelfPreferences.readingLimit` current reads, then read books.
-    case standard = "Default"
+    case read = "Read Books"
     case owned = "Owned Books"
     case all = "All Books"
     var id: String { rawValue }
 
-    /// Decodes unknown values, including the retired "Read Books", as `standard`.
+    /// Decodes unknown values, including the retired "Default", as `read`.
     init(from decoder: any Decoder) throws {
-        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .standard
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .read
     }
 }
 
@@ -131,7 +131,7 @@ enum ProgressStyle: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ShelfPreferences: Codable, Equatable {
-    /// The most current reads that lead the default collection.
+    /// The most current reads that lead **Read Books** and **All Books**.
     static let readingLimit = 3
 
     var collection: ShelfCollection
@@ -161,7 +161,7 @@ struct ShelfPreferences: Codable, Equatable {
                 ProgressStyle.self, forKey: .progressStyle)) ?? .vertical)
     }
 
-    /// Books for the shelf, in display order. **Default** and **All Books** lead with the most
+    /// Books for the shelf, in display order. **Read Books** and **All Books** lead with the most
     /// recently started current reads, regardless of sort, and they count toward `limit`.
     func select(_ books: [Book], limit: Int) -> [Book] {
         let reading =
@@ -175,7 +175,7 @@ struct ShelfPreferences: Codable, Equatable {
         let eligible = books.filter {
             guard !pinned.contains($0.id) else { return false }
             switch collection {
-            case .standard: return $0.isReading != true && $0.isMarkedRead
+            case .read: return $0.isReading != true && $0.isMarkedRead
             case .owned: return $0.isOwned == true
             case .all: return true
             }
@@ -211,13 +211,30 @@ struct ShelfPreferences: Codable, Equatable {
 }
 
 enum LibraryMerge {
+    /// Books from every snapshot, one per Hardcover ID. Hardcover books never merge with each
+    /// other, even with the same title and author, because Hardcover can list one real book
+    /// under two IDs and cleaning that up isn't the app's job. A CWA book has no Hardcover ID, so
+    /// it joins the Hardcover book with its title and author (`matchingKey(_:)`), else stands
+    /// alone.
     static func books(from snapshots: [SourceSnapshot]) -> [Book] {
         var result: [String: Book] = [:]
+        /// The result key of the first Hardcover book with each title and author.
+        var hardcoverKeys: [String: String] = [:]
         // Hardcover supplies personal reading data; CWA adds ownership without replacing it.
         for snapshot in snapshots.sorted(by: { $0.source.rawValue > $1.source.rawValue }) {
             for var book in snapshot.books {
                 book.sources = [snapshot.source]
-                let key = matchingKey(book)
+                let ownKey = "\(snapshot.source.rawValue):\(book.id)"
+                let titleKey = matchingKey(book)
+                let key: String
+                if snapshot.source == .hardcover {
+                    key = ownKey
+                    if let titleKey, hardcoverKeys[titleKey] == nil {
+                        hardcoverKeys[titleKey] = key
+                    }
+                } else {
+                    key = titleKey.flatMap { hardcoverKeys[$0] } ?? ownKey
+                }
                 if var existing = result[key] {
                     existing.isOwned = existing.isOwned == true || book.isOwned == true
                     existing.isRead = existing.isRead == true || book.isRead == true
@@ -236,7 +253,8 @@ enum LibraryMerge {
         return result.values.sorted(by: Book.recentFirst)
     }
 
-    private static func matchingKey(_ book: Book) -> String {
+    /// The normalized title and author, or `nil` when the title is empty or the author unknown.
+    private static func matchingKey(_ book: Book) -> String? {
         func normalized(_ text: String) -> String {
             text.folding(
                 options: [.caseInsensitive, .diacriticInsensitive],
@@ -244,7 +262,7 @@ enum LibraryMerge {
             )
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         }
-        guard book.author != "Unknown author", !book.title.isEmpty else { return "id:\(book.id)" }
+        guard book.author != "Unknown author", !book.title.isEmpty else { return nil }
         return normalized(book.title) + "|" + normalized(book.author)
     }
 }

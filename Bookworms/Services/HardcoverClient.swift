@@ -420,12 +420,8 @@ actor HardcoverClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bookworms/1.0 (read-only tvOS client)", forHTTPHeaderField: "User-Agent")
         request.httpBody = body
-        let started = Date()
         let (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else { throw HardcoverError.incomplete }
-        await APIUsageStore.shared.record(
-            service: "hardcover", status: http.statusCode,
-            duration: Date().timeIntervalSince(started))
         if http.statusCode == 429 {
             let delay = http.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 60
             retryAfter = Date().addingTimeInterval(min(3600, max(1, delay)))
@@ -783,7 +779,8 @@ actor HardcoverClient {
                 seriesName: seriesName?.isEmpty == false ? seriesName : nil,
                 seriesMemberships: source.bookSeries?.compactMap(\.membership),
                 genres: source.genres,
-                communityRating: source.rating, ratingsCount: source.ratingsCount,
+                communityRating: source.communityRating,
+                ratingsCount: source.ratingsCount,
                 ratingDistribution: source.validRatingDistribution,
                 detailCoverURL: covers.preferred, sources: [.hardcover],
                 isRead: row.statusID == Self.readStatus || !finishes.isEmpty
@@ -925,6 +922,9 @@ extension SourceBook {
             .filter { ($0.spoilerRatio ?? 0) < 0.2 && !["Fiction", "Nonfiction"].contains($0.tag) }
             .sorted { ($0.count ?? 0) > ($1.count ?? 0) }.map(\.tag)
     }
+
+    /// The community average, without the 0 Hardcover reports for an unrated book.
+    var communityRating: Double? { rating.flatMap { $0 > 0 ? $0 : nil } }
 
     /// Rating buckets from half a star to five stars with nonnegative counts.
     var validRatingDistribution: [RatingBucket]? {

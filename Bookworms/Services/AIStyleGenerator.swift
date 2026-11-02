@@ -144,12 +144,8 @@ actor AIStyleGenerator {
         let request = try Self.request(
             prompt: prompt, images: images, configuration: configuration, key: key)
         for attempt in 0..<3 {
-            let started = Date()
             let (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            await APIUsageStore.shared.record(
-                service: configuration.provider.rawValue, status: status,
-                duration: Date().timeIntervalSince(started), data: data)
             if (200...299).contains(status) {
                 return try Self.responseText(data, provider: configuration.provider)
             }

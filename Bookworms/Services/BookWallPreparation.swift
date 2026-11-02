@@ -58,38 +58,29 @@ final class BookWallPreparation {
         self.downloadFont = downloadFont
     }
 
-    func isReady(
-        for books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
-        looks: [Int: SpineDesignV1], mates: [Int: [Book]] = [:], fontStyle: AppFontStyle = .serif
-    ) -> Bool {
-        guard let prepared else { return false }
-        return prepared.books == books && prepared.sources == sources
-            && prepared.designs == designs && prepared.looks == looks && prepared.mates == mates
-            && prepared.fontStyle == fontStyle
-    }
-
     /// Prepares `books` in `fontStyle`, each drawn in its series look from `looks`, else in its
     /// series source's design when `sources` (`LibraryModel.seriesSources`) gives one, else in
     /// its companion design from `designs`, else from its cover. A shared design letters in its
     /// face only when the face can letter every book in `mates` that draws it; otherwise all of
     /// them letter it in its system typeface, as on the iPhone. The checks run here, once.
+    ///
+    /// A wall prepared earlier stays in `prepared` until the new one is ready, so a design, link,
+    /// or look that arrives while the wall is on screen replaces it in place. When the new wall
+    /// can't be built, the earlier one stays and `failure` describes the problem.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
         looks: [Int: SpineDesignV1] = [:], mates: [Int: [Book]] = [:],
         fontStyle: AppFontStyle = .serif
     ) async {
-        if let prepared,
-            isReady(
-                for: books, sources: sources, designs: designs, looks: looks, mates: mates,
-                fontStyle: fontStyle)
+        failure = nil
+        if let prepared, prepared.books == books, prepared.sources == sources,
+            prepared.designs == designs, prepared.looks == looks, prepared.mates == mates,
+            prepared.fontStyle == fontStyle
         {
             // A cancelled preparation may have left covers to retry.
             await retryMissingCovers(in: prepared, fontStyle: fontStyle)
             return
         }
-        prepared = nil
-        missingCovers = []
-        failure = nil
         completedCount = 0
         totalCount = books.count
 
@@ -101,7 +92,7 @@ final class BookWallPreparation {
                 books, sources: sources, designs: designs, looks: looks, mates: mates,
                 fontStyle: fontStyle)
         else {
-            if !Task.isCancelled { failure = "A book spine could not be prepared. Select Retry." }
+            if !Task.isCancelled { failure = "A book could not be prepared. Select Retry." }
             return
         }
         // Faces a network failure skipped get one more try once everything else is ready. A
@@ -126,8 +117,8 @@ final class BookWallPreparation {
 
     /// Draws every book of the wall with the faces registered now, adding each drawn book to
     /// `completedCount` when `countsProgress` is true. Returns `nil` when the task is cancelled
-    /// or a spine can't be drawn, and otherwise the wall and the books whose covers it was drawn
-    /// without.
+    /// or a book's spine, cover, or shelf label texture can't be made, and otherwise the wall
+    /// and the books whose covers it was drawn without.
     private func build(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
         looks: [Int: SpineDesignV1], mates: [Int: [Book]], fontStyle: AppFontStyle,
@@ -203,16 +194,20 @@ final class BookWallPreparation {
                 slot: slot, cover: cover, source: source, design: drawn[slot.book.id],
                 fontStyle: fontStyle)
             guard !Task.isCancelled else { return nil }
+            // A texture that can't be made fails the wall, which offers Retry, rather than
+            // drawing a book without its spine, cover, or shelf label.
             guard let spine = try? await images.spineMips?.texture() else { return nil }
-            let coverTexture: TextureResource?
+            var coverTexture: TextureResource?
             if let coverImage = images.cover {
-                coverTexture = try? await TextureResource.generate(
-                    from: coverImage, options: .init(semantic: .color))
-            } else {
-                coverTexture = nil
+                guard
+                    let texture = try? await TextureResource.generate(
+                        from: coverImage, options: .init(semantic: .color))
+                else { return nil }
+                coverTexture = texture
             }
             if let label = images.label {
-                labels[slot.book.id] = await BookWallShelfLabel.prepare(label)
+                guard let prepared = await BookWallShelfLabel.prepare(label) else { return nil }
+                labels[slot.book.id] = prepared
             }
             guard !Task.isCancelled else { return nil }
             bodies[slot.book.id] = BookWallScene.makeBook(
@@ -225,7 +220,8 @@ final class BookWallPreparation {
         var hint: BookWallShelfLabel.Prepared?
         if let image = BookWallShelfLabel.make("Choose a spine to open its book.", style: fontStyle)
         {
-            hint = await BookWallShelfLabel.prepare(image)
+            guard let prepared = await BookWallShelfLabel.prepare(image) else { return nil }
+            hint = prepared
         }
         let wall = BookWallPreparedWall(
             books: books, sources: sources, designs: designs, looks: looks, mates: mates,

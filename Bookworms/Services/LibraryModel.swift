@@ -55,6 +55,7 @@ final class LibraryModel {
             let read = Set(allBooks.filter { $0.isHardcoverBook && $0.isMarkedRead }.map(\.id))
             if read != readBookIDs { readBookIDs = read }
             refreshSeriesSources()
+            refreshSeriesListings()
             refreshOnThisDay()
         }
     }
@@ -135,7 +136,18 @@ final class LibraryModel {
     }
 
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
-    private(set) var seriesByID: [Int: SeriesInfo] = [:]
+    private(set) var seriesByID: [Int: SeriesInfo] = [:] {
+        didSet { if seriesByID != oldValue { refreshSeriesListings() } }
+    }
+
+    /// Each series' books as book details list them (`SeriesEntry.listings(infos:library:)`), by
+    /// series ID. Prepared with the library and its series, so details never walk the library.
+    private(set) var seriesListings: [Int: [SeriesEntry]] = [:]
+
+    private func refreshSeriesListings() {
+        let listings = SeriesEntry.listings(infos: seriesByID, library: allBooks)
+        if listings != seriesListings { seriesListings = listings }
+    }
 
     /// Covers of every series book, for the browsing artwork tier, which skips covers the library
     /// tier already has. Owned books use their library cover. Series of books on My Shelf come
@@ -143,8 +155,8 @@ final class LibraryModel {
     private(set) var browsingCoverURLs: [URL] = []
 
     /// `book`'s series for its details: the series its label names, which its link chooses, else
-    /// its shortest series, and every series it belongs to, with their books when synced. `nil`
-    /// for a book without a named series.
+    /// its shortest series, and every series it belongs to, with their Hardcover lists when synced
+    /// and their listings. `nil` for a book without a named series.
     func series(for book: Book) -> ShownSeries? {
         guard let shown = SeriesDesigns.shownSeries(of: book, link: seriesLinks[book.id]) else {
             return nil
@@ -157,6 +169,10 @@ final class LibraryModel {
             infos: Dictionary(
                 uniqueKeysWithValues: all.compactMap { series in
                     seriesByID[series.seriesID].map { (series.seriesID, $0) }
+                }),
+            listings: Dictionary(
+                uniqueKeysWithValues: all.compactMap { series in
+                    seriesListings[series.seriesID].map { (series.seriesID, $0) }
                 }))
     }
 
@@ -1993,7 +2009,10 @@ final class LibraryModel {
                     else { return nil }
                     return TopShelfBook(
                         id: book.id, title: book.title, imageURL: url,
-                        progress: book.isReading == true ? book.progress ?? 0 : nil,
+                        // A current read without progress shows its cover undimmed, as on
+                        // My Shelf.
+                        progress: book.isReading == true ? book.progress : nil,
+                        isReading: book.isReading == true ? true : nil,
                         showsNativeProgress: style == .horizontal ? true : nil)
                 }
         topShelfRevision &+= 1

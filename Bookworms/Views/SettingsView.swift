@@ -34,6 +34,8 @@ struct SettingsView: View {
     @FocusState private var focusedSection: Section?
     /// Leaves Settings for My Shelf, for example after choosing the sample shelf.
     let onShowShelf: () -> Void
+    /// Syncs the library, then social data, bypassing both daily freshness checks.
+    let onSyncNow: () async -> Void
 
     /// The section Settings shows first. Debug builds accept `--settings-tab=NAME`.
     static func initialSection() -> Section {
@@ -350,8 +352,8 @@ struct SettingsView: View {
             if designs.undesigned > 0 {
                 note(
                     designs.undesigned == 1
-                        ? "1 book has no design yet, so Book Wall shows a default look."
-                        : "\(designs.undesigned) books have no design yet, so Book Wall shows a default look."
+                        ? "1 book has no design yet, so it gets the Apple TV's own look."
+                        : "\(designs.undesigned) books have no design yet, so they get the Apple TV's own look."
                 )
             }
             if !library.iCloudEnabled {
@@ -369,11 +371,13 @@ struct SettingsView: View {
         }
     }
 
-    /// Whether Sync now can reach a source: false while the only usable login is a rejected
-    /// Hardcover login, which needs reconnecting first.
+    /// Whether Sync now can reach an enabled source: false while the only enabled login is a
+    /// rejected Hardcover login, which needs reconnecting first.
     private var canSync: Bool {
         let cwaReady = BookPresentation.offersCWA && library.cwaEnabled && library.hasCWAPassword
-        return cwaReady || (library.hardcoverConnected && !library.hardcoverSessionExpired)
+        return cwaReady
+            || (library.hardcoverEnabled && library.hardcoverConnected
+                && !library.hardcoverSessionExpired)
     }
 
     private var sourcesSettings: some View {
@@ -382,6 +386,8 @@ struct SettingsView: View {
                 BookPresentation.offersCWA
                     ? "Combine enabled sources. Syncs automatically once a day."
                     : "Syncs automatically once a day.")
+            // Source controls wait for a sync to finish; Sync now stays enabled, so pressing it
+            // leaves focus on it.
             columns {
                 Toggle("Hardcover", isOn: $library.hardcoverEnabled)
                     .font(.system(size: 26))
@@ -426,23 +432,16 @@ struct SettingsView: View {
                     }
                 }
             }
-            // Syncs the library, then social data, bypassing both daily freshness checks.
+            .disabled(library.isLoading || library.isGenerating)
             Button {
-                Task {
-                    await library.refresh(manual: true)
-                    await social.load(
-                        token: library.hardcoverTokenForSync(),
-                        account: library.hardcoverAccountID,
-                        readerID: coordinator.preferences.readerID, manual: true,
-                        enabledViews: Set(coordinator.preferences.activeViews),
-                        renewToken: library.renewHardcoverToken(rejected:))
-                }
+                guard !library.isLoading, !library.isGenerating, !social.isLoading else { return }
+                Task { await onSyncNow() }
             } label: {
                 Label("Sync now", systemImage: "arrow.clockwise")
             }
             .font(.system(size: 26))
             .performanceGlassButton()
-            .disabled(social.isLoading || !canSync)
+            .disabled(!canSync)
             .accessibilityIdentifier("sync-now")
             .syncProgress(library.isLoading || social.isLoading)
             // The Hardcover status above already explains a rejected login.
@@ -450,7 +449,6 @@ struct SettingsView: View {
                 note(message)
             }
         }
-        .disabled(library.isLoading || library.isGenerating)
     }
 
     private var generalSettings: some View {

@@ -18,14 +18,30 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(invalid.finishedLabel(format: .iso), "Date not recorded")
     }
 
-    func testLengthLabelUsesMinutesOnlyForAudiobooksWithARecordedLength() {
-        var book = Book(id: 1, title: "Book", author: "Author", pages: 304, format: "Listened")
-        XCTAssertEqual(book.lengthLabel, "304 pages")
-        book.audioSeconds = 44_550
-        XCTAssertEqual(book.lengthLabel, "743 minutes")
+    func testLengthLabelUsesListeningTimeOnlyForAudiobooksWithARecordedLength() {
+        var book = Book(id: 1, title: "Book", author: "Author", pages: 1_024, format: "Listened")
+        XCTAssertEqual(book.lengthLabel, "1,024 pages")
+        book.audioSeconds = 43_500
+        XCTAssertEqual(book.lengthLabel, "12 hr, 5 min")
         book.format = "Ebook"
-        XCTAssertEqual(book.lengthLabel, "304 pages")
+        XCTAssertEqual(book.lengthLabel, "1,024 pages")
         XCTAssertNil(Book(id: 2, title: "Book", author: "Author").lengthLabel)
+    }
+
+    func testHumourAndHumorShowAsOneGenre() {
+        XCTAssertEqual(Book.displayGenre("Humour"), "Humor")
+        XCTAssertEqual(Book.displayGenre("dark humour"), "Dark Humor")
+        let book = Book(
+            id: 1, title: "Book", author: "Author",
+            genres: ["Humor", "Humour", "Satire", "Fantasy"])
+        XCTAssertEqual(
+            BookDetailView.genres(of: book), ["Humor", "Satire", "Fantasy"],
+            "A repeat leaves room for the next genre")
+        XCTAssertTrue(
+            ShelfFilter.genre("Humor")
+                .matches(
+                    Book(
+                        id: 2, title: "Book", author: "Author", genres: ["humour"])))
     }
 
     func testGenreTagsKeepEnglishAndDropForeignLanguages() {
@@ -446,6 +462,20 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(books.first?.rating, 5)
         XCTAssertEqual(books.first?.communityRating, 3.7)
         XCTAssertEqual(books.first?.ratingDistribution?.reduce(0) { $0 + $1.count }, 20)
+        let unrated =
+            #"[{"id":2,"book":{"id":11,"title":"Unrated","rating":0,"ratings_count":0}}]"#
+        XCTAssertNil(
+            HardcoverClient.normalize(
+                try JSONDecoder().decode([UserBook].self, from: Data(unrated.utf8))
+            )
+            .first?
+            .communityRating, "Hardcover's 0 average for an unrated book shows no rating")
+    }
+
+    func testRatingsReadTheSameInEveryView() {
+        XCTAssertEqual(RatingText.stars(4.5), "★4.5")
+        XCTAssertEqual(RatingText.stars(4), "★4")
+        XCTAssertEqual(RatingText.stars(3.75), "★3.8")
     }
 
     func testAppearanceOverrideAndSystemDefault() {
@@ -567,6 +597,19 @@ final class LibraryTests: XCTestCase {
             native.sections[0].items.first?.playbackProgress, 0.4,
             "The horizontal style uses Top Shelf's native progress bar")
         reading.showsNativeProgress = nil
+        var unstarted = books[2]
+        unstarted.isReading = true
+        let invalid = [
+            TopShelfBook(id: 0, title: "No ID", imageURL: books[3].imageURL),
+            TopShelfBook(
+                id: 14, title: "Plain HTTP", imageURL: URL(string: "http://example.com/14.jpg")!),
+        ]
+        let current = try XCTUnwrap(TopShelfSnapshot.content(for: invalid + [unstarted, books[1]]))
+        XCTAssertEqual(current.sections.map(\.title), ["Now reading", "Recently read"])
+        XCTAssertEqual(
+            current.sections.flatMap(\.items).map(\.identifier), ["3", "2"],
+            "A current read without progress is still current, and invalid books are left out")
+        XCTAssertEqual(current.sections[0].items.first?.playbackProgress, 0)
         reading.posterURL = URL(filePath: "/tmp/1-400.jpg")
         let swept = try XCTUnwrap(TopShelfSnapshot.content(for: [reading]))
         XCTAssertEqual(

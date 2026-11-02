@@ -24,7 +24,13 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(years.map(\.year), [2026, 2025])
         XCTAssertEqual(years[1].books.map(\.id), [6, 1], "Books run earliest first")
         XCTAssertEqual(years[1].monthlyCounts, [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        XCTAssertEqual(years[1].busiestMonth, 1, "The earliest month wins a tie")
+        XCTAssertNil(years[1].busiestMonth, "A month of one book isn't busy")
+        let tied = YearInReview.all(
+            from: [
+                book(1, finished: "2025-03-02"), book(2, finished: "2025-03-09"),
+                book(3, finished: "2025-01-20"), book(4, finished: "2025-01-21"),
+            ])
+        XCTAssertEqual(tied.first?.busiestMonth, 1, "The earliest month wins a tie")
         XCTAssertTrue(YearInReview.all(from: [book(1, finished: nil)]).isEmpty)
     }
 
@@ -68,6 +74,14 @@ final class YearInReviewTests: XCTestCase {
             YearInReview.all(from: [book(1, finished: "2025-01-01", pages: 300)]).first)
         XCTAssertEqual(single.longest?.id, 1)
         XCTAssertNil(single.shortest, "One paged book isn't also the shortest")
+        let equal = try XCTUnwrap(
+            YearInReview.all(from: [
+                book(1, finished: "2025-01-01", pages: 300),
+                book(2, finished: "2025-02-01", pages: 300),
+            ])
+            .first)
+        XCTAssertEqual(equal.longest?.id, 2)
+        XCTAssertNil(equal.shortest, "Equal lengths have no shorter book")
         XCTAssertNil(single.favorite)
     }
 
@@ -139,6 +153,18 @@ final class YearInReviewTests: XCTestCase {
         XCTAssertEqual(
             review.genres.map(\.name), ["Fantasy", "LGBTQ", "Litrpg"],
             "Foreign tags don't use up a book's three genre slots")
+    }
+
+    func testHumourAndHumorCountAsOneGenre() throws {
+        let review = try XCTUnwrap(
+            YearInReview.all(from: [
+                book(1, finished: "2025-01-01", genres: ["Humour"]),
+                book(2, finished: "2025-02-01", genres: ["humor"]),
+                book(3, finished: "2025-03-01", genres: ["Dark Humour"]),
+            ])
+            .first)
+        XCTAssertEqual(review.genres.map(\.name), ["Humor", "Dark Humor"])
+        XCTAssertEqual(review.genres.first?.count, 2)
     }
 
     func testLargeYearsShelveTheHighestRatedBooksInReadingOrder() throws {

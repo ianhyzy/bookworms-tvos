@@ -287,7 +287,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             author: authors.isEmpty ? "Unknown author" : authors,
             description: source.description, coverURL: covers.alternate, pages: source.pages,
             format: edition?.readingFormat?.format, genres: source.genres,
-            communityRating: source.rating, ratingsCount: source.ratingsCount,
+            communityRating: source.communityRating, ratingsCount: source.ratingsCount,
             ratingDistribution: source.validRatingDistribution, detailCoverURL: covers.preferred,
             sources: [.hardcover], publicationYear: source.releaseYear)
     }
