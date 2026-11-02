@@ -208,6 +208,8 @@ final class BookWallScene {
     private var viewportSize = CGSize.zero
     private var dropHeight: Float = 3
     private var dropTask: Task<Void, Never>?
+    /// Whether the current fall began without a renderer, which runs no physics.
+    private var fellWithoutHost = false
     private var landedIDs: Set<Int> = []
     /// False only while books fall. A wall with nothing to drop, before preparation or
     /// without books, rests, so the renderer can stop drawing.
@@ -310,7 +312,11 @@ final class BookWallScene {
         continuingCollisionSubscription?.cancel()
         renderHost = host
         host.setAmbientExponent(ambientExponent)
-        if !layout.slots.isEmpty && !isSettled { observeLandings() }
+        if !layout.slots.isEmpty && !isSettled {
+            // Books added while no renderer ran hang overlapped at the drop height, and
+            // physics would push them apart instead of letting them land, so they drop again.
+            if fellWithoutHost { restartFall() } else { observeLandings() }
+        }
         if flight != nil || idlePose != nil {
             motionSubscription?.cancel()
             motionSubscription = nil
@@ -417,7 +423,20 @@ final class BookWallScene {
         return true
     }
 
+    /// Drops an unsettled wall's books again from the drop height, one at a time.
+    private func restartFall() {
+        dropTask?.cancel()
+        preparedBodies.merge(bodies) { prepared, _ in prepared }
+        for body in bodies.values { body.removeFromParent() }
+        bodies.removeAll()
+        restingTransforms.removeAll()
+        landedIDs.removeAll()
+        startFall(reduceMotion: false)
+    }
+
     private func startFall(reduceMotion: Bool) {
+        // Reduce Motion places books at rest, which needs no physics.
+        fellWithoutHost = renderHost == nil && !reduceMotion
         collisionSubscription?.cancel()
         continuingCollisionSubscription?.cancel()
         if !reduceMotion { observeLandings() }
