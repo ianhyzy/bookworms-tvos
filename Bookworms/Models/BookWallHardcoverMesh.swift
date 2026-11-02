@@ -100,6 +100,61 @@ enum BookWallHardcoverMesh {
     }
 
     /// Matches the normal to the unequal width and depth of the elliptical edge roll.
+    /// A hardcover's headbands, as the iPhone draws them: a striped cord across the page
+    /// block's head and tail, along its spine side, `width` deep from the spine wall and raised
+    /// `raise` beyond the pages, under the boards' overhang. Stripes `stripe` long alternate
+    /// between the model's first and second materials across the block's `thickness`. The
+    /// block's middle is the origin, its head at -X, its spine at +Z, and it is `length` long and
+    /// `depth` deep.
+    static func headbands(
+        length: Float, thickness: Float, depth: Float, width: Float, raise: Float, stripe: Float
+    ) -> MeshResource? {
+        let pieces = max(1, Int((thickness / stripe).rounded()))
+        var positions: [SIMD3<Float>] = []
+        var normals: [SIMD3<Float>] = []
+        var indices: [UInt32] = []
+        var materials: [UInt32] = []
+        /// Adds a quad whose corners run around it, facing `normal`, in `material`.
+        func quad(_ corners: [SIMD3<Float>], _ normal: SIMD3<Float>, _ material: UInt32) {
+            let turn = simd_cross(corners[1] - corners[0], corners[2] - corners[0])
+            let facing = simd_dot(turn, normal)
+            let ordered = facing >= 0 ? corners : corners.reversed()
+            let base = UInt32(positions.count)
+            positions += ordered
+            normals += Array(repeating: normal, count: 4)
+            indices += [base, base + 1, base + 2, base, base + 2, base + 3]
+            materials += [material, material]
+        }
+        let spine = depth / 2
+        let inner = spine - width
+        for side: Float in [-1, 1] {
+            let block = side * length / 2
+            let end = side * (length / 2 + raise)
+            for piece in 0..<pieces {
+                let low = -thickness / 2 + thickness * Float(piece) / Float(pieces)
+                let high = -thickness / 2 + thickness * Float(piece + 1) / Float(pieces)
+                let material = UInt32(piece % 2)
+                // The end, facing out of the head or tail, and the side facing the fore edge.
+                quad(
+                    [
+                        [end, low, inner], [end, low, spine], [end, high, spine],
+                        [end, high, inner],
+                    ], [side, 0, 0], material)
+                quad(
+                    [
+                        [block, low, inner], [end, low, inner], [end, high, inner],
+                        [block, high, inner],
+                    ], [0, 0, -1], material)
+            }
+        }
+        var descriptor = MeshDescriptor(name: "headbands")
+        descriptor.positions = MeshBuffers.Positions(positions)
+        descriptor.normals = MeshBuffers.Normals(normals)
+        descriptor.primitives = .triangles(indices)
+        descriptor.materials = .perFace(materials)
+        return try? MeshResource.generate(from: [descriptor])
+    }
+
     private static func bevelNormal(
         sine: Float, cosine: Float, width: Float, depth: Float
     ) -> SIMD2<Float> {

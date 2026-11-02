@@ -64,6 +64,81 @@ final class BookWallLayoutTests: XCTestCase {
         }
     }
 
+    @MainActor func testStackedBooksTurnAFewDegreesInsideTheirColumns() {
+        let books = (1...57)
+            .map { id in
+                Book(id: id, title: "Book \(id)", author: "Author", pages: 120 + id * 23)
+            }
+        let layout = BookWallLayout(books: books)
+        let front = (layout.slots.map(\.coverWidth).max() ?? 0) / 2
+        var largest: Float = 0
+        for slot in layout.slots {
+            let pose = BookWallScene.restingTransform(for: slot, in: layout)
+            // Level on the book below: turned about the vertical only.
+            XCTAssertEqual(pose.rotation.act([0, 1, 0]).y, 1, accuracy: 1e-5)
+            let turn = abs(pose.rotation.angle)
+            XCTAssertLessThanOrEqual(turn, BookWallScene.maximumStackTurn + 1e-5)
+            largest = max(largest, turn)
+            XCTAssertEqual(pose.translation.y, slot.restingY, accuracy: 1e-5)
+            // The spine's middle stays on the front plane.
+            let spine = pose.translation + pose.rotation.act([0, 0, slot.coverWidth / 2])
+            XCTAssertEqual(spine.z, front, accuracy: 1e-4)
+            // Every corner stays inside the column, so no book meets the next column's.
+            for x in [-slot.bookHeight / 2, slot.bookHeight / 2] {
+                for z in [-slot.coverWidth / 2, slot.coverWidth / 2] {
+                    let corner = pose.translation + pose.rotation.act([x, 0, z])
+                    XCTAssertGreaterThanOrEqual(corner.x, slot.x - slot.laneWidth / 2 - 1e-4)
+                    XCTAssertLessThanOrEqual(corner.x, slot.x + slot.laneWidth / 2 + 1e-4)
+                }
+            }
+        }
+        // Some spines face visibly left or right, by more than 2 degrees.
+        XCTAssertGreaterThan(largest, 0.035)
+    }
+
+    @MainActor func testFlightPullsATurnedBookOutTheWayItsSpineFaces() {
+        let resting = Transform(
+            scale: .one, rotation: simd_quatf(angle: 0.07, axis: [0, 1, 0]),
+            translation: [1, 2, 0.5])
+        let clear = BookWallScene.pulledOut(resting, toDepth: 3.9)
+        let moved = clear.translation - resting.translation
+        XCTAssertEqual(clear.translation.z, 3.9, accuracy: 1e-5)
+        XCTAssertEqual(moved.y, 0, accuracy: 1e-6)
+        XCTAssertEqual(moved.x, moved.z * tan(0.07), accuracy: 1e-5)
+        XCTAssertEqual(clear.rotation, resting.rotation)
+    }
+
+    func testPageEdgesWearAsTheIPhoneWearsThem() {
+        let accent = StyleColor(red: 0.8, green: 0.1, blue: 0.1)
+        let now = try! Date("2026-11-01T12:00:00Z", strategy: .iso8601)
+        func edges(finished: [String]?, rating: Double? = nil) -> StyleColor {
+            BookWallPageEdges.color(
+                of: Book(
+                    id: 1, title: "", author: "", finished: finished?.first,
+                    finishedDates: finished, rating: rating),
+                accent: accent, now: now)
+        }
+        XCTAssertEqual(edges(finished: nil), BookWallPageEdges.fresh)
+        XCTAssertEqual(edges(finished: ["2026-10-30"]), BookWallPageEdges.fresh)
+        // The first finish sets the age: fully aged after 15 years, however recent a reread.
+        XCTAssertEqual(edges(finished: ["2026-01-02", "2001-05-01"]), BookWallPageEdges.aged)
+        // Ages run as a square root, in eighths: 3.75 years is halfway.
+        let half = edges(finished: ["2023-02-01"])
+        XCTAssertEqual(
+            half.green,
+            BookWallPageEdges.fresh.green
+                + (BookWallPageEdges.aged.green - BookWallPageEdges.fresh.green) * 0.5,
+            accuracy: 1e-9)
+        // Five-star books are sprayed in the accent, whatever their age.
+        XCTAssertEqual(
+            edges(finished: ["2001-05-01"], rating: 5),
+            accent.mixed(with: BookWallPageEdges.fresh, 0.12))
+        // A style without a design accent mixes its lettering toward its cloth.
+        let style = BookWallLocalSpine.style(
+            for: Book(id: 2, title: "", author: ""), samples: [])
+        XCTAssertEqual(style.accent, style.foreground.mixed(with: style.background, 0.45))
+    }
+
     func testLongBookHasAThickerSpineWithoutCrowdingShortBooks() throws {
         let books = (1...8)
             .map { id in

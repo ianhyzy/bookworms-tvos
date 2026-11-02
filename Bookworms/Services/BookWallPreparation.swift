@@ -285,7 +285,7 @@ final class BookWallPreparation {
             }
             guard !Task.isCancelled, prepared?.id == wall.id else { continue }
             BookWallScene.applyArtwork(
-                to: body, style: images.style, spine: spine, cover: coverTexture)
+                to: body, book: slot.book, style: images.style, spine: spine, cover: coverTexture)
             restored.insert(slot.book.id)
             coverRevision &+= 1
         }
