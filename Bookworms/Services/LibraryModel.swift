@@ -166,8 +166,9 @@ final class LibraryModel {
     /// a link that then changes nothing (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`).
     /// The pick shows at once.
     ///
-    /// Saves run in the order of the picks; a failed save restores the earlier choice unless a
-    /// later pick replaced it. A saved pick reads the companion records again
+    /// Saves run in the order of the picks, and a pick that a later pick replaced before its
+    /// save started isn't saved. A failed save restores the earlier choice unless a later pick
+    /// replaced it. A saved pick reads the companion records again
     /// (`queueSpineDesignRefresh(restarting:)`), so the book draws its new group's look, or the
     /// group gets one. The sample library keeps picks in memory.
     func pickSeries(_ seriesID: Int, for book: Book) {
@@ -198,7 +199,8 @@ final class LibraryModel {
                 // A check that finds another iCloud user turns storage off, which clears the
                 // pick, so the save waits for it and never reaches that user's records.
                 await waitForCloudUserChecks()
-                guard iCloudEnabled else { return }
+                // A check, a storage toggle, or a later pick can clear or replace this pick.
+                guard iCloudEnabled, pickedLinks[book.id]?.number == number else { return }
                 try await dependencies.saveSeriesLink(chosen, accountID, book.id)
                 // A check that began during the save decides whether the pick stays.
                 await waitForCloudUserChecks()
@@ -572,6 +574,8 @@ final class LibraryModel {
             iCloudToggles += 1
             dependencies.defaults.set(iCloudEnabled, forKey: "iCloudEnabled")
             invalidateCloudSync()
+            // Book Wall stops waiting for the cancelled read; a later read rebuilds it.
+            hasReadCompanionRecords = true
             if iCloudEnabled {
                 // The example profile never syncs, so turning storage on asks for the iCloud
                 // library instead.
@@ -696,6 +700,8 @@ final class LibraryModel {
     private func sourceConfigurationChanged() {
         sourceRevision += 1
         invalidateCloudSync()
+        // Book Wall stops waiting for the cancelled read; a later read rebuilds it.
+        hasReadCompanionRecords = true
         rebuildLibrary()
         if hasStarted {
             if !hardcoverEnabled { queueSpineCachePrune() }
@@ -703,6 +709,8 @@ final class LibraryModel {
         }
     }
 
+    /// Cancels the cloud sync and companion-record read. It leaves Book Wall's wait
+    /// (`hasReadCompanionRecords`) to callers, since some of them restart the read.
     private func invalidateCloudSync() {
         cloudRevision += 1
         cloudTask?.cancel()
@@ -711,8 +719,6 @@ final class LibraryModel {
         spineDesignTask?.cancel()
         spineDesignTask = nil
         spineDesignTaskIdentity = nil
-        // Book Wall stops waiting for the cancelled read; a later read rebuilds it.
-        hasReadCompanionRecords = true
     }
 
     func start() async {
@@ -1542,13 +1548,9 @@ final class LibraryModel {
         }
         if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
             cloudUserChecks += 1
-            if hasStarted {
-                // Book Wall keeps waiting for launch's read: it resumes below, or turning
-                // storage off ends the wait.
-                let hasRead = hasReadCompanionRecords
-                invalidateCloudSync()
-                hasReadCompanionRecords = hasRead
-            }
+            // Book Wall keeps waiting for launch's read: it resumes below, or turning storage
+            // off ends the wait.
+            if hasStarted { invalidateCloudSync() }
             let sameUser = await dependencies.cloudUserRecordName() == previous
             cloudUserChecks -= 1
             if sameUser {

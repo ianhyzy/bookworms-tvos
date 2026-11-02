@@ -673,6 +673,35 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(saves.count, savesBefore + 1)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
+        // Of two picks made during a check, only the later one saves.
+        savesBefore = saves.count
+        duringUserRead = {
+            model.pickSeries(8, for: book)
+            model.pickSeries(7, for: book)
+        }
+        await model.cloudAccountChanged()
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(saves.count, savesBefore + 1)
+        XCTAssertEqual(saves.last?.linkedSeriesID, 7)
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+
+        // A pick that turning storage off cleared during a check isn't saved once the reader
+        // turns storage on again, even for another iCloud user.
+        savesBefore = saves.count
+        cloudUser = "_fictional_user_2"
+        duringUserRead = {
+            model.pickSeries(8, for: book)
+            model.iCloudEnabled = false
+            model.iCloudEnabled = true
+        }
+        await model.cloudAccountChanged()
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.iCloudEnabled)
+        XCTAssertEqual(saves.count, savesBefore)
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+
         // A pick made while the check finds another user is never saved: storage turns off.
         savesBefore = saves.count
         cloudUser = "_fictional_user_2"
