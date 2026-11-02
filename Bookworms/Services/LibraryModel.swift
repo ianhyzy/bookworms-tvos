@@ -168,9 +168,9 @@ final class LibraryModel {
     ///
     /// Saves run in the order of the picks, so a failed save's earlier choice is the one iCloud
     /// holds, which it restores unless a later pick replaced it. A pick that a storage toggle or
-    /// an account change cleared before its save started isn't saved. A saved pick reads the companion records again
-    /// (`queueSpineDesignRefresh(restarting:)`), so the book draws its new group's look, or the
-    /// group gets one. The sample library keeps picks in memory.
+    /// an account change cleared before its save started isn't saved. A saved pick reads the
+    /// companion records again (`queueSpineDesignRefresh(restarting:)`), so the book draws its
+    /// new group's look, or the group gets one. The sample library keeps picks in memory.
     func pickSeries(_ seriesID: Int, for book: Book) {
         guard canPickSeries(for: book) else { return }
         let accountID = isSample ? "" : activeHardcoverAccountID ?? ""
@@ -298,7 +298,12 @@ final class LibraryModel {
     /// Counts `iCloudEnabled` changes, so `cloudAccountChanged()` sees a toggle that ends where
     /// it began.
     @ObservationIgnored private var iCloudToggles = 0
-    @ObservationIgnored private var activeHardcoverAccountID: String?
+    /// The Hardcover account whose library shows. Unsaved series picks belong to the account
+    /// they were made for, so a change drops them, including picks of the default series, which
+    /// no link marks with an account.
+    @ObservationIgnored private var activeHardcoverAccountID: String? {
+        didSet { if activeHardcoverAccountID != oldValue { pickedLinks = [:] } }
+    }
     @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
     @ObservationIgnored private var spineDesignTaskIdentity:
         (
