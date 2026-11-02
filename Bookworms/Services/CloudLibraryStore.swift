@@ -1,6 +1,11 @@
 import CloudKit
 import Foundation
 
+extension CKContainer {
+    /// The app's CloudKit container.
+    static var bookworms: CKContainer { CKContainer(identifier: "iCloud.gay.ian.Bookworms") }
+}
+
 struct CloudLibraryArchive: Codable, Sendable {
     var version = 1
     var sources: [SourceSnapshot] = []
@@ -65,7 +70,7 @@ protocol CloudLibraryDatabase: Sendable {
 }
 
 private struct AppleCloudLibraryDatabase: CloudLibraryDatabase {
-    private var container: CKContainer { CKContainer(identifier: "iCloud.gay.ian.Bookworms") }
+    private var container: CKContainer { .bookworms }
     func accountStatus() async throws -> CKAccountStatus { try await container.accountStatus() }
     func record(for id: CKRecord.ID) async throws -> CKRecord {
         try await container.privateCloudDatabase.record(for: id)
@@ -92,8 +97,7 @@ actor CloudLibraryStore {
         #if targetEnvironment(simulator)
             return nil
         #else
-            return try? await CKContainer(identifier: "iCloud.gay.ian.Bookworms").userRecordID()
-                .recordName
+            return try? await CKContainer.bookworms.userRecordID().recordName
         #endif
     }
 

@@ -390,12 +390,10 @@ protocol SpineCloudDatabase: Sendable {
 }
 
 private struct AppleSpineCloudDatabase: SpineCloudDatabase {
-    private var database: CKDatabase {
-        CKContainer(identifier: "iCloud.gay.ian.Bookworms").privateCloudDatabase
-    }
+    private var database: CKDatabase { CKContainer.bookworms.privateCloudDatabase }
 
     func accountStatus() async throws -> CKAccountStatus {
-        try await CKContainer(identifier: "iCloud.gay.ian.Bookworms").accountStatus()
+        try await CKContainer.bookworms.accountStatus()
     }
 
     func record(for id: CKRecord.ID) async throws -> CKRecord {

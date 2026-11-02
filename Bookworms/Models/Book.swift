@@ -110,6 +110,9 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         sources?.contains(.hardcover) ?? (id < CWAConfiguration.firstBookID)
     }
 
+    /// Whether the reader's library marks the book read or finished.
+    var isMarkedRead: Bool { isRead == true || finished != nil }
+
     var spineTitle: String { title.components(separatedBy: ":").first ?? title }
 
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }

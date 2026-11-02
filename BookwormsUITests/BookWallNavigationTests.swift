@@ -213,6 +213,66 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(book)
     }
 
+    /// Details opened on the shelf that wall details filtered return focus to their book, and
+    /// the wall details stay open beneath both: Back reaches them without another flight.
+    func testBackThroughDetailsOnAFilteredShelfKeepsTheWallDetails() throws {
+        let app = openWall()
+        let book = app.buttons["book-wall-8"]
+        RemoteNavigation.waitForFocus(book)
+        XCUIRemote.shared.press(.select)
+        let title = app.staticTexts["detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"])
+        let flights = app.staticTexts["book-wall-flight-probe"]
+        XCTAssertEqual(flights.label, "1")
+        let author = app.buttons["detail-author"]
+        RemoteNavigation.press(.right, in: app, expecting: author)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["clear-shelf-filter"].waitForExistence(timeout: 5))
+        let entry = app.buttons["book-8"]
+        RemoteNavigation.waitForFocus(entry)
+        // Every scenario book shares book 8's author, and the shelf pages before it, so book 7
+        // to its left sits on the page before book 8's.
+        let other = app.buttons["book-7"]
+        RemoteNavigation.press(.left, in: app, expecting: other)
+        XCUIRemote.shared.press(.select)
+        RemoteNavigation.waitForFocus(
+            app.buttons
+                .matching(
+                    NSPredicate(format: "identifier == %@ AND hasFocus == true", "back-to-shelf")
+                )
+                .firstMatch)
+        XCTAssertFalse(
+            RemoteNavigation.visibleButtons(app, prefix: "book-7").isEmpty,
+            "The shelf beneath the details paged away from their book")
+
+        var before = try XCTUnwrap(RemoteNavigation.transitions(app))
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(other)
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Shelf settles")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertTrue(RemoteNavigation.isFocused(other))
+        // Two updates: the leaving details clear focus, and the shelf restores it to book 7.
+        XCTAssertEqual(RemoteNavigation.transitions(app), before + 2)
+        XCTAssertFalse(RemoteNavigation.visibleButtons(app, prefix: "book-7").isEmpty)
+
+        before = try XCTUnwrap(RemoteNavigation.transitions(app))
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(title.exists, "The wall details closed under the filtered shelf")
+        XCTAssertEqual(title.label, "Winter in the Orchard")
+        RemoteNavigation.waitForFocus(author)
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Details settle")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertEqual(flights.label, "1", "Back from the filter flew the book out again")
+        XCTAssertTrue(RemoteNavigation.isFocused(author))
+        // Two updates: the leaving shelf clears focus, and the details restore it to the author.
+        XCTAssertEqual(RemoteNavigation.transitions(app), before + 2)
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(book)
+    }
+
     /// The clear button on a shelf that wall details filtered closes those details and shows
     /// the whole of My Shelf on the book whose details applied the filter.
     func testClearingDetailFilterShowsWholeShelf() {

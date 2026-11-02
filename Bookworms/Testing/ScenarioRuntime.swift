@@ -22,6 +22,10 @@
         @ObservationIgnored private var sourceCalls = 0
         @ObservationIgnored private var cloudCalls = 0
         @ObservationIgnored private var probeRevision = 0
+        @ObservationIgnored private var exampleReleased = false
+        @ObservationIgnored private var heldExample: CheckedContinuation<Void, Never>?
+        @ObservationIgnored private var cloudReleased = false
+        @ObservationIgnored private var heldCloud: CheckedContinuation<Void, Never>?
 
         static func installIfRequested() -> ScenarioRuntime? {
             if let current { return current }
@@ -75,14 +79,29 @@
                 // Book Wall tests enable it here instead of through Settings, then still enter it
                 // through the native sidebar.
                 let arguments = ProcessInfo.processInfo.arguments
-                preferences.enabled =
-                    arguments.contains("--start-view=bookWall")
-                        || arguments.contains("--test-enable-book-wall")
-                    ? [.shelf, .bookWall] : [.shelf]
+                preferences.enabled = [.shelf]
+                if arguments.contains("--test-enable-year-in-review") {
+                    preferences.enabled.append(.yearInReview)
+                }
+                if arguments.contains("--start-view=bookWall")
+                    || arguments.contains("--test-enable-book-wall")
+                {
+                    preferences.enabled.append(.bookWall)
+                }
                 // Ambient mode would otherwise include every view, making social views active and
                 // their unstubbed Hardcover queries race the scenario's network checks.
                 preferences.ambientViews = []
                 defaults.set(try! JSONEncoder().encode(preferences), forKey: "viewPreferences")
+            }
+            if let argument = ProcessInfo.processInfo.arguments.first(where: {
+                $0.hasPrefix("--test-book-count=")
+            }), let count = Int(argument.dropFirst("--test-book-count=".count)) {
+                defaults.set(count, forKey: "bookCount")
+            }
+            if ProcessInfo.processInfo.arguments.contains("--test-cloud-restore") {
+                // The launch sync holds until `release-cloud`, then restores the fixture library,
+                // as an iCloud library that arrives after the welcome's choice does.
+                defaults.set(true, forKey: "iCloudEnabled")
             }
             if let argument = ProcessInfo.processInfo.arguments.first(where: {
                 $0.hasPrefix("--test-appearance=")
@@ -133,7 +152,7 @@
                 ProcessInfo.processInfo.environment["BOOKWORMS_SCENARIO_CONTROL"] ?? "manual"
             for command in [
                 "probe", "release-artwork", "advance-clock", "approve-hardcover", "release-library",
-                "start-ambient",
+                "release-example", "release-cloud", "start-ambient",
             ] {
                 let name = "gay.ian.Bookworms.scenario.\(channel).\(command)"
                 CFNotificationCenterAddObserver(
@@ -194,9 +213,23 @@
                 sourceCalls += 1
                 throw SourceError.credentials
             }
-            dependencies.syncCloud = { [self] archive in
-                cloudCalls += 1
-                return archive
+            if ProcessInfo.processInfo.arguments.contains("--test-cloud-restore") {
+                dependencies.syncCloud = { [self] _ in
+                    cloudCalls += 1
+                    if !cloudReleased {
+                        await withCheckedContinuation { heldCloud = $0 }
+                    }
+                    return CloudLibraryArchive(sources: [
+                        SourceSnapshot(
+                            source: .hardcover, accountID: "42", books: ScenarioFixtures.books,
+                            syncedAt: date)
+                    ])
+                }
+            } else {
+                dependencies.syncCloud = { [self] archive in
+                    cloudCalls += 1
+                    return archive
+                }
             }
             dependencies.readSpineWorklist = { nil }
             dependencies.publishSpineWorklist = { _ in }
@@ -213,10 +246,12 @@
             dependencies.saveSeriesLink = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
             // A fictional stand-in, so UI tests never load the owner's bundled profile. It
-            // suspends like the bundled read, long enough for UI tests to see the welcome's
-            // preparation card through the load.
+            // suspends like the bundled read until `release-example`, so UI tests can see the
+            // welcome's preparation card through the load.
             dependencies.exampleProfile = { [self] in
-                try? await Task.sleep(for: .seconds(3))
+                if !exampleReleased {
+                    await withCheckedContinuation { heldExample = $0 }
+                }
                 return ExampleProfile(
                     books: SampleLibrary.books, series: SampleLibrary.allSeries, designs: [:],
                     looks: [:], syncedAt: date)
@@ -244,6 +279,14 @@
             case "/release-artwork": ScenarioNetwork.state.releaseArtwork()
             case "/approve-hardcover": ScenarioNetwork.state.approveHardcover()
             case "/release-library": ScenarioNetwork.state.releaseLibrary()
+            case "/release-example":
+                exampleReleased = true
+                heldExample?.resume()
+                heldExample = nil
+            case "/release-cloud":
+                cloudReleased = true
+                heldCloud?.resume()
+                heldCloud = nil
             case "/advance-clock":
                 if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
                     let text = components.queryItems?.first(where: { $0.name == "seconds" })?.value,

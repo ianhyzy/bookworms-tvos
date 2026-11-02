@@ -35,6 +35,9 @@ struct ShelfView: View {
     @State private var artworkGeneration = 0
     @State private var presentationStyles: [Int: SpineStyle] = [:]
     @State private var socialReturnRevision = 0
+    /// Whether the next close of book details returns focus to the item that opened them
+    /// (`restoreSelection()`).
+    @State private var returnsFocusFromDetails = true
     @State private var bookWallScene = BookWallScene()
     @State private var wallRenderer = BookWallRendererStatus()
     @State private var bookWallPreparation = BookWallPreparation()
@@ -113,8 +116,9 @@ struct ShelfView: View {
     @State private var showsDetailFilter = false
     /// A book chosen on the filtered shelf, whose details open over it.
     @State private var filteredShelfBook: Book?
-    /// The book whose details applied the current detail filter, where focus enters the
-    /// filtered shelf. `shelfFocus.last` keeps the book that opened the first details.
+    /// Where focus enters the filtered shelf: the book whose details applied the current detail
+    /// filter, or the book last opened from that shelf, so Back from its details returns to it.
+    /// `shelfFocus.last` keeps the book that opened the first details.
     @State private var detailFilterEntryID: Int?
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
@@ -139,6 +143,10 @@ struct ShelfView: View {
                 "hasEnteredShelf": hasEnteredShelf,
                 "focusedBook": shelfFocus.focused ?? -1,
                 "requestedBook": bookFocusRequest?.id ?? -1,
+                "focusRequests": bookFocusRequest?.revision ?? 0,
+                "returnRevision": socialReturnRevision,
+                "preparedBooks": preparedArtwork?.books.map(\.id) ?? [],
+                "reviewBooks": library.yearInReview(coordinator.reviewYear)?.shelf.map(\.id) ?? [],
             ]
         }
     #endif
@@ -255,9 +263,11 @@ struct ShelfView: View {
             // Book Wall leaves the sidebar with the example unless the reader shows it.
             if !sidebarViews.contains(coordinator.current) { coordinator.current = sidebarViews[0] }
             // Selections and the detail filter's entry book point at the example's books and
-            // years, so Back must not reopen an example book. This clears stored state only and requests no
-            // focus.
+            // years, so Back must not reopen an example book, and details that an iCloud restore
+            // ended the example under close. An open sign-in closes them when it closes. None of
+            // this requests focus.
             if !library.isExample {
+                if !connectsFromExample { closeEndedExampleDetails() }
                 detailFilterEntryID = nil
                 filteredShelfBook = nil
                 shelfFocus.last = nil
@@ -266,6 +276,22 @@ struct ShelfView: View {
                 coordinator.reviewSelection = nil
                 coordinator.wallSelection = nil
             }
+        }
+        .onChange(of: connectsFromExample) {
+            // A connection closes the details itself; Back from the sign-in after a restore
+            // ended the example closes them here.
+            if !connectsFromExample && !library.isExample { closeEndedExampleDetails() }
+        }
+    }
+
+    /// Closes book details and the shelf they filtered once the example ends under them. A data
+    /// change closes them, so focus goes where the focus engine places it, not back to the
+    /// item that opened them (`restoreSelection()`).
+    private func closeEndedExampleDetails() {
+        showsDetailFilter = false
+        if selectedBook != nil {
+            returnsFocusFromDetails = false
+            selectedBook = nil
         }
     }
 
@@ -545,7 +571,8 @@ struct ShelfView: View {
         }
         // Book details list the readers with synced libraries who have the book.
         avatars += social.presentation.libraryReaders.compactMap(\.avatarURL)
-        let enabled = coordinator.preferences.activeViews
+        // The example's sidebar replaces the reader's choice of views.
+        let enabled = library.isExample ? sidebarViews : coordinator.preferences.activeViews
         if enabled.contains(.following) {
             books += social.activities.prefix(20).compactMap(\.book)
             avatars += social.activities.prefix(20).compactMap { $0.reader.avatarURL }
@@ -850,6 +877,10 @@ struct ShelfView: View {
 
     private func restoreSelection() {
         recordActivity()
+        guard returnsFocusFromDetails else {
+            returnsFocusFromDetails = true
+            return
+        }
         guard isShowingMainView else { return }
         if coordinator.current == .shelf {
             requestBookFocus(shelfFocus.last ?? lastSelectedID)
@@ -1252,9 +1283,9 @@ struct ShelfView: View {
         .focusSection()
     }
 
-    /// The shelf's books. Over details, focus enters on the book whose details applied the
-    /// filter, a selected book opens details over the shelf, and focus leaves `shelfFocus.last` on
-    /// the book that opened the first details.
+    /// The shelf's books. Over details, focus enters on `detailFilterEntryID`, a selected book
+    /// opens details over the shelf, and focus leaves `shelfFocus.last` on the book that opened
+    /// the first details.
     private func shelfRow(rowHeight: CGFloat, coversDetails: Bool) -> some View {
         let filterEntryID = detailFilterEntryID
         return ShelfFocusReader(focus: shelfFocus) { focus in
@@ -1283,6 +1314,7 @@ struct ShelfView: View {
             onSelect: { book in
                 recordActivity()
                 if coversDetails {
+                    detailFilterEntryID = book.id
                     filteredShelfBook = book
                 } else {
                     lastSelectedID = book.id
@@ -1293,7 +1325,7 @@ struct ShelfView: View {
     }
 
     /// Shows the whole of My Shelf, closing any details the filter covered, with focus on the
-    /// book whose details applied the filter.
+    /// filtered shelf's entry book (`detailFilterEntryID`).
     private func clearShelfFilter() {
         if showsDetailFilter {
             shelfFocus.last = detailFilterEntryID ?? shelfFocus.last

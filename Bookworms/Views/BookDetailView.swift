@@ -1031,7 +1031,7 @@ private struct SeriesPopup: View {
 
     private func isRead(_ book: Book?) -> Bool {
         guard let book else { return false }
-        return book.isReading != true && (book.finished != nil || book.isRead == true)
+        return book.isReading != true && book.isMarkedRead
     }
 
     var body: some View {
