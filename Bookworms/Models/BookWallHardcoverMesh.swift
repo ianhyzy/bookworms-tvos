@@ -99,7 +99,6 @@ enum BookWallHardcoverMesh {
         }
     }
 
-    /// Matches the normal to the unequal width and depth of the elliptical edge roll.
     /// A hardcover's headbands, as the iPhone draws them: a striped cord across the page
     /// block's head and tail, along its spine side, `width` deep from the spine wall and raised
     /// `raise` beyond the pages, under the boards' overhang. Stripes `stripe` long alternate
@@ -155,6 +154,7 @@ enum BookWallHardcoverMesh {
         return try? MeshResource.generate(from: [descriptor])
     }
 
+    /// Matches the normal to the unequal width and depth of the elliptical edge roll.
     private static func bevelNormal(
         sine: Float, cosine: Float, width: Float, depth: Float
     ) -> SIMD2<Float> {

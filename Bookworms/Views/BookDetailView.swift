@@ -84,14 +84,9 @@ struct BookDetailView: View {
         genres = Self.genres(of: book)
     }
 
-    /// Up to three of `book`'s most-tagged genres that read as English, each once by its display
-    /// name (`Book.displayGenre(_:)`, which shows "Humour" as "Humor").
+    /// Up to three of `book`'s most-tagged English genres (`Book.displayGenres`).
     static func genres(of book: Book) -> [String] {
-        var shown = Set<String>()
-        return Array(
-            (book.genres ?? []).filter(HardcoverClient.isEnglishTag).map(Book.displayGenre)
-                .filter { shown.insert($0.lowercased()).inserted }
-                .prefix(3))
+        Array(book.displayGenres.prefix(3))
     }
 
     var body: some View {

@@ -115,6 +115,16 @@ final class BookWallPreparation {
         await retryMissingCovers(in: built.wall, fontStyle: fontStyle)
     }
 
+    /// Drops the prepared wall and its progress, so Book Wall shows its waiting dialog until the
+    /// next preparation finishes. Call it when the library the wall was prepared from ends, such
+    /// as the example profile, whose wall must never show as the reader's own.
+    func discard() {
+        prepared = nil
+        missingCovers = []
+        failure = nil
+        completedCount = 0
+    }
+
     /// Draws every book of the wall with the faces registered now, adding each drawn book to
     /// `completedCount` when `countsProgress` is true. Returns `nil` when the task is cancelled
     /// or a book's spine, cover, or shelf label texture can't be made, and otherwise the wall

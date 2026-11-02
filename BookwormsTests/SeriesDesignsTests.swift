@@ -425,6 +425,14 @@ final class SeriesDesignsTests: XCTestCase {
             of: books, designs: [1: design(for: books[0]), 3: own])
         XCTAssertEqual(without.sources[2]?.id, 1, "Without a look, the best-ranked book lends")
         XCTAssertEqual(without.mates[2]?.map(\.id), [1, 2, 3])
+
+        var progressed = books
+        progressed[1].progress = 0.5
+        progressed[1].rating = 4
+        let synced = LibraryModel.seriesDrawing(
+            of: progressed, designs: [1: design(for: books[0]), 3: own])
+        XCTAssertEqual(
+            synced.mates, without.mates, "Fields the glyph check doesn't read leave mates equal")
     }
 
     /// The Apple TV names a design's model as the iPhone and Mac do, from the design alone.

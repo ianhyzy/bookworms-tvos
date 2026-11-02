@@ -161,10 +161,13 @@ final class YearInReviewTests: XCTestCase {
                 book(1, finished: "2025-01-01", genres: ["Humour"]),
                 book(2, finished: "2025-02-01", genres: ["humor"]),
                 book(3, finished: "2025-03-01", genres: ["Dark Humour"]),
+                book(4, finished: "2025-04-01", genres: ["Humour", "Humor", "Satire", "Fantasy"]),
             ])
             .first)
-        XCTAssertEqual(review.genres.map(\.name), ["Humor", "Dark Humor"])
-        XCTAssertEqual(review.genres.first?.count, 2)
+        XCTAssertEqual(
+            review.genres.map(\.name), ["Humor", "Dark Humor", "Fantasy", "Satire"],
+            "A book's two spellings fill one of its three genre slots")
+        XCTAssertEqual(review.genres.first?.count, 3)
     }
 
     func testLargeYearsShelveTheHighestRatedBooksInReadingOrder() throws {

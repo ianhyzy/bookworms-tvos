@@ -70,7 +70,9 @@ final class LibraryModel {
     private(set) var lookDesigns: [Int: SpineDesignV1] = [:]
     /// The books that draw one shared design, by the ID of each of them: a look group's books, or
     /// a series source and the books that draw its design. Book Wall checks the shared face
-    /// against all of them, including books outside the wall. Prepared with `seriesSources`.
+    /// against all of them, including books outside the wall. Each mate keeps only its ID, title,
+    /// and author, which the check reads (`SeriesDesigns.lettering(of:uppercase:)`). Prepared
+    /// with `seriesSources`.
     private(set) var seriesMates: [Int: [Book]] = [:]
     /// Who made the designs the library's books draw, for **Settings → Spines**. Prepared with
     /// `seriesSources`.
@@ -85,7 +87,9 @@ final class LibraryModel {
     /// (`SeriesDesigns.sources(books:designs:links:)` over the books of groups without a look).
     /// `mates` gives, for each book that draws a shared design, every book that draws it, so
     /// Book Wall can check once, where spines are prepared, that the shared face letters all of
-    /// them (`BookWallPreparation.drawnDesigns(of:designs:looks:sources:mates:)`).
+    /// them (`BookWallPreparation.drawnDesigns(of:designs:looks:sources:mates:)`). Each mate
+    /// keeps only its ID, title, and author, so a sync that changes another field, such as a
+    /// current read's progress, leaves `mates` equal and doesn't rebuild the wall.
     nonisolated static func seriesDrawing(
         of books: [Book], designs: [Int: SpineDesignV1] = [:], links: [Int: SeriesLinkV1] = [:],
         looks: [SeriesLookKey: SeriesLookV1] = [:]
@@ -106,15 +110,19 @@ final class LibraryModel {
         let sources =
             SeriesDesigns.sources(books: Array(ranked.values), designs: designs, links: links)
             .compactMapValues { ranked[$0] }
+        func lettering(_ books: [Book]) -> [Book] {
+            books.map { Book(id: $0.id, title: $0.title, author: $0.author) }
+        }
         var mates: [Int: [Book]] = [:]
         for members in looked.values {
+            let members = lettering(members)
             for book in members { mates[book.id] = members }
         }
         var drawers: [Int: [Book]] = [:]
         for (id, source) in sources { drawers[source.id, default: []].append(ranked[id] ?? source) }
         for members in drawers.values {
             // Sorted, so an unchanged library prepares equal mates and never rebuilds the wall.
-            let members = members.sorted { $0.id < $1.id }
+            let members = lettering(members.sorted { $0.id < $1.id })
             for book in members { mates[book.id] = members }
         }
         return (sources, drawn, mates)

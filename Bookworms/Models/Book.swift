@@ -149,6 +149,15 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         genres?.first(where: HardcoverClient.isEnglishTag).map(Self.displayGenre)
     }
 
+    /// The book's English genres, most-tagged first, each once by its display name
+    /// (`displayGenre(_:)`, which shows "Humour" as "Humor"), as the iPhone's
+    /// `YearInBooks.displayGenres(of:)` lists them.
+    var displayGenres: [String] {
+        var shown = Set<String>()
+        return (genres ?? []).filter(HardcoverClient.isEnglishTag).map(Self.displayGenre)
+            .filter { shown.insert($0.lowercased()).inserted }
+    }
+
     /// Capitalizes tags that readers entered in lowercase, such as "litrpg", and keeps any other
     /// capitalization, such as "LGBTQ" or "LitRPG". Readers tag in British and American spelling,
     /// so "Humour" reads "Humor", and the two count as one genre wherever genres are tallied,

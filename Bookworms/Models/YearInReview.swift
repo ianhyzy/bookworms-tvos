@@ -109,10 +109,7 @@ struct YearInReview: Equatable, Identifiable, Sendable {
         formats = Self.tally(books.flatMap(\.formatParts))
         genres = Array(
             Self.tally(
-                books.flatMap {
-                    ($0.genres ?? []).filter(HardcoverClient.isEnglishTag)
-                        .prefix(Self.genresPerBook).map(Book.displayGenre)
-                }
+                books.flatMap { $0.displayGenres.prefix(Self.genresPerBook) }
             )
             .prefix(5))
         topAuthor = Self.tally(books.map(\.author).filter { !$0.isEmpty })

@@ -147,6 +147,7 @@ struct ShelfView: View {
                 "returnRevision": socialReturnRevision,
                 "preparedBooks": preparedArtwork?.books.map(\.id) ?? [],
                 "reviewBooks": library.yearInReview(coordinator.reviewYear)?.shelf.map(\.id) ?? [],
+                "bookWallPrepared": bookWallPreparation.prepared != nil,
             ]
         }
     #endif
@@ -271,6 +272,9 @@ struct ShelfView: View {
             // ended the example under close. An open sign-in closes them when it closes. None of
             // this requests focus.
             if !library.isExample {
+                // The example's wall must not show as the reader's, even when their Book Wall is
+                // hidden now and no preparation replaces it until they show it.
+                bookWallPreparation.discard()
                 if !connectsFromExample { closeEndedExampleDetails() }
                 detailFilterEntryID = nil
                 filteredShelfBook = nil
