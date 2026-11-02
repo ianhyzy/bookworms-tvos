@@ -116,8 +116,9 @@ struct ShelfView: View {
     @State private var showsDetailFilter = false
     /// A book chosen on the filtered shelf, whose details open over it.
     @State private var filteredShelfBook: Book?
-    /// The book whose details applied the current detail filter, where focus enters the
-    /// filtered shelf. `shelfFocus.last` keeps the book that opened the first details.
+    /// Where focus enters the filtered shelf: the book whose details applied the current detail
+    /// filter, or the book last opened from that shelf, so Back from its details returns to it.
+    /// `shelfFocus.last` keeps the book that opened the first details.
     @State private var detailFilterEntryID: Int?
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
@@ -1282,9 +1283,9 @@ struct ShelfView: View {
         .focusSection()
     }
 
-    /// The shelf's books. Over details, focus enters on the book whose details applied the
-    /// filter, a selected book opens details over the shelf, and focus leaves `shelfFocus.last` on
-    /// the book that opened the first details.
+    /// The shelf's books. Over details, focus enters on `detailFilterEntryID`, a selected book
+    /// opens details over the shelf, and focus leaves `shelfFocus.last` on the book that opened
+    /// the first details.
     private func shelfRow(rowHeight: CGFloat, coversDetails: Bool) -> some View {
         let filterEntryID = detailFilterEntryID
         return ShelfFocusReader(focus: shelfFocus) { focus in
@@ -1313,6 +1314,7 @@ struct ShelfView: View {
             onSelect: { book in
                 recordActivity()
                 if coversDetails {
+                    detailFilterEntryID = book.id
                     filteredShelfBook = book
                 } else {
                     lastSelectedID = book.id
@@ -1323,7 +1325,7 @@ struct ShelfView: View {
     }
 
     /// Shows the whole of My Shelf, closing any details the filter covered, with focus on the
-    /// book whose details applied the filter.
+    /// filtered shelf's entry book (`detailFilterEntryID`).
     private func clearShelfFilter() {
         if showsDetailFilter {
             shelfFocus.last = detailFilterEntryID ?? shelfFocus.last

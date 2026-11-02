@@ -193,6 +193,42 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertFalse(clear.exists)
     }
 
+    /// Back from details opened on a filtered shelf returns focus to the book they show, not to
+    /// the book whose details applied the filter.
+    func testBackFromFilteredShelfDetailsReturnsToTheirBook() throws {
+        let app = RemoteNavigation.launch()
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(first, timeout: 15)
+        XCUIRemote.shared.press(.select)
+        RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"], timeout: 15)
+        RemoteNavigation.press(.right, in: app, expecting: app.buttons["detail-author"])
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["clear-shelf-filter"].waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(first)
+        let second = app.buttons["book-8"]
+        RemoteNavigation.press(.right, in: app, expecting: second)
+        XCUIRemote.shared.press(.select)
+        // Book 8's details open above book 1's, which stay in the tree, so match the focused copy.
+        RemoteNavigation.waitForFocus(
+            app.buttons
+                .matching(
+                    NSPredicate(format: "identifier == %@ AND hasFocus == true", "back-to-shelf")
+                )
+                .firstMatch)
+
+        let before = try XCTUnwrap(RemoteNavigation.transitions(app))
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForFocus(second)
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Shelf settles")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertTrue(RemoteNavigation.isFocused(second))
+        // Two updates: the leaving details clear focus, and the shelf restores it to book 8.
+        XCTAssertEqual(RemoteNavigation.transitions(app), before + 2)
+        XCTAssertTrue(app.buttons["clear-shelf-filter"].exists)
+    }
+
     /// Opens sample book 1's details and focuses its series label, which names The Island Cycle,
     /// the shorter of its two series.
     private func openSeriesLabel(file: StaticString = #filePath, line: UInt = #line)
