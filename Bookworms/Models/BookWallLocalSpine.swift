@@ -9,6 +9,13 @@ enum BookWallLocalSpine {
         let background: StyleColor
         let foreground: StyleColor
         let typography: Typography
+        /// The companion design's accent, or `nil` for a style without one.
+        var designAccent: StyleColor? = nil
+
+        /// The color of a five-star book's sprayed edges and of its headband's second stripe,
+        /// as on the iPhone: the design's accent, else the lettering mixed 45 percent toward
+        /// the cloth, as the iPhone's look without a design mixes it.
+        var accent: StyleColor { designAccent ?? foreground.mixed(with: background, 0.45) }
     }
 
     /// The spine's face and title case.
@@ -23,15 +30,23 @@ enum BookWallLocalSpine {
         /// The stand-in's or the system face's weight, from 400 to 700.
         var weight = 600
         var uppercase = false
+        /// The design's allowed Google Fonts family and instance weight, whose downloaded face
+        /// draws when `fontName` isn't registered (`GoogleFontLibrary.downloadedName`).
+        var family: String?
+        var familyWeight: Int?
+        /// Whether the system face draws at its condensed width, for a design in a condensed
+        /// sans family whose face isn't loaded, as on the iPhone.
+        var isCondensed = false
 
         /// The stand-in's registered face nearest `weight`, else `fontName`, else the system
-        /// face for `typeface` and `weight`.
+        /// face for `typeface`, `weight`, and width.
         func font(size: CGFloat) -> UIFont {
             if let font = loadedFont(size: size) { return font }
             let system = UIFont.systemFont(
                 ofSize: size,
                 weight: weight >= 700
-                    ? .bold : weight >= 600 ? .semibold : weight >= 500 ? .medium : .regular)
+                    ? .bold : weight >= 600 ? .semibold : weight >= 500 ? .medium : .regular,
+                width: isCondensed ? .condensed : .standard)
             let design: UIFontDescriptor.SystemDesign =
                 switch typeface {
                 case "serif": .serif
@@ -43,15 +58,20 @@ enum BookWallLocalSpine {
                 .map { UIFont(descriptor: $0, size: size) } ?? system
         }
 
-        /// The stand-in's registered face nearest `weight`, else `fontName`, or `nil` when
-        /// neither is registered and the spine draws in the system face.
+        /// The stand-in's registered face nearest `weight`, else `fontName`, else the face
+        /// downloaded for `family`, or `nil` when none is registered and the spine draws in the
+        /// system face.
         func loadedFont(size: CGFloat) -> UIFont? {
             if let standInFamily,
                 let face = GoogleFontLibrary.registeredFace(family: standInFamily, nearest: weight)
             {
                 return CTFontCreateCopyWithAttributes(face, size, nil, nil) as UIFont
             }
-            return fontName.flatMap { UIFont(name: $0, size: size) }
+            if let font = fontName.flatMap({ UIFont(name: $0, size: size) }) { return font }
+            guard let family, let familyWeight,
+                let name = GoogleFontLibrary.downloadedName(family: family, weight: familyWeight)
+            else { return nil }
+            return UIFont(name: name, size: size)
         }
     }
 
@@ -59,15 +79,26 @@ enum BookWallLocalSpine {
     /// rules block shows in `SpineFontPolicy.allowedFontName(_:)`'s upright replacement, such
     /// as Bebas Neue for Impact. A face that slants by design shows in its stand-in family
     /// (`SpineFontPolicy.standInFamily(for:)`) at the design's weight, or its Regular face, such
-    /// as Patrick Hand for Dancing Script Bold. A face that is not installed shows in the design's system typeface.
+    /// as Patrick Hand for Dancing Script Bold. Any other blocked face, and a face that is not
+    /// installed, shows in the design's system typeface, condensed for a condensed sans family.
     static func typography(for book: Book, design: SpineDesignV1?) -> Typography {
         guard let design else { return Typography(fontName: fontName(for: book)) }
-        let fontName = design.fontPostScriptName.map(SpineFontPolicy.allowedFontName)
+        let request = BookWallPreparation.fontRequest(for: design)
+        let standIn = design.fontPostScriptName.flatMap(SpineFontPolicy.standInFamily)
         return Typography(
-            fontName: fontName,
-            standInFamily: design.fontPostScriptName.flatMap(SpineFontPolicy.standInFamily),
-            typeface: design.typeface, weight: design.weight, uppercase: design.uppercase)
+            fontName: design.fontPostScriptName.flatMap(SpineFontPolicy.uprightName),
+            standInFamily: standIn, typeface: design.typeface, weight: design.weight,
+            uppercase: design.uppercase, family: standIn == nil ? request?.family : nil,
+            familyWeight: standIn == nil ? request?.weight : nil,
+            isCondensed: design.fontFamily.map(condensedFamilies.contains) ?? false)
     }
+
+    /// The Google Fonts families the iPhone companion's catalog files as condensed sans
+    /// (`SpineFamilyStyle.condensedSans`), whose system stand-in draws condensed.
+    static let condensedFamilies: Set<String> = [
+        "Bebas Neue", "Anton", "Oswald", "Teko", "Fjalla One", "Staatliches", "Archivo Narrow",
+        "Barlow Condensed", "League Gothic", "Six Caps",
+    ]
 
     /// Uses the companion design's colors and type when one exists; otherwise samples the cover.
     /// A design whose colors don't parse keeps its type, which `BookWallLayout` measured the
@@ -78,7 +109,8 @@ enum BookWallLocalSpine {
         {
             return Style(
                 background: background, foreground: foreground,
-                typography: typography(for: book, design: design))
+                typography: typography(for: book, design: design),
+                designAccent: try? StyleColor(hex: design.accentHex))
         }
         let sampled = style(for: book, samples: cover.flatMap(sampleColors) ?? [])
         guard let design else { return sampled }
@@ -276,4 +308,52 @@ enum BookWallLocalSpine {
 
 extension StyleColor {
     var uiColor: UIColor { UIColor(red: red, green: green, blue: blue, alpha: 1) }
+}
+
+/// What the reading history shows on a Book Wall book's page edges, by the iPhone's rules
+/// (`PageEdges` there): a five-star book's edges are sprayed in its spine's accent, and other
+/// books' edges yellow with the time since the reader first finished them.
+enum BookWallPageEdges {
+    static let fresh = StyleColor(red: 237 / 255, green: 230 / 255, blue: 209 / 255)
+    /// Paper after `yellowingYears` or more.
+    static let aged = StyleColor(red: 214 / 255, green: 184 / 255, blue: 124 / 255)
+    static let yellowingYears = 15.0
+
+    /// Whether the book has sprayed edges, which five-star books get.
+    static func isSprayed(_ book: Book) -> Bool { (book.rating ?? 0) >= 5 }
+
+    /// A five-star book's edges are `accent` with a little of the fresh paper. Other books'
+    /// edges yellow quickly at first, then more slowly, until they are fully aged after
+    /// `yellowingYears`, in eighths. Unfinished books have fresh pages.
+    static func color(of book: Book, accent: StyleColor, now: Date = .now) -> StyleColor {
+        if isSprayed(book) { return accent.mixed(with: fresh, 0.12) }
+        guard let finished = book.finishes.compactMap(day).min() else { return fresh }
+        let years = max(0, now.timeIntervalSince(finished) / (365.25 * 86_400))
+        let age = (min(1, years / yellowingYears).squareRoot() * 8).rounded() / 8
+        return fresh.mixed(with: aged, age)
+    }
+
+    /// The edges' color as a share of the fresh paper's, channel by channel, at most 1, which
+    /// tints the wall's paper materials while keeping their look for fresh pages.
+    static func tint(of book: Book, accent: StyleColor, now: Date = .now) -> StyleColor {
+        let color = color(of: book, accent: accent, now: now)
+        return StyleColor(
+            red: min(1, color.red / fresh.red), green: min(1, color.green / fresh.green),
+            blue: min(1, color.blue / fresh.blue))
+    }
+
+    /// The noon of a `yyyy-MM-dd` date, or of a timestamp that starts with one.
+    private static func day(_ text: String) -> Date? {
+        guard text.count >= 10 else { return nil }
+        return try? Date(String(text.prefix(10)) + "T12:00:00Z", strategy: .iso8601)
+    }
+}
+
+extension StyleColor {
+    /// The color `amount` of the way from this one to `other`.
+    func mixed(with other: StyleColor, _ amount: Double) -> StyleColor {
+        StyleColor(
+            red: red + (other.red - red) * amount, green: green + (other.green - green) * amount,
+            blue: blue + (other.blue - blue) * amount)
+    }
 }

@@ -8,6 +8,9 @@ struct BookWallLayout: Sendable {
         let column: Int
         let row: Int
         let x: Float
+        /// The width of the slot's column, which holds the column's longest book with room
+        /// beside it for the book's seeded offset and turn.
+        let laneWidth: Float
         let restingY: Float
         let bookHeight: Float
         let spineThickness: Float
@@ -120,8 +123,8 @@ struct BookWallLayout: Sendable {
                     pointsPerUnit: pointsPerUnit)
             }
         }
-        // A crowded column gives up only thickness beyond what each spine's lettering
-        // needs. Text-fit thickness shrinks only if even that exceeds the column.
+        // A crowded column first gives up thickness beyond what each spine's lettering needs.
+        // When the lettering's thicknesses alone overfill it, every spine shrinks by one factor.
         let laneThicknesses = lanes.indices.map { column in
             let dimensions = laneDimensions[column]
             // Reserve both covering layers before distributing the available stack height.
@@ -180,7 +183,7 @@ struct BookWallLayout: Sendable {
                 slots.append(
                     Slot(
                         book: book, column: column, row: row,
-                        x: laneCenters[column],
+                        x: laneCenters[column], laneWidth: laneWidths[column],
                         restingY: top + collisionThickness / 2, bookHeight: length,
                         spineThickness: thickness,
                         coverWidth: length * laneDimensions[column][row].coverRatio,

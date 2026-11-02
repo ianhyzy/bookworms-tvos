@@ -412,6 +412,31 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertEqual(try focusRequests(app), requests, "Closing the details requested focus")
     }
 
+    /// A restore that ends the example drops the example's Book Wall, though the reader's
+    /// sidebar hides Book Wall and prepares no wall to replace it, so showing Book Wall later
+    /// waits for the reader's own wall.
+    func testARestoreThatEndsTheExampleDropsItsBookWall() throws {
+        let app = launch("welcome", focusProbe: true, arguments: ["--test-cloud-restore"])
+        let example = app.buttons["welcome-example-profile"]
+        XCTAssertTrue(example.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
+        RemoteNavigation.press(.down, in: app, expecting: example)
+        selectExample(in: app, expecting: app.buttons["book-1"])
+        command("release-artwork", app: app)
+        RemoteNavigation.selectView("Book Wall", in: app)
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 20))
+        let shelf = try XCTUnwrap(
+            try probe(app, sample: true, example: true)["shelf"] as? [String: Any])
+        XCTAssertEqual(shelf["bookWallPrepared"] as? Bool, true)
+
+        command("release-cloud", app: app)
+        // The restored library keeps the default views, which leave out Book Wall.
+        let restored = try waitForRestoredLibrary(app)
+        let restoredShelf = try XCTUnwrap(restored["shelf"] as? [String: Any])
+        XCTAssertEqual(
+            restoredShelf["bookWallPrepared"] as? Bool, false, "The example's wall stayed prepared")
+    }
+
     /// Year in Review shows in the example's sidebar though the reader turned it off, so its
     /// covers prepare with the shelf's, including books the shelf leaves out.
     func testExamplePreparesYearInReviewCoversTheReaderTurnedOff() throws {

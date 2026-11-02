@@ -55,6 +55,7 @@ final class LibraryModel {
             let read = Set(allBooks.filter { $0.isHardcoverBook && $0.isMarkedRead }.map(\.id))
             if read != readBookIDs { readBookIDs = read }
             refreshSeriesSources()
+            refreshSeriesListings()
             refreshOnThisDay()
         }
     }
@@ -67,6 +68,12 @@ final class LibraryModel {
     /// The series look each book draws as its design, by ID, in place of its companion design
     /// (`spineDesigns`). Prepared with `seriesSources`.
     private(set) var lookDesigns: [Int: SpineDesignV1] = [:]
+    /// The books that draw one shared design, by the ID of each of them: a look group's books, or
+    /// a series source and the books that draw its design. Book Wall checks the shared face
+    /// against all of them, including books outside the wall. Each mate keeps only its ID, title,
+    /// and author, which the check reads (`SeriesDesigns.lettering(of:uppercase:)`). Prepared
+    /// with `seriesSources`.
+    private(set) var seriesMates: [Int: [Book]] = [:]
     /// Who made the designs the library's books draw, for **Settings → Spines**. Prepared with
     /// `seriesSources`.
     private(set) var designMakers = SpineDesignMakers()
@@ -76,38 +83,49 @@ final class LibraryModel {
     /// A book whose look group (`SeriesDesigns.lookKey(of:link:)`, with `links`) has a series
     /// look in `looks` draws the look as its design (`looks` in the result), unless its link
     /// keeps its own look. Every other book draws its companion design from `designs`, if any,
-    /// and `sources` gives the books that draw another book's design instead:
-    /// `SeriesDesigns.sources` over the books of groups without a look, judging each book's
-    /// design by the face Book Wall draws it in (`BookWallLocalSpine.typography(for:design:)`).
-    /// That face is its companion design's, with a blocked face already replaced by its upright
-    /// stand-in, or its genre face, so a design saved in Impact or Pacifico leads its series, as
-    /// on the iPhone. Whether a look's or source's face can letter each book is checked later,
-    /// once, where a spine is prepared.
+    /// and `sources` gives the books that draw another book's design instead
+    /// (`SeriesDesigns.sources(books:designs:links:)` over the books of groups without a look).
+    /// `mates` gives, for each book that draws a shared design, every book that draws it, so
+    /// Book Wall can check once, where spines are prepared, that the shared face letters all of
+    /// them (`BookWallPreparation.drawnDesigns(of:designs:looks:sources:mates:)`). Each mate
+    /// keeps only its ID, title, and author, so a sync that changes another field, such as a
+    /// current read's progress, leaves `mates` equal and doesn't rebuild the wall.
     nonisolated static func seriesDrawing(
         of books: [Book], designs: [Int: SpineDesignV1] = [:], links: [Int: SeriesLinkV1] = [:],
         looks: [SeriesLookKey: SeriesLookV1] = [:]
-    ) -> (sources: [Int: Book], looks: [Int: SpineDesignV1]) {
+    ) -> (sources: [Int: Book], looks: [Int: SpineDesignV1], mates: [Int: [Book]]) {
         var drawn: [Int: SpineDesignV1] = [:]
         var ranked: [Int: Book] = [:]
+        var looked: [SeriesLookKey: [Book]] = [:]
         for book in books {
             let link = links[book.id]
             if link?.ownLook == true { continue }
             if let key = SeriesDesigns.lookKey(of: book, link: link), let look = looks[key] {
+                if drawn[book.id] == nil { looked[key, default: []].append(book) }
                 drawn[book.id] = look.design(for: book)
             } else if ranked[book.id] == nil {
                 ranked[book.id] = book
             }
         }
-        let fonts = ranked.mapValues { book in
-            let typography = BookWallLocalSpine.typography(for: book, design: designs[book.id])
-            return typography.fontName ?? typography.typeface
-        }
         let sources =
-            SeriesDesigns.sources(
-                books: Array(ranked.values), fonts: fonts, links: links
-            )
+            SeriesDesigns.sources(books: Array(ranked.values), designs: designs, links: links)
             .compactMapValues { ranked[$0] }
-        return (sources, drawn)
+        func lettering(_ books: [Book]) -> [Book] {
+            books.map { Book(id: $0.id, title: $0.title, author: $0.author) }
+        }
+        var mates: [Int: [Book]] = [:]
+        for members in looked.values {
+            let members = lettering(members)
+            for book in members { mates[book.id] = members }
+        }
+        var drawers: [Int: [Book]] = [:]
+        for (id, source) in sources { drawers[source.id, default: []].append(ranked[id] ?? source) }
+        for members in drawers.values {
+            // Sorted, so an unchanged library prepares equal mates and never rebuilds the wall.
+            let members = lettering(members.sorted { $0.id < $1.id })
+            for book in members { mates[book.id] = members }
+        }
+        return (sources, drawn, mates)
     }
 
     private func refreshSeriesSources() {
@@ -118,6 +136,7 @@ final class LibraryModel {
             : Self.seriesDrawing(of: allBooks, links: seriesLinks)
         if drawing.sources != seriesSources { seriesSources = drawing.sources }
         if drawing.looks != lookDesigns { lookDesigns = drawing.looks }
+        if drawing.mates != seriesMates { seriesMates = drawing.mates }
         let makers = SpineDesignMakers(
             books: allBooks, designs: BookPresentation.showsCompanionSpines ? spineDesigns : [:],
             sources: drawing.sources, looks: drawing.looks)
@@ -125,7 +144,18 @@ final class LibraryModel {
     }
 
     /// Series from the active Hardcover snapshot, by series ID. Prepared with the library.
-    private(set) var seriesByID: [Int: SeriesInfo] = [:]
+    private(set) var seriesByID: [Int: SeriesInfo] = [:] {
+        didSet { if seriesByID != oldValue { refreshSeriesListings() } }
+    }
+
+    /// Each series' books as book details list them (`SeriesEntry.listings(infos:library:)`), by
+    /// series ID. Prepared with the library and its series, so details never walk the library.
+    private(set) var seriesListings: [Int: [SeriesEntry]] = [:]
+
+    private func refreshSeriesListings() {
+        let listings = SeriesEntry.listings(infos: seriesByID, library: allBooks)
+        if listings != seriesListings { seriesListings = listings }
+    }
 
     /// Covers of every series book, for the browsing artwork tier, which skips covers the library
     /// tier already has. Owned books use their library cover. Series of books on My Shelf come
@@ -133,8 +163,8 @@ final class LibraryModel {
     private(set) var browsingCoverURLs: [URL] = []
 
     /// `book`'s series for its details: the series its label names, which its link chooses, else
-    /// its shortest series, and every series it belongs to, with their books when synced. `nil`
-    /// for a book without a named series.
+    /// its shortest series, and every series it belongs to, with their Hardcover lists when synced
+    /// and their listings. `nil` for a book without a named series.
     func series(for book: Book) -> ShownSeries? {
         guard let shown = SeriesDesigns.shownSeries(of: book, link: seriesLinks[book.id]) else {
             return nil
@@ -147,6 +177,10 @@ final class LibraryModel {
             infos: Dictionary(
                 uniqueKeysWithValues: all.compactMap { series in
                     seriesByID[series.seriesID].map { (series.seriesID, $0) }
+                }),
+            listings: Dictionary(
+                uniqueKeysWithValues: all.compactMap { series in
+                    seriesListings[series.seriesID].map { (series.seriesID, $0) }
                 }))
     }
 
@@ -394,7 +428,7 @@ final class LibraryModel {
     func savedSpineStyle(for book: Book) -> SpineStyle? {
         if let source = seriesSources[book.id], source.id != book.id,
             let style = ownSavedSpineStyle(for: source),
-            SeriesDesigns.isUsableSource(style.fontName)
+            SpineFontPolicy.allows(style.fontName)
         {
             return style
         }
@@ -1381,7 +1415,7 @@ final class LibraryModel {
     /// (`SeriesDesigns`).
     func style(for book: Book) -> SpineStyle {
         if let source = seriesSources[book.id], source.id != book.id, let style = styles[source.id],
-            SeriesDesigns.isUsableSource(style.fontName)
+            SpineFontPolicy.allows(style.fontName)
         {
             return style
         }
@@ -1983,7 +2017,10 @@ final class LibraryModel {
                     else { return nil }
                     return TopShelfBook(
                         id: book.id, title: book.title, imageURL: url,
-                        progress: book.isReading == true ? book.progress ?? 0 : nil,
+                        // A current read without progress shows its cover undimmed, as on
+                        // My Shelf.
+                        progress: book.isReading == true ? book.progress : nil,
+                        isReading: book.isReading == true ? true : nil,
                         showsNativeProgress: style == .horizontal ? true : nil)
                 }
         topShelfRevision &+= 1

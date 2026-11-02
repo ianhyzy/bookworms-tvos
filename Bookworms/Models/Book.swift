@@ -113,9 +113,19 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
     /// Whether the reader's library marks the book read or finished.
     var isMarkedRead: Bool { isRead == true || finished != nil }
 
-    var spineTitle: String { title.components(separatedBy: ":").first ?? title }
+    /// The title without a subtitle, as spines letter it: the text before the first colon,
+    /// trimmed, or the whole title when nothing comes before the colon. The iPhone companion's
+    /// `CloudBook.spineTitle` uses the same rule.
+    var spineTitle: String {
+        guard let colon = title.firstIndex(of: ":") else { return title }
+        let head = title[..<colon].trimmingCharacters(in: .whitespaces)
+        return head.isEmpty ? title : head
+    }
 
     var formatSymbol: String { Self.formatSymbol(forLabel: formatLabel) }
+
+    /// One symbol per format in `formatParts`, so a book read in print and on audio shows both.
+    var formatSymbols: [String] { formatParts.map(Self.formatSymbol(forLabel:)) }
 
     /// Each format the book was read in, splitting "Physical & audiobook" into both.
     var formatParts: [String] {
@@ -139,10 +149,22 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         genres?.first(where: HardcoverClient.isEnglishTag).map(Self.displayGenre)
     }
 
+    /// The book's English genres, most-tagged first, each once by its display name
+    /// (`displayGenre(_:)`, which shows "Humour" as "Humor"), as the iPhone's
+    /// `YearInBooks.displayGenres(of:)` lists them.
+    var displayGenres: [String] {
+        var shown = Set<String>()
+        return (genres ?? []).filter(HardcoverClient.isEnglishTag).map(Self.displayGenre)
+            .filter { shown.insert($0.lowercased()).inserted }
+    }
+
     /// Capitalizes tags that readers entered in lowercase, such as "litrpg", and keeps any other
-    /// capitalization, such as "LGBTQ" or "LitRPG".
+    /// capitalization, such as "LGBTQ" or "LitRPG". Readers tag in British and American spelling,
+    /// so "Humour" reads "Humor", and the two count as one genre wherever genres are tallied,
+    /// listed, or filtered, as on the iPhone and Mac.
     static func displayGenre(_ tag: String) -> String {
-        tag == tag.lowercased() ? tag.capitalized : tag
+        (tag == tag.lowercased() ? tag.capitalized : tag)
+            .replacing("Humour", with: "Humor").replacing("humour", with: "humor")
     }
 
     /// The reading format's display name. Hardcover records Read, Listened, Both, or Ebook.
@@ -157,13 +179,15 @@ struct Book: Codable, Identifiable, Hashable, Sendable {
         }
     }
 
-    /// The length for display: listening time in whole minutes for an audiobook when Hardcover
-    /// records it, otherwise the page count.
+    /// The length for display, as the iPhone and Mac write it: the listening time for an
+    /// audiobook when Hardcover records it, such as "12 hr, 5 min", otherwise the page count, such
+    /// as "1,024 pages".
     var lengthLabel: String? {
         if formatLabel == "Audiobook", let audioSeconds, audioSeconds > 0 {
-            return "\((audioSeconds + 30) / 60) minutes"
+            return Duration.seconds(audioSeconds)
+                .formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
         }
-        if let pages, pages > 0 { return "\(pages) pages" }
+        if let pages, pages > 0 { return "\(pages.formatted()) pages" }
         return nil
     }
 
@@ -245,7 +269,7 @@ struct SeriesInfo: Codable, Hashable, Sendable, Identifiable {
 
 /// A book's series as its details show them: the series its label names
 /// (`SeriesDesigns.shownSeries(of:link:)`) and every series the book belongs to, with each
-/// series' main books when the last sync fetched them.
+/// series' main books when the last sync fetched them, and the books each series lists.
 struct ShownSeries: Hashable, Sendable {
     /// The series the label names.
     let membership: SeriesMembership
@@ -253,8 +277,17 @@ struct ShownSeries: Hashable, Sendable {
     let all: [SeriesMembership]
     /// The main books of the series in `all` that the last sync fetched, by series ID.
     let infos: [Int: SeriesInfo]
+    /// The books of each series in `all` that has any to list
+    /// (`SeriesEntry.listings(infos:library:)`), by series ID.
+    let listings: [Int: [SeriesEntry]]
 
     var info: SeriesInfo? { infos[membership.seriesID] }
+
+    /// Whether the series label opens the series pop-up: the book is in two or more series, or
+    /// its one series lists two or more books. Otherwise the label names the series as text. The
+    /// iPhone and Mac follow the same rule (`SeriesEntry.opensSeries(of:infos:library:)` in the
+    /// iOS app).
+    var opens: Bool { all.count > 1 || (listings[membership.seriesID]?.count ?? 0) > 1 }
 }
 
 struct LibrarySnapshot: Codable, Sendable {
@@ -334,7 +367,7 @@ enum SampleLibrary {
         Book(
             id: 7, title: "Tides", author: "Casey Moon",
             description: "A natural history of a changing coast.", pages: 180,
-            finished: "2026-08-20"),
+            finished: "2026-08-20", format: "Both"),
         Book(
             id: 8, title: "Winter in the Orchard", author: "Alex Rowan",
             description: "The island's story continues.", pages: 410, finished: "2026-08-18",
@@ -394,6 +427,15 @@ extension SampleLibrary {
             id: 104, title: "Northern Lines", author: "Elliot Shaw", pages: 256,
             finished: "2026-05-19", communityRating: 3.8),
     ]
+}
+
+/// Ratings as every view writes them.
+enum RatingText {
+    /// A star before the rating, with at most one decimal in the reader's locale, such as "★4.5"
+    /// or "★4".
+    static func stars(_ rating: Double) -> String {
+        "★" + rating.formatted(.number.precision(.fractionLength(0...1)))
+    }
 }
 
 struct RatingBucket: Codable, Hashable, Identifiable, Sendable {

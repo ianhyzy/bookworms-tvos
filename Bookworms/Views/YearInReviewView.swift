@@ -36,8 +36,10 @@ struct YearInReviewView: View {
                     // lets its background spill into the tiles and shelf.
                     HStack(alignment: .top, spacing: 24) {
                         monthlyChart(review)
-                        highlights(review).frame(width: review.longest == nil ? 620 : 540)
-                        if review.longest != nil { records(review).frame(width: 540) }
+                        // Highest rated needs no page counts, so either record shows the panel.
+                        let hasRecords = review.longest != nil || review.favorite != nil
+                        highlights(review).frame(width: hasRecords ? 540 : 620)
+                        if hasRecords { records(review).frame(width: 540) }
                     }
                     .frame(height: 300)
                     // The shelf takes whatever height the fixed rows and caption leave.
@@ -255,11 +257,8 @@ struct YearInReviewView: View {
                 record("Shortest", book, detail: "\(pages.formatted()) pages").padding(.top, 10)
             }
             if let book = review.favorite, let rating = book.rating {
-                record(
-                    "Highest rated", book,
-                    detail: "★ " + rating.formatted(.number.precision(.fractionLength(0...1)))
-                )
-                .padding(.top, 10)
+                record("Highest rated", book, detail: RatingText.stars(rating))
+                    .padding(.top, review.longest == nil ? 0 : 10)
             }
         }
         .padding(24)

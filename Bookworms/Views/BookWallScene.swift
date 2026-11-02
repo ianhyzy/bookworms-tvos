@@ -208,6 +208,8 @@ final class BookWallScene {
     private var viewportSize = CGSize.zero
     private var dropHeight: Float = 3
     private var dropTask: Task<Void, Never>?
+    /// Whether the current fall began without a renderer, which runs no physics.
+    private var fellWithoutHost = false
     private var landedIDs: Set<Int> = []
     /// False only while books fall. A wall with nothing to drop, before preparation or
     /// without books, rests, so the renderer can stop drawing.
@@ -310,7 +312,11 @@ final class BookWallScene {
         continuingCollisionSubscription?.cancel()
         renderHost = host
         host.setAmbientExponent(ambientExponent)
-        if !layout.slots.isEmpty && !isSettled { observeLandings() }
+        if !layout.slots.isEmpty && !isSettled {
+            // Books added while no renderer ran hang overlapped at the drop height, and
+            // physics would push them apart instead of letting them land, so they drop again.
+            if fellWithoutHost { restartFall() } else { observeLandings() }
+        }
         if flight != nil || idlePose != nil {
             motionSubscription?.cancel()
             motionSubscription = nil
@@ -417,7 +423,20 @@ final class BookWallScene {
         return true
     }
 
+    /// Drops an unsettled wall's books again from the drop height, one at a time.
+    private func restartFall() {
+        dropTask?.cancel()
+        preparedBodies.merge(bodies) { prepared, _ in prepared }
+        for body in bodies.values { body.removeFromParent() }
+        bodies.removeAll()
+        restingTransforms.removeAll()
+        landedIDs.removeAll()
+        startFall(reduceMotion: false)
+    }
+
     private func startFall(reduceMotion: Bool) {
+        // Reduce Motion places books at rest, which needs no physics.
+        fellWithoutHost = renderHost == nil && !reduceMotion
         collisionSubscription?.cancel()
         continuingCollisionSubscription?.cancel()
         if !reduceMotion { observeLandings() }
@@ -579,14 +598,15 @@ final class BookWallScene {
         showShelfLabel(for: id)
         // The ribbon leaves at once when focus moves; only its arrival animates.
         hideRibbon()
-        guard let id, let body = bodies[id], var lifted = restingTransforms[id] else { return }
+        guard let id, let body = bodies[id], let resting = restingTransforms[id] else { return }
+        let lifted = Self.pulledOut(resting)
         showRibbon(for: id, animated: !reduceMotion)
+        // Reduce Motion pulls the book out at once, so it stands in front of the ribbon and the
+        // contact shadow as it does after the animated pull-out.
         guard !reduceMotion else {
             body.transform = lifted
             return
         }
-        // The case slides straight toward the viewer so the spine remains readable.
-        lifted.translation.z += Self.focusPullOut
         body.move(
             to: lifted, relativeTo: root, duration: TimeInterval(Self.pullOutDuration),
             timingFunction: .easeOut)
@@ -672,8 +692,10 @@ final class BookWallScene {
                 slot.restingY + slot.spineThickness / 2 + 1.0,
             ] {
                 for x in [slot.x - slot.bookHeight / 2 - 0.2, slot.x + slot.bookHeight / 2 + 0.2] {
-                    // Spines sit flush at the deepest book's front; focus pulls one further out.
-                    let point = SIMD3<Float>(x, y, front + focusPullOut + 0.03)
+                    // Spines' middles sit at the deepest book's front, a turned spine's end a
+                    // little nearer, and focus pulls one further out.
+                    let turned = slot.bookHeight / 2 * sin(maximumStackTurn)
+                    let point = SIMD3<Float>(x, y, front + focusPullOut + turned + 0.03)
                     depth = max(
                         depth, requiredCameraDepth(for: point, in: area, of: bounds, focal: focal))
                 }
@@ -845,8 +867,7 @@ final class BookWallScene {
                 SIMD3<Float>(
                     slot.bookHeight, slot.spineThickness + 2 * Self.coverSurfaceOffset,
                     slot.coverWidth + 0.02)) / 2
-        var clear = resting
-        clear.translation.z = stackFront + radius + 0.12
+        let clear = Self.pulledOut(resting, toDepth: stackFront + radius + 0.12)
         var cameraDepth = wallCameraDepth + clear.translation.z - start.translation.z
         var planned: [FlightFrame]?
         // Fit the paired camera/book trajectory, not just its endpoints. No model scaling
@@ -1069,7 +1090,8 @@ final class BookWallScene {
         }
         stopMotion(completed: false)
         setDetailLightLevel(0)
-        if reduceMotion { body.transform = resting }
+        // The book returns to its focused pose, pulled out, as the reversed flight ends.
+        if reduceMotion { body.transform = Self.pulledOut(resting) }
         setCameraDepth(wallCameraDepth)
         flightFrames.removeAll()
         isFlyingOut = false
@@ -1088,7 +1110,7 @@ final class BookWallScene {
             guard let body = bodies[slot.book.id] else { continue }
             body.stopAllAnimations()
             body.position.y = slot.restingY
-            body.orientation = simd_quatf()
+            body.orientation = Self.restingTransform(for: slot, in: layout).rotation
             body.components.set(PhysicsMotionComponent())
             if var physics = body.physicsBody {
                 physics.mode = .kinematic
@@ -1165,8 +1187,6 @@ final class BookWallScene {
             let tail = Self.ribbonTailMesh, !PerformanceDiagnostics.isolates("wall-no-ribbon")
         else { return }
         if ribbon.parent == nil { root.addChild(ribbon) }
-        let front = layout.maxCoverWidth / 2
-        let top = resting.translation.y - slot.collisionThickness / 2
         if ribbonSegments.isEmpty {
             ribbonSegments = (0..<Self.ribbonSegmentCount)
                 .map { index in
@@ -1177,13 +1197,19 @@ final class BookWallScene {
                     return segment
                 }
         }
-        ribbon.position = [
-            resting.translation.x + slot.bookHeight * 0.3, top,
-            front + Self.focusPullOut - 0.04,
-        ]
+        // The ribbon turns with the book, from under its bottom board, toward the tail.
+        let pulled = Self.pulledOut(resting)
+        ribbon.transform = Transform(
+            scale: .one, rotation: pulled.rotation,
+            translation: pulled.translation
+                + pulled.rotation.act([
+                    slot.bookHeight * 0.3, -slot.collisionThickness / 2, slot.coverWidth / 2 - 0.04,
+                ]))
         ribbonVisible = true
         ribbon.isEnabled = true
-        showContactShadow(under: slot, lifted: resting.translation)
+        showContactShadow(
+            under: slot,
+            lifted: resting.translation + resting.rotation.act([0, 0, slot.coverWidth / 2]))
         // Start after the book's 0.2-second pull-out. The ribbon hangs at the pulled-out
         // depth, so sliding earlier would put it in front of a book that has not moved yet.
         ribbonElapsed = animated ? -Self.pullOutDuration : Self.ribbonSettleTime
@@ -1459,8 +1485,9 @@ final class BookWallScene {
         detailShadow.isEnabled = true
     }
 
-    /// Shades the top of the spine below a pulled-out book, where the top light would cast
-    /// its shadow. The shadow is a child of the ribbon, so it hides and returns with it.
+    /// Shades the top of the spine below a pulled-out book, whose spine's middle rests at
+    /// `lifted`, where the top light would cast its shadow, on that spine as it turns. The
+    /// shadow is a child of the ribbon, so it hides and returns with it.
     private func showContactShadow(under slot: BookWallLayout.Slot, lifted: SIMD3<Float>) {
         let below = layout.slots
             .filter { $0.column == slot.column && $0.restingY < slot.restingY }
@@ -1469,12 +1496,12 @@ final class BookWallScene {
             contactShadow.isEnabled = false
             return
         }
+        let belowSpine =
+            belowResting.translation + belowResting.rotation.act([0, 0, below.coverWidth / 2])
         let left = max(
-            lifted.x - slot.spineFaceWidth / 2,
-            belowResting.translation.x - below.spineFaceWidth / 2)
+            lifted.x - slot.spineFaceWidth / 2, belowSpine.x - below.spineFaceWidth / 2)
         let right = min(
-            lifted.x + slot.spineFaceWidth / 2,
-            belowResting.translation.x + below.spineFaceWidth / 2)
+            lifted.x + slot.spineFaceWidth / 2, belowSpine.x + below.spineFaceWidth / 2)
         guard right > left else {
             contactShadow.isEnabled = false
             return
@@ -1482,11 +1509,14 @@ final class BookWallScene {
         let height = Self.contactShadowHeight
         // The light comes from the right, so the shadow falls a little to the left.
         let shift = height * Self.topLightDirection.x / Self.topLightDirection.y
-        let front = layout.maxCoverWidth / 2
         let top = belowResting.translation.y + below.collisionThickness / 2
-        contactShadow.position =
-            SIMD3<Float>((left + right) / 2 - shift, top - height / 2, front + 0.012)
-            - ribbon.position
+        // On the spine below, which turns its own way.
+        let across = (left + right) / 2 - shift - belowSpine.x
+        let place =
+            belowSpine + belowResting.rotation.act([across, 0, 0.012])
+            + [0, top - height / 2 - belowSpine.y, 0]
+        contactShadow.setPosition(place, relativeTo: root)
+        contactShadow.setOrientation(belowResting.rotation, relativeTo: root)
         contactShadow.scale = [right - left, height, 1]
         contactShadow.isEnabled = true
     }
@@ -1728,12 +1758,12 @@ final class BookWallScene {
     private func addBook(_ slot: BookWallLayout.Slot, falls: Bool) {
         guard let body = preparedBodies.removeValue(forKey: slot.book.id) else { return }
         body.stopAllAnimations()
-        var position = Self.restingPosition(for: slot, in: layout)
-        if falls { position.y = dropHeight }
-        body.position = position
-        // Flat covers make supported contact agree with the stacked collision geometry.
-        // A locked roll would leave one corner embedded in the book below it.
-        body.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
+        var pose = Self.restingTransform(for: slot, in: layout)
+        if falls { pose.translation.y = dropHeight }
+        // Flat covers make supported contact agree with the stacked collision geometry. A
+        // locked roll would leave one corner embedded in the book below it, so the book turns
+        // about the vertical only, and falls already turned, since its rotation is locked.
+        body.transform = pose
         body.components.set(PhysicsMotionComponent())
         if var physics = body.physicsBody {
             physics.mode = falls ? .dynamic : .static
@@ -1762,11 +1792,43 @@ final class BookWallScene {
     }
 
     private static let casingName = "hardcover-casing"
+    private static let pageEdgeName = "page-edge"
+    private static let headbandName = "headbands"
+    /// The headband's depth from the spine wall, how far it stands beyond the pages, less than
+    /// the boards' 0.03-unit overhang, and each stripe's length: about 1.6, 0.8, and 1.4 mm, as
+    /// on the iPhone.
+    private static let headbandWidth: Float = 0.034
+    private static let headbandRaise: Float = 0.016
+    private static let headbandStripe: Float = 0.03
     private static let spineFaceName = "hardcover-spine"
     private static let coverFaceName = "hardcover-cover"
 
     private static func caseMaterial(_ style: BookWallLocalSpine.Style) -> PhysicallyBasedMaterial {
         surface(color: style.background.uiColor, roughness: 0.56)
+    }
+
+    /// Paper of `color`, worn as the iPhone wears a book's page edges (`BookWallPageEdges`):
+    /// yellowed with the years since its first finish, or sprayed, with a smoother finish,
+    /// for a five-star book.
+    private static func pageMaterial(
+        _ color: UIColor, book: Book, style: BookWallLocalSpine.Style
+    ) -> PhysicallyBasedMaterial {
+        let tint = BookWallPageEdges.tint(of: book, accent: style.accent)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: nil)
+        return surface(
+            color: UIColor(
+                red: red * tint.red, green: green * tint.green, blue: blue * tint.blue, alpha: 1),
+            roughness: BookWallPageEdges.isSprayed(book) ? 0.5 : 0.85)
+    }
+
+    /// The headband's stripes: the spine's accent, then its lettering color, as on the iPhone.
+    private static func headbandMaterials(_ style: BookWallLocalSpine.Style)
+        -> [PhysicallyBasedMaterial]
+    {
+        [style.accent, style.foreground].map { surface(color: $0.uiColor, roughness: 0.6) }
     }
 
     private static func spineMaterial(_ spine: TextureResource) -> PhysicallyBasedMaterial {
@@ -1778,7 +1840,8 @@ final class BookWallScene {
     private static func coverMaterial(
         _ cover: TextureResource?, style: BookWallLocalSpine.Style
     ) -> any RealityKit.Material {
-        guard let cover else { return UnlitMaterial(color: style.background.uiColor) }
+        // Without a cover, the board is cloth, lit like the casing it continues.
+        guard let cover else { return caseMaterial(style) }
         // The shaped covering reflects a soft edge highlight without tinting the artwork.
         var paper = surface(color: .white, roughness: 0.52, specular: 0.25)
         paper.baseColor = .init(texture: .init(cover))
@@ -1789,17 +1852,31 @@ final class BookWallScene {
     /// after preparation reaches the wall without rebuilding or moving the book. The caller
     /// must ask the scene for a frame afterward.
     static func applyArtwork(
-        to body: ModelEntity, style: BookWallLocalSpine.Style, spine: TextureResource,
-        cover: TextureResource?
+        to body: ModelEntity, book: Book, style: BookWallLocalSpine.Style,
+        spine: TextureResource, cover: TextureResource?
     ) {
         let materials: [String: any RealityKit.Material] = [
             casingName: caseMaterial(style),
             spineFaceName: spineMaterial(spine),
             coverFaceName: coverMaterial(cover, style: style),
         ]
+        // The style's accent tints the page edges and stripes the headbands.
+        body.model?.materials = [
+            pageMaterial(BookWallPageTexture.paperColor, book: book, style: style)
+        ]
         for case let part as ModelEntity in body.children {
-            guard let material = materials[part.name] else { continue }
-            part.model?.materials = [material]
+            switch part.name {
+            case pageEdgeName:
+                guard let edge = part.model?.materials.first as? PhysicallyBasedMaterial
+                else { continue }
+                var paper = pageMaterial(.white, book: book, style: style)
+                paper.baseColor.texture = edge.baseColor.texture
+                part.model?.materials = [paper]
+            case headbandName: part.model?.materials = headbandMaterials(style)
+            default:
+                guard let material = materials[part.name] else { continue }
+                part.model?.materials = [material]
+            }
         }
     }
 
@@ -1822,15 +1899,15 @@ final class BookWallScene {
         let body = ModelEntity(
             mesh: .generateBox(size: pageSize, cornerRadius: pageCornerRadius),
             materials: [
-                Self.surface(color: BookWallPageTexture.paperColor, roughness: 0.85)
+                pageMaterial(BookWallPageTexture.paperColor, book: slot.book, style: style)
             ])
         body.name = "book-\(slot.book.id)"
         let plain = PerformanceDiagnostics.isolates("wall-no-details")
         if let pageEdge, !plain {
             // Box UV orientation differs per face, so each exposed page edge gets its own
             // plane whose height runs along the book's thickness and keeps the leaves parallel.
-            var paper = Self.surface(color: .white, roughness: 0.85)
-            paper.baseColor = .init(texture: .init(pageEdge))
+            var paper = pageMaterial(.white, book: slot.book, style: style)
+            paper.baseColor.texture = .init(pageEdge)
             let edgeHeight = pageSize.y - pageCornerRadius * 2
             let faces: [(width: Float, position: SIMD3<Float>, angle: Float)] = [
                 (pageSize.z, [-pageSize.x / 2 - 0.001, 0, 0], -.pi / 2),  // Head
@@ -1842,10 +1919,21 @@ final class BookWallScene {
                     mesh: .generatePlane(
                         width: face.width - pageCornerRadius * 2, height: edgeHeight),
                     materials: [paper])
+                plane.name = Self.pageEdgeName
                 plane.position = face.position
                 plane.orientation = simd_quatf(angle: face.angle, axis: [0, 1, 0])
                 body.addChild(plane)
             }
+        }
+        if !plain,
+            let mesh = BookWallHardcoverMesh.headbands(
+                length: pageSize.x, thickness: pageSize.y - pageCornerRadius * 2,
+                depth: pageSize.z, width: Self.headbandWidth, raise: Self.headbandRaise,
+                stripe: Self.headbandStripe)
+        {
+            let headbands = ModelEntity(mesh: mesh, materials: headbandMaterials(style))
+            headbands.name = Self.headbandName
+            body.addChild(headbands)
         }
         // Both cover faces flow through the same full-height spine contour. The open
         // fore edge still exposes the paper block inside the continuous casing.
@@ -1909,16 +1997,61 @@ final class BookWallScene {
         return body
     }
 
+    /// How far a stacked book turns at most about the vertical axis, in radians: about
+    /// 4 degrees, as the iPhone's stacks turn theirs. Most books turn much less.
+    static let maximumStackTurn: Float = 0.07
+
     /// Where `addBook` places a book once it rests: a fall can shift it slightly, and settling
     /// records and republishes the landed pose.
-    private static func restingPosition(
+    ///
+    /// Each book lies a little off its column's middle and turns a few degrees about the
+    /// vertical axis through its spine's middle, so its spine faces a little left or right and
+    /// the stack looks placed by hand. It stays level on the book below. Both come from the
+    /// book's ID, and each book stays inside its column, so books never meet the next column's
+    /// books as they fall.
+    static func restingTransform(
         for slot: BookWallLayout.Slot, in layout: BookWallLayout
-    ) -> SIMD3<Float> {
-        let seed = Float((UInt64(bitPattern: Int64(slot.book.id)) &* 1_103_515_245) % 100) / 100
-        // Spines sit flush on one front plane. Centered books of different depths would put
-        // deeper spines nearer the camera, where they hide part of the book above or below.
+    ) -> Transform {
+        let id = UInt64(bitPattern: Int64(slot.book.id))
+        let seed = Float((id &* 1_103_515_245) % 100) / 100
+        let even = Float((id &* 2_654_435_761 &+ 40_503) % 1000) / 500 - 1
+        // A turned book's fore edge moves across by its depth times the turn's sine, which the
+        // column's room beside its longest book must hold.
+        let room = max(0, slot.laneWidth - slot.bookHeight)
+        let limit = asin(min(1, room / max(slot.coverWidth, 0.01)))
+        let turn = min(maximumStackTurn, limit) * even * abs(even)
+        let rotation = simd_quatf(angle: turn, axis: [0, 1, 0])
+        let reach = slot.bookHeight / 2 * cos(turn)
+        let fore = -slot.coverWidth * sin(turn)
+        let half = slot.laneWidth / 2
+        let spineX = min(
+            max(slot.x + (seed - 0.5) * 0.18, slot.x - half + reach - min(0, fore)),
+            slot.x + half - reach - max(0, fore))
+        // Spines sit on one front plane at their middles. Centered books of different depths
+        // would put deeper spines nearer the camera, where they hide part of the book above or
+        // below.
         let front = layout.maxCoverWidth / 2
-        return [slot.x + (seed - 0.5) * 0.18, slot.restingY, front - slot.coverWidth / 2]
+        return Transform(
+            scale: .one, rotation: rotation,
+            translation: [spineX, slot.restingY, front]
+                + rotation.act([0, 0, -slot.coverWidth / 2]))
+    }
+
+    /// A resting book pulled out of its stack by `focusPullOut`, along the way its spine faces,
+    /// so the spine stays readable.
+    private static func pulledOut(_ resting: Transform) -> Transform {
+        var pose = resting
+        pose.translation += resting.rotation.act([0, 0, focusPullOut])
+        return pose
+    }
+
+    /// A resting book pulled out of its stack along the way its spine faces, as focus pulls it,
+    /// until its middle reaches `depth`.
+    static func pulledOut(_ resting: Transform, toDepth depth: Float) -> Transform {
+        let outward = resting.rotation.act([0, 0, 1])
+        var pose = resting
+        pose.translation += outward * ((depth - resting.translation.z) / outward.z)
+        return pose
     }
 
     /// Projects each spine at rest: its landed pose from `resting`, otherwise its planned pose.
@@ -1931,7 +2064,7 @@ final class BookWallScene {
         for slot in layout.slots {
             let pose =
                 (resting[slot.book.id]
-                ?? Transform(translation: restingPosition(for: slot, in: layout)))
+                ?? restingTransform(for: slot, in: layout))
                 .matrix
             var points: [CGPoint] = []
             for x in [-slot.spineFaceWidth / 2, slot.spineFaceWidth / 2] {

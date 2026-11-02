@@ -45,4 +45,4 @@ The RealityRenderer adapter owns a display link and an opaque Metal layer tagged
 
 Credentials stay in Keychain and are not included in cloud archives, worklists, designs, or Top Shelf snapshots. Hardcover exposes fixed GraphQL read queries and returns the authenticated account ID with each complete library fetch. CWA fetches OPDS metadata and covers, not ebook files. Sample-library tests use fictional books and local responses.
 
-Operational errors and generation progress appear in Settings. The shelf remains available from cached data when a network service fails. See [sources and iCloud](SOURCES_AND_ICLOUD.md), [storage policies](STORAGE_AND_PERFORMANCE.md), and [testing](TESTING.md).
+Operational errors appear in Settings. The shelf remains available from cached data when a network service fails. See [sources and iCloud](SOURCES_AND_ICLOUD.md), [storage policies](STORAGE_AND_PERFORMANCE.md), and [testing](TESTING.md).

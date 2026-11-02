@@ -253,6 +253,60 @@ final class BookWallLocalSpineTests: XCTestCase {
         XCTAssertEqual(system.familyName, UIFont.systemFont(ofSize: 24, weight: .bold).familyName)
     }
 
+    /// A companion design in a blocked face without an upright replacement draws in its system
+    /// typeface, as on the iPhone; only saved styles, which always name a face, keep Avenir Next.
+    func testBlockedFacesWithoutAReplacementDrawInTheDesignsSystemTypeface() {
+        XCTAssertNil(SpineFontPolicy.uprightName("Italic"))
+        XCTAssertEqual(SpineFontPolicy.uprightName("Lora-BoldItalic"), "Lora-Bold")
+        XCTAssertEqual(SpineFontPolicy.allowedFontName("Italic"), SpineFontPolicy.uprightFallback)
+        let design = SpineDesignV1(
+            version: 1, accountID: "account", bookID: 1,
+            workItemHash: String(repeating: "a", count: 64),
+            coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
+            generatedAt: Date(timeIntervalSince1970: 0), backgroundHex: "#1F3A5A",
+            foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+            uppercase: false, fontFamily: nil, fontPostScriptName: "Italic")
+        let typography = BookWallLocalSpine.typography(
+            for: Book(id: 1, title: "Mort", author: "Terry Pratchett"), design: design)
+        XCTAssertNil(typography.fontName)
+        XCTAssertNil(typography.loadedFont(size: 24))
+    }
+
+    /// A design in a condensed sans family whose face isn't loaded draws the system face at its
+    /// condensed width, as the iPhone draws it.
+    func testCondensedFamiliesDrawACondensedSystemFace() {
+        func typography(_ family: String) -> BookWallLocalSpine.Typography {
+            BookWallLocalSpine.typography(
+                for: Book(id: 1, title: "Mort", author: "Terry Pratchett"),
+                design: SpineDesignV1(
+                    version: 1, accountID: "account", bookID: 1,
+                    workItemHash: String(repeating: "a", count: 64),
+                    coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
+                    generatedAt: Date(timeIntervalSince1970: 0), backgroundHex: "#1F3A5A",
+                    foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "sans", weight: 600,
+                    uppercase: false, fontFamily: family, fontPostScriptName: "NotInstalled-Bold"))
+        }
+        func width(_ font: UIFont) -> CGFloat {
+            let traits =
+                font.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
+            return traits?[.width] as? CGFloat ?? 0
+        }
+        XCTAssertTrue(typography("Oswald").isCondensed)
+        XCTAssertFalse(typography("Lora").isCondensed)
+        XCTAssertLessThan(width(typography("Oswald").font(size: 24)), 0)
+        XCTAssertEqual(width(typography("Lora").font(size: 24)), 0, accuracy: 0.01)
+    }
+
+    /// Spines letter the title before its first colon, trimmed, as the iPhone does.
+    func testSpineTitlesDropTheSubtitleAndTrim() {
+        func spineTitle(_ title: String) -> String {
+            Book(id: 1, title: title, author: "Author").spineTitle
+        }
+        XCTAssertEqual(spineTitle("Dune : Part One"), "Dune")
+        XCTAssertEqual(spineTitle(": A Story"), ": A Story", "An empty head keeps the full title")
+        XCTAssertEqual(spineTitle("Mort"), "Mort")
+    }
+
     func testFontFilesFollowTheRequestedWeight() {
         let kalam = ["Kalam-Light.ttf", "Kalam-Regular.ttf", "Kalam-Bold.ttf"]
         XCTAssertEqual(GoogleFontLibrary.fileName(for: 700, in: kalam), "Kalam-Bold.ttf")

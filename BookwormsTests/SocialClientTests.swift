@@ -40,6 +40,11 @@ final class SocialClientTests: XCTestCase {
         XCTAssertEqual(book.ratingDistribution?.map(\.rating), [4.5])
         XCTAssertEqual(book.genres, ["Fantasy"])
         XCTAssertEqual(book.publicationYear, 2014)
+        let unrated = try JSONDecoder()
+            .decode(SourceBook.self, from: Data(#"{"id":11,"rating":0,"ratings_count":0}"#.utf8))
+        XCTAssertNil(
+            HardcoverSocialClient.book(unrated).communityRating,
+            "Hardcover's 0 average for an unrated book shows no rating")
     }
 
     func testFollowedReadersAndOwnerDecodeWithoutOptionalProfileData() async throws {

@@ -22,12 +22,8 @@ struct RatingsView: View {
     /// Your rating, then the community average, as rows of a grid that aligns their stars.
     private var ratings: [(label: String, stars: String)] {
         [
-            book.rating.map {
-                ("You", "★\($0.formatted(.number.precision(.fractionLength(0...1))))")
-            },
-            book.communityRating.map {
-                ("Community", "★\($0.formatted(.number.precision(.fractionLength(1))))")
-            },
+            book.rating.map { ("You", RatingText.stars($0)) },
+            book.communityRating.map { ("Community", RatingText.stars($0)) },
         ]
         .compactMap(\.self)
     }
