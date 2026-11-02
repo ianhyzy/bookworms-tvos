@@ -114,7 +114,7 @@ enum RemoteNavigation {
         XCTAssertTrue(isFocused(current), file: file, line: line)
     }
 
-    private static func assertSettled(
+    static func assertSettled(
         _ app: XCUIApplication, after before: Int?, expectedUpdates: Int,
         file: StaticString, line: UInt
     ) {

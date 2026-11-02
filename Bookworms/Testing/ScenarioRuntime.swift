@@ -22,6 +22,8 @@
         @ObservationIgnored private var sourceCalls = 0
         @ObservationIgnored private var cloudCalls = 0
         @ObservationIgnored private var probeRevision = 0
+        @ObservationIgnored private var exampleReleased = false
+        @ObservationIgnored private var heldExample: CheckedContinuation<Void, Never>?
 
         static func installIfRequested() -> ScenarioRuntime? {
             if let current { return current }
@@ -133,7 +135,7 @@
                 ProcessInfo.processInfo.environment["BOOKWORMS_SCENARIO_CONTROL"] ?? "manual"
             for command in [
                 "probe", "release-artwork", "advance-clock", "approve-hardcover", "release-library",
-                "start-ambient",
+                "release-example", "start-ambient",
             ] {
                 let name = "gay.ian.Bookworms.scenario.\(channel).\(command)"
                 CFNotificationCenterAddObserver(
@@ -213,10 +215,12 @@
             dependencies.saveSeriesLink = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
             // A fictional stand-in, so UI tests never load the owner's bundled profile. It
-            // suspends like the bundled read, long enough for UI tests to see the welcome's
-            // preparation card through the load.
+            // suspends like the bundled read until `release-example`, so UI tests can see the
+            // welcome's preparation card through the load.
             dependencies.exampleProfile = { [self] in
-                try? await Task.sleep(for: .seconds(3))
+                if !exampleReleased {
+                    await withCheckedContinuation { heldExample = $0 }
+                }
                 return ExampleProfile(
                     books: SampleLibrary.books, series: SampleLibrary.allSeries, designs: [:],
                     looks: [:], syncedAt: date)
@@ -244,6 +248,10 @@
             case "/release-artwork": ScenarioNetwork.state.releaseArtwork()
             case "/approve-hardcover": ScenarioNetwork.state.approveHardcover()
             case "/release-library": ScenarioNetwork.state.releaseLibrary()
+            case "/release-example":
+                exampleReleased = true
+                heldExample?.resume()
+                heldExample = nil
             case "/advance-clock":
                 if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
                     let text = components.queryItems?.first(where: { $0.name == "seconds" })?.value,

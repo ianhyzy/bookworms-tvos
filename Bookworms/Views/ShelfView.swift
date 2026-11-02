@@ -255,9 +255,14 @@ struct ShelfView: View {
             // Book Wall leaves the sidebar with the example unless the reader shows it.
             if !sidebarViews.contains(coordinator.current) { coordinator.current = sidebarViews[0] }
             // Selections and the detail filter's entry book point at the example's books and
-            // years, so Back must not reopen an example book. This clears stored state only and requests no
-            // focus.
+            // years, so Back must not reopen an example book, and details that an iCloud restore
+            // ended the example under close. Connecting closes them itself once its sheet
+            // finishes. None of this requests focus.
             if !library.isExample {
+                if !connectsFromExample {
+                    showsDetailFilter = false
+                    selectedBook = nil
+                }
                 detailFilterEntryID = nil
                 filteredShelfBook = nil
                 shelfFocus.last = nil
@@ -545,7 +550,9 @@ struct ShelfView: View {
         }
         // Book details list the readers with synced libraries who have the book.
         avatars += social.presentation.libraryReaders.compactMap(\.avatarURL)
-        let enabled = coordinator.preferences.activeViews
+        // The example's sidebar replaces the reader's choice of views.
+        let enabled =
+            coordinator.preferences.activeViews + (library.isExample ? sidebarViews : [])
         if enabled.contains(.following) {
             books += social.activities.prefix(20).compactMap(\.book)
             avatars += social.activities.prefix(20).compactMap { $0.reader.avatarURL }

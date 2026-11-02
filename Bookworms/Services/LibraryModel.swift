@@ -52,9 +52,7 @@ final class LibraryModel {
             let offersOwned =
                 BookPresentation.offersCWA && allBooks.contains { $0.isOwned == true }
             if offersOwned != offersOwnedBooks { offersOwnedBooks = offersOwned }
-            let read = Set(
-                allBooks.filter { $0.isHardcoverBook && ($0.isRead == true || $0.finished != nil) }
-                    .map(\.id))
+            let read = Set(allBooks.filter { $0.isHardcoverBook && $0.isMarkedRead }.map(\.id))
             if read != readBookIDs { readBookIDs = read }
             refreshSeriesSources()
             refreshOnThisDay()
@@ -197,6 +195,8 @@ final class LibraryModel {
             await previous?.value
             guard let self else { return }
             do {
+                // The iCloud user may have changed, so the pick fails rather than reach it.
+                guard cloudUserChecks == 0 else { throw CancellationError() }
                 try await dependencies.saveSeriesLink(chosen, accountID, book.id)
             } catch {
                 // Turning iCloud storage off or changing accounts clears the links; keep them clear.
@@ -281,6 +281,9 @@ final class LibraryModel {
     @ObservationIgnored private var cloudRevision = 0
     /// The `cloudAccountChanged()` calls still reading the iCloud user; cloud work waits for them.
     @ObservationIgnored private var cloudUserChecks = 0
+    /// Counts `iCloudEnabled` changes, so `cloudAccountChanged()` sees a toggle that ends where
+    /// it began.
+    @ObservationIgnored private var iCloudToggles = 0
     @ObservationIgnored private var activeHardcoverAccountID: String?
     @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
     @ObservationIgnored private var spineDesignTaskIdentity:
@@ -560,6 +563,7 @@ final class LibraryModel {
     }
     var iCloudEnabled: Bool {
         didSet {
+            iCloudToggles += 1
             dependencies.defaults.set(iCloudEnabled, forKey: "iCloudEnabled")
             invalidateCloudSync()
             if iCloudEnabled {
@@ -642,8 +646,7 @@ final class LibraryModel {
     }
     func isBookReadByUser(_ id: Int) -> Bool {
         guard hardcoverConnected || isSample else { return false }
-        guard let book = allBooks.first(where: { $0.id == id }) else { return false }
-        return book.isRead == true || book.finished != nil
+        return allBooks.first { $0.id == id }?.isMarkedRead == true
     }
     private var snapshotURL: URL { dependencies.legacySnapshotURL }
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
@@ -1518,13 +1521,20 @@ final class LibraryModel {
     /// otherwise, including when the user can't be read, it turns off.
     ///
     /// Cloud syncs and companion-record reads and writes stop while the user is read, so none
-    /// of them exchanges this library with another account's iCloud data. They resume when the
-    /// user is unchanged.
+    /// of them exchanges this library with another account's iCloud data. Syncs and reads resume
+    /// when the user is unchanged; a series pick saved meanwhile fails and restores the earlier
+    /// choice.
     func cloudAccountChanged() async {
-        let enabled = iCloudEnabled
+        let toggles = iCloudToggles
         if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
             cloudUserChecks += 1
-            if hasStarted { invalidateCloudSync() }
+            if hasStarted {
+                // Book Wall keeps waiting for launch's read: it resumes below, or turning
+                // storage off ends the wait.
+                let hasRead = hasReadCompanionRecords
+                invalidateCloudSync()
+                hasReadCompanionRecords = hasRead
+            }
             let sameUser = await dependencies.cloudUserRecordName() == previous
             cloudUserChecks -= 1
             if sameUser {
@@ -1533,7 +1543,7 @@ final class LibraryModel {
             }
         }
         // A storage toggle made while CloudKit answered is the reader's newer choice.
-        guard iCloudEnabled == enabled else {
+        guard iCloudToggles == toggles else {
             resumeCloudWork()
             return
         }
@@ -1579,6 +1589,9 @@ final class LibraryModel {
                     // agree, so an account switch during the sync can't record the new user as
                     // the one this library synced with (`cloudAccountChanged()`).
                     let userBefore = await dependencies.cloudUserRecordName()
+                    guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
+                        return
+                    }
                     let remote = try await dependencies.syncCloud(archive)
                     let userAfter = await dependencies.cloudUserRecordName()
                     let cloudUser = userBefore == userAfter ? userAfter : nil

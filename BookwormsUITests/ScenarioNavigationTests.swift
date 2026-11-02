@@ -76,6 +76,23 @@ final class ScenarioNavigationTests: XCTestCase {
         return evidence
     }
 
+    /// Selects the focused **View example profile**, releases its load once the preparation
+    /// card shows, and requires focus to reach `first` with `exampleEntryUpdates` updates.
+    private func selectExample(
+        in app: XCUIApplication, expecting first: XCUIElement,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let before = RemoteNavigation.transitions(app)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["welcome-preparing-library"].firstMatch
+                .waitForExistence(timeout: 3), file: file, line: line)
+        command("release-example", app: app)
+        RemoteNavigation.waitForFocus(first, timeout: 15, file: file, line: line)
+        RemoteNavigation.assertSettled(
+            app, after: before, expectedUpdates: exampleEntryUpdates, file: file, line: line)
+    }
+
     private func command(_ command: String, app: XCUIApplication) {
         let channel = app.launchEnvironment["BOOKWORMS_SCENARIO_CONTROL"]!
         CFNotificationCenterPostNotification(
@@ -193,18 +210,8 @@ final class ScenarioNavigationTests: XCTestCase {
         // The popup shows its preparation card until the example's shelf is ready, so focus
         // goes straight to the first book, without first visiting the empty shelf.
         let first = app.buttons["book-1"]
-        let beforeSelect = RemoteNavigation.transitions(app)
-        XCUIRemote.shared.press(.select)
-        XCTAssertTrue(
-            app.descendants(matching: .any)["welcome-preparing-library"].firstMatch
-                .waitForExistence(timeout: 3))
-        RemoteNavigation.waitForFocus(first, timeout: 15)
+        selectExample(in: app, expecting: first)
         waitForAbsence(welcome)
-        _ = XCTWaiter.wait(
-            for: [XCTestExpectation(description: "Focus settles")],
-            timeout: RemoteNavigation.settleWindow)
-        XCTAssertEqual(
-            RemoteNavigation.transitions(app), beforeSelect.map { $0 + exampleEntryUpdates })
         let selected = try probe(app, sample: true, example: true)
         XCTAssertEqual(selected["welcomeCompleted"] as? Bool, true)
         XCTAssertEqual(selected["sourceCalls"] as? Int, 0)
@@ -248,8 +255,7 @@ final class ScenarioNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
         RemoteNavigation.press(.down, in: app, expecting: example)
         let first = app.buttons["book-1"]
-        RemoteNavigation.press(
-            .select, in: app, expecting: first, updates: exampleEntryUpdates, timeout: 15)
+        selectExample(in: app, expecting: first)
         let exampleConnect = app.buttons["example-connect-hardcover"]
         RemoteNavigation.press(.down, in: app, expecting: exampleConnect)
         RemoteNavigation.press(
@@ -272,8 +278,7 @@ final class ScenarioNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(app.buttons["welcome-connect-hardcover"])
         RemoteNavigation.press(.down, in: app, expecting: example)
         let first = app.buttons["book-1"]
-        RemoteNavigation.press(
-            .select, in: app, expecting: first, updates: exampleEntryUpdates, timeout: 15)
+        selectExample(in: app, expecting: first)
         XCUIRemote.shared.press(.select)
         let author = app.buttons["detail-author"]
         RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"], timeout: 15)
@@ -409,6 +414,7 @@ final class ScenarioNavigationTests: XCTestCase {
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(connect)
         RemoteNavigation.press(.down, in: app, expecting: app.buttons["welcome-example-profile"])
+        command("release-example", app: app)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))
         XCTAssertEqual(
