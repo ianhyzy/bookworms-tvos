@@ -707,17 +707,18 @@ final class SeriesDesignsTests: XCTestCase {
     /// A font style change in Settings prepares the wall again, so its shelf labels, hint, and
     /// format icons follow the style.
     @MainActor
-    func testTheWallIsReadyOnlyForTheFontStyleItWasPreparedIn() async {
+    func testAFontStyleChangePreparesTheWallAgain() async throws {
         let (preparation, _) = await prepareWall { _, _ in throw URLError(.timedOut) }
         let wall = [book(1, series: nil)]
-        let design = companionDesign(
-            1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold")
-        XCTAssertTrue(
-            preparation.isReady(
-                for: wall, sources: [:], designs: [1: design], looks: [:], fontStyle: .serif))
-        XCTAssertFalse(
-            preparation.isReady(
-                for: wall, sources: [:], designs: [1: design], looks: [:], fontStyle: .sansSerif))
+        let designs = [
+            1: companionDesign(1, family: "Fictional Serif", postScriptName: "FictionalSerif-Bold")
+        ]
+        let firstID = try XCTUnwrap(preparation.prepared).id
+        await preparation.prepare(wall, sources: [:], designs: designs, fontStyle: .serif)
+        XCTAssertEqual(preparation.prepared?.id, firstID, "The same style keeps the wall")
+        await preparation.prepare(wall, sources: [:], designs: designs, fontStyle: .sansSerif)
+        XCTAssertNotEqual(preparation.prepared?.id, firstID, "A new style replaces the wall")
+        XCTAssertEqual(preparation.prepared?.fontStyle, .sansSerif)
     }
 
     @MainActor
