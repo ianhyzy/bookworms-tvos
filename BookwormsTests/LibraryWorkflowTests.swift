@@ -697,6 +697,27 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(saves.last?.linkedSeriesID, 7)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
+        // When both saves fail, the choice iCloud held before either pick shows, and picking
+        // the earlier series again saves it.
+        savesBefore = saves.count
+        savesFail = true
+        model.pickSeries(8, for: book)
+        model.pickSeries(7, for: book)
+        await model.waitForSeriesLinkSaves()
+        XCTAssertEqual(saves.count, savesBefore)
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+        savesFail = false
+        model.pickSeries(8, for: book)
+        await model.waitForSeriesLinkSaves()
+        XCTAssertEqual(saves.count, savesBefore + 1)
+        XCTAssertNil(stored[1])
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+        model.pickSeries(7, for: book)
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(saves.count, savesBefore + 2)
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+
         // A pick that turning storage off cleared during a check isn't saved once the reader
         // turns storage on again, even for another iCloud user.
         savesBefore = saves.count

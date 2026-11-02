@@ -166,11 +166,12 @@ final class LibraryModel {
     /// a link that then changes nothing (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`).
     /// The pick shows at once.
     ///
-    /// Saves run in the order of the picks, so a failed save's earlier choice is the one iCloud
-    /// holds, which it restores unless a later pick replaced it. A pick that a storage toggle or
-    /// an account change cleared before its save started isn't saved. A saved pick reads the
-    /// companion records again (`queueSpineDesignRefresh(restarting:)`), so the book draws its
-    /// new group's look, or the group gets one. The sample library keeps picks in memory.
+    /// Saves run in the order of the picks. A failed save restores the choice iCloud holds: the
+    /// earlier pick if its save succeeded, else what that pick's own failed save would have
+    /// restored (`failedSeriesPicks`). A pick that a storage toggle or an account change cleared
+    /// before its save started isn't saved. A saved pick reads the companion records again
+    /// (`queueSpineDesignRefresh(restarting:)`), so the book draws its new group's look, or the
+    /// group gets one. The sample library keeps picks in memory.
     func pickSeries(_ seriesID: Int, for book: Book) {
         guard canPickSeries(for: book) else { return }
         let accountID = isSample ? "" : activeHardcoverAccountID ?? ""
@@ -196,14 +197,16 @@ final class LibraryModel {
         seriesLinkSave = Task { [weak self] in
             await previous?.value
             guard let self else { return }
+            // Only this pick's failed save reads the earlier pick's entry.
+            defer { if let earlierPick { failedSeriesPicks[earlierPick.number] = nil } }
             do {
                 // A check that finds another iCloud user turns storage off, which clears the
                 // pick, so the save waits for it and never reaches that user's records.
                 await waitForCloudUserChecks()
                 // A check that turns storage off, any other toggle, or an account change clears
                 // the pick, so it never reaches the records of the user or account that follows.
-                // A pick that a later pick replaced still saves, so a failed later save restores
-                // a choice iCloud holds.
+                // A pick that a later pick replaced still saves, so a failed later save can
+                // restore it.
                 guard iCloudEnabled, iCloudToggles == toggles,
                     activeHardcoverAccountID == accountID
                 else { return }
@@ -212,12 +215,20 @@ final class LibraryModel {
                 await waitForCloudUserChecks()
             } catch {
                 // Turning iCloud storage off or changing accounts clears the links; keep them clear.
-                guard iCloudEnabled, activeHardcoverAccountID == accountID,
-                    pickedLinks[book.id]?.number == number
-                else { return }
-                // Saves run in order, so the earlier pick's save has finished.
-                seriesLinks[book.id] = old
-                pickedLinks[book.id] = earlierPick.map {
+                guard iCloudEnabled, activeHardcoverAccountID == accountID else { return }
+                // Saves run in order, so the earlier picks' saves have finished; one that failed
+                // gives way to what it would have restored.
+                var restored = (link: old, pick: earlierPick)
+                while let pick = restored.pick, let failed = failedSeriesPicks[pick.number] {
+                    restored = failed
+                }
+                // A later pick shows; its own failed save restores this choice instead.
+                guard pickedLinks[book.id]?.number == number else {
+                    failedSeriesPicks[number] = restored
+                    return
+                }
+                seriesLinks[book.id] = restored.link
+                pickedLinks[book.id] = restored.pick.map {
                     SeriesPick(
                         link: $0.link, number: $0.number,
                         savedAfterReads: $0.savedAfterReads ?? seriesLinkReads)
@@ -357,6 +368,10 @@ final class LibraryModel {
     @ObservationIgnored private var seriesPickCount = 0
     /// The link reads started this session, which number each read.
     @ObservationIgnored private var seriesLinkReads = 0
+    /// The choice that a replaced pick's failed save would have restored, by pick number, for
+    /// the failed save of the pick that replaced it (`pickSeries(_:for:)`).
+    @ObservationIgnored private var failedSeriesPicks:
+        [Int: (link: SeriesLinkV1?, pick: SeriesPick?)] = [:]
     /// The latest series-link save, which the next one waits for.
     @ObservationIgnored private var seriesLinkSave: Task<Void, Never>?
     /// Validated series looks of the active Hardcover snapshot's look groups.
