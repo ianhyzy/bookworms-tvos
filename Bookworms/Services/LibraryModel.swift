@@ -166,9 +166,9 @@ final class LibraryModel {
     /// a link that then changes nothing (`SpineCloudStore.setSeriesLink(_:accountID:bookID:)`).
     /// The pick shows at once.
     ///
-    /// Saves run in the order of the picks, and a pick that a later pick replaced before its
-    /// save started isn't saved. A failed save restores the earlier choice unless a later pick
-    /// replaced it. A saved pick reads the companion records again
+    /// Saves run in the order of the picks, so a failed save's earlier choice is the one iCloud
+    /// holds, which it restores unless a later pick replaced it. A pick that a storage toggle or
+    /// an account change cleared before its save started isn't saved. A saved pick reads the companion records again
     /// (`queueSpineDesignRefresh(restarting:)`), so the book draws its new group's look, or the
     /// group gets one. The sample library keeps picks in memory.
     func pickSeries(_ seriesID: Int, for book: Book) {
@@ -185,6 +185,7 @@ final class LibraryModel {
             return
         }
         let earlierPick = pickedLinks[book.id]
+        let toggles = iCloudToggles
         seriesPickCount += 1
         let number = seriesPickCount
         seriesLinks[book.id] = link
@@ -199,8 +200,13 @@ final class LibraryModel {
                 // A check that finds another iCloud user turns storage off, which clears the
                 // pick, so the save waits for it and never reaches that user's records.
                 await waitForCloudUserChecks()
-                // A check, a storage toggle, or a later pick can clear or replace this pick.
-                guard iCloudEnabled, pickedLinks[book.id]?.number == number else { return }
+                // A check that turns storage off, any other toggle, or an account change clears
+                // the pick, so it never reaches the records of the user or account that follows.
+                // A pick that a later pick replaced still saves, so a failed later save restores
+                // a choice iCloud holds.
+                guard iCloudEnabled, iCloudToggles == toggles,
+                    activeHardcoverAccountID == accountID
+                else { return }
                 try await dependencies.saveSeriesLink(chosen, accountID, book.id)
                 // A check that began during the save decides whether the pick stays.
                 await waitForCloudUserChecks()

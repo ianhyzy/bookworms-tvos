@@ -551,6 +551,8 @@ final class LibraryWorkflowTests: XCTestCase {
         var stored: [Int: SeriesLinkV1] = [:]
         var saves: [SeriesLinkV1] = []
         var savesFail = false
+        // The number of earlier saves at which one save fails.
+        var failsAfterSaves: Int?
         var heldSave: ControlledLibraryResponse<Void>?
         var duringUserRead: (@MainActor () async -> Void)?
         var cloudUser = "_fictional_user_1"
@@ -568,7 +570,7 @@ final class LibraryWorkflowTests: XCTestCase {
             XCTAssertEqual(accountID, fixture.hardcoverAccountID)
             XCTAssertEqual(bookID, 1)
             if let heldSave { try await heldSave.value() }
-            if savesFail { throw CloudStorageError.unavailable }
+            if savesFail || failsAfterSaves == saves.count { throw CloudStorageError.unavailable }
             saves.append(link)
             stored[bookID] = link.changesNothing ? nil : link
         }
@@ -673,16 +675,25 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(saves.count, savesBefore + 1)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
-        // Of two picks made during a check, only the later one saves.
+        // Two picks made during a check save in order. When the later save fails, the earlier
+        // pick shows, since iCloud holds it, and picking the later series again saves it.
         savesBefore = saves.count
+        failsAfterSaves = savesBefore + 1
         duringUserRead = {
             model.pickSeries(8, for: book)
             model.pickSeries(7, for: book)
         }
         await model.cloudAccountChanged()
         await model.waitForSeriesLinkSaves()
-        await model.waitForCompanionRecords()
         XCTAssertEqual(saves.count, savesBefore + 1)
+        XCTAssertEqual(saves.last?.changesNothing, true)
+        XCTAssertNil(stored[1])
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+        failsAfterSaves = nil
+        model.pickSeries(7, for: book)
+        await model.waitForSeriesLinkSaves()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(saves.count, savesBefore + 2)
         XCTAssertEqual(saves.last?.linkedSeriesID, 7)
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
