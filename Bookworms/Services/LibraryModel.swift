@@ -222,9 +222,10 @@ final class LibraryModel {
                 while let pick = restored.pick, let failed = failedSeriesPicks[pick.number] {
                     restored = failed
                 }
-                // A later pick shows; its own failed save restores this choice instead.
+                // A later pick shows; its own failed save restores this choice instead. A pick
+                // cleared some other way, such as by a cache prune, leaves nothing to restore.
                 guard pickedLinks[book.id]?.number == number else {
-                    failedSeriesPicks[number] = restored
+                    if pickedLinks[book.id] != nil { failedSeriesPicks[number] = restored }
                     return
                 }
                 seriesLinks[book.id] = restored.link
