@@ -93,7 +93,10 @@ actor GoogleFontLibrary {
     ) async throws -> DownloadedFont {
         guard SpineFontPolicy.allows(family) else { throw AIError.invalidFont }
         if let font = cached(family: family, weight: weight) {
-            if (try? register(font)) != nil { return font }
+            if (try? register(font)) != nil {
+                Self.recordName(of: font, weight: weight)
+                return font
+            }
         }
         guard allowsNetwork else { throw URLError(.notConnectedToInternet) }
         let catalog = try await catalog()
@@ -152,8 +155,26 @@ actor GoogleFontLibrary {
             filePath: file.path, licensePath: licenseFile.path)
         try register(font)
         try JSONEncoder().encode(font).write(to: manifestURL, options: .atomic)
+        Self.recordName(of: font, weight: weight)
         return font
     }
+
+    /// The PostScript name of the face `download(family:weight:)` registered for `family` at
+    /// `weight` in this process, or `nil` before it does. A design can record another name for
+    /// the same face, such as "Merriweather120pt-Bold" under an earlier file rule, so Book Wall
+    /// tries this name when the recorded one isn't registered.
+    static func downloadedName(family: String, weight: Int) -> String? {
+        registeredFacesLock.withLock { downloadedNames["\(family):\(weight)"] }
+    }
+
+    private static func recordName(of font: DownloadedFont, weight: Int) {
+        registeredFacesLock.withLock {
+            downloadedNames["\(font.family):\(weight)"] = font.postScriptName
+        }
+    }
+
+    /// `downloadedName(family:weight:)` results, guarded by `registeredFacesLock`.
+    nonisolated(unsafe) private static var downloadedNames: [String: String] = [:]
 
     /// Returns the font file to download for `weight` from a family's upright `.ttf` file names:
     /// the static file of that weight, else the variable file, else the static file of the

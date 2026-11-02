@@ -57,7 +57,7 @@ enum SpineFontPolicy {
     /// "DancingScript-Bold". Returns `nil` for an allowed name and for a blocked name without a
     /// downloadable stand-in, such as Impact, whose replacement ships with tvOS.
     static func standInFamily(for name: String) -> String? {
-        allows(name) ? nil : standInFamilies[allowedFontName(name)]
+        allows(name) ? nil : uprightName(name).flatMap { standInFamilies[$0] }
     }
 
     /// The Book Wall's general-fiction face, for a blocked name with no closer upright face.
@@ -89,7 +89,16 @@ enum SpineFontPolicy {
     /// | Anything else blocked | `AvenirNext-DemiBold` |
     ///
     /// An upright name that is not installed falls back to the system font, which is upright.
+    /// Saved styles always name a face, so they need the last row; companion designs use
+    /// `uprightName(_:)`.
     static func allowedFontName(_ name: String) -> String {
+        uprightName(name) ?? uprightFallback
+    }
+
+    /// `allowedFontName(_:)` without its last row: `nil` for a blocked name with no upright
+    /// replacement, so a companion design draws in its system typeface, as the iPhone companion
+    /// draws a blocked family without a stand-in (`SpineFamily.uprightReplacement(for:)`).
+    static func uprightName(_ name: String) -> String? {
         guard !allows(name) else { return name }
         if name.lowercased().contains("impact") { return impactReplacement }
         let slantWords = ["Italic", "Oblique", "Slanted"]
@@ -104,7 +113,7 @@ enum SpineFontPolicy {
         }
         if style.hasSuffix("It") { style.removeLast(2) }
         let upright = family + "-" + (style.isEmpty ? "Regular" : style)
-        return !family.isEmpty && allows(upright) ? upright : uprightFallback
+        return !family.isEmpty && allows(upright) ? upright : nil
     }
 
     /// Returns whether a loaded face is upright: it has neither the italic trait nor a slant.

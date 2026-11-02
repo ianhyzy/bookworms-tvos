@@ -127,9 +127,8 @@ struct SpineDesignMakers: Equatable {
 
     /// Counts the design each of `books` draws: its series look from `looks`, else, with a
     /// series source in `sources`, the source's design from `designs`, else its own
-    /// (`LibraryModel.seriesDrawing`). A book whose source has no design counts as undesigned
-    /// even with a design of its own, because Book Wall draws the source's local look on it. It
-    /// counts before preparation's glyph checks, which can give a book its own design instead.
+    /// (`LibraryModel.seriesDrawing`). A source always has a current design, and a shared design
+    /// that letters in its system typeface still counts as its maker's.
     init(
         books: [Book], designs: [Int: SpineDesignV1], sources: [Int: Book],
         looks: [Int: SpineDesignV1]
