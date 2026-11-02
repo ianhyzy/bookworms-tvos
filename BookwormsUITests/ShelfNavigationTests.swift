@@ -193,10 +193,10 @@ final class ShelfNavigationTests: XCTestCase {
         XCTAssertFalse(clear.exists)
     }
 
-    /// Back from details opened on a filtered shelf returns focus to the book they show, not to
-    /// the book whose details applied the filter.
+    /// Details opened on a filtered shelf keep the shelf on their book's page, and Back returns
+    /// focus to that book, not to the book whose details applied the filter.
     func testBackFromFilteredShelfDetailsReturnsToTheirBook() throws {
-        let app = RemoteNavigation.launch()
+        let app = RemoteNavigation.launch(arguments: ["--sample-pages"])
         let first = app.buttons["book-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         RemoteNavigation.waitForFocus(first, timeout: 15)
@@ -206,26 +206,35 @@ final class ShelfNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["clear-shelf-filter"].waitForExistence(timeout: 5))
         RemoteNavigation.waitForFocus(first)
-        let second = app.buttons["book-8"]
-        RemoteNavigation.press(.right, in: app, expecting: second)
+        // With 24 sample books, Alex Rowan's shelf pages after book 16, so book 17 sits on the
+        // page after book 1's.
+        for id in [8, 9, 16, 17] {
+            RemoteNavigation.press(.right, in: app, expecting: app.buttons["book-\(id)"])
+        }
+        let other = app.buttons["book-17"]
         XCUIRemote.shared.press(.select)
-        // Book 8's details open above book 1's, which stay in the tree, so match the focused copy.
+        // Book 17's details open above book 1's, which stay in the tree, so match the focused
+        // copy. My Shelf beneath book 1's details shows book 17 off screen.
         RemoteNavigation.waitForFocus(
             app.buttons
                 .matching(
                     NSPredicate(format: "identifier == %@ AND hasFocus == true", "back-to-shelf")
                 )
                 .firstMatch)
+        XCTAssertFalse(
+            RemoteNavigation.visibleButtons(app, prefix: "book-17").isEmpty,
+            "The shelf beneath the details paged away from their book")
 
         let before = try XCTUnwrap(RemoteNavigation.transitions(app))
         XCUIRemote.shared.press(.menu)
-        RemoteNavigation.waitForFocus(second)
+        RemoteNavigation.waitForFocus(other)
         _ = XCTWaiter.wait(
             for: [XCTestExpectation(description: "Shelf settles")],
             timeout: RemoteNavigation.settleWindow)
-        XCTAssertTrue(RemoteNavigation.isFocused(second))
-        // Two updates: the leaving details clear focus, and the shelf restores it to book 8.
+        XCTAssertTrue(RemoteNavigation.isFocused(other))
+        // Two updates: the leaving details clear focus, and the shelf restores it to book 17.
         XCTAssertEqual(RemoteNavigation.transitions(app), before + 2)
+        XCTAssertFalse(RemoteNavigation.visibleButtons(app, prefix: "book-17").isEmpty)
         XCTAssertTrue(app.buttons["clear-shelf-filter"].exists)
     }
 

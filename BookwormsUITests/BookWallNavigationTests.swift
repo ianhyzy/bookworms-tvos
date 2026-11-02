@@ -231,7 +231,8 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["clear-shelf-filter"].waitForExistence(timeout: 5))
         let entry = app.buttons["book-8"]
         RemoteNavigation.waitForFocus(entry)
-        // Every scenario book shares book 8's author; book 7 sits to its left.
+        // Every scenario book shares book 8's author, and the shelf pages before it, so book 7
+        // to its left sits on the page before book 8's.
         let other = app.buttons["book-7"]
         RemoteNavigation.press(.left, in: app, expecting: other)
         XCUIRemote.shared.press(.select)
@@ -241,6 +242,9 @@ final class BookWallNavigationTests: XCTestCase {
                     NSPredicate(format: "identifier == %@ AND hasFocus == true", "back-to-shelf")
                 )
                 .firstMatch)
+        XCTAssertFalse(
+            RemoteNavigation.visibleButtons(app, prefix: "book-7").isEmpty,
+            "The shelf beneath the details paged away from their book")
 
         var before = try XCTUnwrap(RemoteNavigation.transitions(app))
         XCUIRemote.shared.press(.menu)
@@ -251,6 +255,7 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertTrue(RemoteNavigation.isFocused(other))
         // Two updates: the leaving details clear focus, and the shelf restores it to book 7.
         XCTAssertEqual(RemoteNavigation.transitions(app), before + 2)
+        XCTAssertFalse(RemoteNavigation.visibleButtons(app, prefix: "book-7").isEmpty)
 
         before = try XCTUnwrap(RemoteNavigation.transitions(app))
         XCUIRemote.shared.press(.menu)
