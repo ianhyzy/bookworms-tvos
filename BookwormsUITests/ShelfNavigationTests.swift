@@ -436,7 +436,7 @@ final class ShelfNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.left)
         RemoteNavigation.waitForSidebarFocus("Year in Review", in: app)
         XCTAssertNil(RemoteNavigation.focused(app, prefix: "year-book-"))
-        // The header sits level with the sidebar, so Right from the sidebar reaches the year menu.
+        // Right from the sidebar reaches the year menu, not the cover row.
         RemoteNavigation.press(.right, in: app, expecting: year)
         let capture = XCTAttachment(screenshot: app.screenshot())
         capture.name = "Year in Review"

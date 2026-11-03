@@ -27,7 +27,7 @@ struct YearInReviewView: View {
                     Spacer()
                     if review != nil { yearMenu }
                 }
-                .padding(.top, 54)
+                .padding(.top, HeaderOptionTypography.topPadding)
                 .focusSection()
 
                 if let review {
