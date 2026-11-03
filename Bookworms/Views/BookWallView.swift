@@ -229,7 +229,7 @@ struct BookWallView: View {
                         .accessibilityHint("Drops the books onto the shelf again.")
                         .accessibilityIdentifier("book-wall-replay")
                     }
-                    .padding(.top, 34)
+                    .padding(.top, HeaderOptionTypography.topPadding)
                     .padding(.trailing, 80)
                     .focusSection()
                 }

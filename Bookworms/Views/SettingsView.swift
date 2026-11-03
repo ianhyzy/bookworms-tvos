@@ -79,8 +79,7 @@ struct SettingsView: View {
                     .focusSection()
                 }
             }
-            // Matches the header position of Compare Shelves and Book Club, level with the
-            // sidebar's collapsed title.
+            // Level with the sidebar's collapsed title.
             .padding(.top, 54)
             .padding(.horizontal, 80)
             .padding(.bottom, 40)

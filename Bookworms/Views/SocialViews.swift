@@ -6,6 +6,10 @@ enum HeaderOptionTypography {
     static let iconFont: Font = .system(size: 18, weight: .semibold)
     static let horizontalPadding: CGFloat = 16
     static let verticalPadding: CGFloat = 6
+    /// The header row's top edge. On tvOS 26, Up from content can miss a row that lies wholly
+    /// within the 120-point top safe area, and on tvOS 26.0 Book Club's cover rail stretches up
+    /// over its header when it starts inside that area.
+    static let topPadding: CGFloat = 70
 }
 
 extension View {
@@ -263,7 +267,7 @@ struct SocialViews: View {
                     comparisonOrderMenu
                     readerPicker
                 }
-                .padding(.top, 54)
+                .padding(.top, HeaderOptionTypography.topPadding)
                 .focusSection()
 
                 if let reader {
@@ -407,7 +411,7 @@ struct SocialViews: View {
                     readerPicker
                     sharedSortMenu
                 }
-                .padding(.top, 54)
+                .padding(.top, HeaderOptionTypography.topPadding)
                 .focusSection()
 
                 if let reader, !sharedBooks.isEmpty {

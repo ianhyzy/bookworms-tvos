@@ -228,6 +228,30 @@ final class SocialNavigationTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Theo Marsh"].exists)
     }
 
+    /// Up reaches the first header control, and Left from it opens the sidebar.
+    func testHeaderLeftReachesSidebar() {
+        continueAfterFailure = false
+        var app = RemoteNavigation.open("Compare Shelves")
+        let upper = app.otherElements["comparison-upper"]
+        XCTAssertTrue(upper.waitForExistence(timeout: 15))
+        let books = RemoteNavigation.visibleButtons(app, prefix: "book-", in: upper)
+        guard let first = books.first else { return XCTFail("Expected upper books") }
+        RemoteNavigation.waitForFocus(first)
+        let order = app.buttons["comparison-order-options"]
+        RemoteNavigation.press(.up, in: app, expecting: order)
+        XCUIRemote.shared.press(.left)
+        RemoteNavigation.waitForSidebarFocus("Compare Shelves", in: app)
+        app.terminate()
+
+        app = RemoteNavigation.open("Book Club")
+        let picker = app.buttons["reader-picker-menu"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(sharedCovers(app).firstMatch)
+        RemoteNavigation.press(.up, in: app, expecting: picker)
+        XCUIRemote.shared.press(.left)
+        RemoteNavigation.waitForSidebarFocus("Book Club", in: app)
+    }
+
     func testSettingsOmitPerViewChoices() {
         let app = RemoteNavigation.launch(arguments: ["--settings-tab=Views"])
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 15))

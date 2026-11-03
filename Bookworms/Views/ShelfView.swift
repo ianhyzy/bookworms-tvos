@@ -1401,7 +1401,7 @@ struct ShelfView: View {
 }
 
 extension BookwormsView {
-    /// Views whose top-right header holds their options, level with the sidebar title.
+    /// Views whose top-right header holds their options.
     fileprivate var hasHeader: Bool {
         self == .comparison || self == .shared || self == .yearInReview || self == .bookWall
     }
