@@ -1006,9 +1006,8 @@ final class BookWallLayoutTests: XCTestCase {
         return layout
     }
 
-    /// A full page keeps its books' lengths varied, though many stop at `maximumBookLength`.
-    @MainActor
     /// A full page's lettering takes most books to `maximumBookLength`, 39 of these 50.
+    @MainActor
     func testAFullPageLeavesSomeBooksBelowTheLengthCap() {
         let layout = syntheticWall(50)
         XCTAssertEqual(layout.stackHeight, BookWallLayout.maximumStackHeight)

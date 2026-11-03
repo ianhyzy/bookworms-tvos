@@ -176,7 +176,9 @@ final class BookWallPreparation {
             if !Task.isCancelled, let split = await split(input),
                 let rebuilt = await build(
                     page: Self.clamped(page, count: split.pages.count), of: split,
-                    countsProgress: false)
+                    countsProgress: false),
+                // A replacement preparation may be running, and this split isn't its year.
+                !Task.isCancelled
             {
                 self.year = split
                 built = rebuilt
