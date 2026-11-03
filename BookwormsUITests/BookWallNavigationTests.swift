@@ -345,6 +345,200 @@ final class BookWallNavigationTests: XCTestCase {
         XCTAssertFalse(retry.exists)
     }
 
+    // MARK: - Pages
+
+    func testAYearOnOnePageShowsNoPageMenu() {
+        let app = openWall()
+        XCTAssertFalse(app.buttons["book-wall-page-options"].exists)
+    }
+
+    func testPageMenuLinesUpWithDropAgainAndKeepsCountedFocus() {
+        let app = openInventedWall(books: 100)
+        let menu = app.buttons["book-wall-page-options"]
+        let replay = app.buttons["book-wall-replay"]
+        let sidebar = app.staticTexts["Book Wall"].firstMatch
+        XCTAssertTrue(menu.exists)
+        XCTAssertEqual(menu.label, "Page")
+        XCTAssertEqual(menu.value as? String, "1 of 2")
+        XCTAssertEqual(menu.frame.minY, replay.frame.minY, accuracy: 1)
+        XCTAssertEqual(menu.frame.height, replay.frame.height, accuracy: 1)
+        XCTAssertLessThan(menu.frame.maxX, replay.frame.minX)
+
+        RemoteNavigation.moveFocus(to: replay, in: app)
+        RemoteNavigation.press(.left, in: app, expecting: menu)
+        RemoteNavigation.press(.right, in: app, expecting: replay)
+        RemoteNavigation.press(.left, in: app, expecting: menu)
+        RemoteNavigation.press(.left, in: app, expecting: sidebar)
+        pressToSpine(.right, in: app)
+        RemoteNavigation.press(.menu, in: app, expecting: sidebar)
+        pressToSpine(.right, in: app)
+        RemoteNavigation.moveFocus(to: replay, in: app)
+        RemoteNavigation.press(.left, in: app, expecting: menu)
+        pressToSpine(.down, in: app)
+    }
+
+    func testChoosingAPageDropsItsBooksAndLeavesFocusOnTheMenu() {
+        let app = openInventedWall(books: 100)
+        let menu = app.buttons["book-wall-page-options"]
+        let replay = app.buttons["book-wall-replay"]
+        let firstPage = shownBooks(app)
+        XCTAssertEqual(firstPage, Array(1...firstPage.count), "January comes first")
+
+        RemoteNavigation.moveFocus(to: replay, in: app)
+        RemoteNavigation.press(.left, in: app, expecting: menu)
+        let falls = Int(app.staticTexts["book-wall-fall-probe"].label) ?? 0
+        choosePage(2, on: menu, in: app)
+        capture(app, name: "Book-Wall-page-2-falling")
+        waitForFalls(falls + 1, in: app)
+        RemoteNavigation.waitForFocus(menu)
+        XCTAssertEqual(menu.value as? String, "2 of 2")
+        let secondPage = shownBooks(app)
+        XCTAssertEqual(
+            secondPage, Array((firstPage.count + 1)...100), "No book is lost or repeated")
+        XCTAssertEqual(app.staticTexts["book-wall-seated-probe"].label, "0")
+        capture(app, name: "Book-Wall-page-2")
+
+        // Landing moves no focus, and Drop again drops the same page.
+        let updates = RemoteNavigation.transitions(app)
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Focus stays")],
+            timeout: RemoteNavigation.settleWindow)
+        XCTAssertEqual(RemoteNavigation.transitions(app), updates)
+        RemoteNavigation.press(.right, in: app, expecting: replay)
+        replayAndWaitToLand(app)
+        XCTAssertEqual(shownBooks(app), secondPage)
+        XCTAssertEqual(menu.value as? String, "2 of 2")
+        XCTAssertEqual(app.staticTexts["book-wall-seated-probe"].label, "0")
+
+        // Down enters the new page's spines, and every spine stays on screen.
+        RemoteNavigation.press(.left, in: app, expecting: menu)
+        pressToSpine(.down, in: app)
+        for id in secondPage {
+            let frame = app.buttons["book-wall-\(id)"].frame
+            XCTAssertTrue(app.frame.contains(frame), "Book \(id) extends outside the screen")
+        }
+
+        // A page shown before returns.
+        RemoteNavigation.moveFocus(to: replay, in: app)
+        RemoteNavigation.press(.left, in: app, expecting: menu)
+        let secondFalls = Int(app.staticTexts["book-wall-fall-probe"].label) ?? 0
+        choosePage(1, on: menu, in: app)
+        waitForFalls(secondFalls + 1, in: app)
+        XCTAssertEqual(shownBooks(app), firstPage)
+        RemoteNavigation.waitForFocus(menu)
+    }
+
+    func testDetailsReturnToTheSamePageAndBook() {
+        let app = openInventedWall(books: 100, arguments: ["--test-wall-page=2"])
+        let menu = app.buttons["book-wall-page-options"]
+        XCTAssertEqual(menu.value as? String, "2 of 2")
+        let books = shownBooks(app)
+        let entry = app.buttons["book-wall-\(books[0])"]
+        RemoteNavigation.moveFocus(to: entry, in: app)
+        let beside = app.buttons["book-wall-\(books[1])"]
+        RemoteNavigation.press(.right, in: app, expecting: beside)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 5))
+        XCTAssertFalse(menu.exists, "Details cover the header")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(beside.waitForExistence(timeout: 5))
+        RemoteNavigation.waitForFocus(beside)
+        XCTAssertEqual(shownBooks(app), books)
+        XCTAssertEqual(menu.value as? String, "2 of 2")
+
+        // Left from the leftmost spine and Back both reach the native sidebar.
+        let sidebar = app.staticTexts["Book Wall"].firstMatch
+        RemoteNavigation.press(.left, in: app, expecting: entry)
+        RemoteNavigation.press(.left, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: entry)
+        RemoteNavigation.press(.menu, in: app, expecting: sidebar)
+        RemoteNavigation.press(.right, in: app, expecting: entry)
+    }
+
+    func testAPagePastTheYearShowsTheLastPage() {
+        let app = openInventedWall(books: 100, arguments: ["--test-wall-page=99"])
+        XCTAssertEqual(app.buttons["book-wall-page-options"].value as? String, "2 of 2")
+        XCTAssertEqual(shownBooks(app).last, 100)
+    }
+
+    /// Presses `direction` and requires one stable focus update, to any of the page's spines.
+    private func pressToSpine(
+        _ direction: XCUIRemote.Button, in app: XCUIApplication,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let before = RemoteNavigation.transitions(app)
+        XCUIRemote.shared.press(direction)
+        RemoteNavigation.assertSettled(
+            app, after: before, expectedUpdates: 1, file: file, line: line)
+        // Identifiers with this prefix also name Drop again and the menu, without a book's ID.
+        let id = RemoteNavigation.focused(app, prefix: "book-wall-")?.identifier
+            .dropFirst("book-wall-".count)
+        XCTAssertNotNil(
+            id.flatMap { Int($0) }, "Focus did not reach a spine", file: file, line: line)
+    }
+
+    /// Opens the page menu from focus on it, and chooses `page`, counted from 1.
+    private func choosePage(
+        _ page: Int, on menu: XCUIElement, in app: XCUIApplication,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCUIRemote.shared.press(.select)
+        let item = app.descendants(matching: .any)["Page \(page)"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), file: file, line: line)
+        capture(app, name: "Book-Wall-menu-choosing-page-\(page)")
+        // The menu opens on the current page, and its items run down in order.
+        for _ in 0..<8 where !RemoteNavigation.hasFocus(labeled: "Page \(page)", in: app) {
+            XCUIRemote.shared.press(page == 1 ? .up : .down)
+            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Moved")], timeout: 0.5)
+        }
+        XCUIRemote.shared.press(.select)
+        let chosen = NSPredicate(format: "value BEGINSWITH %@", "\(page) of ")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: chosen, object: menu)], timeout: 10),
+            .completed, "The menu did not choose page \(page)", file: file, line: line)
+    }
+
+    /// Waits until `count` falls have finished: with a new page, once its books have landed.
+    private func waitForFalls(
+        _ count: Int, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let landed = NSPredicate(format: "label == %@", String(count))
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [
+                    XCTNSPredicateExpectation(
+                        predicate: landed, object: app.staticTexts["book-wall-fall-probe"])
+                ], timeout: 60),
+            .completed, "The page's books did not land", file: file, line: line)
+    }
+
+    /// The IDs of the books on the page the wall shows, in finish order.
+    private func shownBooks(_ app: XCUIApplication) -> [Int] {
+        app.staticTexts["book-wall-books-probe"].label
+            .split(separator: ",").compactMap { Int($0) }
+    }
+
+    /// Enters the wall of a year of `count` invented books, once its books have landed.
+    private func openInventedWall(books count: Int, arguments: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments =
+            [
+                "--test-scenario=artwork", "--start-view=shelf", "--test-enable-book-wall",
+                "--focus-probe", "--test-wall-books=\(count)",
+                "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            ] + arguments
+        app.launchEnvironment["TZ"] = "UTC"
+        app.launch()
+        let shelfBook = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-'"))
+            .firstMatch
+        XCTAssertTrue(shelfBook.waitForExistence(timeout: 60))
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["book-wall-replay"].waitForExistence(timeout: 60))
+        return app
+    }
+
     private func launchWithWall(arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments =
@@ -404,7 +598,7 @@ final class BookWallNavigationTests: XCTestCase {
         try app.auditAccessibility {
             [
                 "scenario-probe", "focus-transition-probe", "book-wall-fall-probe",
-                "book-wall-design-probe",
+                "book-wall-design-probe", "book-wall-seated-probe", "book-wall-books-probe",
             ]
             .contains($0.element?.identifier ?? "")
         }

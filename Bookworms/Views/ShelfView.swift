@@ -92,7 +92,7 @@ struct ShelfView: View {
             loaded: library.hasLoadedLibrarySnapshot && library.hasReadCompanionRecords,
             enabled: sidebarViews.contains(.bookWall),
             books: books, sources: sources, designs: designs, looks: looks, mates: mates,
-            fontStyle: fontStyle, retry: bookWallPreparationRetry)
+            fontStyle: fontStyle, page: coordinator.wallPage, retry: bookWallPreparationRetry)
     }
     /// Whether Book Wall shows the waiting dialog: before its first wall, or after a rebuild
     /// fails, so Retry stays reachable. An earlier wall stays on screen while a newer one
@@ -283,6 +283,7 @@ struct ShelfView: View {
                 coordinator.reviewYear = nil
                 coordinator.reviewSelection = nil
                 coordinator.wallSelection = nil
+                coordinator.wallPage = 0
             }
         }
         .onChange(of: connectsFromExample) {
@@ -341,7 +342,7 @@ struct ShelfView: View {
                 guard key.loaded, key.enabled else { return }
                 await bookWallPreparation.prepare(
                     key.books, sources: key.sources, designs: key.designs, looks: key.looks,
-                    mates: key.mates, fontStyle: key.fontStyle)
+                    mates: key.mates, fontStyle: key.fontStyle, page: key.page)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
             .onChange(of: coordinator.preferences, initial: true) {
@@ -536,6 +537,7 @@ struct ShelfView: View {
         let looks: [Int: SpineDesignV1]
         let mates: [Int: [Book]]
         let fontStyle: AppFontStyle
+        let page: Int
         let retry: Int
     }
 
@@ -554,7 +556,9 @@ struct ShelfView: View {
                             ? "Loading your library…"
                             : !library.hasReadCompanionRecords
                                 ? "Loading spine designs…"
-                                : "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
+                                : bookWallPreparation.totalCount == 0
+                                    ? "Measuring book spines…"
+                                    : "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
                     )
                     .appFont(size: 28)
                 }

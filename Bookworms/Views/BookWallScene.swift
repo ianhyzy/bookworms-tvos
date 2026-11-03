@@ -27,6 +27,9 @@ final class BookWallScene {
     private static let spineFaceOffset: Float = 0.002
     private static let fallGravity: Float = 22
     private static let minimumDropSpacing = 0.10
+    /// Far longer than the fall from the drop height takes. A book that hasn't landed this long
+    /// after the last one started falling is stuck, so it takes its place.
+    private static let fallAllowance = Duration.seconds(5)
     private static let idleVerticalAmplitudePoints: CGFloat = 24
     private static let idleHorizontalAmplitudePoints: CGFloat = 6
     private static let idleSwayRadians: Float = .pi / 90
@@ -211,6 +214,10 @@ final class BookWallScene {
     /// Whether the current fall began without a renderer, which runs no physics.
     private var fellWithoutHost = false
     private var landedIDs: Set<Int> = []
+    #if DEBUG && targetEnvironment(simulator)
+        /// Books the fall allowance seated, so tests can tell that every book landed by itself.
+        private(set) var seatedBooks = 0
+    #endif
     /// False only while books fall. A wall with nothing to drop, before preparation or
     /// without books, rests, so the renderer can stop drawing.
     private var isSettled = true
@@ -458,6 +465,15 @@ final class BookWallScene {
                 addBook(slot, falls: !reduceMotion)
             }
             settle()
+            // Physics runs only with a renderer, so the allowance runs only with one too.
+            while !Task.isCancelled, !isSettled {
+                try? await Task.sleep(for: Self.fallAllowance)
+                guard !Task.isCancelled, renderHost != nil else { continue }
+                #if DEBUG && targetEnvironment(simulator)
+                    seatedBooks += layout.slots.count - landedIDs.count
+                #endif
+                seatBooks()
+            }
         }
     }
 
@@ -479,12 +495,15 @@ final class BookWallScene {
     }
 
     private func handleLanding(_ first: Entity, _ second: Entity, contactY: Float) {
-        land(first, on: second, contactY: contactY)
-        land(second, on: first, contactY: contactY)
+        land(first, contactY: contactY)
+        land(second, contactY: contactY)
         settle()
     }
 
-    private func land(_ fallingEntity: Entity, on supportEntity: Entity, contactY: Float) {
+    /// Lands `fallingEntity` when a contact reaches the height it rests at. A falling book moves
+    /// only up and down, since its other axes are locked, so its height alone says it has
+    /// arrived, whichever body the contact is with.
+    private func land(_ fallingEntity: Entity, contactY: Float) {
         guard !isSettled,
             let (id, body) = bodies.first(where: { $0.value === fallingEntity }),
             !landedIDs.contains(id),
@@ -493,24 +512,12 @@ final class BookWallScene {
             physics.mode == .dynamic
         else { return }
 
-        let supportTop: Float
-        if supportEntity === shelf {
-            supportTop = BookWallLayout.floorY
-        } else if let (supportID, supportBody) = bodies.first(where: {
-            $0.value === supportEntity
-        }),
-            let supportSlot = layout.slots.first(where: { $0.book.id == supportID }),
-            supportSlot.column == slot.column, supportSlot.row < slot.row,
-            supportBody.physicsBody?.mode == .kinematic
-        {
-            supportTop = supportBody.position.y + supportSlot.collisionThickness / 2
-        } else {
-            return
-        }
-
-        let landingY = supportTop + slot.collisionThickness / 2
-        guard abs(contactY - supportTop) < max(0.12, slot.collisionThickness * 0.25),
-            body.position.y < landingY + 0.8
+        let landingY = slot.restingY
+        let underside = landingY - slot.collisionThickness / 2
+        guard
+            body.position.y <= landingY
+                || (abs(contactY - underside) < max(0.12, slot.collisionThickness * 0.25)
+                    && body.position.y < landingY + 0.8)
         else { return }
         // Stop the downward momentum at a supported contact. Later impacts should not
         // throw books that have already come to rest back into the air.
@@ -688,7 +695,7 @@ final class BookWallScene {
         let front = layout.maxCoverWidth / 2
         for slot in layout.slots {
             for y in [
-                BookWallLayout.floorY - shelfThickness - 0.06,
+                layout.floorY - shelfThickness - 0.06,
                 slot.restingY + slot.spineThickness / 2 + 1.0,
             ] {
                 for x in [slot.x - slot.bookHeight / 2 - 0.2, slot.x + slot.bookHeight / 2 + 0.2] {
@@ -704,7 +711,7 @@ final class BookWallScene {
         let shelfHalfWidth = layout.totalWidth / 2 + 0.7
         for x in [-shelfHalfWidth, shelfHalfWidth] {
             let corner = SIMD3<Float>(
-                x, BookWallLayout.floorY - shelfThickness, front + shelfDepthAllowance / 2)
+                x, layout.floorY - shelfThickness, front + shelfDepthAllowance / 2)
             depth = max(
                 depth, requiredCameraDepth(for: corner, in: area, of: bounds, focal: focal))
         }
@@ -1103,6 +1110,11 @@ final class BookWallScene {
         cancelTransition()
         guard !isSettled, !layout.slots.isEmpty else { return }
         dropTask?.cancel()
+        seatBooks()
+    }
+
+    /// Puts every book still falling, or yet to fall, in its place, and settles the wall.
+    private func seatBooks() {
         collisionSubscription?.cancel()
         continuingCollisionSubscription?.cancel()
         for slot in layout.slots {
@@ -1405,7 +1417,7 @@ final class BookWallScene {
         let pixelsPerPoint = CGFloat(wallImage.width) / renderBounds.width
         // Image pixels per world unit on the wall plane.
         let pixelsPerUnit = CGFloat(focalLength / backdropDistance) * pixelsPerPoint
-        let stackCenter = BookWallLayout.floorY + BookWallLayout.maxStackHeight / 2
+        let stackCenter = BookWallLayout.stackCenterY
         func glow(height: Float, distance: Float) -> BookWallBackdropBake.Glow {
             BookWallBackdropBake.Glow(
                 center: CGPoint(
@@ -1733,7 +1745,7 @@ final class BookWallScene {
             mesh: .generateBox(size: shelfSize, cornerRadius: 0.015),
             materials: [shelfMaterial])
         shelf.name = "book-wall-shelf"
-        shelf.position = [0, BookWallLayout.floorY - shelfSize.y / 2, 0]
+        shelf.position = [0, layout.floorY - shelfSize.y / 2, 0]
         let shelfShape = ShapeResource.generateBox(size: shelfSize)
         shelf.collision = CollisionComponent(shapes: [shelfShape])
         shelf.physicsBody = PhysicsBodyComponent(
@@ -1747,7 +1759,7 @@ final class BookWallScene {
         shelfLabel.position = [0, 0, shelfSize.z / 2 + 0.002]
         shelfLabel.isEnabled = false
         shelf.addChild(shelfLabel)
-        let stackCenter = BookWallLayout.floorY + BookWallLayout.maxStackHeight / 2
+        let stackCenter = BookWallLayout.stackCenterY
         shelfLight.position = SIMD3<Float>(0, stackCenter, 0) + Self.shelfLightOffset
         poolLight.position = [
             0, stackCenter + Self.poolHeightOffset,
@@ -1953,7 +1965,9 @@ final class BookWallScene {
             mass: max(0.25, slot.bookHeight * slot.spineThickness * slot.coverWidth * 3),
             material: .generate(staticFriction: 0.95, dynamicFriction: 0.8, restitution: 0),
             mode: .static)
-        physics.isTranslationLocked = (x: false, y: false, z: true)
+        // A book falls straight down its column. Sideways drift can rest it on the next column's
+        // book, above the height it lands at.
+        physics.isTranslationLocked = (x: true, y: false, z: true)
         physics.isRotationLocked = (x: true, y: true, z: true)
         physics.linearDamping = 0.25
         physics.angularDamping = 0.8
@@ -2001,8 +2015,8 @@ final class BookWallScene {
     /// 4 degrees, as the iPhone's stacks turn theirs. Most books turn much less.
     static let maximumStackTurn: Float = 0.07
 
-    /// Where `addBook` places a book once it rests: a fall can shift it slightly, and settling
-    /// records and republishes the landed pose.
+    /// Where `addBook` places a book once it rests. Settling records and republishes the landed
+    /// pose.
     ///
     /// Each book lies a little off its column's middle and turns a few degrees about the
     /// vertical axis through its spine's middle, so its spine faces a little left or right and
