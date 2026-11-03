@@ -173,8 +173,13 @@ struct BookWallView: View {
                                 .focusEffectDisabled()
                                 .focused($focusedBook, equals: book.id)
                                 // Keep the selected button mounted and focused throughout
-                                // its flight; other books cannot start competing flights.
-                                .disabled(openingBookID != nil && openingBookID != book.id)
+                                // its flight; other books cannot start competing flights. The
+                                // page a reader left takes no focus or details while the chosen
+                                // one prepares, so its arrival removes no focused or open book.
+                                .disabled(
+                                    (openingBookID != nil && openingBookID != book.id)
+                                        || chosenPage != wall.page
+                                )
                                 .accessibilityLabel("\(book.title), by \(book.author)")
                                 .accessibilityHint("Opens book details.")
                                 .accessibilityIdentifier("book-wall-\(book.id)")

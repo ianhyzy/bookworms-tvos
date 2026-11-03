@@ -428,6 +428,28 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.waitForFocus(menu)
     }
 
+    func testSpinesWaitWhileAPagePreparesAndItsArrivalMovesNoFocus() {
+        let app = openInventedWall(books: 100, arguments: ["--test-wall-slow-pages"])
+        let menu = app.buttons["book-wall-page-options"]
+        let replay = app.buttons["book-wall-replay"]
+        let firstPage = shownBooks(app)
+        RemoteNavigation.moveFocus(to: replay, in: app)
+        RemoteNavigation.press(.left, in: app, expecting: menu)
+        let falls = Int(app.staticTexts["book-wall-fall-probe"].label) ?? 0
+        choosePage(2, on: menu, in: app)
+        RemoteNavigation.waitForFocus(menu)
+        XCTAssertEqual(shownBooks(app), firstPage, "The chosen page is still preparing")
+        XCTAssertFalse(app.buttons["book-wall-\(firstPage[0])"].isEnabled)
+        RemoteNavigation.pressWithoutMoving(.down, in: app, from: menu)
+
+        let updates = RemoteNavigation.transitions(app)
+        waitForFalls(falls + 1, in: app)
+        XCTAssertNotEqual(shownBooks(app), firstPage)
+        XCTAssertEqual(RemoteNavigation.transitions(app), updates)
+        RemoteNavigation.waitForFocus(menu)
+        pressToSpine(.down, in: app)
+    }
+
     func testDetailsReturnToTheSamePageAndBook() {
         let app = openInventedWall(books: 100, arguments: ["--test-wall-page=2"])
         let menu = app.buttons["book-wall-page-options"]

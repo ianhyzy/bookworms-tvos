@@ -43,8 +43,8 @@ struct BookWallPreparedWall {
 /// Prepares current-year books once the library snapshot loads, without mounting the 3D scene.
 ///
 /// A year's split into pages and its most recently shown pages are kept until the year's books,
-/// designs, or font style change, so changing pages neither measures the year again nor, for a
-/// recent page, draws it again.
+/// designs, or font style change or a face registers, so changing pages neither measures the year
+/// again nor, for a recent page, draws it again.
 @MainActor @Observable
 final class BookWallPreparation {
     /// What a year's pages depend on.
@@ -109,9 +109,9 @@ final class BookWallPreparation {
     /// Splits the books into pages when they or their designs change, and prepares `page`, or the
     /// last page when the year has fewer.
     ///
-    /// A wall prepared earlier stays in `prepared` until the new one is ready, so a design, link,
-    /// look, or page that arrives while the wall is on screen replaces it in place. When the new
-    /// wall can't be built, the earlier one stays and `failure` describes the problem.
+    /// A wall prepared earlier stays in `prepared` until the new one is ready, so the wall stays on
+    /// screen while a design, link, look, or page prepares. When the new wall can't be built, the
+    /// earlier one stays and `failure` describes the problem.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
         looks: [Int: SpineDesignV1] = [:], mates: [Int: [Book]] = [:],
@@ -144,12 +144,16 @@ final class BookWallPreparation {
         // Glyph checks and layout measure lettering, so each face must be registered first.
         let faces = Array(designs.values) + looks.values
         let fonts = await Self.loadFonts(for: faces, download: downloadFont)
+        // A face that registered letters the books differently, so the split and the pages drawn
+        // from it no longer hold, even when this task ends here.
+        if fonts.registered {
+            year = nil
+            drawnPages = []
+        }
         guard !Task.isCancelled else { return }
-        // A face that just registered letters the books differently.
-        if year == nil || fonts.registered {
+        if year == nil {
             guard let split = await split(input) else { return }
             year = split
-            drawnPages = []
         }
         guard let year else { return }
         let shownPage = Self.clamped(page, count: year.pages.count)
@@ -162,17 +166,21 @@ final class BookWallPreparation {
         // face that arrives letters a rebuilt wall before the wall shows, so no spine changes
         // in view; a face that fails again waits for the next preparation. A host that timed
         // out gets no retry, which would hold the wall for another request timeout. The rebuild
-        // keeps the progress count, and a rebuild that fails keeps the first wall.
+        // keeps the progress count. A rebuild that fails keeps the first wall and leaves no year,
+        // so the next preparation splits again instead of mixing pages from two splits.
         if fonts.interruption != nil, fonts.interruption != .timedOut,
-            await Self.loadFonts(for: faces, download: downloadFont).registered,
-            !Task.isCancelled,
-            let split = await split(input),
-            let rebuilt = await build(
-                page: Self.clamped(page, count: split.pages.count), of: split,
-                countsProgress: false)
+            await Self.loadFonts(for: faces, download: downloadFont).registered
         {
-            self.year = split
-            built = rebuilt
+            self.year = nil
+            drawnPages = []
+            if !Task.isCancelled, let split = await split(input),
+                let rebuilt = await build(
+                    page: Self.clamped(page, count: split.pages.count), of: split,
+                    countsProgress: false)
+            {
+                self.year = split
+                built = rebuilt
+            }
         }
         guard !Task.isCancelled else { return }
         drawnPages.insert(built, at: 0)

@@ -251,6 +251,52 @@ final class BookWallLayoutTests: XCTestCase {
     }
 
     @MainActor
+    func testAFaceThatRegistersDropsThePagesOfTheOldSplit() async throws {
+        let books = twoPageYear()
+        // A fictional face that no test host registers.
+        let design = SpineDesignV1(
+            version: 1, accountID: "account", bookID: books[0].id,
+            workItemHash: String(repeating: "a", count: 64),
+            coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
+            generatedAt: Date(timeIntervalSince1970: 1_000_000), backgroundHex: "#1F3A5A",
+            foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+            uppercase: true, fontFamily: "Fictional Serif",
+            fontPostScriptName: "FictionalSerif-Bold")
+        var outcomes: [() throws -> Void] = []
+        let preparation = BookWallPreparation { _, _, _ in try outcomes.removeFirst()() }
+        func prepare(page: Int, _ steps: [() throws -> Void]) async {
+            outcomes = steps
+            await preparation.prepare(
+                books, sources: [:], designs: [books[0].id: design], page: page)
+        }
+        let offline: () throws -> Void = { throw URLError(.notConnectedToInternet) }
+        let registers: () throws -> Void = {}
+
+        await prepare(page: 0, [offline, offline])
+        let first = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(first.page, 0)
+
+        // The face registers on the retry, while another page prepares.
+        await prepare(page: 1, [offline, registers])
+        XCTAssertEqual(preparation.prepared?.page, 1)
+        await prepare(page: 0, [registers, registers])
+        let redrawn = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(redrawn.page, 0)
+        XCTAssertNotEqual(redrawn.id, first.id, "A page of the old split came back")
+
+        // The face registers and the task ends before the split does.
+        outcomes = [{ withUnsafeCurrentTask { $0?.cancel() } }]
+        let cancelled = Task {
+            await preparation.prepare(
+                books, sources: [:], designs: [books[0].id: design], page: 1)
+        }
+        await cancelled.value
+        XCTAssertEqual(preparation.prepared?.id, redrawn.id, "The shown wall stays")
+        await prepare(page: 0, [registers, registers])
+        XCTAssertNotEqual(preparation.prepared?.id, redrawn.id, "The next pass splits again")
+    }
+
+    @MainActor
     func testACancelledPreparationLeavesTheShownPage() async throws {
         let preparation = BookWallPreparation()
         let books = twoPageYear()

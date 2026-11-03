@@ -340,6 +340,15 @@ struct ShelfView: View {
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }
+                #if DEBUG && targetEnvironment(simulator)
+                    // Scenario hook: holds a later page, so UI tests can press while it prepares.
+                    if key.page > 0,
+                        ProcessInfo.processInfo.arguments.contains("--test-wall-slow-pages")
+                    {
+                        try? await Task.sleep(for: .seconds(10))
+                        guard !Task.isCancelled else { return }
+                    }
+                #endif
                 await bookWallPreparation.prepare(
                     key.books, sources: key.sources, designs: key.designs, looks: key.looks,
                     mates: key.mates, fontStyle: key.fontStyle, page: key.page)
