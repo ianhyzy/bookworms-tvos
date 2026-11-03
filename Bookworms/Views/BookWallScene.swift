@@ -1,4 +1,5 @@
 import Combine
+import OSLog
 import QuartzCore
 import RealityKit
 import SwiftUI
@@ -30,6 +31,7 @@ final class BookWallScene {
     /// Far longer than the fall from the drop height takes. A book that hasn't landed this long
     /// after the last one started falling is stuck, so it takes its place.
     private static let fallAllowance = Duration.seconds(5)
+    private static let log = Logger(subsystem: "gay.ian.Bookworms", category: "BookWall")
     private static let idleVerticalAmplitudePoints: CGFloat = 24
     private static let idleHorizontalAmplitudePoints: CGFloat = 6
     private static let idleSwayRadians: Float = .pi / 90
@@ -469,8 +471,10 @@ final class BookWallScene {
             while !Task.isCancelled, !isSettled {
                 try? await Task.sleep(for: Self.fallAllowance)
                 guard !Task.isCancelled, renderHost != nil else { continue }
+                let unlanded = layout.slots.count - landedIDs.count
+                Self.log.error("Seated \(unlanded) books still falling after the allowance")
                 #if DEBUG && targetEnvironment(simulator)
-                    seatedBooks += layout.slots.count - landedIDs.count
+                    seatedBooks += unlanded
                 #endif
                 seatBooks()
             }
