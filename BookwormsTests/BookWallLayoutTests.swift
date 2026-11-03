@@ -973,6 +973,47 @@ final class BookWallLayoutTests: XCTestCase {
     }
 
     @MainActor
+    private func wall(books: [Book], page: Int = 0, pageCount: Int = 1) -> BookWallPreparedWall {
+        BookWallPreparedWall(
+            books: books, page: page, pageCount: pageCount, sources: [:], designs: [:], looks: [:],
+            mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
+            layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil)
+    }
+
+    @MainActor
+    func testShowingAnEmptyWallAgainReportsItSettled() {
+        let scene = BookWallScene()
+        let empty = wall(books: [], pageCount: 0)
+        scene.configure(prepared: empty, reduceMotion: false, onFocusFrames: { _, _ in })
+        var settled = false
+        scene.configure(
+            prepared: empty, reduceMotion: false,
+            onFocusFrames: { _, isSettled in settled = isSettled })
+        XCTAssertTrue(settled)
+    }
+
+    @MainActor
+    func testOnlyAWallsFirstBooksAndAChosenPageDrop() {
+        let book = Book(id: 1, title: "Title", author: "Author")
+        var changed = book
+        changed.ratingsCount = 5
+        let other = Book(id: 2, title: "Other", author: "Author")
+        let shown = wall(books: [book], page: 1, pageCount: 3)
+        func inPlace(_ books: [Book], page: Int = 1, pageCount: Int = 3) -> Bool {
+            wall(books: books, page: page, pageCount: pageCount).appearsInPlace(of: shown)
+        }
+
+        XCTAssertTrue(inPlace([changed]), "A sync changed a book's details")
+        XCTAssertTrue(inPlace([other]), "A new design moved books between pages")
+        XCTAssertTrue(inPlace([book], page: 0, pageCount: 1), "The year shrank past the page")
+        XCTAssertFalse(inPlace([other], page: 0), "The reader chose another page")
+        XCTAssertFalse(wall(books: [book]).appearsInPlace(of: nil), "A first wall")
+        XCTAssertFalse(
+            wall(books: [book]).appearsInPlace(of: wall(books: [], pageCount: 0)),
+            "The first books of the year")
+    }
+
+    @MainActor
     func testCancelingATransitionLeavesNoUnlitPointLightEnabled() {
         let scene = BookWallScene()
         scene.cancelTransition()

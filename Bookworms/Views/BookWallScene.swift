@@ -219,6 +219,10 @@ final class BookWallScene {
     #if DEBUG && targetEnvironment(simulator)
         /// Books the fall allowance seated, so tests can tell that every book landed by itself.
         private(set) var seatedBooks = 0
+        /// Falls that began, so tests can tell a wall that dropped from one that appeared in place.
+        private(set) var fallsStarted = 0
+        /// Falls a newer wall replaced before their books landed.
+        private(set) var fallsCutShort = 0
     #endif
     /// False only while books fall. A wall with nothing to drop, before preparation or
     /// without books, rests, so the renderer can stop drawing.
@@ -372,9 +376,13 @@ final class BookWallScene {
         hasUndrawnChange = true
         self.onFocusFrames = onFocusFrames
         guard prepared.id != preparedWallID else {
-            publishFocusFrames()
+            // An empty wall publishes no frames, yet the view still waits to hear it has settled.
+            if prepared.books.isEmpty { onFocusFrames([:], true) } else { publishFocusFrames() }
             return
         }
+        #if DEBUG && targetEnvironment(simulator)
+            if !isSettled, !bodies.isEmpty { fallsCutShort += 1 }
+        #endif
         dropTask?.cancel()
         cancelTransition()
         preparedWallID = prepared.id
@@ -446,6 +454,9 @@ final class BookWallScene {
     private func startFall(reduceMotion: Bool) {
         // Reduce Motion places books at rest, which needs no physics.
         fellWithoutHost = renderHost == nil && !reduceMotion
+        #if DEBUG && targetEnvironment(simulator)
+            if !reduceMotion { fallsStarted += 1 }
+        #endif
         collisionSubscription?.cancel()
         continuingCollisionSubscription?.cancel()
         if !reduceMotion { observeLandings() }

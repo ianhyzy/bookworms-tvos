@@ -1316,6 +1316,18 @@ final class LibraryModel {
         queueSpineDesignRefresh()
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+        /// Scenario hook: changes a detail of every book, as a sync does when a book's community
+        /// numbers have moved.
+        func changeBooksAsASyncDoes() {
+            allBooks = allBooks.map { book in
+                var book = book
+                book.ratingsCount = (book.ratingsCount ?? 0) + 1
+                return book
+            }
+        }
+    #endif
+
     /// Shows the fictional sample library, for `--sample-library` and tests.
     func showSample() {
         guard !isLoading else { return }

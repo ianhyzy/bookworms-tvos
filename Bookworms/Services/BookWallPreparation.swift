@@ -38,6 +38,15 @@ struct BookWallPreparedWall {
     /// Shelf-front lettering for each book and for the resting hint.
     let labels: [Int: BookWallShelfLabel.Prepared]
     let hint: BookWallShelfLabel.Prepared?
+
+    /// Whether this wall appears at rest in place of `shown` instead of dropping its books. Books
+    /// drop for a wall's first books and a page the reader chose. Any other wall appears in place:
+    /// a sync changes details of the same books, a new design can move books between pages, and a
+    /// shrunken year's last page replaces a page it no longer has.
+    func appearsInPlace(of shown: BookWallPreparedWall?) -> Bool {
+        guard let shown, !shown.books.isEmpty else { return false }
+        return shown.page == page || shown.page >= pageCount
+    }
 }
 
 /// Prepares current-year books once the library snapshot loads, without mounting the 3D scene.

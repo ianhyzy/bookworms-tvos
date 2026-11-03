@@ -347,6 +347,57 @@ final class BookWallNavigationTests: XCTestCase {
 
     // MARK: - Pages
 
+    func testASyncDuringAFallWaitsForItsBooksToLand() {
+        let app = openInventedWall(books: 36, arguments: ["--test-wall-syncs-during-replay"])
+        let replay = app.buttons["book-wall-replay"]
+        RemoteNavigation.moveFocus(to: replay, in: app)
+        let wallID = app.staticTexts["book-wall-id-probe"]
+        let before = wallID.label
+        let falls = Int(app.staticTexts["book-wall-fall-probe"].label) ?? 0
+        XCUIRemote.shared.press(.select)
+        let replaced = NSPredicate(format: "label != %@", before)
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: replaced, object: wallID)], timeout: 30),
+            .completed, "The sync's wall should show once the books land")
+        XCTAssertEqual(app.staticTexts["book-wall-cut-falls-probe"].label, "0")
+        // The replayed fall lands, then the newer wall settles in place.
+        waitForFalls(falls + 2, in: app)
+    }
+
+    func testASyncDropsNoBooksAtRestOrAfterDetails() {
+        let app = launchWithWall(arguments: ["--test-wall-keeps-syncing"])
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        let entry = app.buttons["book-wall-8"]
+        RemoteNavigation.press(.select, in: app, expecting: entry)
+        let replay = app.buttons["book-wall-replay"]
+        XCTAssertTrue(replay.waitForExistence(timeout: 30))
+        let drops = app.staticTexts["book-wall-drops-probe"]
+        let wallID = app.staticTexts["book-wall-id-probe"]
+        let dropsAtEntry = drops.label
+        XCTAssertLessThanOrEqual(Int(dropsAtEntry) ?? 2, 1, "A sync restarted the first fall")
+        func wait(_ seconds: TimeInterval) {
+            _ = XCTWaiter.wait(
+                for: [XCTestExpectation(description: "Syncs run")], timeout: seconds)
+        }
+
+        let wallAtRest = wallID.label
+        wait(10)
+        XCTAssertNotEqual(wallID.label, wallAtRest, "A sync should replace the resting wall")
+        XCTAssertEqual(drops.label, dropsAtEntry, "A sync dropped the resting wall's books")
+
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 15))
+        let wallInDetails = wallID.label
+        wait(10)
+        XCTAssertEqual(wallID.label, wallInDetails, "Details should keep their wall")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        wait(6)
+        XCTAssertNotEqual(wallID.label, wallInDetails, "The newer wall should show after details")
+        XCTAssertEqual(drops.label, dropsAtEntry, "Closing details dropped the books")
+    }
+
     func testAYearOnOnePageShowsNoPageMenu() {
         let app = openWall()
         XCTAssertFalse(app.buttons["book-wall-page-options"].exists)
@@ -621,6 +672,7 @@ final class BookWallNavigationTests: XCTestCase {
             [
                 "scenario-probe", "focus-transition-probe", "book-wall-fall-probe",
                 "book-wall-design-probe", "book-wall-seated-probe", "book-wall-books-probe",
+                "book-wall-drops-probe", "book-wall-cut-falls-probe", "book-wall-id-probe",
             ]
             .contains($0.element?.identifier ?? "")
         }

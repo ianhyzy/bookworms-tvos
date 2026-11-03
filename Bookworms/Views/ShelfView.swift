@@ -337,6 +337,16 @@ struct ShelfView: View {
                     }
                 }
             #endif
+            #if DEBUG && targetEnvironment(simulator)
+                // Scenario hook: keeps syncing, so UI tests see walls replace a showing wall.
+                .task {
+                    guard ProcessInfo.processInfo.arguments.contains("--test-wall-keeps-syncing")
+                    else { return }
+                    while (try? await Task.sleep(for: .seconds(4))) != nil {
+                        library.changeBooksAsASyncDoes()
+                    }
+                }
+            #endif
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
                 guard key.loaded, key.enabled else { return }

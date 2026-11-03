@@ -44,13 +44,13 @@ struct BookWallView: View {
         @State private var completedFalls = 0
     #endif
 
-    /// The wall the scene last showed, which `wall` keeps while a book is out of it.
+    /// The wall the scene last showed, which `wall` keeps while books fall or a book is out of it.
     @State private var shownWall: BookWallPreparedWall?
 
-    /// The wall to show: `prepared`, except that a newer wall waits while a book is out of the
-    /// wall, so its arrival never closes details.
+    /// The wall to show: `prepared`, except that a newer wall waits while books fall or a book is
+    /// out of the wall, so its arrival never cuts a fall short or closes details.
     private var wall: BookWallPreparedWall {
-        if let shownWall, detailBook != nil || openingBookID != nil || isReturning {
+        if let shownWall, !isSettled || detailBook != nil || openingBookID != nil || isReturning {
             return shownWall
         }
         return prepared
@@ -283,6 +283,21 @@ struct BookWallView: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("book-wall-seated-probe")
+                    Text(String(scene.fallsStarted))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-drops-probe")
+                    Text(String(scene.fallsCutShort))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-cut-falls-probe")
+                    Text(wall.id.uuidString)
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-id-probe")
                     Text(books.map { String($0.id) }.joined(separator: ","))
                         .font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1)
@@ -310,10 +325,9 @@ struct BookWallView: View {
             }
             let revision = configurationRevision
             let wall = wall
-            // A wall that replaces one of the same books, such as after a design arrives,
-            // appears in place instead of falling again. The header stays through any
-            // replacement, so a focused control keeps focus when its page's books arrive.
-            let inPlace = shownWall?.books == wall.books
+            // The header stays through any replacement, so a focused control keeps focus when its
+            // page's books arrive.
+            let inPlace = wall.appearsInPlace(of: shownWall)
             shownWall = wall
             isSettled = false
             // Empty frames fall back to the planned layout, so the spines stay mounted.
@@ -458,6 +472,12 @@ struct BookWallView: View {
         guard isActive, isSettled, detailBook == nil, openingBookID == nil, !isReturning,
             scene.replayFall(reduceMotion: reduceMotion)
         else { return }
+        #if DEBUG && targetEnvironment(simulator)
+            // Scenario hook: syncs during this fall, so UI tests can see a newer wall wait for it.
+            if ProcessInfo.processInfo.arguments.contains("--test-wall-syncs-during-replay") {
+                library.changeBooksAsASyncDoes()
+            }
+        #endif
         // The spine targets stay mounted, so a focused Drop again keeps focus.
         isSettled = false
         openingFailed = false
