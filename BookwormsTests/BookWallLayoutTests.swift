@@ -1014,6 +1014,20 @@ final class BookWallLayoutTests: XCTestCase {
     }
 
     @MainActor
+    func testANewerWallWaitsUnlessTheReaderChoseAPage() {
+        let book = Book(id: 1, title: "Title", author: "Author")
+        let shown = wall(books: [book], page: 0, pageCount: 3)
+
+        XCTAssertTrue(wall(books: [book]).waits(behind: shown, chosenPage: 0), "A sync")
+        XCTAssertFalse(
+            wall(books: [book], page: 1, pageCount: 3).waits(behind: shown, chosenPage: 1),
+            "The chosen page")
+        XCTAssertFalse(
+            wall(books: [book], page: 0, pageCount: 1).waits(behind: shown, chosenPage: 2),
+            "A shorter year limited the chosen page to the page on screen")
+    }
+
+    @MainActor
     func testCancelingATransitionLeavesNoUnlitPointLightEnabled() {
         let scene = BookWallScene()
         scene.cancelTransition()

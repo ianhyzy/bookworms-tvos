@@ -54,7 +54,7 @@ struct BookWallView: View {
     private var wall: BookWallPreparedWall {
         if let shownWall,
             !isSettled || detailBook != nil || openingBookID != nil || isReturning
-                || (isActive && prepared.appearsInPlace(of: shownWall))
+                || (isActive && prepared.waits(behind: shownWall, chosenPage: coordinator.wallPage))
         {
             return shownWall
         }

@@ -48,6 +48,13 @@ struct BookWallPreparedWall {
         guard let shown, !shown.books.isEmpty else { return false }
         return shown.page == page || shown.page >= pageCount
     }
+
+    /// Whether this wall waits for the reader to leave `shown`: it would appear in place, and the
+    /// reader hasn't chosen another page. A chosen page never waits, even one this wall's shorter
+    /// year limits to the page on screen.
+    func waits(behind shown: BookWallPreparedWall, chosenPage: Int) -> Bool {
+        chosenPage == shown.page && appearsInPlace(of: shown)
+    }
 }
 
 /// Prepares current-year books once the library snapshot loads, without mounting the 3D scene.

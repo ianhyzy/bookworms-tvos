@@ -75,6 +75,7 @@ struct ShelfView: View {
         for book in wallBooks { sources[book.id] = library.seriesSources[book.id] }
         return sources
     }
+    private var hasWallBooks: Bool { bookWallPreparation.prepared?.books.isEmpty == false }
     /// What the wall draws from the library now.
     private var wallData: BookWallData {
         let books = wallBooks
@@ -101,8 +102,7 @@ struct ShelfView: View {
     /// under them. It prepares once they leave. A wall without books has nothing to interrupt, so
     /// a first sync's books still reach it.
     private var wallPreparationKey: BookWallPreparationKey {
-        let isOnWall =
-            sidebarItem == .view(.bookWall) && bookWallPreparation.prepared?.books.isEmpty == false
+        let isOnWall = sidebarItem == .view(.bookWall) && hasWallBooks
         return BookWallPreparationKey(
             data: (isOnWall ? requestedWallData : nil) ?? wallData,
             page: coordinator.wallPage, retry: bookWallPreparationRetry)
@@ -288,7 +288,6 @@ struct ShelfView: View {
                 // The example's wall must not show as the reader's, even when their Book Wall is
                 // hidden now and no preparation replaces it until they show it.
                 bookWallPreparation.discard()
-                bookWallScene.shownWall = nil
                 if !connectsFromExample { closeEndedExampleDetails() }
                 detailFilterEntryID = nil
                 filteredShelfBook = nil
@@ -380,6 +379,8 @@ struct ShelfView: View {
                     mates: data.mates, fontStyle: data.fontStyle, page: key.page)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
+            // Books that follow a discarded or emptied wall are a wall's first books, which drop.
+            .onChange(of: hasWallBooks) { if !hasWallBooks { bookWallScene.shownWall = nil } }
             .onChange(of: coordinator.preferences, initial: true) {
                 social.prepare(coordinator.preferences)
             }
