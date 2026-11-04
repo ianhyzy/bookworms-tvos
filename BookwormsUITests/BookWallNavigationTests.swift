@@ -347,7 +347,7 @@ final class BookWallNavigationTests: XCTestCase {
 
     // MARK: - Pages
 
-    func testASyncDuringAFallWaitsForItsBooksToLand() {
+    func testASyncDuringAFallLeavesTheWallAlone() {
         let app = openInventedWall(books: 36, arguments: ["--test-wall-syncs-during-replay"])
         let replay = app.buttons["book-wall-replay"]
         RemoteNavigation.moveFocus(to: replay, in: app)
@@ -355,17 +355,14 @@ final class BookWallNavigationTests: XCTestCase {
         let before = wallID.label
         let falls = Int(app.staticTexts["book-wall-fall-probe"].label) ?? 0
         XCUIRemote.shared.press(.select)
-        let replaced = NSPredicate(format: "label != %@", before)
-        XCTAssertEqual(
-            XCTWaiter.wait(
-                for: [XCTNSPredicateExpectation(predicate: replaced, object: wallID)], timeout: 30),
-            .completed, "The sync's wall should show once the books land")
+        waitForFalls(falls + 1, in: app)
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Sync settles")], timeout: 10)
+        XCTAssertEqual(wallID.label, before, "A sync replaced the wall under the reader")
+        XCTAssertEqual(app.staticTexts["book-wall-fall-probe"].label, String(falls + 1))
         XCTAssertEqual(app.staticTexts["book-wall-cut-falls-probe"].label, "0")
-        // The replayed fall lands, then the newer wall settles in place.
-        waitForFalls(falls + 2, in: app)
     }
 
-    func testASyncDropsNoBooksAtRestOrAfterDetails() {
+    func testASyncWaitsUntilTheReaderLeavesTheWall() {
         let app = launchWithWall(arguments: ["--test-wall-keeps-syncing"])
         RemoteNavigation.focusSidebarItem("Book Wall", in: app)
         let entry = app.buttons["book-wall-8"]
@@ -381,21 +378,26 @@ final class BookWallNavigationTests: XCTestCase {
                 for: [XCTestExpectation(description: "Syncs run")], timeout: seconds)
         }
 
-        let wallAtRest = wallID.label
+        let wallOnEntry = wallID.label
         wait(10)
-        XCTAssertNotEqual(wallID.label, wallAtRest, "A sync should replace the resting wall")
-        XCTAssertEqual(drops.label, dropsAtEntry, "A sync dropped the resting wall's books")
+        XCTAssertEqual(wallID.label, wallOnEntry, "A sync replaced the resting wall")
 
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 15))
-        let wallInDetails = wallID.label
         wait(10)
-        XCTAssertEqual(wallID.label, wallInDetails, "Details should keep their wall")
+        XCTAssertEqual(wallID.label, wallOnEntry, "A sync replaced the wall behind details")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         wait(6)
-        XCTAssertNotEqual(wallID.label, wallInDetails, "The newer wall should show after details")
+        XCTAssertEqual(wallID.label, wallOnEntry, "A sync replaced the wall after details")
         XCTAssertEqual(drops.label, dropsAtEntry, "Closing details dropped the books")
+
+        RemoteNavigation.selectView("My Shelf", in: app)
+        wait(10)
+        RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+        RemoteNavigation.press(.select, in: app, expecting: entry)
+        XCTAssertNotEqual(wallID.label, wallOnEntry, "The newer wall should show on return")
+        XCTAssertEqual(drops.label, dropsAtEntry, "Returning dropped the books")
     }
 
     func testAYearOnOnePageShowsNoPageMenu() {

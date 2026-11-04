@@ -184,7 +184,9 @@ final class BookWallScene {
     private var continuingCollisionSubscription: Cancellable?
     private var layout = BookWallLayout(books: [])
     private var preparedBodies: [Int: ModelEntity] = [:]
-    private var preparedWallID: UUID?
+    /// The wall the scene last showed. It outlives `BookWallView`, so a wall that prepared while
+    /// the reader was away can appear in place when they return.
+    var shownWall: BookWallPreparedWall?
     private var bodies: [Int: ModelEntity] = [:]
     private var restingTransforms: [Int: Transform] = [:]
     private struct FlightFrame {
@@ -375,7 +377,7 @@ final class BookWallScene {
     ) {
         hasUndrawnChange = true
         self.onFocusFrames = onFocusFrames
-        guard prepared.id != preparedWallID else {
+        guard prepared.id != shownWall?.id else {
             // An empty wall publishes no frames, yet the view still waits to hear it has settled.
             if prepared.books.isEmpty { onFocusFrames([:], true) } else { publishFocusFrames() }
             return
@@ -385,7 +387,7 @@ final class BookWallScene {
         #endif
         dropTask?.cancel()
         cancelTransition()
-        preparedWallID = prepared.id
+        shownWall = prepared
         layout = prepared.layout
         shelfThickness = Self.shelfThickness(for: layout)
         preparedBodies = prepared.bodies

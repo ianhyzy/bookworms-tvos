@@ -44,13 +44,18 @@ struct BookWallView: View {
         @State private var completedFalls = 0
     #endif
 
-    /// The wall the scene last showed, which `wall` keeps while books fall or a book is out of it.
+    /// The wall shown since the reader entered, which `wall` keeps until they leave. Leaving
+    /// removes this view, so a wall that prepared meanwhile shows when they return.
     @State private var shownWall: BookWallPreparedWall?
 
-    /// The wall to show: `prepared`, except that a newer wall waits while books fall or a book is
-    /// out of the wall, so its arrival never cuts a fall short or closes details.
+    /// The wall to show: `prepared`, except that a wall that would drop its books waits while books
+    /// fall or a book is out of the wall, and one that would appear in place waits until the reader
+    /// leaves, so new data never changes the wall under them.
     private var wall: BookWallPreparedWall {
-        if let shownWall, !isSettled || detailBook != nil || openingBookID != nil || isReturning {
+        if let shownWall,
+            !isSettled || detailBook != nil || openingBookID != nil || isReturning
+                || (isActive && prepared.appearsInPlace(of: shownWall))
+        {
             return shownWall
         }
         return prepared
@@ -327,7 +332,7 @@ struct BookWallView: View {
             let wall = wall
             // The header stays through any replacement, so a focused control keeps focus when its
             // page's books arrive.
-            let inPlace = wall.appearsInPlace(of: shownWall)
+            let inPlace = wall.appearsInPlace(of: scene.shownWall)
             shownWall = wall
             isSettled = false
             // Empty frames fall back to the planned layout, so the spines stay mounted.

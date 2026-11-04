@@ -40,9 +40,10 @@ struct BookWallPreparedWall {
     let hint: BookWallShelfLabel.Prepared?
 
     /// Whether this wall appears at rest in place of `shown` instead of dropping its books. Books
-    /// drop for a wall's first books and a page the reader chose. Any other wall appears in place:
-    /// a sync changes details of the same books, a new design can move books between pages, and a
-    /// shrunken year's last page replaces a page it no longer has.
+    /// drop for a wall's first books and a page the reader chose. Any other wall appears in place
+    /// the next time the reader enters the wall (`BookWallView.wall`): a sync changes details of
+    /// the same books, a new design can move books between pages, and a shrunken year's last page
+    /// replaces a page it no longer has.
     func appearsInPlace(of shown: BookWallPreparedWall?) -> Bool {
         guard let shown, !shown.books.isEmpty else { return false }
         return shown.page == page || shown.page >= pageCount
@@ -119,8 +120,8 @@ final class BookWallPreparation {
     /// last page when the year has fewer.
     ///
     /// A wall prepared earlier stays in `prepared` until the new one is ready, so the wall stays on
-    /// screen while a design, link, look, or page prepares. When the new wall can't be built, the
-    /// earlier one stays and `failure` describes the problem.
+    /// screen while a page prepares. When the new wall can't be built, the earlier one stays and
+    /// `failure` describes the problem.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
         looks: [Int: SpineDesignV1] = [:], mates: [Int: [Book]] = [:],
