@@ -158,6 +158,9 @@ final class BookwormsCoordinator {
     var reviewYear: Int?
     var reviewSelection: Int?
     var wallSelection: Int?
+    /// The Book Wall page this session asks for, from 0. A library that shrank can leave it past
+    /// the year's last page, which shows instead.
+    var wallPage = 0
     var comparisonRow = 0
     /// The focused book's position within its visible Compare Shelves page, shared by both rows.
     var comparisonColumn = 0
@@ -172,6 +175,14 @@ final class BookwormsCoordinator {
             .flatMap { try? JSONDecoder().decode(ViewPreferences.self, from: $0) }
             ?? ViewPreferences()
         saved.validate()
+        #if DEBUG && targetEnvironment(simulator)
+            // Scenario hook: opens Book Wall on a page, counted from 1, for Simulator captures.
+            if let argument = ProcessInfo.processInfo.arguments.first(where: {
+                $0.hasPrefix("--test-wall-page=")
+            }), let page = Int(argument.dropFirst("--test-wall-page=".count)) {
+                wallPage = page - 1
+            }
+        #endif
         // Captures and device tests open a view directly; it joins the sidebar if it was hidden.
         let start = ProcessInfo.processInfo.arguments
             .first(where: {

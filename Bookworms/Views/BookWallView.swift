@@ -44,13 +44,18 @@ struct BookWallView: View {
         @State private var completedFalls = 0
     #endif
 
-    /// The wall the scene last showed, which `wall` keeps while a book is out of it.
+    /// The wall shown since the reader entered, which `wall` keeps until they leave. Leaving
+    /// removes this view, so a wall that prepared meanwhile shows when they return.
     @State private var shownWall: BookWallPreparedWall?
 
-    /// The wall to show: `prepared`, except that a newer wall waits while a book is out of the
-    /// wall, so its arrival never closes details.
+    /// The wall to show: `prepared`, except that a wall that would drop its books waits while books
+    /// fall or a book is out of the wall, and one that would appear in place waits until the reader
+    /// leaves, so new data never changes the wall under them.
     private var wall: BookWallPreparedWall {
-        if let shownWall, detailBook != nil || openingBookID != nil || isReturning {
+        if let shownWall,
+            !isSettled || detailBook != nil || openingBookID != nil || isReturning
+                || (isActive && prepared.waits(behind: shownWall, chosenPage: coordinator.wallPage))
+        {
             return shownWall
         }
         return prepared
@@ -173,8 +178,13 @@ struct BookWallView: View {
                                 .focusEffectDisabled()
                                 .focused($focusedBook, equals: book.id)
                                 // Keep the selected button mounted and focused throughout
-                                // its flight; other books cannot start competing flights.
-                                .disabled(openingBookID != nil && openingBookID != book.id)
+                                // its flight; other books cannot start competing flights. The
+                                // page a reader left takes no focus or details while the chosen
+                                // one prepares, so its arrival removes no focused or open book.
+                                .disabled(
+                                    (openingBookID != nil && openingBookID != book.id)
+                                        || chosenPage != wall.page
+                                )
                                 .accessibilityLabel("\(book.title), by \(book.author)")
                                 .accessibilityHint("Opens book details.")
                                 .accessibilityIdentifier("book-wall-\(book.id)")
@@ -218,17 +228,21 @@ struct BookWallView: View {
                     && !(isReturning && PerformanceDiagnostics.isolates("wall-late-replay"))
                     && !PerformanceDiagnostics.isolates("wall-no-replay")
                 {
-                    HStack {
+                    HStack(alignment: .top, spacing: 24) {
                         Spacer()
+                        if wall.pageCount > 1 { pageMenu }
                         Button(action: replayFall) {
                             Label("Drop again", systemImage: "arrow.clockwise")
                                 .appFont(size: 29, weight: .medium)
+                                .frame(maxHeight: .infinity)
                         }
                         .buttonStyle(.glass)
                         .disabled(openingBookID != nil || isReturning)
                         .accessibilityHint("Drops the books onto the shelf again.")
                         .accessibilityIdentifier("book-wall-replay")
                     }
+                    // The labels fill the row, so the two pills share one height in any font.
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, HeaderOptionTypography.topPadding)
                     .padding(.trailing, 80)
                     .focusSection()
@@ -238,6 +252,9 @@ struct BookWallView: View {
                         if books.isEmpty {
                             Text("Books finished this year will appear here.")
                                 .appFont(size: 32)
+                        } else if chosenPage != wall.page {
+                            Text("Preparing page \(chosenPage + 1)…")
+                                .appFont(size: 28)
                         } else if !isSettled {
                             Text(
                                 reduceMotion ? "Arranging books…" : "Books are falling into place…"
@@ -266,6 +283,31 @@ struct BookWallView: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("book-wall-fall-probe")
+                    Text(String(scene.seatedBooks))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-seated-probe")
+                    Text(String(scene.fallsStarted))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-drops-probe")
+                    Text(String(scene.fallsCutShort))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-cut-falls-probe")
+                    Text(wall.id.uuidString)
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-id-probe")
+                    Text(books.map { String($0.id) }.joined(separator: ","))
+                        .font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("book-wall-books-probe")
                     Text(String(wall.drawn.count))
                         .font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1)
@@ -288,12 +330,11 @@ struct BookWallView: View {
             }
             let revision = configurationRevision
             let wall = wall
-            // A wall that replaces one of the same books, such as after a design arrives,
-            // appears in place instead of falling again, and Drop again stays.
-            let inPlace = shownWall?.books == wall.books
+            // The header stays through any replacement, so a focused control keeps focus when its
+            // page's books arrive.
+            let inPlace = wall.appearsInPlace(of: scene.shownWall)
             shownWall = wall
             isSettled = false
-            if !inPlace { hasSettledOnce = false }
             // Empty frames fall back to the planned layout, so the spines stay mounted.
             frames = [:]
             scene.configure(prepared: wall, reduceMotion: reduceMotion || inPlace) {
@@ -317,6 +358,10 @@ struct BookWallView: View {
             scene.highlight(focusedBook, reduceMotion: reduceMotion)
             openingFailed = false
             if focusedBook != nil { onActivity() }
+        }
+        .onChange(of: wall.pageCount, initial: true) {
+            // A reader left on the last page of a shrunken library stays there if it regrows.
+            if coordinator.wallPage != chosenPage { coordinator.wallPage = chosenPage }
         }
         .onChange(of: returnRevision) {
             guard isActive, openingBookID == nil, detailBook == nil, !isReturning else { return }
@@ -344,6 +389,45 @@ struct BookWallView: View {
             cancelTransition()
             scene.deactivate()
         }
+    }
+
+    /// The page the reader chose: the one `wall` shows, or the one being prepared to replace it.
+    private var chosenPage: Int {
+        BookWallPreparation.clamped(coordinator.wallPage, count: wall.pageCount)
+    }
+
+    /// Lists the year's pages, in the look of the other views' header menus at the height of Drop
+    /// again, which sits beside it. Choosing a page changes `wallPage`, which prepares that page;
+    /// its books drop when it is ready, and focus stays on the menu.
+    private var pageMenu: some View {
+        Menu {
+            ForEach(0..<wall.pageCount, id: \.self) { page in
+                Button {
+                    coordinator.wallPage = page
+                    onActivity()
+                } label: {
+                    if page == chosenPage {
+                        Label("Page \(page + 1)", systemImage: "checkmark")
+                    } else {
+                        Text("Page \(page + 1)")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Text("Page \(chosenPage + 1) of \(wall.pageCount)")
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(HeaderOptionTypography.iconFont)
+            }
+            .appFont(size: 29, weight: .semibold)
+            .padding(.horizontal, HeaderOptionTypography.horizontalPadding)
+            .frame(maxHeight: .infinity)
+        }
+        .performanceGlassButton()
+        .disabled(openingBookID != nil || isReturning)
+        .accessibilityLabel("Page")
+        .accessibilityValue("\(chosenPage + 1) of \(wall.pageCount)")
+        .accessibilityIdentifier("book-wall-page-options")
     }
 
     private var detailFade: Animation? { reduceMotion ? nil : .easeInOut(duration: 0.35) }
@@ -393,6 +477,12 @@ struct BookWallView: View {
         guard isActive, isSettled, detailBook == nil, openingBookID == nil, !isReturning,
             scene.replayFall(reduceMotion: reduceMotion)
         else { return }
+        #if DEBUG && targetEnvironment(simulator)
+            // Scenario hook: syncs during this fall, so UI tests can see a newer wall wait for it.
+            if ProcessInfo.processInfo.arguments.contains("--test-wall-syncs-during-replay") {
+                library.changeBooksAsASyncDoes()
+            }
+        #endif
         // The spine targets stay mounted, so a focused Drop again keeps focus.
         isSettled = false
         openingFailed = false

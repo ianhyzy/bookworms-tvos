@@ -1,7 +1,8 @@
 import Foundation
 import UIKit
 
-/// Stable slots for one calendar year's books, including the space occupied by their covers.
+/// Stable slots for one page of a calendar year's books, including the space occupied by their
+/// covers.
 struct BookWallLayout: Sendable {
     struct Slot: Sendable {
         let book: Book
@@ -31,10 +32,16 @@ struct BookWallLayout: Sendable {
         var collisionThickness: Float { spineThickness + BookWallLayout.coverWrapThickness * 2 }
     }
 
-    static let floorY: Float = -4.5
+    /// The height a wall's stacks are centered on, wherever its floor sits, so the camera and
+    /// the backdrop's baked lighting keep one center for every wall.
+    static let stackCenterY: Float = -0.25
     static let coverWrapThickness: Float = 0.006
     static let minimumLaneWidth: Float = 3.1
-    static let maxStackHeight: Float = 8.5
+    /// The room stacks get first. A crowded column gives up thickness beyond what its lettering
+    /// needs to stay this short, so a small wall frames close.
+    static let shortStackHeight: Float = 8.5
+    /// The room stacks grow to before their lettering would have to shrink.
+    static let maximumStackHeight: Float = 12
     static let minimumSpineThickness: Float = 0.55
     /// Keeps each spine clearly longer than it is thick, so thick books do not read as blocks.
     static let minimumLengthToThickness: Float = 6
@@ -46,13 +53,22 @@ struct BookWallLayout: Sendable {
     static let maximumBookLength: Float = 5.6
     /// About this many books share a column; fewer, taller columns fit the screen's height.
     static let booksPerColumn = 10
+    static let maximumColumns = 4
+    /// A year this size always fits one page: `maximumColumns` stacks of the thickest spine
+    /// lettering can ask for, `maximumPageThickness` and its covering. It needs no measuring.
+    static let booksThatAlwaysFit = 36
+    /// A little under the scale any full page shows at (`BookWallScene.spinePointsPerUnit(for:)`),
+    /// which the screen's height sets, whatever its books' lengths. `pages(of:typographies:)`
+    /// measures at this one scale, so it measures each book once. A page's real scale is the same
+    /// or larger, which letters its spines no thicker, so the page still fits.
+    static let fullPagePointsPerUnit: Float = 65.9
     static let fallbackCoverAspectRatio: Float = 2.0 / 3.0
     /// The resting wall's scale at its spine plane, in points per scene unit, when the screen's
     /// height frames it: the largest the scale gets. `BookWallPreparation` lays a wall out at
     /// its own scale (`BookWallScene.spinePointsPerUnit(for:)`).
     static let nominalPointsPerUnit: Float = 90
 
-    private struct Dimensions {
+    struct Dimensions: Sendable {
         /// The length the lettering search starts from, before it lengthens the spine.
         let startHeight: Float
         /// The length the book's lettering needs at `textThickness`, before variety.
@@ -64,7 +80,6 @@ struct BookWallLayout: Sendable {
         /// `minimumLengthToThickness` times as long as.
         let pageShapeThickness: Float
         let lengthVariety: Float
-        let coverRatio: Float
 
         /// The book's length at `thickness`, from `readable`: variety scales it up by as much as
         /// 22%, so similar books still differ and few sit exactly on the minimums, and the book
@@ -85,6 +100,11 @@ struct BookWallLayout: Sendable {
     }
 
     let columns: Int
+    /// The room the stacks have: `shortStackHeight`, or up to `maximumStackHeight` for a wall
+    /// whose lettering doesn't fit that.
+    let stackHeight: Float
+    /// Where the bottom books rest, which is the shelf's top.
+    var floorY: Float { Self.stackCenterY - stackHeight / 2 }
     /// Combined width of every column, each sized to its own longest book.
     let totalWidth: Float
     let slots: [Slot]
@@ -96,18 +116,32 @@ struct BookWallLayout: Sendable {
     /// with a companion design or a series source (`SeriesDesigns`), and other books use their
     /// genre face.
     ///
+    /// `measured` gives sizes already measured at this `pointsPerUnit`, which it doesn't measure
+    /// again.
+    ///
     /// Measures text, so call it while the wall is prepared, never during focus changes.
     init(
         books: [Book], coverRatios: [Int: Double] = [:],
         typographies: [Int: BookWallLocalSpine.Typography] = [:],
-        pointsPerUnit: Float = nominalPointsPerUnit
+        pointsPerUnit: Float = nominalPointsPerUnit, measured: [Int: Dimensions] = [:]
     ) {
         self.pointsPerUnit = pointsPerUnit
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
             typographies[book.id] ?? BookWallLocalSpine.typography(for: book, design: nil)
         }
-        let columnCount = min(
-            5, max(3, (books.count + Self.booksPerColumn - 1) / Self.booksPerColumn))
+        let sizes = books.map { book in
+            measured[book.id]
+                ?? Self.dimensions(
+                    for: book, typography: typography(of: book), pointsPerUnit: pointsPerUnit)
+        }
+        // A small wall keeps three columns unless their stacks would be too tall to letter.
+        let wanted = max(3, (books.count + Self.booksPerColumn - 1) / Self.booksPerColumn)
+        let columnCount =
+            (min(wanted, Self.maximumColumns)..<Self.maximumColumns)
+            .first {
+                Self.tallestStack(sizes, columns: $0, \.textThickness) <= Self.maximumStackHeight
+            }
+            ?? Self.maximumColumns
         columns = columnCount
         let lanes = (0..<columnCount)
             .map { column in
@@ -116,20 +150,30 @@ struct BookWallLayout: Sendable {
                         index % columnCount == column ? book : nil
                     }
             }
-        let laneDimensions = lanes.map { lane in
-            lane.map { book in
-                Self.dimensions(
-                    for: book, coverRatio: coverRatios[book.id], typography: typography(of: book),
-                    pointsPerUnit: pointsPerUnit)
+        let laneDimensions = (0..<columnCount)
+            .map { column in
+                sizes.enumerated()
+                    .compactMap { index, size in
+                        index % columnCount == column ? size : nil
+                    }
             }
-        }
-        // A crowded column first gives up thickness beyond what each spine's lettering needs.
-        // When the lettering's thicknesses alone overfill it, every spine shrinks by one factor.
+        // A crowded column first gives up thickness beyond what each spine's lettering needs, to
+        // fit `shortStackHeight`. A wall whose lettering needs more room takes what its spines
+        // want, up to `maximumStackHeight`. Only past that, which pages prevent, does every spine
+        // in a column shrink by one factor, below its lettering's needs.
+        let lettered = Self.tallestStack(sizes, columns: columnCount, \.textThickness)
+        let stackHeight =
+            lettered <= Self.shortStackHeight
+            ? Self.shortStackHeight
+            : min(
+                Self.maximumStackHeight,
+                Self.tallestStack(sizes, columns: columnCount, \.spineThickness))
+        self.stackHeight = stackHeight
         let laneThicknesses = lanes.indices.map { column in
             let dimensions = laneDimensions[column]
             // Reserve both covering layers before distributing the available stack height.
             let coreHeight = max(
-                0, Self.maxStackHeight - Float(lanes[column].count) * Self.coverWrapThickness * 2)
+                0, stackHeight - Float(lanes[column].count) * Self.coverWrapThickness * 2)
             let textTotal = dimensions.reduce(0) { $0 + $1.textThickness }
             let floorScale = min(1, coreHeight / max(0.001, textTotal))
             let extraSpace = max(0, coreHeight - textTotal)
@@ -175,7 +219,7 @@ struct BookWallLayout: Sendable {
         }
         var slots: [Slot] = []
         for (column, lane) in lanes.enumerated() {
-            var top = Self.floorY
+            var top = Self.stackCenterY - stackHeight / 2
             for (row, book) in lane.enumerated() {
                 let thickness = laneThicknesses[column][row]
                 let length = laneLengths[column][row]
@@ -186,7 +230,7 @@ struct BookWallLayout: Sendable {
                         x: laneCenters[column], laneWidth: laneWidths[column],
                         restingY: top + collisionThickness / 2, bookHeight: length,
                         spineThickness: thickness,
-                        coverWidth: length * laneDimensions[column][row].coverRatio,
+                        coverWidth: length * Self.coverRatio(coverRatios[book.id]),
                         lettering: Self.lettering(
                             for: book, typography: typography(of: book),
                             length: length, thickness: thickness,
@@ -200,9 +244,60 @@ struct BookWallLayout: Sendable {
         }
     }
 
-    private static func dimensions(
-        for book: Book, coverRatio: Double?, typography: BookWallLocalSpine.Typography,
-        pointsPerUnit: Float
+    private static func coverRatio(_ ratio: Double?) -> Float {
+        ratio.flatMap { $0.isFinite && $0 > 0 ? Float($0) : nil } ?? fallbackCoverAspectRatio
+    }
+
+    /// The height of the tallest of `columns` stacks of `sizes` at the given `thickness`, with
+    /// the books dealt across the columns in order.
+    private static func tallestStack(
+        _ sizes: [Dimensions], columns: Int, _ thickness: KeyPath<Dimensions, Float>
+    ) -> Float {
+        var stacks = [Float](repeating: 0, count: columns)
+        for (index, size) in sizes.enumerated() {
+            stacks[index % columns] += size[keyPath: thickness] + coverWrapThickness * 2
+        }
+        return stacks.max() ?? 0
+    }
+
+    /// `books`, in order, split into pages that each hold as many of the next books as
+    /// `maximumColumns` stacks of `maximumStackHeight` letter without a squeeze, and the sizes it
+    /// measured at `fullPagePointsPerUnit`, which `init` can reuse. A year of up to
+    /// `booksThatAlwaysFit` books measures nothing. Returns `nil` when the task is cancelled.
+    ///
+    /// Measures each book once, so its cost is one pass over the year.
+    static func pages(
+        of books: [Book], typographies: [Int: BookWallLocalSpine.Typography] = [:]
+    ) -> (ranges: [Range<Int>], measured: [Int: Dimensions])? {
+        guard books.count > booksThatAlwaysFit else {
+            return (books.isEmpty ? [] : [books.indices], [:])
+        }
+        var ranges: [Range<Int>] = []
+        var measured: [Int: Dimensions] = [:]
+        var start = 0
+        var stacks = [Float](repeating: 0, count: maximumColumns)
+        for (index, book) in books.enumerated() {
+            guard !Task.isCancelled else { return nil }
+            let size = dimensions(
+                for: book,
+                typography: typographies[book.id]
+                    ?? BookWallLocalSpine.typography(for: book, design: nil),
+                pointsPerUnit: fullPagePointsPerUnit)
+            measured[book.id] = size
+            let height = size.textThickness + coverWrapThickness * 2
+            if stacks[(index - start) % maximumColumns] + height > maximumStackHeight {
+                ranges.append(start..<index)
+                start = index
+                stacks = stacks.map { _ in 0 }
+            }
+            stacks[(index - start) % maximumColumns] += height
+        }
+        ranges.append(start..<books.count)
+        return (ranges, measured)
+    }
+
+    static func dimensions(
+        for book: Book, typography: BookWallLocalSpine.Typography, pointsPerUnit: Float
     ) -> Dimensions {
         let pages = Float(min(1_400, max(100, book.pages ?? 320)))
         let seed = Float(StyleColor.seed(book.id) % 101) / 100
@@ -227,17 +322,12 @@ struct BookWallLayout: Sendable {
         // on the minimums. Scaling only upward keeps the text-fit sizes valid.
         let variety =
             Float((UInt64(bitPattern: Int64(book.id)) &* 40_503 &+ 12_345) % 1_000) / 999
-        let ratio =
-            coverRatio.flatMap { value -> Float? in
-                value.isFinite && value > 0 ? Float(value) : nil
-            } ?? Self.fallbackCoverAspectRatio
         return Dimensions(
             startHeight: startHeight, readableHeight: readable.height,
             spineThickness: max(pageThickness, readable.thickness) * (1 + variety * 0.25),
             textThickness: readable.thickness,
             pageShapeThickness: pageThickness * (1 + variety * 0.25),
-            lengthVariety: Float((UInt64(bitPattern: Int64(book.id)) &* 69_069) % 997) / 996,
-            coverRatio: ratio)
+            lengthVariety: Float((UInt64(bitPattern: Int64(book.id)) &* 69_069) % 997) / 996)
     }
 
     /// The length, and the thinnest thickness, at which `book`'s title letters at

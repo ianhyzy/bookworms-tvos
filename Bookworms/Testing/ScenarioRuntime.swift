@@ -348,8 +348,105 @@
         static let paths: [String?] = [
             "portrait", "square", "landscape", nil, "corrupt", "delayed", "portrait", "square",
         ]
+        /// `--test-wall-books=N` replaces the eight books with N invented ones, for walls of
+        /// several pages. Each has one of `inventedCoverCount` plain covers.
+        static let inventedBookCount: Int? = ProcessInfo.processInfo.arguments
+            .first { $0.hasPrefix("--test-wall-books=") }
+            .flatMap { Int($0.dropFirst("--test-wall-books=".count)) }
+        static let inventedCoverCount = 12
+
+        static func inventedTitle(_ number: Int) -> String {
+            let adjectives = [
+                "Quiet", "Hollow", "Amber", "Salt", "Paper", "Winter", "Lantern", "Drowned",
+                "Borrowed", "Silver", "Northern", "Patient", "Crooked", "Burning", "Last", "Ninth",
+                "Sleeping", "Unfinished", "Glass", "Wandering",
+            ]
+            let nouns = [
+                "Orchard", "Cartographer", "Lighthouse", "Archive", "Harbor", "Beekeeper",
+                "Observatory", "Ferryman", "Almanac", "Meridian", "Garden", "Clockmaker",
+                "Estuary", "Library", "Foundry", "Apprentice", "Comet", "Threshold",
+                "Inheritance", "Weaver", "Sparrow", "Tidewater", "Quarry", "Bellringer",
+            ]
+            let places = [
+                "Elsewhere", "the Salt Marsh", "Low Tide", "Ashgrove", "the Long Valley",
+                "Winterfold", "the Far Shore", "Caldera", "Nightfall", "Harrow Bay",
+            ]
+            let adjective = adjectives[(number * 7) % adjectives.count]
+            let noun = nouns[(number * 5) % nouns.count]
+            let other = nouns[(number * 11 + 3) % nouns.count]
+            let place = places[(number * 3) % places.count]
+            if number % 25 == 24 {
+                return
+                    "The Unlikely Education of a \(adjective) \(noun) in the Years Before \(place)"
+            }
+            switch number % 10 {
+            case 0, 1, 2: return "The \(adjective) \(noun)"
+            case 3: return "\(noun) of \(place)"
+            case 4: return "\(adjective) \(noun)"
+            case 5: return "\("AEIOU".contains(noun.first!) ? "An" : "A") \(noun) for \(place)"
+            case 6: return noun
+            case 7: return "The \(noun) and the \(other)"
+            case 8: return "What the \(noun) Remembered at \(place)"
+            default: return "The \(adjective) \(noun): A History of \(place)"
+            }
+        }
+
+        /// `count` invented books finished through the current year, earliest first, so a book's
+        /// ID gives its place in the year.
+        static func inventedRows(_ count: Int) -> [[String: Any]] {
+            let first = ["Mara", "Tomas", "Ines", "Oskar", "Priya", "Leith", "Noor", "Callum"]
+            let last = [
+                "Rowan", "Vasquez-Holt", "Okafor", "Lindqvist", "Marchetti", "Ashworth", "Tanaka",
+                "Beaumont", "Ng", "Halloran", "Sorensen",
+            ]
+            let genres = [
+                "Fantasy", "Science Fiction", "Mystery", "Horror", "Romance", "History",
+                "Literary Fiction", "Biography", "Young Adult", "Poetry", "Humor",
+            ]
+            let pages = [180, 220, 260, 290, 310, 340, 360, 390, 420, 480, 540, 620, 780, 1050]
+            let calendar = Calendar(identifier: .gregorian)
+            return (0..<count)
+                .map { index in
+                    let date = calendar.date(
+                        from: DateComponents(year: 2026, month: 1, day: 2 + index * 240 / count))!
+                    let finished = calendar.dateComponents([.year, .month, .day], from: date)
+                    let author =
+                        "\(first[(index * 3) % first.count]) \(last[(index * 5) % last.count])"
+                    return [
+                        "id": index + 100, "status_id": 3, "rating": 4.0,
+                        "last_read_date": String(
+                            format: "%04d-%02d-%02d", finished.year!, finished.month!, finished.day!
+                        ),
+                        "book": [
+                            "id": index + 1, "title": inventedTitle(index),
+                            "cached_contributors": [
+                                ["author": ["name": author], "contribution": "Author"]
+                            ],
+                            "cached_tags": [
+                                "Genre": [
+                                    [
+                                        "tag": genres[(index * 4) % genres.count], "count": 10,
+                                        "spoilerRatio": 0.0,
+                                    ]
+                                ]
+                            ],
+                            "description": "An invented book.",
+                            "pages": pages[(index * 9) % pages.count] + (index * 13) % 30,
+                            "release_year": 2000 + index % 26,
+                            "rating": 4.2, "ratings_count": 100 + (index * 37) % 900,
+                            "ratings_distribution": [["rating": 4.0, "count": 100]],
+                            "image": [
+                                "url":
+                                    "https://artwork.fixture.invalid/c\(index % inventedCoverCount)"
+                            ],
+                        ] as [String: Any],
+                    ]
+                }
+        }
+
         static var rows: [[String: Any]] {
-            titles.enumerated()
+            if let inventedBookCount { return inventedRows(inventedBookCount) }
+            return titles.enumerated()
                 .map { index, title in
                     var book: [String: Any] = [
                         "id": index + 1, "title": title,
@@ -451,6 +548,22 @@
                     }
             }
             result["corrupt"] = Data("This response is deliberately not an image.".utf8)
+            // Plain covers in a spread of hues, for the invented books.
+            for index in 0..<inventedCoverCount {
+                let color = UIColor(
+                    hue: CGFloat(index) / CGFloat(inventedCoverCount),
+                    saturation: index % 3 == 2 ? 0.25 : 0.6,
+                    brightness: index % 2 == 0 ? 0.45 : 0.7, alpha: 1)
+                let size = CGSize(width: 400, height: 600)
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 1
+                format.opaque = true
+                result["c\(index)"] = UIGraphicsImageRenderer(size: size, format: format)
+                    .jpegData(withCompressionQuality: 0.9) { context in
+                        color.setFill()
+                        context.fill(CGRect(origin: .zero, size: size))
+                    }
+            }
             return result
         }
     }
@@ -556,7 +669,11 @@
                             return nil
                         }
                         if scenario == "welcome-error" { return (403, Data()) }
-                        let rows = scenario == "empty" ? [] : ScenarioFixtures.rows
+                        let offset =
+                            (envelope["variables"] as? [String: Any])?["offset"] as? Int ?? 0
+                        let rows =
+                            scenario == "empty"
+                            ? [] : Array(ScenarioFixtures.rows.dropFirst(offset).prefix(100))
                         return (
                             200,
                             try! JSONSerialization.data(withJSONObject: [

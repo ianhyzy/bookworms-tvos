@@ -43,6 +43,8 @@ struct ShelfView: View {
     @State private var wallRenderer = BookWallRendererStatus()
     @State private var bookWallPreparation = BookWallPreparation()
     @State private var bookWallPreparationRetry = 0
+    /// The data of the latest wall preparation, which a reader on the wall keeps.
+    @State private var requestedWallData: BookWallData?
     @State private var wallDetail = BookWallDetailState()
     @State private var wallViewportFrame = CGRect.zero
     @Environment(\.colorScheme) private var colorScheme
@@ -73,7 +75,9 @@ struct ShelfView: View {
         for book in wallBooks { sources[book.id] = library.seriesSources[book.id] }
         return sources
     }
-    private var wallPreparationKey: BookWallPreparationKey {
+    private var hasWallBooks: Bool { bookWallPreparation.prepared?.books.isEmpty == false }
+    /// What the wall draws from the library now.
+    private var wallData: BookWallData {
         let books = wallBooks
         let sources = wallSources
         // Only the wall's books and their series sources, so designs for other books do not
@@ -88,11 +92,20 @@ struct ShelfView: View {
                 mates[book.id] = library.seriesMates[book.id]
             }
         }
-        return BookWallPreparationKey(
+        return BookWallData(
             loaded: library.hasLoadedLibrarySnapshot && library.hasReadCompanionRecords,
             enabled: sidebarViews.contains(.bookWall),
             books: books, sources: sources, designs: designs, looks: looks, mates: mates,
-            fontStyle: fontStyle, retry: bookWallPreparationRetry)
+            fontStyle: fontStyle)
+    }
+    /// The wall's data waits while the reader is on a wall with books, so a sync starts no drawing
+    /// under them. It prepares once they leave. A wall without books has nothing to interrupt, so
+    /// a first sync's books still reach it.
+    private var wallPreparationKey: BookWallPreparationKey {
+        let isOnWall = sidebarItem == .view(.bookWall) && hasWallBooks
+        return BookWallPreparationKey(
+            data: (isOnWall ? requestedWallData : nil) ?? wallData,
+            page: coordinator.wallPage, retry: bookWallPreparationRetry)
     }
     /// Whether Book Wall shows the waiting dialog: before its first wall, or after a rebuild
     /// fails, so Retry stays reachable. An earlier wall stays on screen while a newer one
@@ -283,6 +296,7 @@ struct ShelfView: View {
                 coordinator.reviewYear = nil
                 coordinator.reviewSelection = nil
                 coordinator.wallSelection = nil
+                coordinator.wallPage = 0
             }
         }
         .onChange(of: connectsFromExample) {
@@ -336,14 +350,37 @@ struct ShelfView: View {
                     }
                 }
             #endif
+            #if DEBUG && targetEnvironment(simulator)
+                // Scenario hook: keeps syncing, so UI tests see a showing wall ignore it.
+                .task {
+                    guard ProcessInfo.processInfo.arguments.contains("--test-wall-keeps-syncing")
+                    else { return }
+                    while (try? await Task.sleep(for: .seconds(4))) != nil {
+                        library.changeBooksAsASyncDoes()
+                    }
+                }
+            #endif
             .task(id: wallPreparationKey, priority: .utility) {
                 let key = wallPreparationKey
-                guard key.loaded, key.enabled else { return }
+                let data = key.data
+                requestedWallData = data
+                guard data.loaded, data.enabled else { return }
+                #if DEBUG && targetEnvironment(simulator)
+                    // Scenario hook: holds a later page, so UI tests can press while it prepares.
+                    if key.page > 0,
+                        ProcessInfo.processInfo.arguments.contains("--test-wall-slow-pages")
+                    {
+                        try? await Task.sleep(for: .seconds(10))
+                        guard !Task.isCancelled else { return }
+                    }
+                #endif
                 await bookWallPreparation.prepare(
-                    key.books, sources: key.sources, designs: key.designs, looks: key.looks,
-                    mates: key.mates, fontStyle: key.fontStyle)
+                    data.books, sources: data.sources, designs: data.designs, looks: data.looks,
+                    mates: data.mates, fontStyle: data.fontStyle, page: key.page)
             }
             .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
+            // Books that follow a discarded or emptied wall are a wall's first books, which drop.
+            .onChange(of: hasWallBooks) { if !hasWallBooks { bookWallScene.shownWall = nil } }
             .onChange(of: coordinator.preferences, initial: true) {
                 social.prepare(coordinator.preferences)
             }
@@ -527,7 +564,7 @@ struct ShelfView: View {
         return preparedShelf?.isReady(for: key) ?? false
     }
 
-    private struct BookWallPreparationKey: Equatable {
+    private struct BookWallData: Equatable {
         let loaded: Bool
         let enabled: Bool
         let books: [Book]
@@ -536,6 +573,11 @@ struct ShelfView: View {
         let looks: [Int: SpineDesignV1]
         let mates: [Int: [Book]]
         let fontStyle: AppFontStyle
+    }
+
+    private struct BookWallPreparationKey: Equatable {
+        let data: BookWallData
+        let page: Int
         let retry: Int
     }
 
@@ -554,7 +596,9 @@ struct ShelfView: View {
                             ? "Loading your library…"
                             : !library.hasReadCompanionRecords
                                 ? "Loading spine designs…"
-                                : "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
+                                : bookWallPreparation.totalCount == 0
+                                    ? "Measuring book spines…"
+                                    : "\(bookWallPreparation.completedCount) of \(bookWallPreparation.totalCount) book spines ready"
                     )
                     .appFont(size: 28)
                 }

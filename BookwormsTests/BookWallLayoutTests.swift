@@ -12,7 +12,7 @@ final class BookWallLayoutTests: XCTestCase {
                 Book(id: id, title: "Book \(id)", author: "Author", pages: 120 + id * 8)
             }
         let layout = BookWallLayout(books: books)
-        XCTAssertEqual(layout.columns, 5)
+        XCTAssertEqual(layout.columns, 4)
         XCTAssertEqual(Set(layout.slots.map { $0.book.id }), Set(books.map(\.id)))
         XCTAssertEqual(layout.slots.count, books.count)
         for column in 0..<layout.columns {
@@ -25,10 +25,10 @@ final class BookWallLayoutTests: XCTestCase {
             }
             XCTAssertLessThanOrEqual(
                 slots.last.map { $0.restingY + $0.collisionThickness / 2 } ?? 0,
-                BookWallLayout.floorY + BookWallLayout.maxStackHeight + 0.0001)
+                layout.floorY + layout.stackHeight + 0.0001)
             XCTAssertEqual(
                 slots.first.map { $0.restingY - $0.collisionThickness / 2 } ?? 0,
-                BookWallLayout.floorY, accuracy: 0.0001)
+                layout.floorY, accuracy: 0.0001)
         }
         XCTAssertEqual(
             layout.slots.map { $0.book.id }, BookWallLayout(books: books).slots.map { $0.book.id })
@@ -45,6 +45,268 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertEqual(columns(30), 3)
         XCTAssertEqual(columns(31), 4)
         XCTAssertEqual(columns(40), 4)
+        XCTAssertEqual(columns(57), 4)
+    }
+
+    func testThickBooksKeepThreeColumnsOnlyWhileTheirStacksFit() {
+        // Long titles need thick spines, so 30 of them stack past the tallest room in three
+        // columns, and a fourth keeps their lettering.
+        let books = (1...30)
+            .map { id in
+                Book(
+                    id: id, title: "A Very Long Title of a Very Long Book Number \(id)",
+                    author: "Author", pages: 1_400)
+            }
+        XCTAssertEqual(BookWallLayout(books: Array(books.prefix(8))).columns, 3)
+        XCTAssertEqual(BookWallLayout(books: books).columns, 4)
+    }
+
+    func testStacksGrowOnlyWhenTheirLetteringNeedsTheRoom() {
+        func wall(_ count: Int) -> BookWallLayout {
+            BookWallLayout(
+                books: (1...count)
+                    .map { Book(id: $0, title: "Book \($0)", author: "Author", pages: 300) })
+        }
+        XCTAssertEqual(wall(8).stackHeight, BookWallLayout.shortStackHeight)
+        XCTAssertEqual(wall(8).floorY, -4.5)
+        let tall = wall(72)
+        XCTAssertGreaterThan(tall.stackHeight, BookWallLayout.shortStackHeight)
+        XCTAssertLessThanOrEqual(tall.stackHeight, BookWallLayout.maximumStackHeight)
+        XCTAssertEqual(tall.floorY + tall.stackHeight / 2, BookWallLayout.stackCenterY)
+    }
+
+    // MARK: - Pages
+
+    /// A year of `count` invented books whose titles and page counts vary, in finish order.
+    private func invented(_ count: Int) -> [Book] {
+        let words = [
+            "Night", "Orchard", "River", "Glass", "House", "Winter", "Stone", "Garden", "Silent",
+            "Empire", "Crown", "Shadow",
+        ]
+        return (1...count)
+            .map { index in
+                Book(
+                    id: index,
+                    title: (0..<(1 + index * 7 % 6))
+                        .map { words[(index * 5 + $0 * 3) % words.count] }
+                        .joined(separator: " "),
+                    author: "Author \(index)", pages: 150 + index * 97 % 901)
+            }
+    }
+
+    func testPagesKeepEveryBookOnceInFinishOrder() throws {
+        let books = invented(400)
+        let pages = try XCTUnwrap(BookWallLayout.pages(of: books))
+        XCTAssertGreaterThan(pages.ranges.count, 1)
+        XCTAssertEqual(pages.ranges.first?.lowerBound, 0)
+        XCTAssertEqual(pages.ranges.last?.upperBound, books.count)
+        for (page, next) in zip(pages.ranges, pages.ranges.dropFirst()) {
+            XCTAssertEqual(page.upperBound, next.lowerBound, "A book was lost or repeated")
+        }
+        XCTAssertEqual(pages.measured.count, books.count, "Each book is measured once")
+    }
+
+    func testAYearThatFitsHasOnePageAndNoneWhenEmpty() throws {
+        for count in [1, 8, BookWallLayout.booksThatAlwaysFit] {
+            let books = invented(count)
+            let pages = try XCTUnwrap(BookWallLayout.pages(of: books))
+            XCTAssertEqual(pages.ranges, [0..<count])
+            XCTAssertTrue(pages.measured.isEmpty, "A year this small measures nothing")
+        }
+        XCTAssertEqual(BookWallLayout.pages(of: [])?.ranges, [])
+    }
+
+    func testTheThickestBooksStillFitTheYearThatAlwaysFits() throws {
+        // The most a stack can ask for: a title that can't letter takes the thickest spine.
+        let books = (1...(BookWallLayout.booksThatAlwaysFit + 1))
+            .map { id in
+                Book(
+                    id: id, title: String(repeating: "Extraordinary ", count: 12),
+                    author: "Author", pages: 1_400)
+            }
+        let pages = try XCTUnwrap(BookWallLayout.pages(of: books))
+        XCTAssertEqual(pages.ranges.first, 0..<BookWallLayout.booksThatAlwaysFit)
+    }
+
+    /// Every page letters without a squeeze at the scale it shows at, in four columns of book-
+    /// shaped spines. A failure here means `fullPagePointsPerUnit` is too large.
+    @MainActor
+    func testEveryPageFitsItsLetteringAtTheScaleItShowsAt() throws {
+        let books = invented(400)
+        let pages = try XCTUnwrap(BookWallLayout.pages(of: books))
+        for range in pages.ranges {
+            let page = Array(books[range])
+            var layout = BookWallLayout(
+                books: page, pointsPerUnit: BookWallLayout.fullPagePointsPerUnit,
+                measured: pages.measured)
+            for _ in 0..<3 {
+                layout = BookWallLayout(
+                    books: page, pointsPerUnit: BookWallScene.spinePointsPerUnit(for: layout))
+            }
+            XCTAssertGreaterThanOrEqual(
+                layout.pointsPerUnit, BookWallLayout.fullPagePointsPerUnit, "Page \(range)")
+            XCTAssertLessThanOrEqual(layout.stackHeight, BookWallLayout.maximumStackHeight)
+            if range != pages.ranges.last { XCTAssertEqual(layout.columns, 4) }
+            for slot in layout.slots {
+                let needs = BookWallLayout.dimensions(
+                    for: slot.book,
+                    typography: BookWallLocalSpine.typography(for: slot.book, design: nil),
+                    pointsPerUnit: layout.pointsPerUnit)
+                XCTAssertGreaterThanOrEqual(
+                    slot.spineThickness, needs.textThickness - 0.001,
+                    "\(slot.book.title) is squeezed on page \(range)")
+                XCTAssertGreaterThanOrEqual(slot.bookHeight, slot.spineThickness * 3)
+            }
+        }
+    }
+
+    func testMeasuredSizesLayOutLikeMeasuringAgain() throws {
+        let books = invented(48)
+        let scale = BookWallLayout.fullPagePointsPerUnit
+        let measured = Dictionary(
+            uniqueKeysWithValues: books.map { book in
+                (
+                    book.id,
+                    BookWallLayout.dimensions(
+                        for: book,
+                        typography: BookWallLocalSpine.typography(for: book, design: nil),
+                        pointsPerUnit: scale)
+                )
+            })
+        let reused = BookWallLayout(books: books, pointsPerUnit: scale, measured: measured)
+        let fresh = BookWallLayout(books: books, pointsPerUnit: scale)
+        XCTAssertEqual(reused.slots.map(\.restingY), fresh.slots.map(\.restingY))
+        XCTAssertEqual(reused.slots.map(\.bookHeight), fresh.slots.map(\.bookHeight))
+    }
+
+    @MainActor func testPageClampsToTheYearsPages() {
+        XCTAssertEqual(BookWallPreparation.clamped(0, count: 3), 0)
+        XCTAssertEqual(BookWallPreparation.clamped(2, count: 3), 2)
+        XCTAssertEqual(BookWallPreparation.clamped(7, count: 3), 2, "A shrunk library")
+        XCTAssertEqual(BookWallPreparation.clamped(4, count: 0), 0, "An empty year")
+    }
+
+    /// A year of thick books, so few fill two pages and the test draws little.
+    private func twoPageYear() -> [Book] {
+        (1...(BookWallLayout.booksThatAlwaysFit + 4))
+            .map { id in
+                Book(
+                    id: id, title: String(repeating: "Extraordinary ", count: 12),
+                    author: "Author", pages: 1_400)
+            }
+    }
+
+    @MainActor
+    func testPreparationReusesPagesAndClampsWhenTheLibraryShrinks() async throws {
+        let preparation = BookWallPreparation()
+        let books = twoPageYear()
+        await preparation.prepare(books, sources: [:], page: 1)
+        let second = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(second.page, 1)
+        XCTAssertEqual(second.pageCount, 2)
+        XCTAssertEqual(second.books, Array(books.suffix(4)))
+        XCTAssertEqual(preparation.totalCount, 4, "Progress counts the page, not the year")
+        for body in second.bodies.values {
+            let locks = try XCTUnwrap(body.physicsBody).isTranslationLocked
+            XCTAssertTrue(locks.x && locks.z && !locks.y, "A book falls straight down")
+        }
+
+        await preparation.prepare(books, sources: [:], page: 0)
+        let first = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(first.books, Array(books.prefix(BookWallLayout.booksThatAlwaysFit)))
+        await preparation.prepare(books, sources: [:], page: 1)
+        XCTAssertEqual(preparation.prepared?.id, second.id, "A recent page isn't drawn again")
+
+        // A sync removes the second page's books, and the page the reader chose is gone.
+        await preparation.prepare(Array(books.prefix(4)), sources: [:], page: 1)
+        let shrunk = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(shrunk.page, 0)
+        XCTAssertEqual(shrunk.pageCount, 1)
+        XCTAssertEqual(shrunk.books, Array(books.prefix(4)))
+
+        // The library empties, and the wall shows no page at all.
+        await preparation.prepare([], sources: [:], page: 3)
+        XCTAssertEqual(preparation.prepared?.books, [])
+        XCTAssertEqual(preparation.prepared?.pageCount, 0)
+    }
+
+    @MainActor
+    func testPreparationKeepsABoundedNumberOfDrawnPages() async throws {
+        let preparation = BookWallPreparation()
+        let books = (1...(BookWallLayout.booksThatAlwaysFit * 4 + 1))
+            .map { id in
+                Book(
+                    id: id, title: String(repeating: "Extraordinary ", count: 12),
+                    author: "Author", pages: 1_400)
+            }
+        await preparation.prepare(books, sources: [:], page: 4)
+        let oldest = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(oldest.pageCount, 5)
+        XCTAssertEqual(oldest.books.count, 1)
+        for page in 0..<3 {
+            await preparation.prepare(books, sources: [:], page: page)
+        }
+        await preparation.prepare(books, sources: [:], page: 4)
+        XCTAssertNotEqual(preparation.prepared?.id, oldest.id, "The oldest page was let go")
+    }
+
+    @MainActor
+    func testAFaceThatRegistersDropsThePagesOfTheOldSplit() async throws {
+        let books = twoPageYear()
+        // A fictional face that no test host registers.
+        let design = SpineDesignV1(
+            version: 1, accountID: "account", bookID: books[0].id,
+            workItemHash: String(repeating: "a", count: 64),
+            coverHash: String(repeating: "b", count: 64), generatorVersion: "ios-pcc-v2",
+            generatedAt: Date(timeIntervalSince1970: 1_000_000), backgroundHex: "#1F3A5A",
+            foregroundHex: "#F4EEE2", accentHex: "#D8CBB0", typeface: "serif", weight: 700,
+            uppercase: true, fontFamily: "Fictional Serif",
+            fontPostScriptName: "FictionalSerif-Bold")
+        var outcomes: [() throws -> Void] = []
+        let preparation = BookWallPreparation { _, _, _ in try outcomes.removeFirst()() }
+        func prepare(page: Int, _ steps: [() throws -> Void]) async {
+            outcomes = steps
+            await preparation.prepare(
+                books, sources: [:], designs: [books[0].id: design], page: page)
+        }
+        let offline: () throws -> Void = { throw URLError(.notConnectedToInternet) }
+        let registers: () throws -> Void = {}
+
+        await prepare(page: 0, [offline, offline])
+        let first = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(first.page, 0)
+
+        // The face registers on the retry, while another page prepares.
+        await prepare(page: 1, [offline, registers])
+        XCTAssertEqual(preparation.prepared?.page, 1)
+        await prepare(page: 0, [registers, registers])
+        let redrawn = try XCTUnwrap(preparation.prepared)
+        XCTAssertEqual(redrawn.page, 0)
+        XCTAssertNotEqual(redrawn.id, first.id, "A page of the old split came back")
+
+        // The face registers and the task ends before the split does.
+        outcomes = [{ withUnsafeCurrentTask { $0?.cancel() } }]
+        let cancelled = Task {
+            await preparation.prepare(
+                books, sources: [:], designs: [books[0].id: design], page: 1)
+        }
+        await cancelled.value
+        XCTAssertEqual(preparation.prepared?.id, redrawn.id, "The shown wall stays")
+        await prepare(page: 0, [registers, registers])
+        XCTAssertNotEqual(preparation.prepared?.id, redrawn.id, "The next pass splits again")
+    }
+
+    @MainActor
+    func testACancelledPreparationLeavesTheShownPage() async throws {
+        let preparation = BookWallPreparation()
+        let books = twoPageYear()
+        await preparation.prepare(books, sources: [:], page: 1)
+        let shown = try XCTUnwrap(preparation.prepared)
+        let task = Task { await preparation.prepare(books, sources: [:], page: 0) }
+        task.cancel()
+        await task.value
+        XCTAssertEqual(preparation.prepared?.id, shown.id)
+        XCTAssertNil(preparation.failure)
     }
 
     func testWideBooksLeaveClearanceBetweenColumns() throws {
@@ -660,7 +922,7 @@ final class BookWallLayoutTests: XCTestCase {
                     .map { Book(id: $0, title: "Book \($0)", author: "Author", pages: pages) })
         }
         let minimum = BookWallScene.minimumShelfThickness
-        for (count, columns) in [(8, 3), (30, 3), (40, 4), (50, 5)] {
+        for (count, columns) in [(8, 3), (30, 3), (40, 4)] {
             let layout = wall(count)
             XCTAssertEqual(layout.columns, columns)
             XCTAssertEqual(
@@ -679,9 +941,6 @@ final class BookWallLayoutTests: XCTestCase {
                     BookWallScene.minimumLabelPoints)
             }
         }
-        XCTAssertGreaterThan(
-            BookWallScene.shelfThickness(for: wall(50)),
-            BookWallScene.shelfThickness(for: wall(40)))
         // Short books keep a 4-column wall narrow enough that its label already meets the
         // minimum, so the front keeps its minimum height.
         let narrow = wall(40, pages: 100)
@@ -704,13 +963,68 @@ final class BookWallLayoutTests: XCTestCase {
         var settled = false
         scene.configure(
             prepared: BookWallPreparedWall(
-                books: [], sources: [:], designs: [:], looks: [:], mates: [:], fontStyle: .serif,
-                drawn: [:], drawsWith: [:],
+                books: [], page: 0, pageCount: 0, sources: [:], designs: [:], looks: [:],
+                mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
                 layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil),
             reduceMotion: false, onFocusFrames: { _, isSettled in settled = isSettled })
         scene.didDrawFrame()
         XCTAssertTrue(settled)
         XCTAssertFalse(scene.needsFrame)
+    }
+
+    @MainActor
+    private func wall(books: [Book], page: Int = 0, pageCount: Int = 1) -> BookWallPreparedWall {
+        BookWallPreparedWall(
+            books: books, page: page, pageCount: pageCount, sources: [:], designs: [:], looks: [:],
+            mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
+            layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil)
+    }
+
+    @MainActor
+    func testShowingAnEmptyWallAgainReportsItSettled() {
+        let scene = BookWallScene()
+        let empty = wall(books: [], pageCount: 0)
+        scene.configure(prepared: empty, reduceMotion: false, onFocusFrames: { _, _ in })
+        var settled = false
+        scene.configure(
+            prepared: empty, reduceMotion: false,
+            onFocusFrames: { _, isSettled in settled = isSettled })
+        XCTAssertTrue(settled)
+    }
+
+    @MainActor
+    func testOnlyAWallsFirstBooksAndAChosenPageDrop() {
+        let book = Book(id: 1, title: "Title", author: "Author")
+        var changed = book
+        changed.ratingsCount = 5
+        let other = Book(id: 2, title: "Other", author: "Author")
+        let shown = wall(books: [book], page: 1, pageCount: 3)
+        func inPlace(_ books: [Book], page: Int = 1, pageCount: Int = 3) -> Bool {
+            wall(books: books, page: page, pageCount: pageCount).appearsInPlace(of: shown)
+        }
+
+        XCTAssertTrue(inPlace([changed]), "A sync changed a book's details")
+        XCTAssertTrue(inPlace([other]), "A new design moved books between pages")
+        XCTAssertTrue(inPlace([book], page: 0, pageCount: 1), "The year shrank past the page")
+        XCTAssertFalse(inPlace([other], page: 0), "The reader chose another page")
+        XCTAssertFalse(wall(books: [book]).appearsInPlace(of: nil), "A first wall")
+        XCTAssertFalse(
+            wall(books: [book]).appearsInPlace(of: wall(books: [], pageCount: 0)),
+            "The first books of the year")
+    }
+
+    @MainActor
+    func testANewerWallWaitsUnlessTheReaderChoseAPage() {
+        let book = Book(id: 1, title: "Title", author: "Author")
+        let shown = wall(books: [book], page: 0, pageCount: 3)
+
+        XCTAssertTrue(wall(books: [book]).waits(behind: shown, chosenPage: 0), "A sync")
+        XCTAssertFalse(
+            wall(books: [book], page: 1, pageCount: 3).waits(behind: shown, chosenPage: 1),
+            "The chosen page")
+        XCTAssertFalse(
+            wall(books: [book], page: 0, pageCount: 1).waits(behind: shown, chosenPage: 2),
+            "A shorter year limited the chosen page to the page on screen")
     }
 
     @MainActor
@@ -747,17 +1061,17 @@ final class BookWallLayoutTests: XCTestCase {
         return layout
     }
 
-    /// A crowded wall keeps its books' lengths varied: a spine that its column squeezes stops
-    /// lengthening where its title stops growing, so few books stop at `maximumBookLength`.
+    /// A full page's lettering takes most books to `maximumBookLength`, 39 of these 50.
     @MainActor
-    func testACrowdedWallKeepsItsBooksLengthsVaried() {
+    func testAFullPageLeavesSomeBooksBelowTheLengthCap() {
         let layout = syntheticWall(50)
-        XCTAssertLessThan(layout.pointsPerUnit, 60)
+        XCTAssertEqual(layout.stackHeight, BookWallLayout.maximumStackHeight)
+        XCTAssertLessThan(layout.pointsPerUnit, BookWallLayout.nominalPointsPerUnit)
         let capped = layout.slots.filter {
             $0.bookHeight >= BookWallLayout.maximumBookLength - 0.001
         }
-        XCTAssertLessThan(capped.count, 35)
+        XCTAssertLessThan(capped.count, 40)
         XCTAssertGreaterThanOrEqual(
-            Set(layout.slots.map { ($0.bookHeight * 100).rounded() }).count, 15)
+            Set(layout.slots.map { ($0.bookHeight * 100).rounded() }).count, 10)
     }
 }

@@ -11,7 +11,11 @@ struct BookWallPreparedWall {
     /// Distinguishes rebuilt walls whose books are equal, so the scene shows the entities that
     /// later cover recovery updates.
     let id = UUID()
+    /// The books of the page this wall shows, earliest finish first.
     let books: [Book]
+    /// The page this wall shows, from 0, and how many pages the year has.
+    let page: Int
+    let pageCount: Int
     /// The series design sources the wall was prepared for (`LibraryModel.seriesSources`).
     let sources: [Int: Book]
     /// The companion designs the wall was prepared for (`LibraryModel.spineDesigns`), keyed by
@@ -34,11 +38,66 @@ struct BookWallPreparedWall {
     /// Shelf-front lettering for each book and for the resting hint.
     let labels: [Int: BookWallShelfLabel.Prepared]
     let hint: BookWallShelfLabel.Prepared?
+
+    /// Whether this wall appears at rest in place of `shown` instead of dropping its books. Books
+    /// drop for a wall's first books and a page the reader chose. Any other wall appears in place
+    /// the next time the reader enters the wall (`BookWallView.wall`): a sync changes details of
+    /// the same books, a new design can move books between pages, and a shrunken year's last page
+    /// replaces a page it no longer has.
+    func appearsInPlace(of shown: BookWallPreparedWall?) -> Bool {
+        guard let shown, !shown.books.isEmpty else { return false }
+        return shown.page == page || shown.page >= pageCount
+    }
+
+    /// Whether this wall waits for the reader to leave `shown`: it would appear in place, and the
+    /// reader hasn't chosen another page. A chosen page never waits, even one this wall's shorter
+    /// year limits to the page on screen.
+    func waits(behind shown: BookWallPreparedWall, chosenPage: Int) -> Bool {
+        chosenPage == shown.page && appearsInPlace(of: shown)
+    }
 }
 
 /// Prepares current-year books once the library snapshot loads, without mounting the 3D scene.
+///
+/// A year's split into pages and its most recently shown pages are kept until the year's books,
+/// designs, or font style change or a face registers, so changing pages neither measures the year
+/// again nor, for a recent page, draws it again.
 @MainActor @Observable
 final class BookWallPreparation {
+    /// What a year's pages depend on.
+    private struct Input: Equatable {
+        let books: [Book]
+        let sources: [Int: Book]
+        let designs: [Int: SpineDesignV1]
+        let looks: [Int: SpineDesignV1]
+        let mates: [Int: [Book]]
+        let fontStyle: AppFontStyle
+    }
+
+    /// A year's books split into pages, and what the split worked out that drawing them reuses.
+    private struct Year {
+        let input: Input
+        let pages: [Range<Int>]
+        let measured: [Int: BookWallLayout.Dimensions]
+        let drawn: [Int: SpineDesignV1]
+        let drawsWith: [Int: Book]
+        let typographies: [Int: BookWallLocalSpine.Typography]
+
+        func books(onPage page: Int) -> [Book] {
+            pages.indices.contains(page) ? Array(input.books[pages[page]]) : []
+        }
+    }
+
+    /// A drawn page and the books with a cover URL whose cover it was drawn without: wall books,
+    /// and series sources outside the wall whose cover sets their series-mates' colors.
+    private struct DrawnPage {
+        let wall: BookWallPreparedWall
+        var missing: [Book]
+    }
+
+    /// Each page's models and textures stay in memory while the page is kept.
+    private static let maximumDrawnPages = 3
+
     private(set) var prepared: BookWallPreparedWall?
     private(set) var completedCount = 0
     private(set) var totalCount = 0
@@ -46,9 +105,9 @@ final class BookWallPreparation {
     /// Increments when a recovered cover replaces a prepared book's artwork, so the visible
     /// scene can draw again.
     private(set) var coverRevision = 0
-    /// Books with a cover URL whose cover the wall was prepared without: wall books, and
-    /// series sources outside the wall whose cover sets their series-mates' colors.
-    @ObservationIgnored private var missingCovers: [Book] = []
+    @ObservationIgnored private var year: Year?
+    /// The current year's drawn pages, most recently shown first.
+    @ObservationIgnored private var drawnPages: [DrawnPage] = []
     private let rasterizer = BookWallRasterizer()
     private let downloadFont: FontDownload?
 
@@ -64,34 +123,59 @@ final class BookWallPreparation {
     /// face only when the face can letter every book in `mates` that draws it; otherwise all of
     /// them letter it in its system typeface, as on the iPhone. The checks run here, once.
     ///
-    /// A wall prepared earlier stays in `prepared` until the new one is ready, so a design, link,
-    /// or look that arrives while the wall is on screen replaces it in place. When the new wall
-    /// can't be built, the earlier one stays and `failure` describes the problem.
+    /// Splits the books into pages when they or their designs change, and prepares `page`, or the
+    /// last page when the year has fewer.
+    ///
+    /// A wall prepared earlier stays in `prepared` until the new one is ready, so the wall stays on
+    /// screen while a page prepares. When the new wall can't be built, the earlier one stays and
+    /// `failure` describes the problem.
     func prepare(
         _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1] = [:],
         looks: [Int: SpineDesignV1] = [:], mates: [Int: [Book]] = [:],
-        fontStyle: AppFontStyle = .serif
+        fontStyle: AppFontStyle = .serif, page: Int = 0
     ) async {
         failure = nil
-        if let prepared, prepared.books == books, prepared.sources == sources,
-            prepared.designs == designs, prepared.looks == looks, prepared.mates == mates,
-            prepared.fontStyle == fontStyle
+        let input = Input(
+            books: books, sources: sources, designs: designs, looks: looks, mates: mates,
+            fontStyle: fontStyle)
+        if year?.input == input, let year,
+            let index = drawnPages.firstIndex(where: {
+                $0.wall.page == Self.clamped(page, count: year.pages.count)
+            })
         {
+            let drawn = drawnPages.remove(at: index)
+            drawnPages.insert(drawn, at: 0)
+            if prepared?.id != drawn.wall.id { prepared = drawn.wall }
             // A cancelled preparation may have left covers to retry.
-            await retryMissingCovers(in: prepared, fontStyle: fontStyle)
+            await retryMissingCovers(in: drawn.wall, fontStyle: fontStyle)
             return
         }
+        if year?.input != input {
+            year = nil
+            drawnPages = []
+        }
         completedCount = 0
-        totalCount = books.count
+        // A larger year's page sizes aren't known until it is split.
+        totalCount = books.count <= BookWallLayout.booksThatAlwaysFit ? books.count : 0
 
         // Glyph checks and layout measure lettering, so each face must be registered first.
         let faces = Array(designs.values) + looks.values
         let fonts = await Self.loadFonts(for: faces, download: downloadFont)
-        guard !Task.isCancelled,
-            var built = await build(
-                books, sources: sources, designs: designs, looks: looks, mates: mates,
-                fontStyle: fontStyle)
-        else {
+        // A face that registered letters the books differently, so the split and the pages drawn
+        // from it no longer hold, even when this task ends here.
+        if fonts.registered {
+            year = nil
+            drawnPages = []
+        }
+        guard !Task.isCancelled else { return }
+        if year == nil {
+            guard let split = await split(input) else { return }
+            year = split
+        }
+        guard let year else { return }
+        let shownPage = Self.clamped(page, count: year.pages.count)
+        totalCount = year.books(onPage: shownPage).count
+        guard var built = await build(page: shownPage, of: year) else {
             if !Task.isCancelled { failure = "A book could not be prepared. Select Retry." }
             return
         }
@@ -99,20 +183,34 @@ final class BookWallPreparation {
         // face that arrives letters a rebuilt wall before the wall shows, so no spine changes
         // in view; a face that fails again waits for the next preparation. A host that timed
         // out gets no retry, which would hold the wall for another request timeout. The rebuild
-        // keeps the progress count, and a rebuild that fails keeps the first wall.
+        // keeps the progress count. A rebuild that fails keeps the first wall and leaves no year,
+        // so the next preparation splits again instead of mixing pages from two splits.
         if fonts.interruption != nil, fonts.interruption != .timedOut,
-            await Self.loadFonts(for: faces, download: downloadFont).registered,
-            !Task.isCancelled,
-            let rebuilt = await build(
-                books, sources: sources, designs: designs, looks: looks, mates: mates,
-                fontStyle: fontStyle, countsProgress: false)
+            await Self.loadFonts(for: faces, download: downloadFont).registered
         {
-            built = rebuilt
+            self.year = nil
+            drawnPages = []
+            if !Task.isCancelled, let split = await split(input),
+                let rebuilt = await build(
+                    page: Self.clamped(page, count: split.pages.count), of: split,
+                    countsProgress: false),
+                // A replacement preparation may be running, and this split isn't its year.
+                !Task.isCancelled
+            {
+                self.year = split
+                built = rebuilt
+            }
         }
         guard !Task.isCancelled else { return }
+        drawnPages.insert(built, at: 0)
+        drawnPages.removeLast(max(0, drawnPages.count - Self.maximumDrawnPages))
         prepared = built.wall
-        missingCovers = built.missing
         await retryMissingCovers(in: built.wall, fontStyle: fontStyle)
+    }
+
+    /// `page` limited to the year's `count` pages, for a library that shrank under it.
+    static func clamped(_ page: Int, count: Int) -> Int {
+        max(0, min(page, count - 1))
     }
 
     /// Drops the prepared wall and its progress, so Book Wall shows its waiting dialog until the
@@ -120,40 +218,57 @@ final class BookWallPreparation {
     /// as the example profile, whose wall must never show as the reader's own.
     func discard() {
         prepared = nil
-        missingCovers = []
+        year = nil
+        drawnPages = []
         failure = nil
         completedCount = 0
     }
 
-    /// Draws every book of the wall with the faces registered now, adding each drawn book to
-    /// `completedCount` when `countsProgress` is true. Returns `nil` when the task is cancelled
-    /// or a book's spine, cover, or shelf label texture can't be made, and otherwise the wall
-    /// and the books whose covers it was drawn without.
-    private func build(
-        _ books: [Book], sources: [Int: Book], designs: [Int: SpineDesignV1],
-        looks: [Int: SpineDesignV1], mates: [Int: [Book]], fontStyle: AppFontStyle,
-        countsProgress: Bool = true
-    ) async -> (wall: BookWallPreparedWall, missing: [Book])? {
+    /// Works out what each book draws in with the faces registered now, and splits the year's
+    /// books into pages by it, off the main actor. Returns `nil` when the task is cancelled.
+    private func split(_ input: Input) async -> Year? {
         let drawn = Self.drawnDesigns(
-            of: books, designs: designs, looks: looks, sources: sources, mates: mates)
+            of: input.books, designs: input.designs, looks: input.looks, sources: input.sources,
+            mates: input.mates)
         func typography(of book: Book) -> BookWallLocalSpine.Typography {
             BookWallLocalSpine.typography(for: book, design: drawn[book.id])
         }
         var drawsWith: [Int: Book] = [:]
         var typographies: [Int: BookWallLocalSpine.Typography] = [:]
-        for book in books {
-            if let source = sources[book.id], source.id != book.id {
+        for book in input.books {
+            if let source = input.sources[book.id], source.id != book.id {
                 drawsWith[book.id] = source
                 typographies[book.id] = typography(of: source)
             } else if drawn[book.id] != nil {
                 typographies[book.id] = typography(of: book)
             }
         }
-        // A source finished in another year is not on the wall, but its cover sets the colors.
+        guard let pages = await rasterizer.pages(of: input.books, typographies: typographies),
+            !Task.isCancelled
+        else { return nil }
+        return Year(
+            input: input, pages: pages.ranges, measured: pages.measured, drawn: drawn,
+            drawsWith: drawsWith, typographies: typographies)
+    }
+
+    /// Draws every book of `page` of `year`, adding each drawn book to `completedCount` when
+    /// `countsProgress` is true. Returns `nil` when the task is cancelled or a book's spine, cover,
+    /// or shelf label texture can't be made, and otherwise the page and the books whose covers it
+    /// was drawn without.
+    private func build(page: Int, of year: Year, countsProgress: Bool = true) async -> DrawnPage? {
+        let books = year.books(onPage: page)
+        let drawn = year.drawn
+        let drawsWith = year.drawsWith
+        let typographies = year.typographies
+        let fontStyle = year.input.fontStyle
+        // A source finished in another year or on another page is not on the wall, but its cover
+        // sets the colors.
         let ids = Set(books.map(\.id))
         var outside: [Int: Book] = [:]
-        for source in drawsWith.values where !ids.contains(source.id) {
-            outside[source.id] = source
+        for book in books {
+            if let source = drawsWith[book.id], !ids.contains(source.id) {
+                outside[source.id] = source
+            }
         }
         let preparation = await ArtworkStore.shared.prefetch(
             books: books + outside.values.sorted { $0.id < $1.id }, avatarURLs: [])
@@ -162,10 +277,13 @@ final class BookWallPreparation {
         // wall frames from farther away. A layout grown at one scale can frame a little
         // farther, so it is laid out again at the scale it shows at, up to three more times,
         // until the two agree to within 1%.
-        var scale = BookWallLayout.nominalPointsPerUnit
+        // A year that was split measured its books at one scale already, so it starts there.
+        var scale =
+            year.measured.isEmpty
+            ? BookWallLayout.nominalPointsPerUnit : BookWallLayout.fullPagePointsPerUnit
         var layout = await rasterizer.layout(
             books: books, coverRatios: preparation.ratios, typographies: typographies,
-            pointsPerUnit: scale)
+            pointsPerUnit: scale, measured: year.measured)
         for _ in 0..<3 {
             let shown = BookWallScene.spinePointsPerUnit(for: layout)
             guard abs(shown - scale) > scale * 0.01, !Task.isCancelled else { break }
@@ -234,10 +352,11 @@ final class BookWallPreparation {
             hint = prepared
         }
         let wall = BookWallPreparedWall(
-            books: books, sources: sources, designs: designs, looks: looks, mates: mates,
+            books: books, page: page, pageCount: year.pages.count, sources: year.input.sources,
+            designs: year.input.designs, looks: year.input.looks, mates: year.input.mates,
             fontStyle: fontStyle, drawn: drawn, drawsWith: drawsWith, layout: layout,
             bodies: bodies, labels: labels, hint: hint)
-        return (wall, missing)
+        return DrawnPage(wall: wall, missing: missing)
     }
 
     /// Downloads missing covers again after 30 seconds, as the shelf does after a failure. A
@@ -249,7 +368,7 @@ final class BookWallPreparation {
     private func retryMissingCovers(in wall: BookWallPreparedWall, fontStyle: AppFontStyle)
         async
     {
-        let failed = missingCovers
+        let failed = drawnPages.first { $0.wall.id == wall.id }?.missing ?? []
         let failedIDs = Set(failed.map(\.id))
         guard !failed.isEmpty, (try? await Task.sleep(for: .seconds(30))) != nil else { return }
         await ArtworkStore.shared.forgetFailures()
@@ -296,7 +415,9 @@ final class BookWallPreparation {
             coverRevision &+= 1
         }
         guard prepared?.id == wall.id else { return }
-        missingCovers.removeAll { recovered.contains($0.id) && restored.contains($0.id) }
+        guard let index = drawnPages.firstIndex(where: { $0.wall.id == wall.id }) else { return }
+        drawnPages[index].missing
+            .removeAll { recovered.contains($0.id) && restored.contains($0.id) }
     }
 }
 
@@ -458,13 +579,26 @@ actor BookWallRasterizer {
     /// Lays out the wall and measures its lettering here, off the main actor.
     func layout(
         books: [Book], coverRatios: [Int: Double],
-        typographies: [Int: BookWallLocalSpine.Typography], pointsPerUnit: Float
+        typographies: [Int: BookWallLocalSpine.Typography], pointsPerUnit: Float,
+        measured: [Int: BookWallLayout.Dimensions] = [:]
     ) -> BookWallLayout {
         let measurement = PerformanceDiagnostics.begin("BookWallLayout")
         defer { measurement.end() }
+        // Sizes measured at another scale don't apply.
         return BookWallLayout(
             books: books, coverRatios: coverRatios, typographies: typographies,
-            pointsPerUnit: pointsPerUnit)
+            pointsPerUnit: pointsPerUnit,
+            measured: pointsPerUnit == BookWallLayout.fullPagePointsPerUnit ? measured : [:])
+    }
+
+    /// Splits a year's books into pages here, off the main actor. Returns `nil` when the task is
+    /// cancelled.
+    func pages(
+        of books: [Book], typographies: [Int: BookWallLocalSpine.Typography]
+    ) -> (ranges: [Range<Int>], measured: [Int: BookWallLayout.Dimensions])? {
+        let measurement = PerformanceDiagnostics.begin("BookWallPages")
+        defer { measurement.end() }
+        return BookWallLayout.pages(of: books, typographies: typographies)
     }
 
     func style(for book: Book, cover: CGImage?, design: SpineDesignV1?)
