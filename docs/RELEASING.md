@@ -67,7 +67,7 @@ The verifier checks that the app bundles the example profile, display names, the
 
 Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. When the [privacy policy text](#privacy-policy-text) has changed, publish the same wording and effective date at ian.gay/bookworms-privacy-policy, and paste the text into the **Apple TV Privacy Policy** field in App Store Connect. The production schema contains `LibraryArchive` with its `archive` asset and the companion records.
 
-The companion records are `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`, each with a `payload` Bytes field. The Apple TV writes `SeriesLookV1` and `SeriesLinkV1` records as well as reading them. Confirm that a signed companion writes a design and a signed Apple TV reads and caches it from the same private container, that a series look saved on one device is the look the other draws, that a series picked in Apple TV book details names the book on the iPhone and Mac, and the reverse, and that a design or look a companion upgrades from a lower model tier replaces the one the Apple TV draws after its next read.
+The companion records are `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`, each with a `payload` Bytes field. The Apple TV writes `SeriesLookV1` and `SeriesLinkV1` records as well as reading them. Once TestFlight builds of the iPhone and Mac app exist, install them and a TestFlight build of this Apple TV version on devices signed in to one iCloud account, and turn on iCloud storage on the Apple TV, so the check runs in Production. Confirm that a companion writes a design and the Apple TV reads and caches it from the same private container, that a series look saved on one device is the look the other draws, that a series picked in Apple TV book details names the book on the iPhone and Mac, and the reverse, and that a design or look a companion upgrades from a lower model tier replaces the one the Apple TV draws after its next read.
 
 After an authorized upload:
 
@@ -76,6 +76,7 @@ After an authorized upload:
 3. Complete the listing, **App Privacy**, **Age Rating**, **App Review Information**, and **Pricing and Availability** from [App Store information](#app-store-information).
 4. Under **App Store Version Release**, choose **Manually release this version** so an approved build goes live only when you release it.
 5. Select **Add for Review**, then **Submit to App Review**.
+6. For 1.2.0, keep the manual release and release it together with or after the iPhone and Mac app, because **Settings > Spines** sends readers to that app.
 
 To check the exact candidate with production signing and production CloudKit before submission, export it from Xcode Organizer with **Release Testing** and install it on the registered Apple TV. Verify launch, navigation, source credentials, refresh and cache behavior, Top Shelf, offline recovery, and production iCloud.
 
@@ -109,7 +110,7 @@ Apple documents the selection controls in [Manage availability for your app](htt
 | App Privacy | **Data Not Collected**; see [privacy implementation](PRIVACY.md) |
 | Age rating | The app shows Hardcover reviews, which are user-generated content. Answer the questionnaire accordingly. |
 | Content rights | The app shows third-party content: Hardcover metadata, covers, profile photos, and reviews. |
-| App Review sign-in | A demo Hardcover account with finished books, a current read, and followed readers. Enter its credentials only in App Store Connect. |
+| App Review sign-in | A demo Hardcover account with finished books, including books finished this year, a current read, and followed readers. Enter its credentials only in App Store Connect. |
 
 Use these App Review notes, adjusted to the build:
 
@@ -122,7 +123,9 @@ With the demo account: select "Connect Hardcover" in the welcome popup, or open 
 
 Social views show only readers the account follows. Book details can also show public Hardcover reviews of that book. Hardcover moderates all reviews; users report and block readers in the Hardcover app and website. Bookworms reads the account's block list and never shows readers the account blocked.
 
-Book Wall is off by default. Turn it on in Settings > Views. It requires Apple TV 4K (2nd generation) or later.
+Book Wall requires Apple TV 4K (2nd generation) or later. The example profile already shows it in the sidebar menu, and its Settings > Views toggles are disabled. With the demo account, Book Wall starts off; turn it on in Settings > Views.
+
+The companion Bookworms app for iPhone and Mac is in App Review at the same time. It designs the book spines that Settings > Spines describes.
 ```
 
 ### Privacy policy text
