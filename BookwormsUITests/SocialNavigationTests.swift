@@ -307,9 +307,10 @@ final class SocialNavigationTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["A memorable read with a distinctive voice."].isHittable)
         RemoteNavigation.waitForFocus(app.buttons["Reveal spoilers"])
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(
-            app.staticTexts["A memorable read with a distinctive voice."]
-                .waitForExistence(timeout: 5))
+        // VoiceOver reads the review's lines as one element.
+        let review = app.descendants(matching: .any)["review-text"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        XCTAssertTrue(review.label.contains("A memorable read with a distinctive voice."))
         capture(app, name: "Review reading sheet")
     }
 
