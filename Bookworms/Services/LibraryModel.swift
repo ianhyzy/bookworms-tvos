@@ -186,11 +186,11 @@ final class LibraryModel {
 
     /// Whether picking a series in `book`'s details can save it: always in the sample library,
     /// which keeps picks in memory, never in the read-only example profile, and otherwise for a
-    /// book of the active Hardcover account with iCloud storage on.
+    /// Hardcover book with iCloud storage on while companion records apply (`companionAccountID`).
     func canPickSeries(for book: Book) -> Bool {
         guard !isExample else { return false }
         return isSample
-            || (iCloudEnabled && hardcoverEnabled && activeHardcoverAccountID != nil
+            || (iCloudEnabled && hardcoverEnabled && companionAccountID != nil
                 && book.isHardcoverBook)
     }
 
@@ -208,7 +208,7 @@ final class LibraryModel {
     /// group gets one. The sample library keeps picks in memory.
     func pickSeries(_ seriesID: Int, for book: Book) {
         guard canPickSeries(for: book) else { return }
-        let accountID = isSample ? "" : activeHardcoverAccountID ?? ""
+        let accountID = isSample ? "" : companionAccountID ?? ""
         let old = seriesLinks[book.id]
         let chosen = SeriesLinkV1(
             accountID: accountID, bookID: book.id,
@@ -242,14 +242,14 @@ final class LibraryModel {
                 // A pick that a later pick replaced still saves, so a failed later save can
                 // restore it.
                 guard iCloudEnabled, iCloudToggles == toggles,
-                    activeHardcoverAccountID == accountID
+                    companionAccountID == accountID
                 else { return }
                 try await dependencies.saveSeriesLink(chosen, accountID, book.id)
                 // A check that began during the save decides whether the pick stays.
                 await waitForCloudUserChecks()
             } catch {
                 // Turning iCloud storage off or changing accounts clears the links; keep them clear.
-                guard iCloudEnabled, activeHardcoverAccountID == accountID else { return }
+                guard iCloudEnabled, companionAccountID == accountID else { return }
                 // Saves run in order, so the earlier picks' saves have finished; one that failed
                 // gives way to what it would have restored.
                 var restored = (link: old, pick: earlierPick)
@@ -349,6 +349,17 @@ final class LibraryModel {
     /// no link marks with an account.
     @ObservationIgnored private var activeHardcoverAccountID: String? {
         didSet { if activeHardcoverAccountID != oldValue { pickedLinks = [:] } }
+    }
+    /// The account whose companion records apply: the active account, else, without a Hardcover
+    /// credential, the account of the snapshot the shelf shows, such as one an iPhone saved to
+    /// iCloud. The legacy `"hardcover"` placeholder has no records. It isn't saved, so a newer
+    /// snapshot of another account takes over, and it never lists work (`SpineWorklistV1`).
+    private var companionAccountID: String? {
+        if let activeHardcoverAccountID { return activeHardcoverAccountID }
+        guard !hardcoverConnected, let id = activeHardcoverSnapshot()?.accountID,
+            id != "hardcover"
+        else { return nil }
+        return id
     }
     @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
     @ObservationIgnored private var spineDesignTaskIdentity:
@@ -1857,7 +1868,7 @@ final class LibraryModel {
         // Sample mode draws its own records; an account that a disconnect kept must not replace
         // them or save looks for the sample's books.
         guard !isSample, iCloudEnabled, hardcoverEnabled,
-            let accountID = activeHardcoverAccountID,
+            let accountID = companionAccountID,
             let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
         else { return }
         if !restarting, let identity = spineDesignTaskIdentity, spineDesignTask != nil,

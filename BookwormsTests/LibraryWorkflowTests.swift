@@ -2416,6 +2416,56 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(published.isEmpty)
     }
 
+    /// An Apple TV without a credential reads the companion records of the account whose
+    /// snapshot it shows, such as an iPhone's library with no worklist, without saving that
+    /// account or listing work. The legacy `"hardcover"` placeholder has no records.
+    func testCredentialFreeShelfReadsTheShownAccountsCompanionRecords() async throws {
+        for accountID in ["_fictional_iphone_account", "hardcover"] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+            fixture.secrets.removeValue(forKey: "hardcover-token")
+            let book = fixture.book(1)
+            let snapshot = SourceSnapshot(
+                source: .hardcover, accountID: accountID, books: [book], syncedAt: fixture.time)
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.syncCloud = { _ in CloudLibraryArchive(sources: [snapshot]) }
+            var readAccounts: [String] = []
+            dependencies.fetchSpineDesigns = { accountID, _ in
+                readAccounts.append(accountID)
+                return ([:], true)
+            }
+            dependencies.fetchCoverChoices = { accountID, _ in
+                (
+                    [
+                        1: CoverChoiceV1(
+                            version: 1, accountID: accountID, bookID: 1,
+                            coverURL: URL(string: "https://covers.example.test/chosen.jpg")!,
+                            chosenAt: fixture.time)
+                    ], true
+                )
+            }
+            dependencies.publishSpineWorklist = { _ in XCTFail("Unexpected worklist") }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            XCTAssertEqual(model.books.map(\.id), [1])
+            XCTAssertNil(fixture.defaults.string(forKey: "activeHardcoverAccountID"))
+            if accountID == "hardcover" {
+                XCTAssertEqual(readAccounts, [])
+                XCTAssertFalse(model.canPickSeries(for: book))
+                XCTAssertNil(model.books.first?.chosenCoverURL)
+            } else {
+                XCTAssertEqual(readAccounts, [accountID])
+                XCTAssertTrue(model.canPickSeries(for: book))
+                XCTAssertNotNil(model.books.first?.chosenCoverURL)
+            }
+        }
+    }
+
     func testSnapshotInstalledDuringWorklistReadSurvivesCloudSync() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
