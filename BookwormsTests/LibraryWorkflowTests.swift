@@ -2466,6 +2466,40 @@ final class LibraryWorkflowTests: XCTestCase {
         }
     }
 
+    /// The empty shelf names the setting that hides a connected reader's books, which the
+    /// screen labels Collection, and tells a library with no books apart.
+    func testEmptyShelfHintNamesWhyTheShelfIsEmpty() async throws {
+        let signedOut = try LibraryWorkflowFixture()
+        defer { signedOut.cleanUp() }
+        signedOut.secrets.removeValue(forKey: "hardcover-token")
+        let model = LibraryModel(dependencies: signedOut.dependencies())
+        await model.start()
+        XCTAssertEqual(
+            model.emptyShelfHint, "Connect a source in Settings to explore your books.")
+
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [])])
+        let empty = LibraryModel(dependencies: fixture.dependencies())
+        await empty.start()
+        XCTAssertTrue(empty.books.isEmpty)
+        XCTAssertEqual(
+            empty.emptyShelfHint,
+            "Your library has no books yet. Books you add appear after the next sync.")
+
+        let filtered = try LibraryWorkflowFixture()
+        defer { filtered.cleanUp() }
+        let unread = Book(id: 2, title: "Fixture 2", author: "Fictional author")
+        try filtered.save([filtered.snapshot(.hardcover, books: [unread])])
+        let hidden = LibraryModel(dependencies: filtered.dependencies())
+        await hidden.start()
+        hidden.shelfPreferences = ShelfPreferences(collection: .read)
+        XCTAssertTrue(hidden.books.isEmpty, "Read Books leaves out an unread book")
+        XCTAssertEqual(
+            hidden.emptyShelfHint,
+            "No books match your shelf choices. Change Collection in Settings → Shelf.")
+    }
+
     func testSnapshotInstalledDuringWorklistReadSurvivesCloudSync() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

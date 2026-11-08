@@ -182,10 +182,7 @@ struct SocialViews: View {
     private var following: some View {
         Group {
             if social.activities.isEmpty {
-                empty(
-                    "Your following feed",
-                    "Connect Hardcover with social read permissions in Settings. Activity from people you follow appears here."
-                )
+                empty("Your following feed", social.emptyFeedMessage)
             } else {
                 GeometryReader { geometry in
                     let pageSize = 4

@@ -30,6 +30,30 @@ final class SocialFeatureTests: XCTestCase {
             "Bookless events are left out")
     }
 
+    /// An empty Feed asks the reader to connect only before any account's data loads: it says
+    /// it's loading while social data loads, and that there's no activity once it has.
+    func testEmptyFeedMessageFollowsTheLoad() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "EmptyFeed.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        XCTAssertTrue(model.emptyFeedMessage.hasPrefix("Connect Hardcover"))
+
+        await client.holdReaderTwo()
+        let load = Task {
+            await model.load(
+                token: "hc_pat_fixture", readerID: 2, enabledViews: [.following, .comparison])
+        }
+        // The held library of reader 2 keeps the load running after the feed arrives.
+        for _ in 0..<100 where !model.isLoading { await Task.yield() }
+        XCTAssertEqual(model.emptyFeedMessage, "Loading activity from people you follow…")
+        await client.releaseReaderTwo()
+        await load.value
+        XCTAssertTrue(model.activities.isEmpty)
+        XCTAssertEqual(model.emptyFeedMessage, "People you follow have no recent activity.")
+    }
+
     func testDisabledViewsDoNotFetchUnusedDatasets() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Scope.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

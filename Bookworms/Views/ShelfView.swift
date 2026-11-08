@@ -1400,13 +1400,9 @@ struct ShelfView: View {
                     : library.isConnected ? "Your shelf is waiting" : "Make room for your books"
             )
             .appFont(size: 42).foregroundStyle(palette.text)
-            Text(
-                library.isConnected
-                    ? "No books match your shelf choices. Change Show in Settings → Shelf."
-                    : "Connect a source in Settings to explore your books."
-            )
-            .appFont(size: 28).foregroundStyle(palette.text).multilineTextAlignment(.center)
-            .frame(maxWidth: 900)
+            Text(library.emptyShelfHint)
+                .appFont(size: 28).foregroundStyle(palette.text).multilineTextAlignment(.center)
+                .frame(maxWidth: 900)
             // The buttons keep the glass styles' own label colors, which change with focus.
             if let filter = library.shelfFilter {
                 Button(action: clearShelfFilter) {

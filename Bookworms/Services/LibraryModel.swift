@@ -614,6 +614,17 @@ final class LibraryModel {
     var isConnected: Bool {
         !isSample && ((hardcoverEnabled && hardcoverConnected) || (cwaEnabled && hasCWAPassword))
     }
+    /// The empty shelf's hint: how to connect a source, which setting to change when shelf
+    /// choices hide every book, or that a connected library has no books.
+    var emptyShelfHint: String {
+        guard isConnected else { return "Connect a source in Settings to explore your books." }
+        guard allBooks.isEmpty else {
+            return "No books match your shelf choices. Change Collection in Settings → Shelf."
+        }
+        return isLoading
+            ? "Loading your books…"
+            : "Your library has no books yet. Books you add appear after the next sync."
+    }
     var hardcoverEnabled: Bool {
         didSet {
             dependencies.defaults.set(hardcoverEnabled, forKey: "hardcoverEnabled")

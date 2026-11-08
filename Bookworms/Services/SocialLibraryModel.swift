@@ -50,6 +50,15 @@ final class SocialLibraryModel {
     }
     private(set) var status = "Connect Hardcover to use social views."
     private(set) var isLoading = false
+    /// What Feed shows without activity: a loading note while social data loads, a note that
+    /// followed readers have no activity once an account's data has loaded, and otherwise how to
+    /// connect.
+    var emptyFeedMessage: String {
+        if isLoading { return "Loading activity from people you follow…" }
+        if snapshot != nil { return "People you follow have no recent activity." }
+        return
+            "Connect Hardcover with social read permissions in Settings. Activity from people you follow appears here."
+    }
     private(set) var revision = 0
     @ObservationIgnored private let client: any SocialLibraryFetching
     @ObservationIgnored private let defaults: UserDefaults
