@@ -29,7 +29,7 @@ Network recipients can observe connection metadata such as an IP address. The ap
 
 ## Collection disclosures
 
-The manifests declare required-reason API use; they do not yet declare collected-data categories. This is not a claim that no data leaves the device. The developer receives no user data, so **Data Not Collected** is the expected App Store privacy answer for the current build; confirm it against Apple's definitions when answering. Keep the manifest, the [published privacy policy](https://ian.gay/bookworms-privacy-policy/), the [Apple TV privacy policy text](RELEASING.md#apple-tv-privacy-policy-text), and App Store privacy answers consistent.
+The manifests declare required-reason API use; they do not yet declare collected-data categories. This is not a claim that no data leaves the device. The developer receives no user data, so **Data Not Collected** is the expected App Store privacy answer for the current build; confirm it against Apple's definitions when answering. Keep the manifest, the [published privacy policy](https://ian.gay/bookworms-privacy-policy/), the [privacy policy text](RELEASING.md#privacy-policy-text), and App Store privacy answers consistent. That policy also covers the iPhone and Mac app, whose repository documents its own data flows; the table above covers only the Apple TV app.
 
 Apple distinguishes real-time request processing from retained collection. Generation is currently disabled. Reassess disclosure before enabling any automatic provider requests. See [Apple's privacy questionnaire guidance](https://developer.apple.com/app-store/app-privacy-details/).
 

@@ -65,7 +65,7 @@ The verifier checks that the app bundles the example profile, display names, the
 
 ## App Store submission
 
-Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. When the [Apple TV privacy policy text](#apple-tv-privacy-policy-text) has changed, publish the same wording and effective date at ian.gay/bookworms-privacy-policy, and paste the text into the **Apple TV Privacy Policy** field in App Store Connect. The production schema contains `LibraryArchive` with its `archive` asset and the companion records.
+Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. When the [privacy policy text](#privacy-policy-text) has changed, publish the same wording and effective date at ian.gay/bookworms-privacy-policy, and paste the text into the **Apple TV Privacy Policy** field in App Store Connect. The production schema contains `LibraryArchive` with its `archive` asset and the companion records.
 
 The companion records are `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`, each with a `payload` Bytes field. The Apple TV writes `SeriesLookV1` and `SeriesLinkV1` records as well as reading them. Confirm that a signed companion writes a design and a signed Apple TV reads and caches it from the same private container, that a series look saved on one device is the look the other draws, that a series picked in Apple TV book details names the book on the iPhone and Mac, and the reverse, and that a design or look a companion upgrades from a lower model tier replaces the one the Apple TV draws after its next read.
 
@@ -99,7 +99,7 @@ Apple documents the selection controls in [Manage availability for your app](htt
 | --- | --- |
 | Name | Bookworms - eBook Display |
 | Privacy policy URL | https://ian.gay/bookworms-privacy-policy/ |
-| Apple TV privacy policy | Required for tvOS, because Apple TV has no browser. Paste the plain text from [Apple TV privacy policy text](#apple-tv-privacy-policy-text). App Review reviews it, and the Apple TV App Store displays it. |
+| Apple TV privacy policy | Required for tvOS, because Apple TV has no browser. Paste the plain text from [privacy policy text](#privacy-policy-text). App Review reviews it, and the Apple TV App Store displays it. |
 | Support and marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
@@ -125,42 +125,51 @@ Social views show only readers the account follows. Book details can also show p
 Book Wall is off by default. Turn it on in Settings > Views. It requires Apple TV 4K (2nd generation) or later.
 ```
 
-### Apple TV privacy policy text
+### Privacy policy text
 
-Paste this text into the **Apple TV Privacy Policy** field. Update it with the published policy, and change the effective date when either changes.
+One policy covers Bookworms on Apple TV, iPhone, and Mac. Publish this text at ian.gay/bookworms-privacy-policy, and paste it into the **Apple TV Privacy Policy** field. Change the effective date whenever the text changes, and update both places together.
 
 ```text
 Bookworms privacy policy
 
-Effective November 4, 2026. Contact: bookworms@ian.gay
+Effective November 8, 2026. Contact: bookworms@ian.gay
 Web version: ian.gay/bookworms-privacy-policy
 
 Summary
-This policy covers Bookworms on Apple TV. Bookworms shows your Hardcover reading library on your Apple TV. The developer doesn't operate a server and doesn't receive your data. There's no account with the developer, and the app has no advertising, analytics, or tracking. If you choose to share analytics with app developers in your Apple TV's settings, Apple may give the developer anonymous crash and usage reports.
+This policy covers Bookworms on Apple TV, iPhone, and Mac, which shows your Hardcover reading library. The developer doesn't operate a server and doesn't receive your data. There's no account with the developer, and Bookworms has no advertising, analytics, or tracking. If you choose to share analytics with app developers in your device's settings, Apple may give the developer anonymous crash and usage reports.
 
-Information Bookworms uses
-When you connect Hardcover, Bookworms saves your sign-in in the Apple TV's Keychain and uses it to read the following directly from Hardcover:
+Hardcover
+When you connect Hardcover, Bookworms saves your sign-in in your device's Keychain and uses it to read the following directly from Hardcover:
 - Your profile, library, and reading history, such as books, reading status and progress, dates, ratings, and your reviews.
-- Social information from readers you follow, such as profiles, profile photos, libraries, activity, ratings, and reviews. Bookworms also shows public Hardcover reviews of a book when you choose to view them.
+- Social information from readers you follow, such as profiles, profile photos, libraries, activity, ratings, and reviews. On Apple TV, it also shows a book's public Hardcover reviews when you ask. On iPhone and Mac, it also reads the public profile, ratings, and library of a reader you look up by username.
 - The list of readers you blocked, so Bookworms can hide them.
 
-Bookworms only reads this information and never changes your Hardcover account. Hardcover's policies govern the data Hardcover holds, including the moderation of reviews.
+Bookworms only reads this information and never changes your Hardcover account. Hardcover's policies govern the data it holds, including review moderation.
 
-Covers and profile photos download from the addresses Hardcover provides. Book Wall downloads fonts from Google Fonts for spine designs made by Bookworms on your iPhone or Mac and for the designs in the example profile. Google Fonts receives the names of those fonts. This can happen as Bookworms prepares Book Wall, before you open it. Each of these servers receives standard connection information, such as your IP address. Your settings are stored in the app.
+Spine designs
+On iPhone and Mac, default spine styling and series copies send nothing. Apple's on-device model designs on your device. When Apple's Private Cloud Compute designs a book, it receives the book's cover, title, and author, and the cover text your device read. If you set up Anthropic, OpenAI, Google Gemini, or an OpenAI-compatible endpoint with your own API key, that provider receives the same, but only after you allow it. Your API key stays in your device's Keychain and goes only to that provider. Each provider's policy governs what it receives. On Apple TV, Bookworms makes its own spine looks on the device.
+
+Other requests
+Covers and profile photos download from the addresses Hardcover provides. Fonts for spine designs download from Google Fonts, which receives the names of those fonts. On iPhone and Mac, this includes the font catalog and the fonts the font picker lists. On Apple TV, Book Wall downloads the fonts that iPhone and Mac designs and the example profile use, sometimes before you open it. Each server receives standard connection information, such as your IP address.
+
+Sharing and Photos
+On iPhone and Mac, share images and videos are made on your device. Bookworms saves them to Photos only when you ask, with add-only access, and never reads your photo library. Shared images and text can include your Hardcover username and profile and book links; With friends images name the readers they compare. Where Show profile link appears, turning it off leaves your link out. The app you share to receives what you share.
 
 Example profile
-Bookworms includes an example profile of the developer's own Hardcover reading from recent years, such as books, ratings, finish dates, formats, series, and book descriptions, with the developer's spine designs, cover choices, and series choices. It has no reviews. You can view it without connecting Hardcover. The app only displays it, but viewing it downloads its covers and fonts as described above. Connecting Hardcover or turning on iCloud storage closes it. Bookworms doesn't save it to your Hardcover account or iCloud.
+Bookworms includes an example profile of the developer's own Hardcover reading from recent years, such as books, ratings, finish dates, and series, with his spine designs, series looks, cover choices, and series choices. It has no reviews, and you can view it without connecting Hardcover. Viewing it downloads its covers and fonts as described above. Bookworms doesn't save it to your Hardcover account or iCloud. On Apple TV, connecting Hardcover or turning on iCloud storage closes it. On iPhone and Mac, Leave example profile or any change to your Hardcover account closes it.
 
 Where data is stored
-Downloaded information, images, and settings stay on your Apple TV, except for the optional iCloud copy described below. Bookworms and tvOS may remove cached data to save space. Bookworms downloads it again when it next needs it. Bookworms also saves when each source last synced and its latest sync error. These stay on your Apple TV.
+Downloaded information, images, and settings stay on your device, except for the iCloud copy below. Bookworms and the system may remove cached data to save space; Bookworms downloads it again when needed. The Apple TV also keeps each source's latest sync error on the device.
 
-iCloud storage is optional and off by default. If you turn it on, Bookworms saves a copy of your library information, including your Hardcover account ID and your own reviews, to your private iCloud database so your Apple devices can share and restore it. It excludes your Hardcover sign-in, images, and social information. Bookworms on your Apple devices also shares spine designs, cover choices, series choices, and a list of books to design in that database. The developer can't access any of it. Apple's privacy policy governs iCloud.
+iCloud
+On Apple TV, iCloud storage is optional and off by default; turn it on in Settings > General. On iPhone and Mac, Bookworms uses iCloud whenever the device is signed in to iCloud, and has no iCloud setting. Bookworms saves a copy of your Hardcover library, including your Hardcover account ID and your own reviews, to your private iCloud database so your Apple devices can share and restore it. It also saves spine designs (which can include a cover's title text), series looks, cover choices, series choices, a list of books to design, and, from iPhone and Mac, your Top Five pins. The copy excludes your sign-in, API keys, images, and friends' information. The developer can't access any of it. Apple's privacy policy governs iCloud.
 
 Your choices
-- Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV and asks Hardcover to end it. Your downloaded information stays on the Apple TV until tvOS clears it or you delete Bookworms, and any iCloud copy stays in iCloud. If Settings shows Reconnect Hardcover instead, reconnect first, then disconnect.
+- On Apple TV, Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV and asks Hardcover to end it. Your downloaded information stays on the Apple TV until tvOS clears it or you delete Bookworms. If Settings shows Reconnect Hardcover instead, reconnect first, then disconnect.
+- On iPhone or Mac, Sign out in Bookworms' Hardcover settings removes your saved sign-in, the downloaded library, and friends' information from that device and asks Hardcover to end the sign-in. Bookworms can still show the copy in iCloud.
 - Revoke Bookworms' access at any time on Hardcover's Authorized Apps page.
-- Turning off iCloud storage in Settings > General stops syncing on this Apple TV. Your other devices follow their own settings. The existing copy stays in iCloud until you remove Bookworms' data in your Apple Account's iCloud storage settings. Any of your devices still using iCloud with Bookworms can save it again.
-- Deleting Bookworms from your Apple TV removes app files and settings, but not any iCloud copy, and your Hardcover sign-in may remain in the Apple TV Keychain. To remove the sign-in, choose Settings > Sources > Disconnect Hardcover before deleting Bookworms.
+- Turning off iCloud storage stops syncing on that Apple TV, and an iPhone or Mac stops when it signs out of iCloud. Neither removes the iCloud copy, which stays until you remove Bookworms' data in your Apple Account's iCloud storage settings, and any device still using iCloud with Bookworms can save it again.
+- Deleting Bookworms from a device removes its files and settings, but not the iCloud copy, and your sign-in and API keys may remain in that device's Keychain. To remove them, disconnect or sign out of Hardcover and remove your API key first.
 
 Children
 Bookworms isn't directed to children and doesn't knowingly collect information from them.
@@ -169,7 +178,7 @@ Changes
 Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new effective date.
 ```
 
-Keep the published privacy policy and this text consistent with the build: it describes Hardcover as the only source, Google Fonts requests for the fonts of companion spines (`BookPresentation.showsCompanionSpines`) and the example profile's designs, the example profile's contents, iCloud storage as off by default, an iCloud copy that includes your own reviews and that your Apple devices share with their spine designs, cover choices, series choices, and worklist, and no AI requests. Update both before enabling CWA (`BookPresentation.offersCWA`), generated spines, or iCloud by default. Before the iPhone and Mac listing uses this policy, follow that app's release workflow. iCloud storage is opt-in.
+Keep the published policy and this text consistent with both apps' builds. For the Apple TV, it describes Hardcover as the only source, iCloud storage as off by default, no design-model requests, and Google Fonts requests for the fonts of companion designs and series looks (`BookPresentation.showsCompanionSpines`) and the example profile's designs. For the iPhone and Mac, it describes iCloud saves whenever the device is signed in to iCloud, Top Five pins, readers looked up by username, design-model requests and the reader's consent before a third-party provider receives book data, Google Fonts requests, and add-only Photos saves. Update it before enabling CWA (`BookPresentation.offersCWA`) or generated spines (`BookPresentation.showsGeneratedSpines`) on the Apple TV, and whenever either app sends data somewhere new. The iPhone and Mac app's release workflow lists its requests in more detail.
 
 ## Verify the release candidate
 
