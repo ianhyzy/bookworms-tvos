@@ -641,6 +641,9 @@ final class LibraryModel {
                 // The example profile never syncs, so turning storage on asks for the iCloud
                 // library instead.
                 if isExample { isSample = false }
+                // Turning storage on syncs with the current iCloud user, so a sync's user check
+                // (`cloudAccountChanged()`) compares later users with that one.
+                dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
                 queueCloudSync()
             } else {
                 // Companion designs, covers, and series looks apply only with iCloud storage
@@ -859,9 +862,16 @@ final class LibraryModel {
             if cloudSyncSuppressedForWelcome {
                 cloudStatus = "iCloud storage waits until setup finishes."
             } else {
-                queueSpineDesignRefresh()
-                // A due refresh below waits for this read, so it starts at once.
-                queueCloudSync(delay: .zero)
+                // The account may have changed while the app wasn't running, so the companion
+                // read, which can save series looks, and the sync wait for the user check.
+                if dependencies.defaults.string(forKey: Self.cloudUserKey) != nil {
+                    await cloudAccountChanged(atLaunch: true)
+                }
+                if iCloudEnabled {
+                    queueSpineDesignRefresh()
+                    // A due refresh below waits for this read, so it starts at once.
+                    queueCloudSync(delay: .zero)
+                }
             }
         } else {
             cloudStatus = "iCloud storage is off."
@@ -1602,14 +1612,18 @@ final class LibraryModel {
     static let cloudUserKey = "iCloudUserRecordName"
 
     /// Handles `CKAccountChanged`, which CloudKit also posts when the same account's state
-    /// changes. Storage stays on while the signed-in user is the one the last sync used;
-    /// otherwise, including when the user can't be read, it turns off.
+    /// changes. Storage stays on while the signed-in user is the one the last sync used, or when
+    /// no sync saved a user; otherwise, including when the user can't be read, it turns off.
     ///
     /// Cloud syncs and companion-record reads and writes stop while the user is read, so none
     /// of them exchanges this library with another account's iCloud data. They resume when the
     /// user is unchanged, including a series pick's save, which waits for the check
     /// (`waitForCloudUserChecks()`).
-    func cloudAccountChanged() async {
+    ///
+    /// `atLaunch` checks for a change made while the app wasn't running, which posts no notice.
+    /// It keeps storage on for a user that can't be read, as when the Apple TV is offline, and
+    /// leaves starting cloud work to the caller.
+    func cloudAccountChanged(atLaunch: Bool = false) async {
         let toggles = iCloudToggles
         // Waiters resume after the outcome below, so a changed user's storage is already off.
         defer {
@@ -1624,18 +1638,30 @@ final class LibraryModel {
             // Book Wall keeps waiting for launch's read: it resumes below, or turning storage
             // off ends the wait.
             if hasStarted { invalidateCloudSync() }
-            let sameUser = await dependencies.cloudUserRecordName() == previous
+            let user = await dependencies.cloudUserRecordName()
             cloudUserChecks -= 1
-            if sameUser {
-                resumeCloudWork()
+            if user == previous || (atLaunch && user == nil) {
+                if !atLaunch { resumeCloudWork() }
                 return
             }
-        }
-        // A storage toggle made while CloudKit answered is the reader's newer choice.
-        guard iCloudToggles == toggles else {
+        } else if iCloudEnabled {
+            // No sync saved a user, as before a reader signs in to iCloud when a failed sync asks
+            // them to, so storage stays on. A sync that read no user, such as one offline, saves
+            // none either; storage then stays on for whichever user follows, as such syncs do.
             resumeCloudWork()
             return
         }
+        // A storage toggle made while CloudKit answered is the reader's newer choice.
+        guard iCloudToggles == toggles else {
+            if !atLaunch { resumeCloudWork() }
+            return
+        }
+        stopSyncingForChangedAccount()
+    }
+
+    /// Turns storage off for a new iCloud user, so this library and that user's iCloud data
+    /// stay apart until the reader turns storage on again.
+    private func stopSyncingForChangedAccount() {
         dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
         cloudBacked = false
         iCloudEnabled = false
@@ -1645,7 +1671,7 @@ final class LibraryModel {
             rebuildLibrary()
         }
         cloudStatus =
-            "Your iCloud account changed. Turn iCloud Storage on to sync this library with the current account."
+            "Your iCloud account changed, so iCloud storage turned off. Turn it on to sync this library with the current account."
     }
 
     /// Returns once no `cloudAccountChanged()` call is reading the iCloud user.
@@ -1686,6 +1712,15 @@ final class LibraryModel {
                     // the one this library synced with (`cloudAccountChanged()`).
                     let userBefore = await dependencies.cloudUserRecordName()
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
+                        return
+                    }
+                    // A user other than the last sync's means the account changed, perhaps while
+                    // launch couldn't read the user.
+                    if let userBefore,
+                        let previous = dependencies.defaults.string(forKey: Self.cloudUserKey),
+                        userBefore != previous
+                    {
+                        stopSyncingForChangedAccount()
                         return
                     }
                     let remote = try await dependencies.syncCloud(archive)

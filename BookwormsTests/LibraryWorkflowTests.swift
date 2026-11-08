@@ -735,6 +735,8 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
         // A pick made while the check finds another user is never saved: storage turns off.
+        // Turning storage on above cleared the saved user; a sync saves it again.
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         savesBefore = saves.count
         cloudUser = "_fictional_user_2"
         duringUserRead = { model.pickSeries(8, for: book) }
@@ -2559,6 +2561,92 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.cloudAccountChanged()
         XCTAssertFalse(model.iCloudEnabled)
         XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+        XCTAssertEqual(
+            model.cloudStatus,
+            "Your iCloud account changed, so iCloud storage turned off. Turn it on to sync this library with the current account."
+        )
+    }
+
+    /// CloudKit posts no notice for an account change made while the app wasn't running, so
+    /// launch compares the user with the last sync's before any sync or companion read. A user
+    /// it can't read, as offline, keeps storage on; a later sync that reads another user then
+    /// stops before it uploads.
+    func testLaunchChecksTheICloudUserBeforeCloudWork() async throws {
+        for launchUser in ["_fictional_user_2", nil] as [String?] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+            try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            var syncs = 0
+            dependencies.syncCloud = {
+                syncs += 1
+                return $0
+            }
+            var reads = 0
+            dependencies.fetchSpineDesigns = { _, _ in
+                reads += 1
+                return ([:], true)
+            }
+            var user = launchUser
+            dependencies.cloudUserRecordName = { user }
+            dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            if launchUser != nil {
+                XCTAssertFalse(model.iCloudEnabled)
+                XCTAssertEqual(syncs, 0)
+                XCTAssertEqual(reads, 0)
+                XCTAssertTrue(model.cloudStatus.hasPrefix("Your iCloud account changed"))
+                continue
+            }
+            XCTAssertTrue(model.iCloudEnabled)
+            XCTAssertEqual(syncs, 1)
+            XCTAssertGreaterThan(reads, 0)
+
+            user = "_fictional_user_2"
+            model.queueCloudSync(delay: .zero)
+            await model.waitForCloudSync()
+            XCTAssertFalse(model.iCloudEnabled)
+            XCTAssertEqual(syncs, 1, "The sync stopped before it uploaded")
+        }
+    }
+
+    /// Before any sync saved a user, an account notice, such as the one that follows signing
+    /// in to iCloud as a failed sync asks, keeps storage on and syncs.
+    func testSigningInToICloudAfterAFailedSyncKeepsStorageOn() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        var signedIn = false
+        dependencies.syncCloud = {
+            guard signedIn else { throw CloudStorageError.unavailable }
+            return $0
+        }
+        dependencies.cloudUserRecordName = { signedIn ? "_fictional_user_1" : nil }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            model.cloudStatus,
+            "iCloud could not sync. Local data is retained. Sign in to iCloud in Apple TV Settings, then sync again."
+        )
+
+        signedIn = true
+        await model.cloudAccountChanged()
+        XCTAssertTrue(model.iCloudEnabled)
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            fixture.defaults.string(forKey: LibraryModel.cloudUserKey), "_fictional_user_1")
+        XCTAssertTrue(model.cloudStatus.hasPrefix("Saved to iCloud."))
     }
 
     /// No sync starts while `cloudAccountChanged()` reads the user, so a sync queued then can't
@@ -2654,7 +2742,6 @@ final class LibraryWorkflowTests: XCTestCase {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
         fixture.defaults.set(true, forKey: "iCloudEnabled")
-        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
@@ -2675,6 +2762,7 @@ final class LibraryWorkflowTests: XCTestCase {
         await library.start()
         await library.waitForCloudSync()
 
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         toggleDuringRead = true
         await library.cloudAccountChanged()
         XCTAssertFalse(toggleDuringRead)
@@ -2732,6 +2820,7 @@ final class LibraryWorkflowTests: XCTestCase {
             calls += 1
             return try await (calls == 1 ? old : current).value()
         }
+        dependencies.cloudUserRecordName = { nil }
         dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -2744,6 +2833,7 @@ final class LibraryWorkflowTests: XCTestCase {
             oldFinished.fulfill()
         }
         await fulfillment(of: [waiting], timeout: 5)
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         await model.cloudAccountChanged()
         model.iCloudEnabled = true
         await fulfillment(of: [current.started], timeout: 5)

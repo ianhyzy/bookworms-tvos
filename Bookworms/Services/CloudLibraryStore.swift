@@ -175,7 +175,7 @@ enum CloudStorageError: LocalizedError {
         case .simulator:
             "iCloud sync requires a signed Apple TV build. The simulator uses local storage."
         case .unavailable:
-            "Sign in to iCloud on Apple TV to save your library and designs. Local data is still available."
+            "Sign in to iCloud in Apple TV Settings, then sync again."
         case .newerVersion:
             "Update the app to read this iCloud library. Your cloud data is unchanged."
         case .conflict:
