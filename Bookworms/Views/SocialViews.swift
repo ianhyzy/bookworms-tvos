@@ -868,6 +868,8 @@ struct ReviewReadingView: View {
                 // The text holds focus so Up, Down, and Back reach this sheet.
                 .focusable()
                 .focusEffectDisabled()
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Press up or down to read more. Press Back to close the review.")
                 .accessibilityIdentifier("review-text")
             }
         }
