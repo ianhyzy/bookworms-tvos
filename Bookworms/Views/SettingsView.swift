@@ -348,20 +348,25 @@ struct SettingsView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("spine-makers")
             }
-            if designs.undesigned > 0 {
-                note(
-                    designs.undesigned == 1
-                        ? "1 book has no design yet, so it gets the Apple TV's own look."
-                        : "\(designs.undesigned) books have no design yet, so they get the Apple TV's own look."
-                )
-            }
-            if !library.iCloudEnabled {
-                note("iCloud storage is off, so no new designs arrive. Turn it on in General.")
+            // With storage off, designs are hidden rather than missing. The example profile
+            // keeps its own designs either way.
+            if !library.isExample {
+                if !library.iCloudEnabled {
+                    note(
+                        "iCloud storage is off, so Book Wall uses the Apple TV's own looks. Turn it on in General."
+                    )
+                } else if designs.undesigned > 0 {
+                    note(
+                        designs.undesigned == 1
+                            ? "1 book has no design yet, so it gets the Apple TV's own look."
+                            : "\(designs.undesigned) books have no design yet, so they get the Apple TV's own look."
+                    )
+                }
             }
         } trailing: {
             settingLabel(
                 "Which devices design spines",
-                "Each iPhone and Mac designs with its own model. To change a device's model, use Choose model in its Spines tab."
+                "Each iPhone and Mac designs with its own model. To change a device's model, use Choose model in Spines on that device."
             )
             settingLabel(
                 "Why a book can look different elsewhere",
@@ -499,7 +504,9 @@ struct SettingsView: View {
                 .font(.system(size: 26))
                 .performanceGlassButton()
                 .disabled(!library.iCloudEnabled)
-            note("Turning this off keeps saved cloud data. Covers stay cached locally.")
+            note(
+                "Turning this off keeps your data in iCloud. This Apple TV then shows its own spine looks, default covers, and default series."
+            )
         }
     }
 
