@@ -114,13 +114,18 @@ struct ShelfView: View {
         bookWallPreparation.prepared == nil
             || (bookWallPreparation.failure != nil && !wallDetail.isPresented)
     }
+    /// Back from the dialog shows My Shelf, or Settings when Book Wall is the only sidebar view,
+    /// since My Shelf would fall back to Book Wall and its dialog. Either way the focus engine
+    /// places focus.
     private var waitsForBookWall: Binding<Bool> {
         Binding(
-            get: { coordinator.current == .bookWall && needsBookWallDialog },
+            get: { sidebarItem == .view(.bookWall) && needsBookWallDialog },
             set: { presented in
-                if !presented && needsBookWallDialog { showView(.shelf) }
+                guard !presented && needsBookWallDialog else { return }
+                if showsOnlyBookWall { sidebarItem = .settings } else { showView(.shelf) }
             })
     }
+    private var showsOnlyBookWall: Bool { sidebarViews == [.bookWall] }
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
     @State private var selectedBook: Book?
@@ -373,6 +378,10 @@ struct ShelfView: View {
                         try? await Task.sleep(for: .seconds(10))
                         guard !Task.isCancelled else { return }
                     }
+                    // Scenario hook: keeps the waiting dialog up, so UI tests can press in it.
+                    if ProcessInfo.processInfo.arguments.contains("--test-wall-never-prepares") {
+                        return
+                    }
                 #endif
                 await bookWallPreparation.prepare(
                     data.books, sources: data.sources, designs: data.designs, looks: data.looks,
@@ -602,7 +611,9 @@ struct ShelfView: View {
                     )
                     .appFont(size: 28)
                 }
-                Button("Back to My Shelf") { showView(.shelf) }
+                if !showsOnlyBookWall {
+                    Button("Back to My Shelf") { showView(.shelf) }
+                }
             }
             .padding(72)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
