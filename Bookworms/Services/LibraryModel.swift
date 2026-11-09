@@ -78,6 +78,24 @@ final class LibraryModel {
     /// `seriesSources`.
     private(set) var designMakers = SpineDesignMakers()
 
+    /// The note under **Settings → Spines**' model counts. With storage off, designs are hidden
+    /// rather than missing, so it says Book Wall uses the Apple TV's own looks; with storage on,
+    /// it counts the books with no design yet. The example profile keeps its own designs either
+    /// way, so it has no note.
+    var spinesNote: String? {
+        guard !isExample else { return nil }
+        guard iCloudEnabled else {
+            return
+                "iCloud storage is off, so Book Wall uses the Apple TV's own looks. Turn it on in General."
+        }
+        switch designMakers.undesigned {
+        case 0: return nil
+        case 1: return "1 book has no design yet, so it gets the Apple TV's own look."
+        case let count:
+            return "\(count) books have no design yet, so they get the Apple TV's own look."
+        }
+    }
+
     /// What Book Wall draws `books` with, by book ID.
     ///
     /// A book whose look group (`SeriesDesigns.lookKey(of:link:)`, with `links`) has a series
@@ -621,9 +639,11 @@ final class LibraryModel {
         guard allBooks.isEmpty else {
             return "No books match your shelf choices. Change Collection in Settings → Shelf."
         }
-        return isLoading
-            ? "Loading your books…"
-            : "Your library has no books yet. Books you add appear after the next sync."
+        if !sourceErrors.isEmpty {
+            return "Your books couldn't load. Check Settings → Sources, then sync again."
+        }
+        if isLoading || enabledSnapshots().isEmpty { return "Loading your books…" }
+        return "Your library has no books yet. Books you add appear after the next sync."
     }
     var hardcoverEnabled: Bool {
         didSet {

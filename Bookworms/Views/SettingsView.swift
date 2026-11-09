@@ -348,21 +348,7 @@ struct SettingsView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("spine-makers")
             }
-            // With storage off, designs are hidden rather than missing. The example profile
-            // keeps its own designs either way.
-            if !library.isExample {
-                if !library.iCloudEnabled {
-                    note(
-                        "iCloud storage is off, so Book Wall uses the Apple TV's own looks. Turn it on in General."
-                    )
-                } else if designs.undesigned > 0 {
-                    note(
-                        designs.undesigned == 1
-                            ? "1 book has no design yet, so it gets the Apple TV's own look."
-                            : "\(designs.undesigned) books have no design yet, so they get the Apple TV's own look."
-                    )
-                }
-            }
+            if let spinesNote = library.spinesNote { note(spinesNote) }
         } trailing: {
             settingLabel(
                 "Which devices design spines",

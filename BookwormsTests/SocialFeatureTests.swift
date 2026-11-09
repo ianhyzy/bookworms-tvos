@@ -31,7 +31,8 @@ final class SocialFeatureTests: XCTestCase {
     }
 
     /// An empty Feed asks the reader to connect only before any account's data loads: it says
-    /// it's loading while social data loads, and that there's no activity once it has.
+    /// it's loading while social data loads, that there's no activity once it has, and that it
+    /// couldn't load after a failure other than a denied login or permission.
     func testEmptyFeedMessageFollowsTheLoad() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "EmptyFeed.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -52,6 +53,18 @@ final class SocialFeatureTests: XCTestCase {
         await load.value
         XCTAssertTrue(model.activities.isEmpty)
         XCTAssertEqual(model.emptyFeedMessage, "People you follow have no recent activity.")
+
+        let offlineClient = SocialFixtureClient()
+        await offlineClient.fail(with: .offline)
+        let offline = SocialLibraryModel(
+            client: offlineClient,
+            defaults: try XCTUnwrap(UserDefaults(suiteName: "EmptyFeed.\(UUID())")),
+            cacheRoot: root.appending(path: "offline"))
+        await offline.load(token: "hc_pat_fixture", readerID: 2, enabledViews: [.following])
+        XCTAssertFalse(offline.isLoading)
+        XCTAssertEqual(
+            offline.emptyFeedMessage,
+            "Activity from people you follow couldn't load. Try again later.")
     }
 
     func testDisabledViewsDoNotFetchUnusedDatasets() async throws {

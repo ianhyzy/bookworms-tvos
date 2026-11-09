@@ -2267,6 +2267,30 @@ final class LibraryWorkflowTests: XCTestCase {
         }
     }
 
+    /// **Settings → Spines** counts the books with no design yet only while storage is on,
+    /// since turning it off hides designs rather than removing them.
+    func testSpinesNoteCountsUndesignedBooksOnlyWithStorageOn() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(
+            model.spinesNote, "1 book has no design yet, so it gets the Apple TV's own look.")
+
+        model.iCloudEnabled = false
+        XCTAssertEqual(
+            model.spinesNote,
+            "iCloud storage is off, so Book Wall uses the Apple TV's own looks. Turn it on in General."
+        )
+    }
+
     func testAFailedLookSaveDoesNotStopTheOtherGroups() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -2467,7 +2491,8 @@ final class LibraryWorkflowTests: XCTestCase {
     }
 
     /// The empty shelf names the setting that hides a connected reader's books, which the
-    /// screen labels Collection, and tells a library with no books apart.
+    /// screen labels Collection, and tells a library with no books apart from one that is
+    /// loading or couldn't load.
     func testEmptyShelfHintNamesWhyTheShelfIsEmpty() async throws {
         let signedOut = try LibraryWorkflowFixture()
         defer { signedOut.cleanUp() }
@@ -2498,6 +2523,25 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(
             hidden.emptyShelfHint,
             "No books match your shelf choices. Change Collection in Settings → Shelf.")
+
+        let loading = try LibraryWorkflowFixture()
+        defer { loading.cleanUp() }
+        var dependencies = loading.dependencies()
+        var heldFetch: CheckedContinuation<Void, Never>?
+        dependencies.fetchHardcover = { _, _ in
+            await withCheckedContinuation { heldFetch = $0 }
+            throw URLError(.notConnectedToInternet)
+        }
+        let first = LibraryModel(dependencies: dependencies)
+        let start = Task { await first.start() }
+        for _ in 0..<100 where heldFetch == nil { await Task.yield() }
+        XCTAssertEqual(first.emptyShelfHint, "Loading your books…")
+        try XCTUnwrap(heldFetch).resume()
+        await start.value
+        XCTAssertNotNil(first.sourceErrors["hardcover"])
+        XCTAssertEqual(
+            first.emptyShelfHint,
+            "Your books couldn't load. Check Settings → Sources, then sync again.")
     }
 
     func testSnapshotInstalledDuringWorklistReadSurvivesCloudSync() async throws {
@@ -3524,6 +3568,7 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         model.iCloudEnabled = false
         XCTAssertTrue(model.isExample, "Turning storage off keeps the example's records")
         XCTAssertEqual(model.spineDesigns, profile.designs)
+        XCTAssertNil(model.spinesNote, "The example keeps its designs, so Spines has no note")
 
         model.iCloudEnabled = true
         XCTAssertFalse(model.isExample)

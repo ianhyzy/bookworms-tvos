@@ -50,12 +50,16 @@ final class SocialLibraryModel {
     }
     private(set) var status = "Connect Hardcover to use social views."
     private(set) var isLoading = false
+    /// Whether the latest load failed for a reason other than a denied login or permission,
+    /// such as the network, so asking the reader to connect would be wrong.
+    private(set) var loadFailed = false
     /// What Feed shows without activity: a loading note while social data loads, a note that
-    /// followed readers have no activity once an account's data has loaded, and otherwise how to
-    /// connect.
+    /// followed readers have no activity once an account's data has loaded, a note that the
+    /// load failed, and otherwise how to connect.
     var emptyFeedMessage: String {
         if isLoading { return "Loading activity from people you follow…" }
         if snapshot != nil { return "People you follow have no recent activity." }
+        if loadFailed { return "Activity from people you follow couldn't load. Try again later." }
         return
             "Connect Hardcover with social read permissions in Settings. Activity from people you follow appears here."
     }
@@ -108,6 +112,7 @@ final class SocialLibraryModel {
             identity = nil
             snapshot = nil
             isLoading = false
+            loadFailed = false
             status = "Connect Hardcover to use social views."
             return
         }
@@ -155,6 +160,7 @@ final class SocialLibraryModel {
         }
         if PerformanceDiagnostics.isolates("background") { return }
         isLoading = true
+        loadFailed = false
         let task = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -321,6 +327,7 @@ final class SocialLibraryModel {
                             "Hardcover denied access to social data."
                         }
                 default:
+                    loadFailed = true
                     status =
                         "Social data could not refresh. Cached data is retained. "
                         + UserFacingError.hardcoverMessage(error)
@@ -351,6 +358,7 @@ final class SocialLibraryModel {
         try Task.checkCancellation()
         guard request == requestRevision else { throw CancellationError() }
         snapshot = value
+        loadFailed = false
         for (dataset, date) in value.dates {
             defaults.set(date, forKey: "socialSuccess.\(value.owner.id).\(dataset)")
         }
