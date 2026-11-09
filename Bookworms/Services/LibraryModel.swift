@@ -2083,18 +2083,20 @@ final class LibraryModel {
         await cloudTask?.value
     }
 
-    /// Waits for the currently queued cloud operation for at most `limit`. A sync that takes
-    /// longer keeps running; only the wait ends.
+    /// Waits for the currently queued cloud operation for at most `limit`. A running iCloud user
+    /// check holds the sync back (`cloudUserChecks`), so the wait covers the check and the sync
+    /// it then queues. A sync that takes longer keeps running; only the wait ends.
     private func waitForCloudSync(atMost limit: Duration) async {
-        guard let task = cloudTask else { return }
+        guard cloudTask != nil || cloudUserChecks > 0 else { return }
         let (ended, end) = AsyncStream.makeStream(of: Void.self)
         let sleep = dependencies.sleep
         let timer = Task {
             try? await sleep(limit)
             end.finish()
         }
-        Task {
-            await task.value
+        Task { [weak self] in
+            await self?.waitForCloudUserChecks()
+            await self?.cloudTask?.value
             end.finish()
         }
         for await _ in ended {}

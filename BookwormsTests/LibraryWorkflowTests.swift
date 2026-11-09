@@ -3157,6 +3157,39 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(reads, 1, "The read before the fetch replaces the read after the check")
     }
 
+    /// Launch's iCloud user check holds the sync back, and a due refresh waits for the check
+    /// and the sync that follows it, so a fresh iCloud snapshot still skips the fetch.
+    func testADueLaunchFetchWaitsForTheICloudUserCheckAndItsSync() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        let remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 3_600)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+        }
+        dependencies.cloudUserRecordName = { "_fictional_user_1" }
+        var reads = 0
+        dependencies.syncCloud = { _ in
+            reads += 1
+            return CloudLibraryArchive(sources: [remote])
+        }
+        var fetches = 0
+        dependencies.fetchHardcover = { _, _ in
+            fetches += 1
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(3)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(fetches, 0)
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(model.books.map(\.id), [2])
+    }
+
     func testICloudReadBeforeAFetchRechecksEachSource() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
