@@ -50,6 +50,25 @@ final class SocialLibraryModel {
     }
     private(set) var status = "Connect Hardcover to use social views."
     private(set) var isLoading = false
+    /// Whether the latest load failed before Feed's activity settled, for a reason other than a
+    /// denied login or permission, such as the network, so asking the reader to connect would be
+    /// wrong. A failure in a library fetched after the feed leaves it false.
+    private(set) var loadFailed = false
+    /// What Feed shows without activity: a loading note while social data loads, a note that
+    /// followed readers have no activity once their activity has loaded and the latest load
+    /// succeeded, a note that activity couldn't load after a failed load or while an account's
+    /// data lacks activity, and otherwise how to connect.
+    var emptyFeedMessage: String {
+        if isLoading { return "Loading activity from people you follow…" }
+        if !loadFailed, snapshot?.dates["feed"] != nil {
+            return "People you follow have no recent activity."
+        }
+        if loadFailed || snapshot != nil {
+            return "Activity from people you follow couldn't load. Try again later."
+        }
+        return
+            "Connect Hardcover with social read permissions in Settings. Activity from people you follow appears here."
+    }
     private(set) var revision = 0
     @ObservationIgnored private let client: any SocialLibraryFetching
     @ObservationIgnored private let defaults: UserDefaults
@@ -99,6 +118,7 @@ final class SocialLibraryModel {
             identity = nil
             snapshot = nil
             isLoading = false
+            loadFailed = false
             status = "Connect Hardcover to use social views."
             return
         }
@@ -146,6 +166,7 @@ final class SocialLibraryModel {
         }
         if PerformanceDiagnostics.isolates("background") { return }
         isLoading = true
+        loadFailed = false
         let task = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -157,6 +178,7 @@ final class SocialLibraryModel {
             var token = token
             var renewToken = renewToken
             var renewalFailed = false
+            var feedSettled = false
             // Sends one request. The first rejected token is renewed, and every later request in
             // this load uses the replacement.
             @MainActor func authorized<T>(_ send: (String) async throws -> T) async throws -> T {
@@ -244,6 +266,7 @@ final class SocialLibraryModel {
                         }
                     }
                 }
+                feedSettled = true
                 if needsComparison || needsPicks,
                     begin(
                         owner: current.owner.id, dataset: "mine", manual: manual,
@@ -312,6 +335,7 @@ final class SocialLibraryModel {
                             "Hardcover denied access to social data."
                         }
                 default:
+                    loadFailed = !feedSettled
                     status =
                         "Social data could not refresh. Cached data is retained. "
                         + UserFacingError.hardcoverMessage(error)
@@ -342,6 +366,7 @@ final class SocialLibraryModel {
         try Task.checkCancellation()
         guard request == requestRevision else { throw CancellationError() }
         snapshot = value
+        loadFailed = false
         for (dataset, date) in value.dates {
             defaults.set(date, forKey: "socialSuccess.\(value.owner.id).\(dataset)")
         }

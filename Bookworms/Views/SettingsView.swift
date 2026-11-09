@@ -348,20 +348,11 @@ struct SettingsView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("spine-makers")
             }
-            if designs.undesigned > 0 {
-                note(
-                    designs.undesigned == 1
-                        ? "1 book has no design yet, so it gets the Apple TV's own look."
-                        : "\(designs.undesigned) books have no design yet, so they get the Apple TV's own look."
-                )
-            }
-            if !library.iCloudEnabled {
-                note("iCloud storage is off, so no new designs arrive. Turn it on in General.")
-            }
+            if let spinesNote = library.spinesNote { note(spinesNote) }
         } trailing: {
             settingLabel(
                 "Which devices design spines",
-                "Each iPhone and Mac designs with its own model. To change a device's model, use Choose model in its Spines tab."
+                "Each iPhone and Mac designs with its own model. To change a device's model, use Choose model in Spines on that device."
             )
             settingLabel(
                 "Why a book can look different elsewhere",
@@ -494,12 +485,19 @@ struct SettingsView: View {
             Toggle("iCloud storage", isOn: $library.iCloudEnabled)
                 .font(.system(size: 26))
                 .accessibilityIdentifier("icloud-storage")
-            note(library.cloudStatus).accessibilityIdentifier("icloud-status")
+            if !library.cloudStatus.isEmpty {
+                note(library.cloudStatus).accessibilityIdentifier("icloud-status")
+            }
             Button("Sync iCloud now") { library.queueCloudSync() }
                 .font(.system(size: 26))
                 .performanceGlassButton()
                 .disabled(!library.iCloudEnabled)
-            note("Turning this off keeps saved cloud data. Covers stay cached locally.")
+            note(
+                library.iCloudEnabled
+                    ? "Turning this off doesn't remove data already synced to iCloud. This Apple TV then shows only designs made by the Apple TV app. To delete the data from iCloud, delete it from another device."
+                    : "Turn this on to show the spine designs, covers, and series you choose in Bookworms on iPhone and Mac."
+            )
+            .accessibilityIdentifier("icloud-footer")
         }
     }
 

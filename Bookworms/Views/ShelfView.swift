@@ -114,12 +114,20 @@ struct ShelfView: View {
         bookWallPreparation.prepared == nil
             || (bookWallPreparation.failure != nil && !wallDetail.isPresented)
     }
+    /// Back from the dialog shows `bookWallExit`, or Settings when there is none. Either way the
+    /// focus engine places focus.
     private var waitsForBookWall: Binding<Bool> {
         Binding(
-            get: { coordinator.current == .bookWall && needsBookWallDialog },
+            get: { sidebarItem == .view(.bookWall) && needsBookWallDialog },
             set: { presented in
-                if !presented && needsBookWallDialog { showView(.shelf) }
+                guard !presented && needsBookWallDialog else { return }
+                if let bookWallExit { showView(bookWallExit) } else { sidebarItem = .settings }
             })
+    }
+    /// The view that leaving the Book Wall dialog shows: My Shelf, else the first other sidebar
+    /// view. `nil` when Book Wall is the only view.
+    private var bookWallExit: BookwormsView? {
+        sidebarViews.contains(.shelf) ? .shelf : sidebarViews.first { $0 != .bookWall }
     }
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
@@ -373,6 +381,10 @@ struct ShelfView: View {
                         try? await Task.sleep(for: .seconds(10))
                         guard !Task.isCancelled else { return }
                     }
+                    // Scenario hook: keeps the waiting dialog up, so UI tests can press in it.
+                    if ProcessInfo.processInfo.arguments.contains("--test-wall-never-prepares") {
+                        return
+                    }
                 #endif
                 await bookWallPreparation.prepare(
                     data.books, sources: data.sources, designs: data.designs, looks: data.looks,
@@ -602,7 +614,9 @@ struct ShelfView: View {
                     )
                     .appFont(size: 28)
                 }
-                Button("Back to My Shelf") { showView(.shelf) }
+                if let bookWallExit {
+                    Button("Back to \(bookWallExit.rawValue)") { showView(bookWallExit) }
+                }
             }
             .padding(72)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
@@ -1400,13 +1414,9 @@ struct ShelfView: View {
                     : library.isConnected ? "Your shelf is waiting" : "Make room for your books"
             )
             .appFont(size: 42).foregroundStyle(palette.text)
-            Text(
-                library.isConnected
-                    ? "No books match your shelf choices. Change Show in Settings → Shelf."
-                    : "Connect a source in Settings to explore your books."
-            )
-            .appFont(size: 28).foregroundStyle(palette.text).multilineTextAlignment(.center)
-            .frame(maxWidth: 900)
+            Text(library.emptyShelfHint)
+                .appFont(size: 28).foregroundStyle(palette.text).multilineTextAlignment(.center)
+                .frame(maxWidth: 900)
             // The buttons keep the glass styles' own label colors, which change with focus.
             if let filter = library.shelfFilter {
                 Button(action: clearShelfFilter) {

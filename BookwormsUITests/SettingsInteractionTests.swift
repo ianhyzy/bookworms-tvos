@@ -129,15 +129,19 @@ final class SettingsInteractionTests: XCTestCase {
         RemoteNavigation.press(.right, in: app, expecting: spines)
     }
 
-    /// Without designs, **Settings → Spines** lists no models and says books get the Apple TV's
-    /// own look, and that iCloud storage is off.
+    /// Without designs and with iCloud storage off, **Settings → Spines** lists no models and
+    /// says Book Wall uses the Apple TV's own looks, without counting books as undesigned.
     func testSpinesWithoutDesignsExplainsBookWallsOwnLook() {
         let app = openSettings("Spines")
         XCTAssertTrue(
-            text(containing: "get the Apple TV's own look", in: app).waitForExistence(timeout: 5)
+            text(
+                containing: "iCloud storage is off, so Book Wall uses the Apple TV's own looks",
+                in: app
+            )
+            .waitForExistence(timeout: 5)
         )
         XCTAssertFalse(app.descendants(matching: .any)["spine-makers"].exists)
-        XCTAssertTrue(text(containing: "iCloud storage is off", in: app).exists)
+        XCTAssertFalse(text(containing: "no design yet", in: app).exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Settings spines without designs"
         screenshot.lifetime = .keepAlways
@@ -181,13 +185,18 @@ final class SettingsInteractionTests: XCTestCase {
         let app = openSettings("General")
         let toggle = app.descendants(matching: .any)["icloud-storage"].firstMatch
         RemoteNavigation.moveFocus(to: toggle, in: app)
-        // iCloud storage starts off.
+        // iCloud storage starts off, with no status.
         XCTAssertFalse(app.buttons["Sync iCloud now"].isEnabled)
+        XCTAssertFalse(app.staticTexts["icloud-status"].exists)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["Sync iCloud now"].isEnabled)
+        XCTAssertTrue(app.staticTexts["icloud-footer"].label.hasPrefix("Turning this off"))
         XCUIRemote.shared.press(.select)
         XCTAssertFalse(app.buttons["Sync iCloud now"].isEnabled)
-        XCTAssertTrue(app.staticTexts["icloud-status"].label.contains("off"))
+        // The toggle shows Off, so no status repeats it, and the footer says what turning it
+        // on adds.
+        XCTAssertFalse(app.staticTexts["icloud-status"].exists)
+        XCTAssertTrue(app.staticTexts["icloud-footer"].label.hasPrefix("Turn this on"))
     }
 
     func testWoodBackgroundToggleCanBeFocusedAndToggled() {

@@ -88,6 +88,7 @@
                 {
                     preferences.enabled.append(.bookWall)
                 }
+                if arguments.contains("--test-only-book-wall") { preferences.enabled = [.bookWall] }
                 // Ambient mode would otherwise include every view, making social views active and
                 // their unstubbed Hardcover queries race the scenario's network checks.
                 preferences.ambientViews = []

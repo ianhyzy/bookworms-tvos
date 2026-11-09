@@ -67,6 +67,52 @@ final class BookWallNavigationTests: XCTestCase {
         RemoteNavigation.pressWithoutMoving(.down, in: app, from: first)
     }
 
+    /// With Book Wall the only sidebar view, the waiting dialog offers no way back to My Shelf,
+    /// which would show the wall again. Back shows Settings in one focus update, which the focus
+    /// engine places, each time the dialog shows, and Back can then leave the app.
+    func testBackFromTheWaitingDialogOpensSettingsWhenBookWallIsTheOnlyView() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--test-scenario=artwork", "--test-only-book-wall", "--test-wall-never-prepares",
+            "--focus-probe", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+        ]
+        app.launchEnvironment["TZ"] = "UTC"
+        app.launch()
+        let waiting = app.staticTexts["Preparing Book Wall"]
+        let sections = app.descendants(matching: .any)["settings-sections"]
+        // The focus engine can place focus in the sidebar or in Settings, whose My Shelf toggle
+        // shares a sidebar row's label, so this tells them apart by position.
+        func focusIsInSidebar() -> Bool {
+            let focused = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "hasFocus == true")).allElementsBoundByIndex.last
+            return focused.map { $0.frame.maxX < sections.frame.minX } ?? false
+        }
+        for attempt in 0..<2 {
+            if attempt > 0 {
+                if !focusIsInSidebar() { XCUIRemote.shared.press(.menu) }
+                let sidebar = XCTNSPredicateExpectation(
+                    predicate: NSPredicate { _, _ in focusIsInSidebar() }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [sidebar], timeout: 5), .completed)
+                RemoteNavigation.focusSidebarItem("Book Wall", in: app)
+                XCUIRemote.shared.press(.select)
+            }
+            XCTAssertTrue(waiting.waitForExistence(timeout: 60))
+            XCTAssertFalse(app.buttons["Back to My Shelf"].exists)
+            let before = RemoteNavigation.transitions(app)
+            XCUIRemote.shared.press(.menu)
+            XCTAssertTrue(sections.waitForExistence(timeout: 5))
+            RemoteNavigation.assertSettled(
+                app, after: before, expectedUpdates: 1, file: #filePath, line: #line)
+            XCTAssertFalse(waiting.exists)
+        }
+        // Back from Settings content opens the sidebar, and Back from the sidebar leaves the app.
+        for _ in 0..<2 where app.state == .runningForeground {
+            XCUIRemote.shared.press(.menu)
+            _ = app.wait(for: .runningBackground, timeout: 3)
+        }
+        XCTAssertEqual(app.state, .runningBackground, "Back never left the app")
+    }
+
     func testRendererKeepsCountedFocusInEveryDirectionAndReplays() {
         let app = openWall()
         let first = app.buttons["book-wall-8"]

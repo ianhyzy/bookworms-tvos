@@ -30,6 +30,76 @@ final class SocialFeatureTests: XCTestCase {
             "Bookless events are left out")
     }
 
+    /// An empty Feed asks the reader to connect only before any account's data loads: it says
+    /// it's loading while social data loads, that there's no activity once it has, and that it
+    /// couldn't load after a failure other than a denied login or permission.
+    func testEmptyFeedMessageFollowsTheLoad() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "EmptyFeed.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        XCTAssertTrue(model.emptyFeedMessage.hasPrefix("Connect Hardcover"))
+
+        await client.holdReaderTwo()
+        let load = Task {
+            await model.load(
+                token: "hc_pat_fixture", readerID: 2, enabledViews: [.following, .comparison])
+        }
+        // The held library of reader 2 keeps the load running after the feed arrives.
+        for _ in 0..<100 where !model.isLoading { await Task.yield() }
+        XCTAssertEqual(model.emptyFeedMessage, "Loading activity from people you follow…")
+        await client.releaseReaderTwo()
+        await load.value
+        XCTAssertTrue(model.activities.isEmpty)
+        XCTAssertEqual(model.emptyFeedMessage, "People you follow have no recent activity.")
+
+        let offlineClient = SocialFixtureClient()
+        await offlineClient.fail(with: .offline)
+        let offline = SocialLibraryModel(
+            client: offlineClient,
+            defaults: try XCTUnwrap(UserDefaults(suiteName: "EmptyFeed.\(UUID())")),
+            cacheRoot: root.appending(path: "offline"))
+        await offline.load(token: "hc_pat_fixture", readerID: 2, enabledViews: [.following])
+        XCTAssertFalse(offline.isLoading)
+        XCTAssertEqual(
+            offline.emptyFeedMessage,
+            "Activity from people you follow couldn't load. Try again later.")
+    }
+
+    /// A first load whose Following request succeeds and Feed request fails says the activity
+    /// couldn't load, not that there is none.
+    func testEmptyFeedMessageReportsAFailedFeedAfterFollowingLoads() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "FailedFeed.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.failFeed()
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(token: "hc_pat_fixture", readerID: 2, enabledViews: [.following])
+        XCTAssertNotNil(model.snapshot, "Following installed before the feed failed")
+        XCTAssertTrue(model.loadFailed)
+        XCTAssertEqual(
+            model.emptyFeedMessage,
+            "Activity from people you follow couldn't load. Try again later.")
+    }
+
+    /// A library that fails after an empty feed loads leaves Feed saying there's no activity.
+    func testEmptyFeedMessageIgnoresALibraryFailureAfterTheFeedLoads() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "LateFailure.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.failLibrary(of: 2)
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(
+            token: "hc_pat_fixture", readerID: 2, enabledViews: [.following, .comparison])
+        let counts = await client.counts
+        XCTAssertEqual(counts["reader2"], 1, "The load reached reader 2's library")
+        XCTAssertFalse(model.loadFailed)
+        XCTAssertEqual(model.emptyFeedMessage, "People you follow have no recent activity.")
+    }
+
     func testDisabledViewsDoNotFetchUnusedDatasets() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Scope.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -724,6 +794,9 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         feedFailure = denied ? HardcoverError.forbidden : URLError(.timedOut)
     }
     func unfollow() { unfollowed = true }
+    private var failingReaders: Set<Int> = []
+    /// Answers requests for `reader`'s library with a network timeout.
+    func failLibrary(of reader: Int) { failingReaders.insert(reader) }
     private var deniedReaders: Set<Int> = []
     /// Answers requests for `reader`'s library with HTTP 403, as for a private account.
     func deny(reader: Int) { deniedReaders.insert(reader) }
@@ -754,6 +827,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         try authorize(token)
         counts["reader\(user)", default: 0] += 1
         if deniedReaders.contains(user) { throw HardcoverError.forbidden }
+        if failingReaders.contains(user) { throw URLError(.timedOut) }
         if user == 2 && holdsReaderTwo {
             await withCheckedContinuation { readerTwoGates.append($0) }
         }

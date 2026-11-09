@@ -30,6 +30,8 @@ enum HardcoverConnectionPhase: Equatable {
 /// link read reflects its save.
 private struct SeriesPick {
     let link: SeriesLinkV1?
+    /// The account the pick was made for, which a pick of the default series has no link to name.
+    let accountID: String
     /// Tells the pick from a later pick of the same book.
     let number: Int
     /// How many link reads had started when the pick's save finished; `nil` while it saves.
@@ -77,6 +79,24 @@ final class LibraryModel {
     /// Who made the designs the library's books draw, for **Settings → Spines**. Prepared with
     /// `seriesSources`.
     private(set) var designMakers = SpineDesignMakers()
+
+    /// The note under **Settings → Spines**' model counts. With storage off, designs are hidden
+    /// rather than missing, so it says Book Wall uses the Apple TV's own looks; with storage on,
+    /// it counts the books with no design yet. The example profile keeps its own designs either
+    /// way, so it has no note.
+    var spinesNote: String? {
+        guard !isExample else { return nil }
+        guard iCloudEnabled else {
+            return
+                "iCloud storage is off, so Book Wall uses the Apple TV's own looks. Turn it on in General."
+        }
+        switch designMakers.undesigned {
+        case 0: return nil
+        case 1: return "1 book has no design yet, so it gets the Apple TV's own look."
+        case let count:
+            return "\(count) books have no design yet, so they get the Apple TV's own look."
+        }
+    }
 
     /// What Book Wall draws `books` with, by book ID.
     ///
@@ -186,11 +206,11 @@ final class LibraryModel {
 
     /// Whether picking a series in `book`'s details can save it: always in the sample library,
     /// which keeps picks in memory, never in the read-only example profile, and otherwise for a
-    /// book of the active Hardcover account with iCloud storage on.
+    /// Hardcover book with iCloud storage on while companion records apply (`companionAccountID`).
     func canPickSeries(for book: Book) -> Bool {
         guard !isExample else { return false }
         return isSample
-            || (iCloudEnabled && hardcoverEnabled && activeHardcoverAccountID != nil
+            || (iCloudEnabled && hardcoverEnabled && companionAccountID != nil
                 && book.isHardcoverBook)
     }
 
@@ -208,7 +228,7 @@ final class LibraryModel {
     /// group gets one. The sample library keeps picks in memory.
     func pickSeries(_ seriesID: Int, for book: Book) {
         guard canPickSeries(for: book) else { return }
-        let accountID = isSample ? "" : activeHardcoverAccountID ?? ""
+        let accountID = isSample ? "" : companionAccountID ?? ""
         let old = seriesLinks[book.id]
         let chosen = SeriesLinkV1(
             accountID: accountID, bookID: book.id,
@@ -224,7 +244,7 @@ final class LibraryModel {
         seriesPickCount += 1
         let number = seriesPickCount
         seriesLinks[book.id] = link
-        pickedLinks[book.id] = SeriesPick(link: link, number: number)
+        pickedLinks[book.id] = SeriesPick(link: link, accountID: accountID, number: number)
         refreshSeriesSources()
         guard !isSample else { return }
         let previous = seriesLinkSave
@@ -242,14 +262,14 @@ final class LibraryModel {
                 // A pick that a later pick replaced still saves, so a failed later save can
                 // restore it.
                 guard iCloudEnabled, iCloudToggles == toggles,
-                    activeHardcoverAccountID == accountID
+                    companionAccountID == accountID
                 else { return }
                 try await dependencies.saveSeriesLink(chosen, accountID, book.id)
                 // A check that began during the save decides whether the pick stays.
                 await waitForCloudUserChecks()
             } catch {
                 // Turning iCloud storage off or changing accounts clears the links; keep them clear.
-                guard iCloudEnabled, activeHardcoverAccountID == accountID else { return }
+                guard iCloudEnabled, companionAccountID == accountID else { return }
                 // Saves run in order, so the earlier picks' saves have finished; one that failed
                 // gives way to what it would have restored.
                 var restored = (link: old, pick: earlierPick)
@@ -265,7 +285,7 @@ final class LibraryModel {
                 seriesLinks[book.id] = restored.link
                 pickedLinks[book.id] = restored.pick.map {
                     SeriesPick(
-                        link: $0.link, number: $0.number,
+                        link: $0.link, accountID: $0.accountID, number: $0.number,
                         savedAfterReads: $0.savedAfterReads ?? seriesLinkReads)
                 }
                 refreshSeriesSources()
@@ -345,10 +365,26 @@ final class LibraryModel {
     /// it began.
     @ObservationIgnored private var iCloudToggles = 0
     /// The Hardcover account whose library shows. Unsaved series picks belong to the account
-    /// they were made for, so a change drops them, including picks of the default series, which
-    /// no link marks with an account.
+    /// they were made for, so a change drops other accounts' picks, including picks of the
+    /// default series, which no link marks with an account. A credential-free shelf's picks,
+    /// made for `companionAccountID`, outlast that account's adoption.
     @ObservationIgnored private var activeHardcoverAccountID: String? {
-        didSet { if activeHardcoverAccountID != oldValue { pickedLinks = [:] } }
+        didSet {
+            if activeHardcoverAccountID != oldValue {
+                pickedLinks = pickedLinks.filter { $0.value.accountID == activeHardcoverAccountID }
+            }
+        }
+    }
+    /// The account whose companion records apply: the active account, else, without a Hardcover
+    /// credential, the account of the snapshot the shelf shows, such as one an iPhone saved to
+    /// iCloud. The legacy `"hardcover"` placeholder has no records. It isn't saved, so a newer
+    /// snapshot of another account takes over, and it never lists work (`SpineWorklistV1`).
+    private var companionAccountID: String? {
+        if let activeHardcoverAccountID { return activeHardcoverAccountID }
+        guard !hardcoverConnected, let id = activeHardcoverSnapshot()?.accountID,
+            id != "hardcover"
+        else { return nil }
+        return id
     }
     @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
     @ObservationIgnored private var spineDesignTaskIdentity:
@@ -603,6 +639,19 @@ final class LibraryModel {
     var isConnected: Bool {
         !isSample && ((hardcoverEnabled && hardcoverConnected) || (cwaEnabled && hasCWAPassword))
     }
+    /// The empty shelf's hint: how to connect a source, which setting to change when shelf
+    /// choices hide every book, or that a connected library has no books.
+    var emptyShelfHint: String {
+        guard isConnected else { return "Connect a source in Settings to explore your books." }
+        guard allBooks.isEmpty else {
+            return "No books match your shelf choices. Change Collection in Settings → Shelf."
+        }
+        if !sourceErrors.isEmpty {
+            return "Your books couldn't load. Check Settings → Sources, then sync again."
+        }
+        if isLoading || enabledSnapshots().isEmpty { return "Loading your books…" }
+        return "Your library has no books yet. Books you add appear after the next sync."
+    }
     var hardcoverEnabled: Bool {
         didSet {
             dependencies.defaults.set(hardcoverEnabled, forKey: "hardcoverEnabled")
@@ -641,6 +690,9 @@ final class LibraryModel {
                 // The example profile never syncs, so turning storage on asks for the iCloud
                 // library instead.
                 if isExample { isSample = false }
+                // Turning storage on syncs with the current iCloud user, so a sync's user check
+                // (`cloudAccountChanged()`) compares later users with that one.
+                dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
                 queueCloudSync()
             } else {
                 // Companion designs, covers, and series looks apply only with iCloud storage
@@ -657,7 +709,8 @@ final class LibraryModel {
                         rebuildLibrary()
                     }
                 }
-                cloudStatus = "iCloud storage is off. Existing cloud data is retained."
+                // The toggle shows Off and the footer explains the rest, so no status shows.
+                cloudStatus = ""
             }
         }
     }
@@ -802,6 +855,8 @@ final class LibraryModel {
             showSample()
             hasLoadedLibrarySnapshot = true
             hasReadCompanionRecords = true
+            // The sample library never syncs, so nothing replaces the launch status.
+            cloudStatus = ""
             return
         }
         aiRecords = dependencies.styleStore.load()
@@ -859,14 +914,22 @@ final class LibraryModel {
             if cloudSyncSuppressedForWelcome {
                 cloudStatus = "iCloud storage waits until setup finishes."
             } else {
-                queueSpineDesignRefresh()
-                // A due refresh below waits for this read, so it starts at once.
-                queueCloudSync(delay: .zero)
+                // The account may have changed while the app wasn't running, so the companion
+                // read, which can save series looks, and the sync wait for the user check. The
+                // check counts at once, so work the refresh below queues waits for it too.
+                if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
+                    cloudUserChecks += 1
+                    Task { [weak self] in await self?.checkCloudUserAtLaunch(previous: previous) }
+                } else {
+                    queueSpineDesignRefresh()
+                    // A due refresh below waits for this read, so it starts at once.
+                    queueCloudSync(delay: .zero)
+                }
             }
         } else {
-            cloudStatus = "iCloud storage is off."
+            cloudStatus = ""
         }
-        if spineDesignTask == nil {
+        if spineDesignTask == nil, cloudUserChecks == 0 {
             hasReadCompanionRecords = true
         } else {
             let limit = dependencies.companionReadLimit
@@ -1602,40 +1665,74 @@ final class LibraryModel {
     static let cloudUserKey = "iCloudUserRecordName"
 
     /// Handles `CKAccountChanged`, which CloudKit also posts when the same account's state
-    /// changes. Storage stays on while the signed-in user is the one the last sync used;
-    /// otherwise, including when the user can't be read, it turns off.
+    /// changes. Storage that is off stays off; turning it on clears the saved user anyway.
+    /// Storage stays on while the signed-in user is the one the last sync used, or when no sync
+    /// saved a user; otherwise, including when the user can't be read, it turns off.
     ///
     /// Cloud syncs and companion-record reads and writes stop while the user is read, so none
     /// of them exchanges this library with another account's iCloud data. They resume when the
     /// user is unchanged, including a series pick's save, which waits for the check
     /// (`waitForCloudUserChecks()`).
     func cloudAccountChanged() async {
+        guard iCloudEnabled else { return }
         let toggles = iCloudToggles
         // Waiters resume after the outcome below, so a changed user's storage is already off.
-        defer {
-            if cloudUserChecks == 0 {
-                let waiters = cloudUserCheckWaiters
-                cloudUserCheckWaiters = []
-                for waiter in waiters { waiter.resume() }
-            }
-        }
+        defer { resumeCloudUserCheckWaiters() }
         if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
             cloudUserChecks += 1
             // Book Wall keeps waiting for launch's read: it resumes below, or turning storage
             // off ends the wait.
             if hasStarted { invalidateCloudSync() }
-            let sameUser = await dependencies.cloudUserRecordName() == previous
+            let user = await dependencies.cloudUserRecordName()
             cloudUserChecks -= 1
-            if sameUser {
+            if user == previous {
                 resumeCloudWork()
                 return
             }
+        } else {
+            // No sync saved a user, as before a reader signs in to iCloud when a failed sync asks
+            // them to, so storage stays on. A sync that read no user, such as one offline, saves
+            // none either; storage then stays on for whichever user follows, as such syncs do.
+            resumeCloudWork()
+            return
         }
         // A storage toggle made while CloudKit answered is the reader's newer choice.
         guard iCloudToggles == toggles else {
             resumeCloudWork()
             return
         }
+        stopSyncingForChangedAccount()
+    }
+
+    /// Checks for an iCloud account change made while the app wasn't running, which posts no
+    /// notice, against `previous`, the user the last sync saved. `start()` counts this check in
+    /// `cloudUserChecks` before it starts the task, so launch doesn't wait for CloudKit while the
+    /// companion read and sync do. Another user turns storage off; a user that can't be read, as
+    /// when the Apple TV is offline, keeps it on.
+    private func checkCloudUserAtLaunch(previous: String) async {
+        let toggles = iCloudToggles
+        defer { resumeCloudUserCheckWaiters() }
+        let user = await dependencies.cloudUserRecordName()
+        cloudUserChecks -= 1
+        // A storage toggle made while CloudKit answered is the reader's newer choice.
+        if let user, user != previous, iCloudEnabled, iCloudToggles == toggles {
+            stopSyncingForChangedAccount()
+        } else {
+            resumeCloudWork(syncDelay: .zero)
+        }
+    }
+
+    /// Resumes the work waiting for the iCloud user checks once none is reading the user.
+    private func resumeCloudUserCheckWaiters() {
+        guard cloudUserChecks == 0 else { return }
+        let waiters = cloudUserCheckWaiters
+        cloudUserCheckWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// Turns storage off for a new iCloud user, so this library and that user's iCloud data
+    /// stay apart until the reader turns storage on again.
+    private func stopSyncingForChangedAccount() {
         dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
         cloudBacked = false
         iCloudEnabled = false
@@ -1645,21 +1742,24 @@ final class LibraryModel {
             rebuildLibrary()
         }
         cloudStatus =
-            "Your iCloud account changed. Turn iCloud Storage on to sync this library with the current account."
+            "Your iCloud account changed, so iCloud storage turned off. Turn it on to sync this library with the current account."
     }
 
     /// Returns once no `cloudAccountChanged()` call is reading the iCloud user.
-    private func waitForCloudUserChecks() async {
+    func waitForCloudUserChecks() async {
         while cloudUserChecks > 0 {
             await withCheckedContinuation { cloudUserCheckWaiters.append($0) }
         }
     }
 
-    /// Restarts the cloud sync and companion-record read that `cloudAccountChanged()` held back.
-    private func resumeCloudWork() {
+    /// Restarts the cloud sync and companion-record read that an iCloud user check held back.
+    private func resumeCloudWork(syncDelay: Duration = .seconds(2)) {
         guard hasStarted else { return }
-        queueCloudSync()
+        queueCloudSync(delay: syncDelay)
         queueSpineDesignRefresh()
+        // An account-change check still reading the user holds the read back; Book Wall waits
+        // for the read it resumes, or for `companionReadLimit`. With no read to run, it stops.
+        if spineDesignTask == nil, cloudUserChecks == 0 { hasReadCompanionRecords = true }
     }
 
     /// Queues a cloud sync, which uploads local snapshots and merges the archive's newer ones.
@@ -1688,11 +1788,32 @@ final class LibraryModel {
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return
                     }
+                    // A user other than the last sync's means the account changed, perhaps while
+                    // launch couldn't read the user.
+                    if let userBefore,
+                        let previous = dependencies.defaults.string(forKey: Self.cloudUserKey),
+                        userBefore != previous
+                    {
+                        stopSyncingForChangedAccount()
+                        return
+                    }
                     let remote = try await dependencies.syncCloud(archive)
                     let userAfter = await dependencies.cloudUserRecordName()
                     let cloudUser = userBefore == userAfter ? userAfter : nil
                     // Disabling storage or changing accounts invalidates even uncancellable replies.
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
+                        return
+                    }
+                    // The user switched during the sync, so `remote` may hold another user's
+                    // library. Merging it would upload it to the wrong user on a later sync, even
+                    // with no saved user for `cloudAccountChanged()` to compare. A first read that
+                    // failed leaves the saved user to compare.
+                    if let userAfter,
+                        let expected = userBefore
+                            ?? dependencies.defaults.string(forKey: Self.cloudUserKey),
+                        userAfter != expected
+                    {
+                        stopSyncingForChangedAccount()
                         return
                     }
                     // A restored Apple TV without a credential shows the account that another
@@ -1822,7 +1943,7 @@ final class LibraryModel {
         // Sample mode draws its own records; an account that a disconnect kept must not replace
         // them or save looks for the sample's books.
         guard !isSample, iCloudEnabled, hardcoverEnabled,
-            let accountID = activeHardcoverAccountID,
+            let accountID = companionAccountID,
             let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
         else { return }
         if !restarting, let identity = spineDesignTaskIdentity, spineDesignTask != nil,
@@ -1842,6 +1963,10 @@ final class LibraryModel {
             seriesLooks = [:]
             refreshSeriesSources()
         }
+        // The account can change with no record of it to clear, as when a credential-free
+        // shelf shows a newer snapshot of another account. Another account's picks, including
+        // unsaved picks of the default series, never apply to this account's links.
+        pickedLinks = pickedLinks.filter { $0.value.accountID == accountID }
         let requestID = UUID()
         spineDesignTaskIdentity = (accountID, snapshot.syncedAt, requestID)
         spineDesignTask = Task { [weak self] in
@@ -1976,18 +2101,23 @@ final class LibraryModel {
         await cloudTask?.value
     }
 
-    /// Waits for the currently queued cloud operation for at most `limit`. A sync that takes
-    /// longer keeps running; only the wait ends.
+    /// Waits for the currently queued cloud operation for at most `limit`. A running iCloud user
+    /// check holds the sync back (`cloudUserChecks`), so the wait covers the check and the sync
+    /// it then queues, including one that an account-change notice cancels and requeues. A sync
+    /// that takes longer keeps running; only the wait ends.
     private func waitForCloudSync(atMost limit: Duration) async {
-        guard let task = cloudTask else { return }
+        guard cloudTask != nil || cloudUserChecks > 0 else { return }
         let (ended, end) = AsyncStream.makeStream(of: Void.self)
         let sleep = dependencies.sleep
         let timer = Task {
             try? await sleep(limit)
             end.finish()
         }
-        Task {
-            await task.value
+        Task { [weak self] in
+            while let self, self.cloudUserChecks > 0 || self.cloudTask != nil {
+                await self.waitForCloudUserChecks()
+                await self.cloudTask?.value
+            }
             end.finish()
         }
         for await _ in ended {}
