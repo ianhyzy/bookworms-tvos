@@ -494,7 +494,7 @@ struct SettingsView: View {
                 .disabled(!library.iCloudEnabled)
             note(
                 library.iCloudEnabled
-                    ? "Turning this off keeps your data in iCloud. This Apple TV then shows its own spine looks, default covers, and default series."
+                    ? "Turning this off doesn't remove data already synced to iCloud. This Apple TV then shows only designs made by the Apple TV app. To delete the data from iCloud, delete it from another device."
                     : "Turn this on to show the spine designs, covers, and series you choose in Bookworms on iPhone and Mac."
             )
             .accessibilityIdentifier("icloud-footer")
