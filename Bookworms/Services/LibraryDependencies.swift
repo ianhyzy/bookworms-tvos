@@ -78,6 +78,11 @@ struct LibraryDependencies {
         @MainActor (String, [SeriesLookKey]) async throws -> (
             values: [SeriesLookKey: SeriesLookV1], isComplete: Bool
         ) = { try await SpineCloudStore.shared.seriesLooks(accountID: $0, keys: $1) }
+    /// Reads an account's companion records from the disk caches, without CloudKit
+    /// (`SpineCloudStore.cachedRecords(accountID:books:)`).
+    var readCachedCompanionRecords: @MainActor (String, [Book]) async -> CachedCompanionRecords = {
+        await SpineCloudStore.shared.cachedRecords(accountID: $0, books: $1)
+    }
     var createSeriesLook: @MainActor (SeriesLookV1) async throws -> SeriesLookV1 = {
         try await SpineCloudStore.shared.createSeriesLook($0)
     }

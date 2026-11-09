@@ -136,9 +136,9 @@ extension CloudLibraryArchive {
 
 extension SourceSnapshot {
     /// The snapshot with what a writer that predates a field leaves out filled in from `older`,
-    /// a snapshot of the same account: its series, its username, and each book's `finishedDates` when the
-    /// book's newest finish there is still `finished`. Otherwise such a book shows one read
-    /// until the next Hardcover sync.
+    /// a snapshot of the same account: its series, its username, and each book's `finishedDates`
+    /// when the book's newest finish there is still `finished`. Otherwise such a book shows one
+    /// read until the next Hardcover sync.
     fileprivate func keeping(_ older: SourceSnapshot) -> SourceSnapshot {
         var snapshot = self
         snapshot.series = series ?? older.series

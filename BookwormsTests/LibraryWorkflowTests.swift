@@ -2828,6 +2828,120 @@ final class LibraryWorkflowTests: XCTestCase {
         }
     }
 
+    /// Before the Hardcover account check clears, because iCloud can't be read or holds another
+    /// account's data, the shelf shows its own account's cached companion records and makes no
+    /// CloudKit read. Without a credential, that is the library the last clear check used.
+    func testUnclearedCheckShowsOnlyTheOwnAccountsCachedRecords() async throws {
+        enum Case { case offline, otherAccount, credentialFree, credentialFreeNeverCleared }
+        for testCase in [Case.offline, .otherAccount, .credentialFree, .credentialFreeNeverCleared]
+        {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            let book = fixture.book(1)
+            var accountID = fixture.hardcoverAccountID
+            if testCase == .credentialFree || testCase == .credentialFreeNeverCleared {
+                accountID = "_fictional_iphone_account"
+                fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+                fixture.secrets.removeValue(forKey: "hardcover-token")
+                if testCase == .credentialFree {
+                    fixture.defaults.set(accountID, forKey: LibraryModel.clearedLibraryKey)
+                }
+            }
+            try fixture.save([
+                SourceSnapshot(
+                    source: .hardcover, accountID: accountID, books: [book],
+                    syncedAt: fixture.time)
+            ])
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.readCloudArchive = {
+                guard testCase == .otherAccount else {
+                    throw CloudStorageError.temporarilyUnavailable
+                }
+                return CloudLibraryArchive(sources: [
+                    SourceSnapshot(
+                        source: .hardcover, accountID: "_fictional_other", books: [book],
+                        syncedAt: fixture.time)
+                ])
+            }
+            var cloudReads = 0
+            dependencies.fetchSpineDesigns = { _, _ in
+                cloudReads += 1
+                return ([:], true)
+            }
+            var cachedReads: [String] = []
+            dependencies.readCachedCompanionRecords = { accountID, _ in
+                cachedReads.append(accountID)
+                var records = CachedCompanionRecords()
+                records.coverChoices = [
+                    1: CoverChoiceV1(
+                        version: 1, accountID: accountID, bookID: 1,
+                        coverURL: URL(string: "https://covers.example.test/chosen.jpg")!,
+                        chosenAt: fixture.time)
+                ]
+                return records
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            XCTAssertFalse(model.cloudAccountsCleared, "\(testCase)")
+            XCTAssertEqual(cloudReads, 0, "\(testCase)")
+            XCTAssertEqual(model.otherICloudAccounts.isEmpty, testCase != .otherAccount)
+            if testCase == .credentialFreeNeverCleared {
+                XCTAssertEqual(cachedReads, [])
+                XCTAssertNil(model.books.first?.chosenCoverURL)
+            } else {
+                XCTAssertEqual(Set(cachedReads), [accountID], "\(testCase)")
+                XCTAssertNotNil(model.books.first?.chosenCoverURL, "\(testCase)")
+            }
+        }
+    }
+
+    /// A sync uploads only the signed-in account's Hardcover snapshots and those of accounts
+    /// merged into it, and a credential-free Apple TV uploads none, so a library deleted from
+    /// iCloud doesn't return from a local copy.
+    func testSyncUploadsNoOtherAccountsHardcoverSnapshot() async throws {
+        for signedIn in [true, false] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            let own = signedIn ? fixture.hardcoverAccountID : "_fictional_chosen"
+            if !signedIn {
+                fixture.defaults.set(own, forKey: "activeHardcoverAccountID")
+                fixture.secrets.removeValue(forKey: "hardcover-token")
+            }
+            let ownSnapshot = SourceSnapshot(
+                source: .hardcover, accountID: own, books: [fixture.book(1)],
+                syncedAt: fixture.time)
+            try fixture.save([
+                ownSnapshot,
+                SourceSnapshot(
+                    source: .hardcover, accountID: "_fictional_deleted", books: [fixture.book(2)],
+                    syncedAt: fixture.time),
+            ])
+            let stored = CloudLibraryArchive(sources: [ownSnapshot])
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.readCloudArchive = { stored }
+            var uploaded: [CloudLibraryArchive] = []
+            dependencies.syncCloud = { archive in
+                uploaded.append(archive)
+                return stored.merging(archive)
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            XCTAssertTrue(model.cloudAccountsCleared)
+            XCTAssertEqual(
+                uploaded.last?.sources.map(\.accountID), signedIn ? [own] : [], "\(signedIn)")
+            // The local copy keeps both, so nothing is lost when iCloud has no copy.
+            XCTAssertEqual(
+                Set(dependencies.sourceStore.load().map(\.accountID)), [own, "_fictional_deleted"])
+        }
+    }
+
     /// The empty shelf names the setting that hides a connected reader's books, which the
     /// screen labels Collection, and tells a library with no books apart from one that is
     /// loading or couldn't load.
@@ -3822,6 +3936,7 @@ private final class LibraryWorkflowFixture {
         dependencies.fetchCoverChoices = { _, _ in ([:], true) }
         dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
         dependencies.fetchSeriesLooks = { _, _ in ([:], true) }
+        dependencies.readCachedCompanionRecords = { _, _ in CachedCompanionRecords() }
         dependencies.createSeriesLook = { _ in
             XCTFail("Unexpected series look")
             throw URLError(.unsupportedURL)

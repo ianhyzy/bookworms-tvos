@@ -425,6 +425,14 @@ private struct AppleSpineCloudDatabase: SpineCloudDatabase {
     }
 }
 
+/// One account's companion records from the disk caches (`SpineCloudStore.cachedRecords`).
+struct CachedCompanionRecords: Sendable {
+    var designs: [Int: SpineDesignV1] = [:]
+    var coverChoices: [Int: CoverChoiceV1] = [:]
+    var seriesLinks: [Int: SeriesLinkV1] = [:]
+    var seriesLooks: [SeriesLookKey: SeriesLookV1] = [:]
+}
+
 actor SpineCloudStore {
     static let shared = SpineCloudStore()
 
@@ -594,6 +602,34 @@ actor SpineCloudStore {
         try await records(
             .seriesLooks(cacheURL: seriesLookCacheURL), accountID: accountID,
             subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    /// Reads `accountID`'s companion records for `books` from the disk caches alone, without
+    /// CloudKit or writes, for a shelf whose Hardcover account check hasn't cleared. The looks
+    /// are those of the look groups that the cached links decide.
+    func cachedRecords(accountID: String, books: [Book]) -> CachedCompanionRecords {
+        let byID = Self.byID(books)
+        var records = CachedCompanionRecords()
+        records.designs =
+            cached(.designs(cacheURL: cacheURL), accountID: accountID, subjects: byID)
+            .values
+        records.coverChoices =
+            cached(
+                .coverChoices(cacheURL: coverChoiceCacheURL), accountID: accountID, subjects: byID
+            )
+            .values
+        let links =
+            cached(.seriesLinks(cacheURL: seriesLinkCacheURL), accountID: accountID, subjects: byID)
+            .values
+        records.seriesLinks = links
+        let keys = books.compactMap { SeriesDesigns.lookKey(of: $0, link: links[$0.id]) }
+        records.seriesLooks =
+            cached(
+                .seriesLooks(cacheURL: seriesLookCacheURL), accountID: accountID,
+                subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first })
+            )
+            .values
+        return records
     }
 
     /// Saves `look` as its group's look unless another device saved one first, and returns the
@@ -849,24 +885,11 @@ actor SpineCloudStore {
             var status = ReadStatus(phase: "loading_cache", requestedCount: selected.count)
             writeReadStatus(status, name: kind.statusName)
         #endif
-        let selectedRecordNames = Set(
-            selected.keys.map {
-                kind.recordID(accountID, $0).recordName
-            })
         let keyByRecordName = Dictionary(
             uniqueKeysWithValues: selected.keys.map {
                 (kind.recordID(accountID, $0).recordName, $0)
             })
-        var cache = loadCache(kind).filter { selectedRecordNames.contains($0.key) }
-        var accepted: [Key: Value] = [:]
-        for (key, subject) in selected {
-            let name = kind.recordID(accountID, key).recordName
-            if let value = cache[name], kind.isValid(value, accountID, subject) {
-                accepted[key] = value
-            } else {
-                cache.removeValue(forKey: name)
-            }
-        }
+        var (accepted, cache) = cached(kind, accountID: accountID, subjects: selected)
         #if DEBUG
             status.acceptedCount = accepted.count
             status.phase = "checking_cloud"
@@ -1004,6 +1027,25 @@ actor SpineCloudStore {
         #endif
         try checkCurrentGeneration(generation, of: kind)
         return (accepted, isComplete)
+    }
+
+    /// `kind`'s valid cached records for `accountID` and `selected`, and the cache narrowed to
+    /// them.
+    private func cached<Key: Hashable, Subject, Value: Codable & Sendable>(
+        _ kind: CompanionRecordKind<Key, Subject, Value>, accountID: String,
+        subjects selected: [Key: Subject]
+    ) -> (values: [Key: Value], cache: [String: Value]) {
+        let full = loadCache(kind)
+        var cache: [String: Value] = [:]
+        var accepted: [Key: Value] = [:]
+        for (key, subject) in selected {
+            let name = kind.recordID(accountID, key).recordName
+            if let value = full[name], kind.isValid(value, accountID, subject) {
+                accepted[key] = value
+                cache[name] = value
+            }
+        }
+        return (accepted, cache)
     }
 
     private func checkCurrentGeneration<Key, Subject, Value>(

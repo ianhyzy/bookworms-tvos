@@ -412,7 +412,7 @@ final class LibraryModel {
     @ObservationIgnored private var spineDesignTask: Task<Void, Never>?
     @ObservationIgnored private var spineDesignTaskIdentity:
         (
-            accountID: String, syncedAt: Date, requestID: UUID
+            accountID: String, syncedAt: Date, cachedOnly: Bool, requestID: UUID
         )?
     private var schedule: SourceSyncSchedule { SourceSyncSchedule(defaults: dependencies.defaults) }
     var bookCount: Int {
@@ -943,22 +943,23 @@ final class LibraryModel {
             if cloudSyncSuppressedForWelcome {
                 cloudStatus = "iCloud storage waits until setup finishes."
             } else {
-                // The account may have changed while the app wasn't running, so the companion
-                // read, which can save series looks, and the sync wait for the user check. The
-                // check counts at once, so work the refresh below queues waits for it too.
+                // The account may have changed while the app wasn't running, so the sync and the
+                // companion read wait for the iCloud user check. The check counts at once, so
+                // work the refresh below queues waits for it too. Until the sync's Hardcover
+                // account check clears, the companion read shows only the disk caches.
                 if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
                     cloudUserChecks += 1
                     Task { [weak self] in await self?.checkCloudUserAtLaunch(previous: previous) }
                 } else {
                     queueSpineDesignRefresh()
-                    // A due refresh below waits for this read, so it starts at once.
+                    // A due refresh below waits for this sync, so it starts at once.
                     queueCloudSync(delay: .zero)
                 }
             }
         } else {
             cloudStatus = ""
         }
-        // The companion read follows the sync's Hardcover account check.
+        // Book Wall waits for the CloudKit read that follows the sync's Hardcover account check.
         if spineDesignTask == nil, cloudTask == nil, cloudUserChecks == 0 {
             hasReadCompanionRecords = true
         } else {
@@ -1701,6 +1702,9 @@ final class LibraryModel {
 
     /// The iCloud user that the last successful sync used (`cloudAccountChanged()`).
     static let cloudUserKey = "iCloudUserRecordName"
+    /// The library that the last clear Hardcover account check used on an Apple TV without a
+    /// credential, whose cached companion records show until the next check clears.
+    static let clearedLibraryKey = "iCloudClearedLibraryID"
 
     /// Handles `CKAccountChanged`, which CloudKit also posts when the same account's state
     /// changes. Storage that is off stays off; turning it on clears the saved user anyway.
@@ -1772,6 +1776,7 @@ final class LibraryModel {
     /// stay apart until the reader turns storage on again.
     private func stopSyncingForChangedAccount() {
         dependencies.defaults.removeObject(forKey: Self.cloudUserKey)
+        dependencies.defaults.removeObject(forKey: Self.clearedLibraryKey)
         cloudBacked = false
         iCloudEnabled = false
         if !hardcoverConnected {
@@ -1783,11 +1788,28 @@ final class LibraryModel {
             "Your iCloud account changed, so iCloud storage turned off. Turn it on to sync this library with the current account."
     }
 
-    /// The archive a sync uploads: the local snapshots, legacy designs, and known merges.
+    /// The archive a sync merges into the local copy: the local snapshots, legacy designs, and
+    /// known merges.
     private var localArchive: CloudLibraryArchive {
         CloudLibraryArchive(
             sources: sourceSnapshots, designs: aiRecords,
             merges: accountMerges.isEmpty ? nil : accountMerges)
+    }
+
+    /// The archive a sync uploads: `localArchive` with a real Hardcover account's snapshot only
+    /// when this Apple TV is signed in to that account or to one it merged into. A
+    /// credential-free shelf's Hardcover snapshots came from iCloud, so uploading them again
+    /// could restore an account whose data the reader deleted from iCloud.
+    private var uploadArchive: CloudLibraryArchive {
+        let signedIn = hardcoverConnected ? activeHardcoverAccountID : nil
+        var archive = localArchive
+        archive.sources.removeAll { snapshot in
+            snapshot.source == .hardcover && snapshot.accountID != "hardcover"
+                && signedIn.map {
+                    CloudLibraryArchive.absorbs(snapshot.accountID, accountMerges, into: $0)
+                } != true
+        }
+        return archive
     }
 
     /// Runs the Hardcover account check on `archive`, with the merges this Apple TV knows, and
@@ -1817,8 +1839,11 @@ final class LibraryModel {
         otherICloudAccounts = []
         iCloudLibraryChoices = []
         switch result {
-        case .clear:
+        case .clear(let accountID):
             cloudAccountsCleared = true
+            if !hardcoverConnected {
+                dependencies.defaults.set(accountID, forKey: Self.clearedLibraryKey)
+            }
             return true
         case .otherAccounts(let accounts):
             otherICloudAccounts = accounts
@@ -1828,10 +1853,13 @@ final class LibraryModel {
             cloudStatus = "iCloud sync is paused until you choose a library."
         }
         cloudAccountsCleared = false
-        // The companion read that a clear check before the sync started stops with the sync.
-        spineDesignTask?.cancel()
-        spineDesignTask = nil
-        spineDesignTaskIdentity = nil
+        // The companion read that a clear check before the sync started stops with the sync. A
+        // read of the disk caches alone goes on.
+        if spineDesignTaskIdentity?.cachedOnly != true {
+            spineDesignTask?.cancel()
+            spineDesignTask = nil
+            spineDesignTaskIdentity = nil
+        }
         return false
     }
 
@@ -1894,6 +1922,8 @@ final class LibraryModel {
     }
 
     /// Restarts the cloud sync and companion-record read that an iCloud user check held back.
+    /// The read uses CloudKit only when the Hardcover account check is already clear; otherwise
+    /// it shows the disk caches and the sync's check starts the CloudKit read.
     private func resumeCloudWork(syncDelay: Duration = .seconds(2)) {
         guard hasStarted else { return }
         queueCloudSync(delay: syncDelay)
@@ -1923,7 +1953,7 @@ final class LibraryModel {
                 cloudPending = false
                 cloudStatus = "Syncing with iCloud…"
                 do {
-                    let archive = localArchive
+                    let archive = uploadArchive
                     // The user is read on both sides of the sync and saved only when both reads
                     // agree, so an account switch during the sync can't record the new user as
                     // the one this library synced with (`cloudAccountChanged()`).
@@ -1944,7 +1974,7 @@ final class LibraryModel {
                         // A connected credential that validation hasn't tied to an account yet
                         // waits for it; validation's install queues another sync.
                         if hardcoverConnected, activeHardcoverAccountID == nil {
-                            cloudStatus = "Waiting for iCloud…"
+                            cloudStatus = "iCloud storage waits until Hardcover connects."
                             return
                         }
                         let stored = try await dependencies.readCloudArchive()
@@ -2090,16 +2120,27 @@ final class LibraryModel {
     /// Looks sampled from covers also wait for a complete cover-choice read. One task runs per
     /// account and sync date; a newer selection cancels an older one, as does `restarting`, which
     /// a saved series pick sets because a running read may have missed its new look group.
+    ///
+    /// Until the Hardcover account check clears (`cloudAccountsCleared`), it reads only the disk
+    /// caches, with no CloudKit request or save, and only for this Apple TV's own account: the
+    /// signed-in one, or without a credential, the library the reader chose or the last clear
+    /// check used (`clearedLibraryKey`). An Apple TV offline at launch thus still shows the
+    /// records it read before.
     private func queueSpineDesignRefresh(restarting: Bool = false) {
         guard !PerformanceDiagnostics.isolates("background"), cloudUserChecks == 0 else { return }
         // Sample mode draws its own records; an account that a disconnect kept must not replace
         // them or save looks for the sample's books.
-        guard !isSample, iCloudEnabled, cloudAccountsCleared, hardcoverEnabled,
+        guard !isSample, iCloudEnabled, hardcoverEnabled,
             let accountID = companionAccountID,
             let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
         else { return }
+        let cachedOnly = !cloudAccountsCleared
+        let ownAccountID =
+            activeHardcoverAccountID ?? dependencies.defaults.string(forKey: Self.clearedLibraryKey)
+        if cachedOnly, accountID != ownAccountID { return }
         if !restarting, let identity = spineDesignTaskIdentity, spineDesignTask != nil,
-            identity.accountID == accountID, identity.syncedAt == snapshot.syncedAt
+            identity.accountID == accountID, identity.syncedAt == snapshot.syncedAt,
+            identity.cachedOnly == cachedOnly
         {
             return
         }
@@ -2120,10 +2161,14 @@ final class LibraryModel {
         // unsaved picks of the default series, never apply to this account's links.
         pickedLinks = pickedLinks.filter { $0.value.accountID == accountID }
         let requestID = UUID()
-        spineDesignTaskIdentity = (accountID, snapshot.syncedAt, requestID)
+        spineDesignTaskIdentity = (accountID, snapshot.syncedAt, cachedOnly, requestID)
         spineDesignTask = Task { [weak self] in
             guard let self else { return }
             let books = snapshot.books
+            if cachedOnly {
+                await showCachedCompanionRecords(of: books, accountID: accountID, requestID)
+                return
+            }
             let designs = try? await dependencies.fetchSpineDesigns(accountID, books)
             let choices = try? await dependencies.fetchCoverChoices(accountID, books)
             seriesLinkReads += 1
@@ -2167,6 +2212,34 @@ final class LibraryModel {
             spineDesignTask = nil
             spineDesignTaskIdentity = nil
         }
+    }
+
+    /// Shows `accountID`'s cached companion records for `books`
+    /// (`queueSpineDesignRefresh(restarting:)`). It saves nothing and leaves Book Wall waiting
+    /// for the CloudKit read that follows a clear check.
+    private func showCachedCompanionRecords(
+        of books: [Book], accountID: String, _ requestID: UUID
+    ) async {
+        let cached = await dependencies.readCachedCompanionRecords(accountID, books)
+        guard spineDesignTaskIdentity?.requestID == requestID else { return }
+        spineDesignTask = nil
+        spineDesignTaskIdentity = nil
+        if cached.designs != spineDesigns { spineDesigns = cached.designs }
+        var rebuild = false
+        if cached.coverChoices != coverChoices {
+            coverChoices = cached.coverChoices
+            rebuild = true
+        }
+        let links = applyingPicks(to: cached.seriesLinks, read: seriesLinkReads)
+        if links != seriesLinks {
+            seriesLinks = links
+            rebuild = true
+        }
+        if cached.seriesLooks != seriesLooks {
+            seriesLooks = cached.seriesLooks
+            if !rebuild { refreshSeriesSources() }
+        }
+        if rebuild { rebuildLibrary() }
     }
 
     /// Saves a series look for each look group of `books` that has none, so other devices draw
@@ -2235,7 +2308,7 @@ final class LibraryModel {
         }
         hasReadCompanionRecords = true
         let requestID = UUID()
-        spineDesignTaskIdentity = ("", .distantPast, requestID)
+        spineDesignTaskIdentity = ("", .distantPast, false, requestID)
         spineDesignTask = Task { [weak self] in
             guard let self else { return }
             _ = try? await dependencies.fetchSpineDesigns("", [])
@@ -2445,7 +2518,7 @@ final class LibraryModel {
                     var updated = aiRecords
                     updated[book.id] = record
                     if cloudBacked && iCloudEnabled && cloudAccountsCleared {
-                        var archive = localArchive
+                        var archive = uploadArchive
                         archive.designs = updated
                         let saved = try await dependencies.syncCloud(archive)
                         updated = saved.designs
