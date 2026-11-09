@@ -54,12 +54,17 @@ final class SocialLibraryModel {
     /// such as the network, so asking the reader to connect would be wrong.
     private(set) var loadFailed = false
     /// What Feed shows without activity: a loading note while social data loads, a note that
-    /// followed readers have no activity once an account's data has loaded, a note that the
-    /// load failed, and otherwise how to connect.
+    /// followed readers have no activity once their activity has loaded and the latest load
+    /// succeeded, a note that activity couldn't load after a failed load or while an account's
+    /// data lacks activity, and otherwise how to connect.
     var emptyFeedMessage: String {
         if isLoading { return "Loading activity from people you follow…" }
-        if snapshot != nil { return "People you follow have no recent activity." }
-        if loadFailed { return "Activity from people you follow couldn't load. Try again later." }
+        if !loadFailed, snapshot?.dates["feed"] != nil {
+            return "People you follow have no recent activity."
+        }
+        if loadFailed || snapshot != nil {
+            return "Activity from people you follow couldn't load. Try again later."
+        }
         return
             "Connect Hardcover with social read permissions in Settings. Activity from people you follow appears here."
     }

@@ -67,6 +67,23 @@ final class SocialFeatureTests: XCTestCase {
             "Activity from people you follow couldn't load. Try again later.")
     }
 
+    /// A first load whose Following request succeeds and Feed request fails says the activity
+    /// couldn't load, not that there is none.
+    func testEmptyFeedMessageReportsAFailedFeedAfterFollowingLoads() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "FailedFeed.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.failFeed()
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(token: "hc_pat_fixture", readerID: 2, enabledViews: [.following])
+        XCTAssertNotNil(model.snapshot, "Following installed before the feed failed")
+        XCTAssertTrue(model.loadFailed)
+        XCTAssertEqual(
+            model.emptyFeedMessage,
+            "Activity from people you follow couldn't load. Try again later.")
+    }
+
     func testDisabledViewsDoNotFetchUnusedDatasets() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Scope.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
