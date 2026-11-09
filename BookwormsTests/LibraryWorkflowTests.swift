@@ -811,6 +811,70 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.series(for: book)?.membership, saga)
     }
 
+    /// On a credential-free shelf without a worklist, a newer snapshot of another account
+    /// changes the account whose records apply, which drops an unsaved pick of the default
+    /// series too, so it can't hide the new account's link.
+    func testANewerSnapshotOfAnotherAccountDropsUnsavedDefaultPicks() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        let saga = SeriesMembership(
+            seriesID: 7, name: "Fictional Saga", position: 12, featured: true, size: 20)
+        let arc = SeriesMembership(seriesID: 8, name: "Fictional Arc", position: 2, size: 3)
+        var book = fixture.book(1)
+        book.seriesID = 7
+        book.seriesName = "Fictional Saga"
+        book.seriesMemberships = [saga, arc]
+        var archive = CloudLibraryArchive(sources: [
+            SourceSnapshot(
+                source: .hardcover, accountID: "_fictional_account_a", books: [book],
+                syncedAt: fixture.time)
+        ])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in archive }
+        // Account B's iPhone linked the book to the Fictional Saga.
+        dependencies.fetchSeriesLinks = { accountID, _ in
+            guard accountID == "_fictional_account_b" else { return ([:], true) }
+            return (
+                [
+                    1: SeriesLinkV1(
+                        accountID: accountID, bookID: 1, linkedSeriesID: 7,
+                        chosenAt: fixture.time)
+                ], true
+            )
+        }
+        let save = ControlledLibraryResponse<Void>("Series link save started")
+        dependencies.saveSeriesLink = { _, _, _ in try await save.value() }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.canPickSeries(for: book))
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+
+        // The Fictional Saga's save is under way when the default is picked again.
+        model.pickSeries(7, for: book)
+        await fulfillment(of: [save.started], timeout: 5)
+        model.pickSeries(8, for: book)
+
+        archive = CloudLibraryArchive(sources: [
+            SourceSnapshot(
+                source: .hardcover, accountID: "_fictional_account_b", books: [book],
+                syncedAt: fixture.time.addingTimeInterval(60))
+        ])
+        model.queueCloudSync(delay: .zero)
+        await model.waitForCloudSync()
+        save.resolve(())
+        await model.waitForSeriesLinkSaves()
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertNil(fixture.defaults.string(forKey: "activeHardcoverAccountID"))
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+    }
+
     func testAPickKeepsTheBooksOwnLookAndReplacesNotInASeries() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }

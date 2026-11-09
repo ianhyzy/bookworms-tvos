@@ -30,6 +30,8 @@ enum HardcoverConnectionPhase: Equatable {
 /// link read reflects its save.
 private struct SeriesPick {
     let link: SeriesLinkV1?
+    /// The account the pick was made for, which a pick of the default series has no link to name.
+    let accountID: String
     /// Tells the pick from a later pick of the same book.
     let number: Int
     /// How many link reads had started when the pick's save finished; `nil` while it saves.
@@ -242,7 +244,7 @@ final class LibraryModel {
         seriesPickCount += 1
         let number = seriesPickCount
         seriesLinks[book.id] = link
-        pickedLinks[book.id] = SeriesPick(link: link, number: number)
+        pickedLinks[book.id] = SeriesPick(link: link, accountID: accountID, number: number)
         refreshSeriesSources()
         guard !isSample else { return }
         let previous = seriesLinkSave
@@ -283,7 +285,7 @@ final class LibraryModel {
                 seriesLinks[book.id] = restored.link
                 pickedLinks[book.id] = restored.pick.map {
                     SeriesPick(
-                        link: $0.link, number: $0.number,
+                        link: $0.link, accountID: $0.accountID, number: $0.number,
                         savedAfterReads: $0.savedAfterReads ?? seriesLinkReads)
                 }
                 refreshSeriesSources()
@@ -1943,6 +1945,10 @@ final class LibraryModel {
             seriesLooks = [:]
             refreshSeriesSources()
         }
+        // The account can change with no record of it to clear, as when a credential-free
+        // shelf shows a newer snapshot of another account. Another account's picks, including
+        // unsaved picks of the default series, never apply to this account's links.
+        pickedLinks = pickedLinks.filter { $0.value.accountID == accountID }
         let requestID = UUID()
         spineDesignTaskIdentity = (accountID, snapshot.syncedAt, requestID)
         spineDesignTask = Task { [weak self] in
