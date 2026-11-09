@@ -331,6 +331,15 @@ class ExecutionTests(unittest.TestCase):
         self.assertIsNone(selected[0][1])
         self.assertEqual(selected[1][1]["version"], "27.0")
 
+    def test_major_version_selects_its_newest_installed_point_release(self):
+        inventory = {"runtimes": [
+            {"isAvailable": True, "version": version, "identifier": "com.apple.tvOS-" + version.replace(".", "-")}
+            for version in ("26.0", "26.5", "27.2", "27.10", "28.0")
+        ]}
+        selected = runner.select_runtimes(inventory, ["26", "27", "29"])
+        self.assertEqual([runtime and runtime["version"] for _, runtime in selected], ["26.5", "27.10", None])
+        self.assertEqual(runner.select_runtimes(inventory, ["26.0"])[0][1]["version"], "26.0")
+
     def test_missing_runtime_produces_blocked_report(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "results"
