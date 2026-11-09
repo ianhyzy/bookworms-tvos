@@ -885,11 +885,12 @@ final class LibraryModel {
                 cloudStatus = "iCloud storage waits until setup finishes."
             } else {
                 // The account may have changed while the app wasn't running, so the companion
-                // read, which can save series looks, and the sync wait for the user check.
-                if dependencies.defaults.string(forKey: Self.cloudUserKey) != nil {
-                    await cloudAccountChanged(atLaunch: true)
-                }
-                if iCloudEnabled {
+                // read, which can save series looks, and the sync wait for the user check. The
+                // check counts at once, so work the refresh below queues waits for it too.
+                if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
+                    cloudUserChecks += 1
+                    Task { [weak self] in await self?.checkCloudUserAtLaunch(previous: previous) }
+                } else {
                     queueSpineDesignRefresh()
                     // A due refresh below waits for this read, so it starts at once.
                     queueCloudSync(delay: .zero)
@@ -898,7 +899,7 @@ final class LibraryModel {
         } else {
             cloudStatus = "iCloud storage is off."
         }
-        if spineDesignTask == nil {
+        if spineDesignTask == nil, cloudUserChecks == 0 {
             hasReadCompanionRecords = true
         } else {
             let limit = dependencies.companionReadLimit
@@ -1634,27 +1635,19 @@ final class LibraryModel {
     static let cloudUserKey = "iCloudUserRecordName"
 
     /// Handles `CKAccountChanged`, which CloudKit also posts when the same account's state
-    /// changes. Storage stays on while the signed-in user is the one the last sync used, or when
-    /// no sync saved a user; otherwise, including when the user can't be read, it turns off.
+    /// changes. Storage that is off stays off; turning it on clears the saved user anyway.
+    /// Storage stays on while the signed-in user is the one the last sync used, or when no sync
+    /// saved a user; otherwise, including when the user can't be read, it turns off.
     ///
     /// Cloud syncs and companion-record reads and writes stop while the user is read, so none
     /// of them exchanges this library with another account's iCloud data. They resume when the
     /// user is unchanged, including a series pick's save, which waits for the check
     /// (`waitForCloudUserChecks()`).
-    ///
-    /// `atLaunch` checks for a change made while the app wasn't running, which posts no notice.
-    /// It keeps storage on for a user that can't be read, as when the Apple TV is offline, and
-    /// leaves starting cloud work to the caller.
-    func cloudAccountChanged(atLaunch: Bool = false) async {
+    func cloudAccountChanged() async {
+        guard iCloudEnabled else { return }
         let toggles = iCloudToggles
         // Waiters resume after the outcome below, so a changed user's storage is already off.
-        defer {
-            if cloudUserChecks == 0 {
-                let waiters = cloudUserCheckWaiters
-                cloudUserCheckWaiters = []
-                for waiter in waiters { waiter.resume() }
-            }
-        }
+        defer { resumeCloudUserCheckWaiters() }
         if let previous = dependencies.defaults.string(forKey: Self.cloudUserKey) {
             cloudUserChecks += 1
             // Book Wall keeps waiting for launch's read: it resumes below, or turning storage
@@ -1662,11 +1655,11 @@ final class LibraryModel {
             if hasStarted { invalidateCloudSync() }
             let user = await dependencies.cloudUserRecordName()
             cloudUserChecks -= 1
-            if user == previous || (atLaunch && user == nil) {
-                if !atLaunch { resumeCloudWork() }
+            if user == previous {
+                resumeCloudWork()
                 return
             }
-        } else if iCloudEnabled {
+        } else {
             // No sync saved a user, as before a reader signs in to iCloud when a failed sync asks
             // them to, so storage stays on. A sync that read no user, such as one offline, saves
             // none either; storage then stays on for whichever user follows, as such syncs do.
@@ -1675,10 +1668,38 @@ final class LibraryModel {
         }
         // A storage toggle made while CloudKit answered is the reader's newer choice.
         guard iCloudToggles == toggles else {
-            if !atLaunch { resumeCloudWork() }
+            resumeCloudWork()
             return
         }
         stopSyncingForChangedAccount()
+    }
+
+    /// Checks for an iCloud account change made while the app wasn't running, which posts no
+    /// notice, against `previous`, the user the last sync saved. `start()` counts this check in
+    /// `cloudUserChecks` before it starts the task, so launch doesn't wait for CloudKit while the
+    /// companion read and sync do. Another user turns storage off; a user that can't be read, as
+    /// when the Apple TV is offline, keeps it on.
+    private func checkCloudUserAtLaunch(previous: String) async {
+        let toggles = iCloudToggles
+        defer { resumeCloudUserCheckWaiters() }
+        let user = await dependencies.cloudUserRecordName()
+        cloudUserChecks -= 1
+        // A storage toggle made while CloudKit answered is the reader's newer choice.
+        if let user, user != previous, iCloudEnabled, iCloudToggles == toggles {
+            stopSyncingForChangedAccount()
+        } else {
+            queueSpineDesignRefresh()
+            if spineDesignTask == nil { hasReadCompanionRecords = true }
+            queueCloudSync(delay: .zero)
+        }
+    }
+
+    /// Resumes the work waiting for the iCloud user checks once none is reading the user.
+    private func resumeCloudUserCheckWaiters() {
+        guard cloudUserChecks == 0 else { return }
+        let waiters = cloudUserCheckWaiters
+        cloudUserCheckWaiters = []
+        for waiter in waiters { waiter.resume() }
     }
 
     /// Turns storage off for a new iCloud user, so this library and that user's iCloud data
@@ -1697,7 +1718,7 @@ final class LibraryModel {
     }
 
     /// Returns once no `cloudAccountChanged()` call is reading the iCloud user.
-    private func waitForCloudUserChecks() async {
+    func waitForCloudUserChecks() async {
         while cloudUserChecks > 0 {
             await withCheckedContinuation { cloudUserCheckWaiters.append($0) }
         }
