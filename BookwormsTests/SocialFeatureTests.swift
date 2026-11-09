@@ -84,6 +84,22 @@ final class SocialFeatureTests: XCTestCase {
             "Activity from people you follow couldn't load. Try again later.")
     }
 
+    /// A library that fails after an empty feed loads leaves Feed saying there's no activity.
+    func testEmptyFeedMessageIgnoresALibraryFailureAfterTheFeedLoads() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "LateFailure.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SocialFixtureClient()
+        await client.failLibrary(of: 2)
+        let model = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await model.load(
+            token: "hc_pat_fixture", readerID: 2, enabledViews: [.following, .comparison])
+        let counts = await client.counts
+        XCTAssertEqual(counts["reader2"], 1, "The load reached reader 2's library")
+        XCTAssertFalse(model.loadFailed)
+        XCTAssertEqual(model.emptyFeedMessage, "People you follow have no recent activity.")
+    }
+
     func testDisabledViewsDoNotFetchUnusedDatasets() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Scope.\(UUID())"))
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -778,6 +794,9 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         feedFailure = denied ? HardcoverError.forbidden : URLError(.timedOut)
     }
     func unfollow() { unfollowed = true }
+    private var failingReaders: Set<Int> = []
+    /// Answers requests for `reader`'s library with a network timeout.
+    func failLibrary(of reader: Int) { failingReaders.insert(reader) }
     private var deniedReaders: Set<Int> = []
     /// Answers requests for `reader`'s library with HTTP 403, as for a private account.
     func deny(reader: Int) { deniedReaders.insert(reader) }
@@ -808,6 +827,7 @@ private actor SocialFixtureClient: SocialLibraryFetching {
         try authorize(token)
         counts["reader\(user)", default: 0] += 1
         if deniedReaders.contains(user) { throw HardcoverError.forbidden }
+        if failingReaders.contains(user) { throw URLError(.timedOut) }
         if user == 2 && holdsReaderTwo {
             await withCheckedContinuation { readerTwoGates.append($0) }
         }

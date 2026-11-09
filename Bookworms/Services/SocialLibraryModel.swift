@@ -50,8 +50,9 @@ final class SocialLibraryModel {
     }
     private(set) var status = "Connect Hardcover to use social views."
     private(set) var isLoading = false
-    /// Whether the latest load failed for a reason other than a denied login or permission,
-    /// such as the network, so asking the reader to connect would be wrong.
+    /// Whether the latest load failed before Feed's activity settled, for a reason other than a
+    /// denied login or permission, such as the network, so asking the reader to connect would be
+    /// wrong. A failure in a library fetched after the feed leaves it false.
     private(set) var loadFailed = false
     /// What Feed shows without activity: a loading note while social data loads, a note that
     /// followed readers have no activity once their activity has loaded and the latest load
@@ -177,6 +178,7 @@ final class SocialLibraryModel {
             var token = token
             var renewToken = renewToken
             var renewalFailed = false
+            var feedSettled = false
             // Sends one request. The first rejected token is renewed, and every later request in
             // this load uses the replacement.
             @MainActor func authorized<T>(_ send: (String) async throws -> T) async throws -> T {
@@ -264,6 +266,7 @@ final class SocialLibraryModel {
                         }
                     }
                 }
+                feedSettled = true
                 if needsComparison || needsPicks,
                     begin(
                         owner: current.owner.id, dataset: "mine", manual: manual,
@@ -332,7 +335,7 @@ final class SocialLibraryModel {
                             "Hardcover denied access to social data."
                         }
                 default:
-                    loadFailed = true
+                    loadFailed = !feedSettled
                     status =
                         "Social data could not refresh. Cached data is retained. "
                         + UserFacingError.hardcoverMessage(error)
