@@ -3190,6 +3190,53 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.books.map(\.id), [2])
     }
 
+    /// An account-change notice that cancels the sync a due refresh waits for, and finds the
+    /// same user, requeues the sync, and the refresh waits for that one too.
+    func testADueFetchWaitsForASyncThatAnAccountChangeRequeues() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        let remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 3_600)
+        let firstSync = ControlledLibraryResponse<Void>("Launch sync started")
+        let debounce = ControlledLibraryResponse<Void>("Requeued sync scheduled")
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+            if duration == .seconds(2) { try await debounce.value() }
+        }
+        dependencies.cloudUserRecordName = { "_fictional_user_1" }
+        var reads = 0
+        dependencies.syncCloud = { _ in
+            reads += 1
+            if reads == 1 { try await firstSync.value() }
+            return CloudLibraryArchive(sources: [remote])
+        }
+        var fetches = 0
+        let fetched = expectation(description: "Hardcover fetched")
+        fetched.isInverted = true
+        dependencies.fetchHardcover = { _, _ in
+            fetches += 1
+            fetched.fulfill()
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(3)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        let launch = Task { await model.start() }
+        await fulfillment(of: [firstSync.started], timeout: 5)
+        await model.cloudAccountChanged()
+        await fulfillment(of: [debounce.started], timeout: 5)
+        firstSync.resolve(())
+        // The cancelled sync has returned; the refresh must still wait for the requeued one.
+        await fulfillment(of: [fetched], timeout: 1)
+        debounce.resolve(())
+        await launch.value
+        await model.waitForCloudSync()
+        XCTAssertEqual(fetches, 0)
+        XCTAssertEqual(model.books.map(\.id), [2])
+    }
+
     func testICloudReadBeforeAFetchRechecksEachSource() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
