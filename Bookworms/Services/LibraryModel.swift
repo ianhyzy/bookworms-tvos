@@ -365,10 +365,15 @@ final class LibraryModel {
     /// it began.
     @ObservationIgnored private var iCloudToggles = 0
     /// The Hardcover account whose library shows. Unsaved series picks belong to the account
-    /// they were made for, so a change drops them, including picks of the default series, which
-    /// no link marks with an account.
+    /// they were made for, so a change drops other accounts' picks, including picks of the
+    /// default series, which no link marks with an account. A credential-free shelf's picks,
+    /// made for `companionAccountID`, outlast that account's adoption.
     @ObservationIgnored private var activeHardcoverAccountID: String? {
-        didSet { if activeHardcoverAccountID != oldValue { pickedLinks = [:] } }
+        didSet {
+            if activeHardcoverAccountID != oldValue {
+                pickedLinks = pickedLinks.filter { $0.value.accountID == activeHardcoverAccountID }
+            }
+        }
     }
     /// The account whose companion records apply: the active account, else, without a Hardcover
     /// credential, the account of the snapshot the shelf shows, such as one an iPhone saved to
@@ -1714,7 +1719,9 @@ final class LibraryModel {
             stopSyncingForChangedAccount()
         } else {
             queueSpineDesignRefresh()
-            if spineDesignTask == nil { hasReadCompanionRecords = true }
+            // An account-change check still reading the user holds the read back; Book Wall
+            // waits for the read it resumes, or for `companionReadLimit`.
+            if spineDesignTask == nil, cloudUserChecks == 0 { hasReadCompanionRecords = true }
             queueCloudSync(delay: .zero)
         }
     }
@@ -1754,6 +1761,8 @@ final class LibraryModel {
         guard hasStarted else { return }
         queueCloudSync()
         queueSpineDesignRefresh()
+        // With no read to run, Book Wall stops waiting, as launch's check would have had it.
+        if spineDesignTask == nil, cloudUserChecks == 0 { hasReadCompanionRecords = true }
     }
 
     /// Queues a cloud sync, which uploads local snapshots and merges the archive's newer ones.
@@ -1796,6 +1805,18 @@ final class LibraryModel {
                     let cloudUser = userBefore == userAfter ? userAfter : nil
                     // Disabling storage or changing accounts invalidates even uncancellable replies.
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
+                        return
+                    }
+                    // The user switched during the sync, so `remote` may hold another user's
+                    // library. Merging it would upload it to the wrong user on a later sync, even
+                    // with no saved user for `cloudAccountChanged()` to compare. A first read that
+                    // failed leaves the saved user to compare.
+                    if let userAfter,
+                        let expected = userBefore
+                            ?? dependencies.defaults.string(forKey: Self.cloudUserKey),
+                        userAfter != expected
+                    {
+                        stopSyncingForChangedAccount()
                         return
                     }
                     // A restored Apple TV without a credential shows the account that another

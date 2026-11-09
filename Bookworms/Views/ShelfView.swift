@@ -114,18 +114,22 @@ struct ShelfView: View {
         bookWallPreparation.prepared == nil
             || (bookWallPreparation.failure != nil && !wallDetail.isPresented)
     }
-    /// Back from the dialog shows My Shelf, or Settings when Book Wall is the only sidebar view,
-    /// since My Shelf would fall back to Book Wall and its dialog. Either way the focus engine
-    /// places focus.
+    /// Back from the dialog shows `bookWallExit`, or Settings when there is none. Either way the
+    /// focus engine places focus.
     private var waitsForBookWall: Binding<Bool> {
         Binding(
             get: { sidebarItem == .view(.bookWall) && needsBookWallDialog },
             set: { presented in
                 guard !presented && needsBookWallDialog else { return }
-                if showsOnlyBookWall { sidebarItem = .settings } else { showView(.shelf) }
+                if let bookWallExit { showView(bookWallExit) } else { sidebarItem = .settings }
             })
     }
-    private var showsOnlyBookWall: Bool { sidebarViews == [.bookWall] }
+    /// The view that leaving the Book Wall dialog shows: My Shelf, else the first sidebar view,
+    /// as `showView(_:)` falls back. `nil` when that is Book Wall, whose dialog would show again.
+    private var bookWallExit: BookwormsView? {
+        let exit = sidebarViews.contains(.shelf) ? BookwormsView.shelf : sidebarViews[0]
+        return exit == .bookWall ? nil : exit
+    }
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
     @State private var selectedBook: Book?
@@ -611,8 +615,8 @@ struct ShelfView: View {
                     )
                     .appFont(size: 28)
                 }
-                if !showsOnlyBookWall {
-                    Button("Back to My Shelf") { showView(.shelf) }
+                if let bookWallExit {
+                    Button("Back to \(bookWallExit.rawValue)") { showView(bookWallExit) }
                 }
             }
             .padding(72)
