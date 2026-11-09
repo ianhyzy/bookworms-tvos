@@ -485,14 +485,19 @@ struct SettingsView: View {
             Toggle("iCloud storage", isOn: $library.iCloudEnabled)
                 .font(.system(size: 26))
                 .accessibilityIdentifier("icloud-storage")
-            note(library.cloudStatus).accessibilityIdentifier("icloud-status")
+            if !library.cloudStatus.isEmpty {
+                note(library.cloudStatus).accessibilityIdentifier("icloud-status")
+            }
             Button("Sync iCloud now") { library.queueCloudSync() }
                 .font(.system(size: 26))
                 .performanceGlassButton()
                 .disabled(!library.iCloudEnabled)
             note(
-                "Turning this off keeps your data in iCloud. This Apple TV then shows its own spine looks, default covers, and default series."
+                library.iCloudEnabled
+                    ? "Turning this off keeps your data in iCloud. This Apple TV then shows its own spine looks, default covers, and default series."
+                    : "Turn this on to show the spine designs, covers, and series you choose in Bookworms on iPhone and Mac."
             )
+            .accessibilityIdentifier("icloud-footer")
         }
     }
 

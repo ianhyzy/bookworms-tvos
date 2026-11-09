@@ -191,7 +191,10 @@ final class SettingsInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["Sync iCloud now"].isEnabled)
         XCUIRemote.shared.press(.select)
         XCTAssertFalse(app.buttons["Sync iCloud now"].isEnabled)
-        XCTAssertTrue(app.staticTexts["icloud-status"].label.contains("off"))
+        // The toggle shows Off, so no status repeats it, and the footer says what turning it
+        // on adds.
+        XCTAssertFalse(app.staticTexts["icloud-status"].exists)
+        XCTAssertTrue(app.staticTexts["icloud-footer"].label.hasPrefix("Turn this on"))
     }
 
     func testWoodBackgroundToggleCanBeFocusedAndToggled() {

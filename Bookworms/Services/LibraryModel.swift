@@ -702,7 +702,8 @@ final class LibraryModel {
                         rebuildLibrary()
                     }
                 }
-                cloudStatus = "iCloud storage is off. Existing cloud data is retained."
+                // The toggle shows Off and the footer explains the rest, so no status shows.
+                cloudStatus = ""
             }
         }
     }
@@ -917,7 +918,7 @@ final class LibraryModel {
                 }
             }
         } else {
-            cloudStatus = "iCloud storage is off."
+            cloudStatus = ""
         }
         if spineDesignTask == nil, cloudUserChecks == 0 {
             hasReadCompanionRecords = true

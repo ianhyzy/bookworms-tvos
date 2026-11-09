@@ -2883,7 +2883,7 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.cloudAccountChanged()
         XCTAssertFalse(model.iCloudEnabled)
         XCTAssertEqual(reads, 0)
-        XCTAssertEqual(model.cloudStatus, "iCloud storage is off.")
+        XCTAssertEqual(model.cloudStatus, "")
         XCTAssertEqual(
             fixture.defaults.string(forKey: "activeHardcoverAccountID"),
             fixture.hardcoverAccountID)
@@ -3062,7 +3062,7 @@ final class LibraryWorkflowTests: XCTestCase {
         delay.resolve(())
         await fulfillment(of: [completed], timeout: 5)
         await work.value
-        XCTAssertTrue(model.cloudStatus.contains("storage is off"))
+        XCTAssertEqual(model.cloudStatus, "")
         XCTAssertEqual(model.books.map(\.id), [1])
     }
 
