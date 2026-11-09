@@ -40,11 +40,11 @@ python3 scripts/test-local.py --plan Unit
 To select a runtime explicitly or verify a major change:
 
 ```sh
-python3 scripts/test-local.py --runtime 26.0
+python3 scripts/test-local.py --runtime 26
 python3 scripts/test-local.py --major
 ```
 
-`--major` runs the complete Local plan on each runtime in [the runtime matrix](../TestPlans/runtime-matrix.json): the minimum tvOS 26.0 and current verification target tvOS 27.0. Update the matrix intentionally when the verification target changes. The runner does not silently substitute a runtime that is missing. A missing runtime is **blocked**, not passed.
+`--major` runs the complete Local plan on each runtime in [the runtime matrix](../TestPlans/runtime-matrix.json): tvOS 26, the minimum major version, and tvOS 27, the current one. A major version alone, in the matrix or in `--runtime`, selects the newest installed point release of it, such as tvOS 26.5 or 27.2, because Apple TV owners update quickly; an exact version, such as `--runtime 26.0`, selects only that runtime. Apple published no tvOS 26 simulator runtime after 26.5, although devices received later 26.x updates. Install the newest runtimes with `xcodebuild -downloadPlatform tvOS` (the Xcode SDK's version) and `xcodebuild -downloadPlatform tvOS -buildVersion 26.5`. Add a major version to the matrix intentionally when Apple ships one. The runner does not silently substitute a runtime that is missing. A missing runtime is **blocked**, not passed.
 
 Inspect `report.md` and `report.json` after every run. Intermediate reports remain **running** until every requested runtime finishes and the source identity is checked again. The runner compares the selected test methods in the current source and plan with the actual result bundle. Failed tests, unexpected skips, missing or unexpected tests, missing results, failed coverage export, and failed cleanup prevent a passing result. Source changes during verification invalidate the run. Exit codes are `0` for an automated pass, `1` for failure, and `2` for blocked verification. Visual review has a separate status and can remain pending after assertions pass; missing runtime evidence blocks visual verification.
 
@@ -86,7 +86,7 @@ The runner exports stable screenshot names and `visual-review.html` for review. 
 python3 scripts/test-local.py --major --baseline-dir /absolute/path/to/approved-screenshots
 ```
 
-Organize references as `tvOS-26.0/*.png` and `tvOS-27.0/*.png`, plus `tvOS-27.0-reduce-motion/*.png` for the Reduce Motion pass on the last runtime, retaining exported filenames. PNG byte comparisons flag changed images; they do not establish visual correctness. The runner never writes to the reference directory or approves a baseline. Inspect differences, accessibility findings, loaded artwork, and focus evidence before accepting visual changes. TV-distance appearance remains a device check.
+Organize references by major version as `tvOS-26/*.png` and `tvOS-27/*.png`, plus `tvOS-27-reduce-motion/*.png` for the Reduce Motion pass on the last runtime, retaining exported filenames, so a point-release update keeps its references. PNG byte comparisons flag changed images; they do not establish visual correctness. The runner never writes to the reference directory or approves a baseline. Inspect differences, accessibility findings, loaded artwork, and focus evidence before accepting visual changes. TV-distance appearance remains a device check.
 
 ## Read-only live-service checks
 

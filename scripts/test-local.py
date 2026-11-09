@@ -331,11 +331,18 @@ def version_tuple(value):
 
 
 def select_runtimes(inventory, requested):
+    """Pairs each requested runtime with an installed one. A major version alone, such as "27",
+    selects the newest installed point release of it, so the matrix follows Apple's updates; an
+    exact version or identifier selects only that runtime."""
     available = [r for r in inventory["runtimes"] if r.get("isAvailable") and "tvOS" in r["identifier"]]
     if requested:
         selected = []
         for version in requested:
-            matches = [r for r in available if r["version"] == version or r["identifier"] == version]
+            if version.isdigit():
+                matches = sorted((r for r in available if r["version"].split(".")[0] == version),
+                                 key=lambda runtime: version_tuple(runtime["version"]), reverse=True)
+            else:
+                matches = [r for r in available if r["version"] == version or r["identifier"] == version]
             selected.append((version, matches[0] if matches else None))
         return selected
     if not available:
@@ -532,7 +539,7 @@ def write_report(output, report):
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", choices=["Local", "Unit"], default="Local")
-    parser.add_argument("--runtime", action="append", help="Exact tvOS version or runtime identifier; repeat for multiple runtimes")
+    parser.add_argument("--runtime", action="append", help="tvOS major version (newest installed point release), exact version, or runtime identifier; repeat for multiple runtimes")
     parser.add_argument("--major", action="store_true", help="Run Local on every required runtime in TestPlans/runtime-matrix.json")
     parser.add_argument("--output", type=Path, help="New artifact directory outside source control; must not already exist")
     parser.add_argument("--baseline-dir", type=Path,
@@ -588,7 +595,9 @@ def main(argv=None):
             if reduce_motion:
                 derived_data = runtime_output / "DerivedData"
                 runtime_output = output / ("tvOS-" + runtime["version"] + "-reduce-motion")
-            baseline = args.baseline_dir.resolve() / runtime_output.name if args.baseline_dir else None
+            # Baselines are kept per major version, so a point-release update keeps its references.
+            baseline_name = "tvOS-" + runtime["version"].split(".")[0] + ("-reduce-motion" if reduce_motion else "")
+            baseline = args.baseline_dir.resolve() / baseline_name if args.baseline_dir else None
             tests = reduce_motion_tests(required) if reduce_motion else required
             record = execute_runtime(runtime, device_type, runtime_output, args.plan, tests, baseline,
                                      reduce_motion, derived_data)
