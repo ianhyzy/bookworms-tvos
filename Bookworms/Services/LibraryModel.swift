@@ -848,6 +848,8 @@ final class LibraryModel {
             showSample()
             hasLoadedLibrarySnapshot = true
             hasReadCompanionRecords = true
+            // The sample library never syncs, so nothing replaces the launch status.
+            cloudStatus = ""
             return
         }
         aiRecords = dependencies.styleStore.load()

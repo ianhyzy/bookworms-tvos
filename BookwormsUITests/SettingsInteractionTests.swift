@@ -185,10 +185,12 @@ final class SettingsInteractionTests: XCTestCase {
         let app = openSettings("General")
         let toggle = app.descendants(matching: .any)["icloud-storage"].firstMatch
         RemoteNavigation.moveFocus(to: toggle, in: app)
-        // iCloud storage starts off.
+        // iCloud storage starts off, with no status.
         XCTAssertFalse(app.buttons["Sync iCloud now"].isEnabled)
+        XCTAssertFalse(app.staticTexts["icloud-status"].exists)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["Sync iCloud now"].isEnabled)
+        XCTAssertTrue(app.staticTexts["icloud-footer"].label.hasPrefix("Turning this off"))
         XCUIRemote.shared.press(.select)
         XCTAssertFalse(app.buttons["Sync iCloud now"].isEnabled)
         // The toggle shows Off, so no status repeats it, and the footer says what turning it
