@@ -206,12 +206,13 @@ final class LibraryModel {
 
     /// Whether picking a series in `book`'s details can save it: always in the sample library,
     /// which keeps picks in memory, never in the read-only example profile, and otherwise for a
-    /// Hardcover book with iCloud storage on while companion records apply (`companionAccountID`).
+    /// Hardcover book with iCloud storage on while companion records apply (`companionAccountID`)
+    /// and the Hardcover account check is clear (`cloudAccountsCleared`).
     func canPickSeries(for book: Book) -> Bool {
         guard !isExample else { return false }
         return isSample
-            || (iCloudEnabled && hardcoverEnabled && companionAccountID != nil
-                && book.isHardcoverBook)
+            || (iCloudEnabled && cloudAccountsCleared && hardcoverEnabled
+                && companionAccountID != nil && book.isHardcoverBook)
     }
 
     /// Makes `seriesID` the series `book`'s details name and its spine's look follows, saved as
@@ -261,7 +262,7 @@ final class LibraryModel {
                 // the pick, so it never reaches the records of the user or account that follows.
                 // A pick that a later pick replaced still saves, so a failed later save can
                 // restore it.
-                guard iCloudEnabled, iCloudToggles == toggles,
+                guard iCloudEnabled, cloudAccountsCleared, iCloudToggles == toggles,
                     companionAccountID == accountID
                 else { return }
                 try await dependencies.saveSeriesLink(chosen, accountID, book.id)
@@ -364,6 +365,26 @@ final class LibraryModel {
     /// Counts `iCloudEnabled` changes, so `cloudAccountChanged()` sees a toggle that ends where
     /// it began.
     @ObservationIgnored private var iCloudToggles = 0
+    /// Whether the Hardcover account check (`applyAccountCheck(to:worklist:)`) found no other
+    /// account's data in iCloud for the account in use. Until it does, this Apple TV doesn't
+    /// sync, read or save companion records, or publish a worklist. It starts `false` at launch
+    /// and returns to `false` when storage turns on, the account changes, or Hardcover
+    /// disconnects.
+    private(set) var cloudAccountsCleared = false
+    /// The accounts the **Merge** prompt names, while it shows.
+    private(set) var otherICloudAccounts: [CloudAccount] = []
+    /// The libraries the **Choose a library** prompt lists, while it shows.
+    private(set) var iCloudLibraryChoices: [CloudAccount] = []
+    /// Why **Merge** failed, for the **Couldn't merge** alert.
+    var mergeFailure: String?
+    /// Whether the alert that explains deleting Bookworms data from iCloud shows, after **Keep
+    /// iCloud off**.
+    var showsICloudDeletionHelp = false
+    /// The archive's merges this Apple TV knows: each old Hardcover account and the account it
+    /// merged into. Saved, so a merge recorded offline uploads with the next sync.
+    @ObservationIgnored private var accountMerges: [String: String] = [:] {
+        didSet { dependencies.defaults.set(accountMerges, forKey: "iCloudAccountMerges") }
+    }
     /// The Hardcover account whose library shows. Unsaved series picks belong to the account
     /// they were made for, so a change drops other accounts' picks, including picks of the
     /// default series, which no link marks with an account. A credential-free shelf's picks,
@@ -372,13 +393,15 @@ final class LibraryModel {
         didSet {
             if activeHardcoverAccountID != oldValue {
                 pickedLinks = pickedLinks.filter { $0.value.accountID == activeHardcoverAccountID }
+                cloudAccountsCleared = false
             }
         }
     }
-    /// The account whose companion records apply: the active account, else, without a Hardcover
-    /// credential, the account of the snapshot the shelf shows, such as one an iPhone saved to
-    /// iCloud. The legacy `"hardcover"` placeholder has no records. It isn't saved, so a newer
-    /// snapshot of another account takes over, and it never lists work (`SpineWorklistV1`).
+    /// The account whose companion records apply: the active account, which is the signed-in
+    /// account or the library a reader without a credential chose, else, without a Hardcover
+    /// credential, the account of the snapshot the shelf shows: the only library in iCloud, such
+    /// as one an iPhone saved. The legacy `"hardcover"` placeholder has no records. A shown
+    /// snapshot's account isn't saved and never lists work (`SpineWorklistV1`).
     private var companionAccountID: String? {
         if let activeHardcoverAccountID { return activeHardcoverAccountID }
         guard !hardcoverConnected, let id = activeHardcoverSnapshot()?.accountID,
@@ -684,6 +707,10 @@ final class LibraryModel {
             iCloudToggles += 1
             dependencies.defaults.set(iCloudEnabled, forKey: "iCloudEnabled")
             invalidateCloudSync()
+            // Turning storage on checks the Hardcover accounts again; off, nothing asks.
+            cloudAccountsCleared = false
+            otherICloudAccounts = []
+            iCloudLibraryChoices = []
             // Book Wall stops waiting for the cancelled read; a later read rebuilds it.
             hasReadCompanionRecords = true
             if iCloudEnabled {
@@ -808,6 +835,8 @@ final class LibraryModel {
         // Opt-in: the published privacy policy describes iCloud storage as off by default.
         iCloudEnabled = defaults.object(forKey: "iCloudEnabled") as? Bool ?? false
         activeHardcoverAccountID = defaults.string(forKey: "activeHardcoverAccountID")
+        accountMerges =
+            defaults.dictionary(forKey: "iCloudAccountMerges") as? [String: String] ?? [:]
         sourceErrors = defaults.dictionary(forKey: "sourceErrors") as? [String: String] ?? [:]
     }
 
@@ -929,7 +958,8 @@ final class LibraryModel {
         } else {
             cloudStatus = ""
         }
-        if spineDesignTask == nil, cloudUserChecks == 0 {
+        // The companion read follows the sync's Hardcover account check.
+        if spineDesignTask == nil, cloudTask == nil, cloudUserChecks == 0 {
             hasReadCompanionRecords = true
         } else {
             let limit = dependencies.companionReadLimit
@@ -1150,7 +1180,8 @@ final class LibraryModel {
             hardcoverEnabled = true
             hardcoverConnectionPhase = .savingLibrary
             await install(
-                result.books, source: .hardcover, accountID: accountID, series: result.series)
+                result.books, source: .hardcover, accountID: accountID, series: result.series,
+                username: result.username)
             return true
         } catch {
             guard revision == sourceRevision, !Task.isCancelled else { return false }
@@ -1243,7 +1274,7 @@ final class LibraryModel {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 await install(
                     result.books, source: .hardcover, accountID: result.accountID,
-                    series: result.series)
+                    series: result.series, username: result.username)
             } catch {
                 guard revision == sourceRevision, !Task.isCancelled else { return }
                 let text = UserFacingError.hardcoverMessage(error)
@@ -1473,6 +1504,7 @@ final class LibraryModel {
         do { try hardcoverSession.remove() } catch { message = readable(error) }
         hardcoverConnected = false
         hardcoverSessionExpired = false
+        cloudAccountsCleared = false
         hardcoverEnabled = false
         isSample = false
         rebuildLibrary()
@@ -1498,20 +1530,20 @@ final class LibraryModel {
     }
 
     private func install(
-        _ result: [Book], source: LibrarySource, accountID: String, series: [SeriesInfo]? = nil
+        _ result: [Book], source: LibrarySource, accountID: String, series: [SeriesInfo]? = nil,
+        username: String? = nil
     ) async {
         sourceErrors[source.rawValue] = nil
         if source == .hardcover {
             setActiveHardcoverAccountID(accountID)
             hardcoverSessionExpired = false
         }
-        let previousSeries = sourceSnapshots.last {
+        let previous = sourceSnapshots.last {
             $0.source == source && $0.accountID == accountID
-        }?
-        .series
+        }
         let snapshot = SourceSnapshot(
             source: source, accountID: accountID, books: result, syncedAt: dependencies.now(),
-            series: series ?? previousSeries)
+            series: series ?? previous?.series, username: username ?? previous?.username)
         // A complete Hardcover sync replaces snapshots from older builds and accounts.
         sourceSnapshots.removeAll {
             $0.source == source && (source == .hardcover || $0.accountID == accountID)
@@ -1566,9 +1598,15 @@ final class LibraryModel {
             return snapshots.filter { $0.accountID == activeHardcoverAccountID }
                 .max { $0.syncedAt < $1.syncedAt }
         }
-        // Preserve existing cached covers before a legacy account can be verified. A newly
-        // restored device without a credential uses its newest snapshot.
-        return snapshots.filter { !hardcoverConnected || $0.accountID == "hardcover" }
+        // Preserve existing cached covers before a legacy account can be verified.
+        if hardcoverConnected {
+            return snapshots.filter { $0.accountID == "hardcover" }
+                .max { $0.syncedAt < $1.syncedAt }
+        }
+        // A newly restored device without a credential uses its newest library, which is its
+        // only one unless the reader still has to choose (`chooseLibrary(_:)`).
+        let libraries = CloudLibraryArchive.libraryIDs(of: snapshots, merges: accountMerges)
+        return snapshots.filter { libraries.isEmpty || libraries.contains($0.accountID) }
             .max { $0.syncedAt < $1.syncedAt }
     }
 
@@ -1745,6 +1783,109 @@ final class LibraryModel {
             "Your iCloud account changed, so iCloud storage turned off. Turn it on to sync this library with the current account."
     }
 
+    /// The archive a sync uploads: the local snapshots, legacy designs, and known merges.
+    private var localArchive: CloudLibraryArchive {
+        CloudLibraryArchive(
+            sources: sourceSnapshots, designs: aiRecords,
+            merges: accountMerges.isEmpty ? nil : accountMerges)
+    }
+
+    /// Runs the Hardcover account check on `archive`, with the merges this Apple TV knows, and
+    /// `worklist`. Returns whether the sync may use iCloud; otherwise it sets the prompt and the
+    /// paused status.
+    ///
+    /// Signed in, the account in use is the active one. Without a credential, it is the library
+    /// the reader chose, and a choice that is no longer a library is forgotten.
+    private func applyAccountCheck(
+        to archive: CloudLibraryArchive, worklist: SpineWorklistV1?
+    ) -> Bool {
+        var archive = archive
+        archive.merges = (archive.merges ?? [:]).merging(accountMerges) { stored, _ in stored }
+        if !hardcoverConnected, let chosen = activeHardcoverAccountID {
+            let libraries = CloudLibraryArchive.libraryIDs(
+                of: archive.sources, merges: archive.merges ?? [:])
+            if !libraries.isEmpty, !libraries.contains(chosen) {
+                activeHardcoverAccountID = nil
+                dependencies.defaults.removeObject(forKey: "activeHardcoverAccountID")
+                rebuildLibrary()
+            }
+        }
+        let result = archive.check(
+            worklist: worklist,
+            signedInAccountID: hardcoverConnected ? activeHardcoverAccountID : nil,
+            chosenAccountID: hardcoverConnected ? nil : activeHardcoverAccountID)
+        otherICloudAccounts = []
+        iCloudLibraryChoices = []
+        switch result {
+        case .clear:
+            cloudAccountsCleared = true
+            return true
+        case .otherAccounts(let accounts):
+            otherICloudAccounts = accounts
+            cloudStatus = "iCloud sync is paused until you choose Merge or Keep iCloud off."
+        case .chooseLibrary(let accounts):
+            iCloudLibraryChoices = accounts
+            cloudStatus = "iCloud sync is paused until you choose a library."
+        }
+        cloudAccountsCleared = false
+        // The companion read that a clear check before the sync started stops with the sync.
+        spineDesignTask?.cancel()
+        spineDesignTask = nil
+        spineDesignTaskIdentity = nil
+        return false
+    }
+
+    /// **Merge**: copies each other account's companion records to the books it shares with
+    /// this account's library (`copyAccountRecords`), newest account first so it wins a shared
+    /// book, then records the merges and syncs, which uploads them. A failed copy records no
+    /// merge and shows `mergeFailure`; the prompt returns at the next sync's check.
+    func mergeOtherAccounts() async {
+        let accounts = otherICloudAccounts
+        otherICloudAccounts = []
+        guard hardcoverConnected, let accountID = activeHardcoverAccountID, !accounts.isEmpty
+        else { return }
+        guard let library = activeHardcoverSnapshot(), library.accountID == accountID else {
+            mergeFailure =
+                "Your Hardcover library hasn't downloaded yet. Bookworms asks again when it has."
+            return
+        }
+        do {
+            for account in accounts.sorted(by: { $0.syncedAt > $1.syncedAt }) {
+                let shared = library.books.filter { account.bookIDs.contains($0.id) }
+                try await dependencies.copyAccountRecords(account.id, accountID, shared)
+            }
+        } catch {
+            mergeFailure = UserFacingError.message(error)
+            return
+        }
+        // Storage turned off or the account changed while copying: that check decides.
+        guard iCloudEnabled, hardcoverConnected, activeHardcoverAccountID == accountID else {
+            return
+        }
+        for account in accounts { accountMerges[account.id] = accountID }
+        cloudAccountsCleared = true
+        // The sync reads the companion records once it uploads the merges.
+        queueCloudSync(delay: .zero)
+    }
+
+    /// **Keep iCloud off**: turns iCloud storage off, which ends the prompt until the reader
+    /// turns storage on again, and explains how to delete Bookworms data from iCloud.
+    func keepICloudOff() {
+        iCloudEnabled = false
+        showsICloudDeletionHelp = true
+    }
+
+    /// Shows the library of `accountID`, one the **Choose a library** prompt lists, on an Apple
+    /// TV without a Hardcover credential, and saves the choice as the active account.
+    func chooseLibrary(_ accountID: String) {
+        guard !hardcoverConnected, iCloudLibraryChoices.contains(where: { $0.id == accountID })
+        else { return }
+        iCloudLibraryChoices = []
+        setActiveHardcoverAccountID(accountID)
+        rebuildLibrary()
+        queueCloudSync(delay: .zero)
+    }
+
     /// Returns once no `cloudAccountChanged()` call is reading the iCloud user.
     func waitForCloudUserChecks() async {
         while cloudUserChecks > 0 {
@@ -1759,7 +1900,9 @@ final class LibraryModel {
         queueSpineDesignRefresh()
         // An account-change check still reading the user holds the read back; Book Wall waits
         // for the read it resumes, or for `companionReadLimit`. With no read to run, it stops.
-        if spineDesignTask == nil, cloudUserChecks == 0 { hasReadCompanionRecords = true }
+        if spineDesignTask == nil, cloudTask == nil, cloudUserChecks == 0 {
+            hasReadCompanionRecords = true
+        }
     }
 
     /// Queues a cloud sync, which uploads local snapshots and merges the archive's newer ones.
@@ -1780,7 +1923,7 @@ final class LibraryModel {
                 cloudPending = false
                 cloudStatus = "Syncing with iCloud…"
                 do {
-                    let archive = CloudLibraryArchive(sources: sourceSnapshots, designs: aiRecords)
+                    let archive = localArchive
                     // The user is read on both sides of the sync and saved only when both reads
                     // agree, so an account switch during the sync can't record the new user as
                     // the one this library synced with (`cloudAccountChanged()`).
@@ -1796,6 +1939,25 @@ final class LibraryModel {
                     {
                         stopSyncingForChangedAccount()
                         return
+                    }
+                    if !cloudAccountsCleared {
+                        // A connected credential that validation hasn't tied to an account yet
+                        // waits for it; validation's install queues another sync.
+                        if hardcoverConnected, activeHardcoverAccountID == nil {
+                            cloudStatus = "Waiting for iCloud…"
+                            return
+                        }
+                        let stored = try await dependencies.readCloudArchive()
+                        let worklist = try await dependencies.readSpineWorklist()
+                        guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
+                            return
+                        }
+                        guard
+                            applyAccountCheck(
+                                to: stored ?? CloudLibraryArchive(), worklist: worklist)
+                        else { return }
+                        // The companion read, held back until now, runs beside the sync.
+                        queueSpineDesignRefresh()
                     }
                     let remote = try await dependencies.syncCloud(archive)
                     let userAfter = await dependencies.cloudUserRecordName()
@@ -1816,29 +1978,19 @@ final class LibraryModel {
                         stopSyncingForChangedAccount()
                         return
                     }
-                    // A restored Apple TV without a credential shows the account that another
-                    // device listed for the companion, when the archive contains it. Read it
-                    // before merging so a snapshot installed during this read is kept.
-                    let restoredWorklist: SpineWorklistV1?
-                    if hardcoverConnected {
-                        restoredWorklist = nil
-                    } else {
-                        restoredWorklist = try? await dependencies.readSpineWorklist()
-                    }
+                    // Another device may have added an account's data since the check above. The
+                    // archive is in hand, so each sync checks it again before the merge, the
+                    // worklist, and the companion read use it. A snapshot installed during the
+                    // worklist read is kept, because the merge below reads the local copy after.
+                    let worklist = try await dependencies.readSpineWorklist()
                     guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled else {
                         return
                     }
-                    let merged = remote.merging(
-                        CloudLibraryArchive(sources: sourceSnapshots, designs: aiRecords))
+                    guard applyAccountCheck(to: remote, worklist: worklist) else { return }
+                    let merged = remote.merging(localArchive)
                     sourceSnapshots = merged.sources
                     aiRecords = merged.designs
-                    if let worklist = restoredWorklist,
-                        sourceSnapshots.contains(where: {
-                            $0.source == .hardcover && $0.accountID == worklist.accountID
-                        })
-                    {
-                        setActiveHardcoverAccountID(worklist.accountID)
-                    }
+                    accountMerges = merged.merges ?? [:]
                     cloudBacked = true
                     if let cloudUser {
                         dependencies.defaults.set(cloudUser, forKey: Self.cloudUserKey)
@@ -1894,9 +2046,8 @@ final class LibraryModel {
                         // Only a connected, enabled, unexpired credential lists work, and that
                         // credential's authenticated validate or fetch set the active account
                         // ID, so no Hardcover request is needed here. An explicit local disable
-                        // clears the list. A credential-free restore can adopt an account but
-                        // never lists work, so it cannot reactivate a worklist that another
-                        // Apple TV cleared.
+                        // clears the list. A credential-free shelf never lists work, so it cannot
+                        // reactivate a worklist that another Apple TV cleared.
                         let listsWork =
                             hardcoverConnected && hardcoverEnabled && !hardcoverSessionExpired
                         if listsWork || !hardcoverEnabled {
@@ -1904,7 +2055,8 @@ final class LibraryModel {
                                 accountID: accountID, syncedAt: snapshot.syncedAt,
                                 bookIDs: listsWork ? snapshot.books.map(\.id) : [])
                             do {
-                                try await dependencies.publishSpineWorklist(worklist)
+                                try await dependencies.publishSpineWorklist(
+                                    worklist, accountMerges)
                                 guard iCloudEnabled, revision == cloudRevision, !Task.isCancelled
                                 else { return }
                             } catch {
@@ -1942,7 +2094,7 @@ final class LibraryModel {
         guard !PerformanceDiagnostics.isolates("background"), cloudUserChecks == 0 else { return }
         // Sample mode draws its own records; an account that a disconnect kept must not replace
         // them or save looks for the sample's books.
-        guard !isSample, iCloudEnabled, hardcoverEnabled,
+        guard !isSample, iCloudEnabled, cloudAccountsCleared, hardcoverEnabled,
             let accountID = companionAccountID,
             let snapshot = activeHardcoverSnapshot(), snapshot.accountID == accountID
         else { return }
@@ -2292,9 +2444,10 @@ final class LibraryModel {
                     try Task.checkCancellation()
                     var updated = aiRecords
                     updated[book.id] = record
-                    if cloudBacked && iCloudEnabled {
-                        let saved = try await dependencies.syncCloud(
-                            CloudLibraryArchive(sources: sourceSnapshots, designs: updated))
+                    if cloudBacked && iCloudEnabled && cloudAccountsCleared {
+                        var archive = localArchive
+                        archive.designs = updated
+                        let saved = try await dependencies.syncCloud(archive)
                         updated = saved.designs
                     }
                     try dependencies.styleStore.save(

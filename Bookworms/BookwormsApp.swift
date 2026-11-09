@@ -44,6 +44,7 @@ struct BookwormsApp: App {
                     }
                 }
                 .preferredColorScheme(appearance.colorScheme)
+                .modifier(CloudAccountAlerts(library: library))
                 .task {
                     // Unit tests own their model instances; the host UI must not start live syncing.
                     guard NSClassFromString("XCTestCase") == nil else { return }
@@ -57,6 +58,65 @@ struct BookwormsApp: App {
                     Task { await library.cloudAccountChanged() }
                 }
         }
+    }
+}
+
+/// The Hardcover account prompts: **Merge** or **Keep iCloud off** when iCloud holds another
+/// account's data, the library choice without a Hardcover credential, and their follow-up
+/// alerts. Each prompt shows while its state is set and has no cancel button, so the reader
+/// chooses; its actions clear the state.
+private struct CloudAccountAlerts: ViewModifier {
+    @Bindable var library: LibraryModel
+
+    func body(content: Content) -> some View {
+        content
+            .alert(
+                "Another Hardcover account in iCloud",
+                isPresented: Binding(
+                    get: { !library.otherICloudAccounts.isEmpty }, set: { _ in })
+            ) {
+                // Starts at once, so the prompt clears before the alert reads it again.
+                Button("Merge") { Task.immediate { await library.mergeOtherAccounts() } }
+                Button("Keep iCloud off") { library.keepICloudOff() }
+            } message: {
+                Text(otherAccountsMessage)
+            }
+            .alert(
+                "Choose a library",
+                isPresented: Binding(
+                    get: { !library.iCloudLibraryChoices.isEmpty }, set: { _ in })
+            ) {
+                ForEach(library.iCloudLibraryChoices) { account in
+                    Button(account.name) { library.chooseLibrary(account.id) }
+                }
+            } message: {
+                Text("iCloud has libraries from more than one Hardcover account.")
+            }
+            .alert(
+                "Couldn't merge",
+                isPresented: Binding(
+                    get: { library.mergeFailure != nil },
+                    set: { if !$0 { library.mergeFailure = nil } })
+            ) {
+                Button("OK") {}
+            } message: {
+                Text(library.mergeFailure ?? "")
+            }
+            .alert("iCloud storage is off", isPresented: $library.showsICloudDeletionHelp) {
+                Button("OK") {}
+            } message: {
+                Text(
+                    "To delete Bookworms data from iCloud, use an iPhone, iPad, or Mac. This deletes all Bookworms iCloud data, including this account's."
+                )
+            }
+    }
+
+    private var otherAccountsMessage: String {
+        let accounts = library.otherICloudAccounts
+        let names = ListFormatter.localizedString(byJoining: accounts.map(\.name))
+        return accounts.count == 1
+            ? "iCloud has Bookworms data from \(names). Merge copies its designs and choices to the same books in your library."
+            : "iCloud has Bookworms data from \(names). Merge copies their designs and choices to the same books in your library."
     }
 }
 

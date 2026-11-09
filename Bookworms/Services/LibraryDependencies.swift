@@ -42,6 +42,10 @@ struct LibraryDependencies {
     var syncCloud: @MainActor (CloudLibraryArchive) async throws -> CloudLibraryArchive = {
         try await CloudLibraryStore.shared.sync($0)
     }
+    /// Reads the stored archive without saving, for the Hardcover account check.
+    var readCloudArchive: @MainActor () async throws -> CloudLibraryArchive? = {
+        try await CloudLibraryStore.shared.read()
+    }
     /// The signed-in iCloud user's record name, or `nil` when it can't be read.
     var cloudUserRecordName: @MainActor () async -> String? = {
         await CloudLibraryStore.shared.userRecordName()
@@ -49,8 +53,14 @@ struct LibraryDependencies {
     var readSpineWorklist: @MainActor () async throws -> SpineWorklistV1? = {
         try await SpineCloudStore.shared.worklist()
     }
-    var publishSpineWorklist: @MainActor (SpineWorklistV1) async throws -> Void = {
-        try await SpineCloudStore.shared.publish($0)
+    /// Publishes a worklist unless the stored one names an account that the merges don't
+    /// absorb into the new one's (`SpineCloudStore.publish(_:merges:)`).
+    var publishSpineWorklist: @MainActor (SpineWorklistV1, [String: String]) async throws -> Void =
+        { try await SpineCloudStore.shared.publish($0, merges: $1) }
+    /// Copies an old account's companion records into the current account for `books`
+    /// (`SpineCloudStore.copyRecords(from:into:books:)`).
+    var copyAccountRecords: @MainActor (String, String, [Book]) async throws -> Void = {
+        try await SpineCloudStore.shared.copyRecords(from: $0, into: $1, books: $2)
     }
     var fetchSpineDesigns:
         @MainActor (String, [Book]) async throws -> (

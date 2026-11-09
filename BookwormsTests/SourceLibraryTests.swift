@@ -496,19 +496,140 @@ final class SourceLibraryTests: XCTestCase {
         XCTAssertThrowsError(try reloaded.begin(.hardcover, now: now.addingTimeInterval(-1)))
     }
 
+    /// The merge keeps each account's newest snapshot with the older one's username when it has
+    /// none, and the union of both sides' merges, where the stored side wins a conflict.
     func testCloudMergeKeepsNewestSourceAndOtherAccounts() {
         let now = Date()
-        let old = SourceSnapshot(source: .hardcover, accountID: "one", books: [], syncedAt: now)
+        var old = SourceSnapshot(source: .hardcover, accountID: "one", books: [], syncedAt: now)
+        old.username = "fictional_reader"
         let latest = SourceSnapshot(
             source: .hardcover, accountID: "one", books: SampleLibrary.books,
             syncedAt: now.addingTimeInterval(1))
         let other = SourceSnapshot(source: .cwa, accountID: "two", books: [], syncedAt: now)
-        let merged = CloudLibraryArchive(sources: [latest])
-            .merging(CloudLibraryArchive(sources: [old, other]))
+        let merged = CloudLibraryArchive(sources: [latest], merges: ["a": "one", "b": "one"])
+            .merging(CloudLibraryArchive(sources: [old, other], merges: ["b": "c", "d": "one"]))
         XCTAssertEqual(merged.sources.count, 2)
+        let hardcover = merged.sources.first(where: { $0.source == .hardcover })
+        XCTAssertEqual(hardcover?.books.count, SampleLibrary.books.count)
+        XCTAssertEqual(hardcover?.username, "fictional_reader")
+        XCTAssertEqual(merged.merges, ["a": "one", "b": "one", "d": "one"])
+        XCTAssertNil(CloudLibraryArchive().merging(CloudLibraryArchive()).merges)
+    }
+
+    /// An archive without merges, as older builds and the iPhone write it, decodes, and one
+    /// with merges keeps them through a round trip.
+    func testArchiveDecodesWithAndWithoutMerges() throws {
+        let plain = try JSONDecoder()
+            .decode(
+                CloudLibraryArchive.self,
+                from: Data(#"{"version":1,"sources":[],"designs":{}}"#.utf8))
+        XCTAssertNil(plain.merges)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
         XCTAssertEqual(
-            merged.sources.first(where: { $0.source == .hardcover })?.books.count,
-            SampleLibrary.books.count)
+            String(decoding: try encoder.encode(plain), as: UTF8.self),
+            #"{"designs":{},"sources":[],"version":1}"#)
+        let merged = try JSONDecoder()
+            .decode(
+                CloudLibraryArchive.self,
+                from: Data(#"{"version":1,"sources":[],"designs":{},"merges":{"4242":"77"}}"#.utf8))
+        XCTAssertEqual(merged.merges, ["4242": "77"])
+    }
+
+    /// The account check's rules, the same table as the iPhone and Mac app's.
+    func testAccountCheckFollowsMergesAndIgnoresThePlaceholder() {
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        func snapshot(_ id: String, username: String? = nil, books: [Int] = [1]) -> SourceSnapshot {
+            var snapshot = SourceSnapshot(
+                source: .hardcover, accountID: id,
+                books: books.map { Book(id: $0, title: "Book \($0)", author: "A") },
+                syncedAt: now)
+            snapshot.username = username
+            return snapshot
+        }
+        func archive(_ ids: [String], merges: [String: String]? = nil) -> CloudLibraryArchive {
+            CloudLibraryArchive(sources: ids.map { snapshot($0) }, merges: merges)
+        }
+        func ids(_ check: CloudAccountCheck) -> [String] {
+            switch check {
+            case .clear(let id): ["clear:\(id ?? "nil")"]
+            case .otherAccounts(let accounts): accounts.map { "other:\($0.id)" }
+            case .chooseLibrary(let accounts): accounts.map { "choose:\($0.id)" }
+            }
+        }
+        // Signed in.
+        XCTAssertEqual(
+            ids(
+                archive(["B", "hardcover"])
+                    .check(worklist: nil, signedInAccountID: "B", chosenAccountID: nil)),
+            ["clear:B"], "The placeholder is ignored")
+        XCTAssertEqual(
+            ids(
+                archive(["B", "A"])
+                    .check(worklist: nil, signedInAccountID: "B", chosenAccountID: nil)),
+            ["other:A"])
+        XCTAssertEqual(
+            ids(
+                archive(["A", "B", "C"], merges: ["A": "C", "C": "B"])
+                    .check(worklist: nil, signedInAccountID: "B", chosenAccountID: nil)),
+            ["clear:B"], "Chains count")
+        XCTAssertEqual(
+            ids(
+                archive(["B", "D"], merges: ["B": "D"])
+                    .check(worklist: nil, signedInAccountID: "B", chosenAccountID: nil)),
+            ["other:D"], "B merged into D doesn't absorb D")
+        XCTAssertEqual(
+            ids(
+                archive(["A", "B", "C"], merges: ["A": "C", "C": "A"])
+                    .check(worklist: nil, signedInAccountID: "B", chosenAccountID: nil)),
+            ["other:A", "other:C"], "A loop that misses B isn't absorbed")
+        let worklist = SpineWorklistV1(accountID: "W", syncedAt: now, bookIDs: [5])
+        let worklistOnly = CloudLibraryArchive()
+            .check(
+                worklist: worklist, signedInAccountID: "B", chosenAccountID: nil)
+        XCTAssertEqual(ids(worklistOnly), ["other:W"])
+        if case .otherAccounts(let accounts) = worklistOnly {
+            XCTAssertEqual(accounts.first?.bookIDs, [5])
+            XCTAssertEqual(accounts.first?.name, "account W")
+        }
+        let named = CloudLibraryArchive(sources: [snapshot("A", username: "reader_a")])
+            .check(worklist: nil, signedInAccountID: "B", chosenAccountID: nil)
+        XCTAssertEqual(
+            named,
+            .otherAccounts([
+                CloudAccount(id: "A", username: "reader_a", bookIDs: [1], syncedAt: now)
+            ]))
+        // No sign-in.
+        XCTAssertEqual(
+            ids(
+                CloudLibraryArchive()
+                    .check(worklist: nil, signedInAccountID: nil, chosenAccountID: nil)),
+            ["clear:nil"])
+        XCTAssertEqual(
+            ids(
+                archive(["A", "hardcover"])
+                    .check(worklist: worklist, signedInAccountID: nil, chosenAccountID: nil)),
+            ["clear:A"], "One library is clear whatever the worklist names")
+        XCTAssertEqual(
+            ids(
+                archive(["B", "A"])
+                    .check(worklist: nil, signedInAccountID: nil, chosenAccountID: nil)),
+            ["choose:A", "choose:B"])
+        XCTAssertEqual(
+            ids(
+                archive(["B", "A"])
+                    .check(worklist: nil, signedInAccountID: nil, chosenAccountID: "B")),
+            ["clear:B"])
+        XCTAssertEqual(
+            ids(
+                archive(["A", "B"], merges: ["A": "B"])
+                    .check(worklist: nil, signedInAccountID: nil, chosenAccountID: nil)),
+            ["clear:B"], "A merged account isn't a library")
+        XCTAssertEqual(
+            ids(
+                archive(["A", "B"], merges: ["A": "B", "B": "A"])
+                    .check(worklist: nil, signedInAccountID: nil, chosenAccountID: nil)),
+            ["choose:A", "choose:B"], "A loop leaves every account a library")
     }
 
     func testCloudMergeKeepsStoredSeriesWhenANewerSnapshotHasNone() {

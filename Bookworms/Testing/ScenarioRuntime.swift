@@ -232,8 +232,10 @@
                     return archive
                 }
             }
+            dependencies.readCloudArchive = { nil }
             dependencies.readSpineWorklist = { nil }
-            dependencies.publishSpineWorklist = { _ in }
+            dependencies.publishSpineWorklist = { _, _ in }
+            dependencies.copyAccountRecords = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.fetchSpineDesigns = { accountID, books in
                 let designs =
                     ProcessInfo.processInfo.arguments.contains("--test-companion-designs")

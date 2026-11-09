@@ -15,6 +15,9 @@ struct SourceSnapshot: Codable, Sendable {
     /// Series that the books belong to; Hardcover only. `nil` in snapshots saved before series
     /// were fetched.
     var series: [SeriesInfo]? = nil
+    /// The Hardcover account's username, which the one-account prompts name. `nil` for other
+    /// sources and in snapshots saved before usernames were fetched.
+    var username: String? = nil
 }
 
 struct CWAConfiguration: Codable, Equatable, Sendable {

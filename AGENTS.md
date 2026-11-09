@@ -133,6 +133,7 @@ Check each item that your change touches. These are the problems CodeRabbit find
 - `ExampleProfile/` holds the owner's real reading history for **View example profile** (`scripts/export-example-profile.py`). This repository is public: Git ignores the folder apart from its placeholder, so never commit it, print its contents, publish screenshots made from it, or load it in tests. Scenarios and tests use fictional profiles.
 - Keep literal credentials out of repository files, command arguments, logs, screenshots, and test fixtures. Use Keychain and authorized 1Password references; see [Hardcover authentication](docs/HARDCOVER_AUTHENTICATION.md).
 - Keep credentials provider-specific and library access read-only. Preserve source provenance when merging books. A credential replacement is not permission to combine unrelated accounts from the same provider.
+- Each person has one Hardcover account. Never mix another Hardcover account's iCloud data into this account's without the reader's **Merge** (`LibraryModel.mergeOtherAccounts()`); see [sources and iCloud](docs/SOURCES_AND_ICLOUD.md#icloud).
 
 ## Versioning and releases
 
