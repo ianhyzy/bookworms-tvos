@@ -886,6 +886,9 @@ final class LibraryModel {
             hasReadCompanionRecords = true
             // The sample library never syncs, so nothing replaces the launch status.
             cloudStatus = ""
+            #if DEBUG
+                showAccountPromptPreview()
+            #endif
             return
         }
         aiRecords = dependencies.styleStore.load()
@@ -1419,6 +1422,33 @@ final class LibraryModel {
                 var book = book
                 book.ratingsCount = (book.ratingsCount ?? 0) + 1
                 return book
+            }
+        }
+    #endif
+
+    #if DEBUG
+        /// `--account-prompt=STATE` with `--sample-library`: shows one Hardcover account prompt
+        /// with invented accounts, for wording and layout review. STATE is `other`, `deletion`,
+        /// `mergeFailed`, or `choose`. The sample library never syncs, so nothing clears the
+        /// prompt until the reader answers it.
+        private func showAccountPromptPreview() {
+            guard
+                let argument = ProcessInfo.processInfo.arguments.first(where: {
+                    $0.hasPrefix("--account-prompt=")
+                })
+            else { return }
+            func account(_ id: String, _ username: String) -> CloudAccount {
+                CloudAccount(id: id, username: username, bookIDs: [], syncedAt: .now)
+            }
+            switch argument.dropFirst("--account-prompt=".count) {
+            case "other": otherICloudAccounts = [account("9001", "maple_reader")]
+            case "deletion": showsICloudDeletionHelp = true
+            case "mergeFailed": mergeFailure = UserFacingError.message(CloudStorageError.incomplete)
+            case "choose":
+                iCloudLibraryChoices = [
+                    account("9001", "maple_reader"), account("9002", "birch_pages"),
+                ]
+            default: preconditionFailure("Unknown --account-prompt state")
             }
         }
     #endif
