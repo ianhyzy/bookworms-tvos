@@ -124,11 +124,10 @@ struct ShelfView: View {
                 if let bookWallExit { showView(bookWallExit) } else { sidebarItem = .settings }
             })
     }
-    /// The view that leaving the Book Wall dialog shows: My Shelf, else the first sidebar view,
-    /// as `showView(_:)` falls back. `nil` when that is Book Wall, whose dialog would show again.
+    /// The view that leaving the Book Wall dialog shows: My Shelf, else the first other sidebar
+    /// view. `nil` when Book Wall is the only view.
     private var bookWallExit: BookwormsView? {
-        let exit = sidebarViews.contains(.shelf) ? BookwormsView.shelf : sidebarViews[0]
-        return exit == .bookWall ? nil : exit
+        sidebarViews.contains(.shelf) ? .shelf : sidebarViews.first { $0 != .bookWall }
     }
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false

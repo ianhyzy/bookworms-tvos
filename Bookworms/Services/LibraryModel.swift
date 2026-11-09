@@ -1718,11 +1718,7 @@ final class LibraryModel {
         if let user, user != previous, iCloudEnabled, iCloudToggles == toggles {
             stopSyncingForChangedAccount()
         } else {
-            queueSpineDesignRefresh()
-            // An account-change check still reading the user holds the read back; Book Wall
-            // waits for the read it resumes, or for `companionReadLimit`.
-            if spineDesignTask == nil, cloudUserChecks == 0 { hasReadCompanionRecords = true }
-            queueCloudSync(delay: .zero)
+            resumeCloudWork(syncDelay: .zero)
         }
     }
 
@@ -1756,12 +1752,13 @@ final class LibraryModel {
         }
     }
 
-    /// Restarts the cloud sync and companion-record read that `cloudAccountChanged()` held back.
-    private func resumeCloudWork() {
+    /// Restarts the cloud sync and companion-record read that an iCloud user check held back.
+    private func resumeCloudWork(syncDelay: Duration = .seconds(2)) {
         guard hasStarted else { return }
-        queueCloudSync()
+        queueCloudSync(delay: syncDelay)
         queueSpineDesignRefresh()
-        // With no read to run, Book Wall stops waiting, as launch's check would have had it.
+        // An account-change check still reading the user holds the read back; Book Wall waits
+        // for the read it resumes, or for `companionReadLimit`. With no read to run, it stops.
         if spineDesignTask == nil, cloudUserChecks == 0 { hasReadCompanionRecords = true }
     }
 
