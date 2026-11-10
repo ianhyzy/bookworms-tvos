@@ -636,7 +636,7 @@ final class SpineCloudTests: XCTestCase {
             }
             await database.failNextSaves(conflicts)
             do {
-                try await store.publish(worklist)
+                try await store.publish(worklist, merges: [:])
                 XCTAssertEqual(conflicts, 2, "The third try saves")
             } catch CloudStorageError.conflict {
                 XCTAssertEqual(conflicts, 3, "Three conflicts in a row give up")
@@ -736,8 +736,8 @@ final class SpineCloudTests: XCTestCase {
         let worklist = SpineWorklistV1(
             accountID: "42", syncedAt: Date(timeIntervalSince1970: 1_780_000_000),
             bookIDs: [7, 3, 7])
-        try await store.publish(worklist)
-        try await store.publish(worklist)
+        try await store.publish(worklist, merges: [:])
+        try await store.publish(worklist, merges: [:])
         let saved = try await store.worklist()
         let saveCount = await database.saveCount()
         let savedType = await database.savedType()
@@ -750,20 +750,118 @@ final class SpineCloudTests: XCTestCase {
         let database = FakeSpineDatabase()
         let store = SpineCloudStore(database: database)
         let date = Date(timeIntervalSince1970: 1_780_000_000)
-        try await store.publish(SpineWorklistV1(accountID: "42", syncedAt: date, bookIDs: [7]))
+        try await store.publish(
+            SpineWorklistV1(accountID: "42", syncedAt: date, bookIDs: [7]), merges: [:])
         try await store.publish(
             SpineWorklistV1(
-                accountID: "42", syncedAt: date.addingTimeInterval(-1), bookIDs: [3]))
+                accountID: "42", syncedAt: date.addingTimeInterval(-1), bookIDs: [3]),
+            merges: [:])
         let afterOlder = try await store.worklist()
         let firstSaveCount = await database.saveCount()
         XCTAssertEqual(afterOlder?.bookIDs, [7])
         XCTAssertEqual(firstSaveCount, 1)
 
-        try await store.publish(SpineWorklistV1(accountID: "42", syncedAt: date, bookIDs: []))
+        try await store.publish(
+            SpineWorklistV1(accountID: "42", syncedAt: date, bookIDs: []), merges: [:])
         let afterDisable = try await store.worklist()
         let finalSaveCount = await database.saveCount()
         XCTAssertEqual(afterDisable?.bookIDs, [])
         XCTAssertEqual(finalSaveCount, 2)
+    }
+
+    /// A worklist never replaces another account's unless the merges absorb that account.
+    func testPublishRefusesAnotherAccountsWorklistUnlessMerged() async throws {
+        let database = FakeSpineDatabase()
+        let store = SpineCloudStore(database: database)
+        let date = Date(timeIntervalSince1970: 1_780_000_000)
+        try await store.publish(
+            SpineWorklistV1(accountID: "42", syncedAt: date, bookIDs: [7]), merges: [:])
+        do {
+            try await store.publish(
+                SpineWorklistV1(accountID: "77", syncedAt: date, bookIDs: []), merges: [:])
+            XCTFail("Another account's worklist is replaced")
+        } catch CloudStorageError.otherAccount {}
+        let kept = try await store.worklist()
+        XCTAssertEqual(kept?.accountID, "42")
+
+        try await store.publish(
+            SpineWorklistV1(accountID: "77", syncedAt: date, bookIDs: [8]),
+            merges: ["42": "77"])
+        let merged = try await store.worklist()
+        XCTAssertEqual(merged?.accountID, "77")
+    }
+
+    /// **Merge**'s copy creates the new account's missing records for the given books, with the
+    /// account and design hash changed and other fields kept, and leaves existing records and
+    /// the old account's records as they were.
+    func testCopyRecordsCreatesOnlyMissingRecordsForTheNewAccount() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = FakeSpineDatabase()
+        let store = SpineCloudStore(
+            database: database, cacheURL: directory.appending(path: "spine-designs.json"))
+        var shared = book(id: 7)
+        shared.seriesID = 4242
+        shared.seriesName = "Fictional Saga"
+        let kept = book(id: 9)
+        let date = Date(timeIntervalSince1970: 1_780_000_000)
+        try await database.put(design(for: shared))
+        try await database.put(design(for: kept))
+        try await database.put(design(for: book(id: 8)))
+        try await database.put(design(for: kept, accountID: "77", typeface: "sans"))
+        try await database.put(
+            CoverChoiceV1(
+                version: 1, accountID: "42", bookID: 7,
+                coverURL: URL(string: "https://example.test/chosen.jpg")!, chosenAt: date))
+        try await database.put(
+            SeriesLinkV1(accountID: "42", bookID: 7, linkedSeriesID: 4242, chosenAt: date))
+        let key = try XCTUnwrap(SeriesDesigns.lookKey(of: shared, link: nil))
+        try await database.put(look(key))
+        await database.put(
+            payload: Data(
+                #"{"version":1,"accountID":"42","bookIDs":[8,7],"pinnedAt":0,"extra":"kept"}"#.utf8),
+            type: "TopFivePinsV1",
+            named: SpineCloudIdentity.topFivePinsRecordID(accountID: "42").recordName)
+
+        try await store.copyRecords(from: "42", into: "77", books: [shared, kept])
+
+        func payload(_ id: CKRecord.ID) async throws -> Data {
+            let data = await database.payload(named: id.recordName)
+            return try XCTUnwrap(data, id.recordName)
+        }
+        func decoded<Value: Decodable>(_ type: Value.Type, _ id: CKRecord.ID) async throws
+            -> Value
+        {
+            try JSONDecoder().decode(type, from: try await payload(id))
+        }
+        let copied = try await decoded(
+            SpineDesignV1.self, SpineCloudIdentity.designRecordID(accountID: "77", bookID: 7))
+        XCTAssertTrue(copied.isValid(accountID: "77", book: shared))
+        let existing = try await decoded(
+            SpineDesignV1.self, SpineCloudIdentity.designRecordID(accountID: "77", bookID: 9))
+        XCTAssertEqual(existing.typeface, "sans", "An existing record stays")
+        let unshared = await database.payload(
+            named: SpineCloudIdentity.designRecordID(accountID: "77", bookID: 8).recordName)
+        XCTAssertNil(unshared)
+        let original = try await decoded(
+            SpineDesignV1.self, SpineCloudIdentity.designRecordID(accountID: "42", bookID: 7))
+        XCTAssertEqual(original.accountID, "42")
+        let choice = try await decoded(
+            CoverChoiceV1.self, SpineCloudIdentity.coverChoiceRecordID(accountID: "77", bookID: 7))
+        XCTAssertEqual(choice.accountID, "77")
+        let link = try await decoded(
+            SeriesLinkV1.self, SpineCloudIdentity.seriesLinkRecordID(accountID: "77", bookID: 7))
+        XCTAssertEqual(link.accountID, "77")
+        XCTAssertEqual(link.linkedSeriesID, 4242)
+        let copiedLook = try await decoded(
+            SeriesLookV1.self, SpineCloudIdentity.seriesLookRecordID(accountID: "77", key: key))
+        XCTAssertEqual(copiedLook.accountID, "77")
+        let pinsData = try await payload(SpineCloudIdentity.topFivePinsRecordID(accountID: "77"))
+        let pins = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: pinsData) as? [String: Any])
+        XCTAssertEqual(pins["accountID"] as? String, "77")
+        XCTAssertEqual(pins["bookIDs"] as? [Int], [7])
+        XCTAssertEqual(pins["extra"] as? String, "kept")
     }
 }
 
@@ -794,6 +892,11 @@ private actor FakeSpineDatabase: SpineCloudDatabase {
             .recordName
         payloads[name] = try JSONEncoder().encode(choice)
         recordTypes[name] = "CoverChoiceV1"
+    }
+
+    func put(payload: Data, type: String, named name: String) {
+        payloads[name] = payload
+        recordTypes[name] = type
     }
 
     func deleteCoverChoice(accountID: String, bookID: Int) {

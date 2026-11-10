@@ -287,7 +287,7 @@ actor HardcoverClient {
 
     // The client owns its query documents so callers cannot submit mutations.
     private enum Query: String {
-        case account = "query ShelfAccount { me { id } }"
+        case account = "query ShelfAccount { me { id username } }"
         case library = """
             query ShelfLibrary($user: Int!, $offset: Int!, $language: String!) {
               user_books(where: {user_id: {_eq: $user}}, order_by: {id: asc}, limit: 100, offset: $offset) {
@@ -332,7 +332,10 @@ actor HardcoverClient {
     }
     private struct Failure: Decodable { let error: String? }
     private struct Account: Decodable { let me: [User] }
-    private struct User: Decodable { let id: Int }
+    private struct User: Decodable {
+        let id: Int
+        let username: String?
+    }
     private struct Library: Decodable {
         let userBooks: [UserBook]
         enum CodingKeys: String, CodingKey { case userBooks = "user_books" }
@@ -474,7 +477,9 @@ actor HardcoverClient {
                 let series = try? await fetchSeries(
                     Self.seriesIDs(of: books), token: token,
                     previous: previous?.accountID == accountID ? previous?.series : nil)
-                return HardcoverLibrary(accountID: accountID, books: books, series: series)
+                return HardcoverLibrary(
+                    accountID: accountID, books: books, series: series,
+                    username: user.username)
             }
         }
         throw HardcoverError.incomplete
@@ -810,6 +815,8 @@ struct HardcoverLibrary: Sendable {
     let books: [Book]
     /// `nil` when series couldn't be fetched, so the previous snapshot's series stay.
     var series: [SeriesInfo]? = nil
+    /// The account's Hardcover username, when it has one.
+    var username: String? = nil
 }
 
 struct SeriesResponse: Decodable, Sendable {

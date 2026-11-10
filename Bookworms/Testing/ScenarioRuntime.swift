@@ -232,8 +232,10 @@
                     return archive
                 }
             }
+            dependencies.readCloudArchive = { nil }
             dependencies.readSpineWorklist = { nil }
-            dependencies.publishSpineWorklist = { _ in }
+            dependencies.publishSpineWorklist = { _, _ in }
+            dependencies.copyAccountRecords = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.fetchSpineDesigns = { accountID, books in
                 let designs =
                     ProcessInfo.processInfo.arguments.contains("--test-companion-designs")
@@ -243,6 +245,7 @@
             dependencies.fetchCoverChoices = { _, _ in ([:], true) }
             dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
             dependencies.fetchSeriesLooks = { _, _ in ([:], true) }
+            dependencies.readCachedCompanionRecords = { _, _ in CachedCompanionRecords() }
             dependencies.createSeriesLook = { _ in throw CloudStorageError.unavailable }
             dependencies.saveSeriesLink = { _, _, _ in throw CloudStorageError.unavailable }
             dependencies.now = { [self] in date }
