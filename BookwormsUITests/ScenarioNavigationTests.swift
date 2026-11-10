@@ -25,6 +25,7 @@ final class ScenarioNavigationTests: XCTestCase {
             app.launchArguments.append("--test-appearance=\(appearance)")
         }
         app.launch()
+        RemoteNavigation.enterContent(app)
         return app
     }
 
@@ -94,9 +95,24 @@ final class ScenarioNavigationTests: XCTestCase {
             app.descendants(matching: .any)["welcome-preparing-library"].firstMatch
                 .waitForExistence(timeout: 3), file: file, line: line)
         command("release-example", app: app)
-        RemoteNavigation.waitForFocus(first, timeout: 15, file: file, line: line)
-        RemoteNavigation.assertSettled(
-            app, after: before, expectedUpdates: exampleEntryUpdates, file: file, line: line)
+        let landed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                RemoteNavigation.isFocused(first) || RemoteNavigation.sidebarHasFocus(app)
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [landed], timeout: 15), .completed, file: file, line: line)
+        guard RemoteNavigation.sidebarHasFocus(app) else {
+            RemoteNavigation.assertSettled(
+                app, after: before, expectedUpdates: exampleEntryUpdates, file: file, line: line)
+            return
+        }
+        // On tvOS 27.2 focus falls back to the sidebar when the choice leaves, and the viewer
+        // presses Right to reach the shelf in one focus update. The settle window lets the
+        // sidebar finish opening first.
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Sidebar settles")],
+            timeout: RemoteNavigation.settleWindow)
+        RemoteNavigation.press(.right, in: app, expecting: first, file: file, line: line)
     }
 
     private func command(_ command: String, app: XCUIApplication) {

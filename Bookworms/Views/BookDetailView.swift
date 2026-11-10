@@ -49,6 +49,8 @@ struct BookDetailView: View {
     @State private var showsReviews = false
     /// The entry point when focus moves into the metadata row: the first genre.
     @FocusState private var focusedGenre: String?
+    /// Details open on Back. tvOS 27.2 otherwise enters at the metadata row's default focus.
+    @FocusState private var backFocused: Bool
     @State private var readingDescription: ReviewPresentation?
     @State private var descriptionHeight: CGFloat = 0
     @State private var fullDescriptionHeight: CGFloat = 0
@@ -130,6 +132,7 @@ struct BookDetailView: View {
                                     .appFont(size: 29, weight: .medium)
                             }
                             .buttonStyle(.glass)
+                            .focused($backFocused)
                             .accessibilityIdentifier("back-to-shelf")
                             .frame(height: BookDetailCoverLayout.backHeight)
                         } else {
@@ -193,6 +196,7 @@ struct BookDetailView: View {
                 }
                 .padding(.horizontal, BookDetailCoverLayout.horizontalPadding)
                 .padding(.vertical, BookDetailCoverLayout.verticalPadding)
+                .defaultFocus($backFocused, showsBackButton)
             }
         }
         .onExitCommand { close() }
