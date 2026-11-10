@@ -651,6 +651,7 @@ final class BookWallNavigationTests: XCTestCase {
             ] + arguments
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
+        RemoteNavigation.enterContent(app)
         let shelfBook = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-'"))
             .firstMatch
         XCTAssertTrue(shelfBook.waitForExistence(timeout: 60))
@@ -670,6 +671,7 @@ final class BookWallNavigationTests: XCTestCase {
             ] + arguments
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
+        RemoteNavigation.enterContent(app)
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
         return app
     }

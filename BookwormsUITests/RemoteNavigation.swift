@@ -18,7 +18,34 @@ enum RemoteNavigation {
             ["--reset-test-settings", "--sample-library", "--focus-probe"]
             + arguments + (view.map { ["--start-view=\($0)"] } ?? [])
         app.launch()
+        enterContent(app)
         return app
+    }
+
+    /// Presses Right when the app shows its sidebar open and focused, as a viewer does.
+    ///
+    /// tvOS 27.2 opens a `.sidebarAdaptable` `TabView`'s sidebar at launch, and again when the
+    /// focused content goes away, and content cannot take focus until the sidebar closes: on
+    /// Right, on Select, or after 8 idle seconds. Right lands on the content's default focus.
+    /// Earlier releases draw sidebar rows as buttons, so only 27.2's open sidebar has a focused
+    /// cell. The settle window lets focus land before the check. When content has no button yet,
+    /// as while a view loads, focus stays in the sidebar, because Right would close it and leave
+    /// nothing focused.
+    static func enterContent(_ app: XCUIApplication) {
+        let focus = NSPredicate(format: "hasFocus == true")
+        _ = app.descendants(matching: .any).matching(focus).firstMatch.waitForExistence(timeout: 15)
+        _ = XCTWaiter.wait(
+            for: [XCTestExpectation(description: "Focus settles")], timeout: settleWindow)
+        guard sidebarHasFocus(app), app.buttons.count > app.cells.buttons.count else { return }
+        XCUIRemote.shared.press(.right)
+        let entered = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in !sidebarHasFocus(app) }, object: nil)
+        _ = XCTWaiter.wait(for: [entered], timeout: 5)
+    }
+
+    /// Whether tvOS 27.2's open sidebar has focus. See `enterContent(_:)`.
+    static func sidebarHasFocus(_ app: XCUIApplication) -> Bool {
+        app.cells.matching(NSPredicate(format: "hasFocus == true")).count > 0
     }
 
     /// Launches on My Shelf and opens the view titled `title` from the sidebar, as a user does.
@@ -195,28 +222,41 @@ enum RemoteNavigation {
         to element: XCUIElement, in app: XCUIApplication,
         file: StaticString = #filePath, line: UInt = #line
     ) {
-        for _ in 0..<12 where !isFocused(element) {
-            let focused = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "hasFocus == true")).allElementsBoundByIndex.last
-            guard let from = focused?.frame, element.exists else {
+        var stuckAt: CGRect?
+        // Enough presses to climb a full Book Wall stack, one book per press.
+        for _ in 0..<40 where !isFocused(element) {
+            guard let from = focusedFrame(in: app), element.exists else {
                 XCUIRemote.shared.press(.down)
                 continue
             }
             let to = element.frame
+            let vertical: XCUIRemote.Button = to.midY > from.midY ? .down : .up
             // Left or Right in the Settings section bar would switch sections, so leave it first.
             let bar = app.descendants(matching: .any)["settings-sections"]
             let inBar = bar.exists && bar.frame.contains(CGPoint(x: from.midX, y: from.midY))
             // Change columns first; moving vertically in the wrong column can miss the target.
+            // When the last column move left focus in place, as at the end of a row that stops
+            // short of the target, move vertically instead.
             let direction: XCUIRemote.Button =
                 inBar
                 ? .down
-                : to.maxX <= from.minX
-                    ? .left
-                    : to.minX >= from.maxX
-                        ? .right : to.midY > from.midY ? .down : .up
+                : from == stuckAt
+                    ? vertical
+                    : to.maxX <= from.minX
+                        ? .left : to.minX >= from.maxX ? .right : vertical
+            stuckAt = direction == .left || direction == .right ? from : nil
             XCUIRemote.shared.press(direction)
+            let moved = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in focusedFrame(in: app) != from }, object: nil)
+            _ = XCTWaiter.wait(for: [moved], timeout: 1)
         }
         waitForFocus(element, file: file, line: line)
+    }
+
+    private static func focusedFrame(in app: XCUIApplication) -> CGRect? {
+        app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
+            .allElementsBoundByIndex.last?
+            .frame
     }
 
     /// Opens the Settings sidebar item and, when `section` is set, selects that section segment.
