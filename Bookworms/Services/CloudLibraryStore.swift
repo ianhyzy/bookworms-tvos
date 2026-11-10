@@ -281,7 +281,7 @@ enum CloudStorageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .otherAccount:
-            "iCloud has data from another Hardcover account. Choose Merge or Keep iCloud off."
+            "iCloud has data from another Hardcover account. Choose Merge or Keep iCloud Off."
         case .restricted:
             "iCloud access is restricted on this Apple TV. Check account restrictions in Settings."
         case .temporarilyUnavailable:

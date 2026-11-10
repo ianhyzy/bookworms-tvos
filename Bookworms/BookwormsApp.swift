@@ -61,7 +61,7 @@ struct BookwormsApp: App {
     }
 }
 
-/// The Hardcover account prompts: **Merge** or **Keep iCloud off** when iCloud holds another
+/// The Hardcover account prompts: **Merge** or **Keep iCloud Off** when iCloud holds another
 /// account's data, the library choice without a Hardcover credential, and their follow-up
 /// alerts. Each prompt shows while its state is set and has no cancel button, so the reader
 /// chooses; its actions clear the state.
@@ -77,7 +77,7 @@ private struct CloudAccountAlerts: ViewModifier {
             ) {
                 // Starts at once, so the prompt clears before the alert reads it again.
                 Button("Merge") { Task.immediate { await library.mergeOtherAccounts() } }
-                Button("Keep iCloud off") { library.keepICloudOff() }
+                Button("Keep iCloud Off") { library.keepICloudOff() }
             } message: {
                 Text(otherAccountsMessage)
             }

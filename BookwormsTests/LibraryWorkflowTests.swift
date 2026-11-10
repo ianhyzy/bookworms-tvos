@@ -2631,7 +2631,7 @@ final class LibraryWorkflowTests: XCTestCase {
                 [worklistOnly ? "account _fictional_other" : "@other_reader"])
             XCTAssertEqual(
                 model.cloudStatus,
-                "iCloud sync is paused until you choose Merge or Keep iCloud off.")
+                "iCloud sync is paused until you choose Merge or Keep iCloud Off.")
             XCTAssertEqual(reads, 0)
             XCTAssertFalse(model.canPickSeries(for: book))
             XCTAssertEqual(model.books.map(\.id), [1])
@@ -2740,7 +2740,7 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.start()
         await model.waitForCloudSync()
         await model.mergeOtherAccounts()
-        XCTAssertEqual(model.mergeFailure, CloudStorageError.conflict.errorDescription)
+        XCTAssertEqual(model.mergeFailure, LibraryModel.mergeFailedMessage)
         XCTAssertNil(fixture.defaults.object(forKey: "iCloudAccountMerges"))
         XCTAssertFalse(model.cloudAccountsCleared)
 
@@ -2749,7 +2749,7 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.otherICloudAccounts.map(\.id), ["_fictional_other"])
     }
 
-    /// **Keep iCloud off** turns storage off and explains deleting the data; turning storage on
+    /// **Keep iCloud Off** turns storage off and explains deleting the data; turning storage on
     /// again checks again.
     func testKeepICloudOffTurnsStorageOffUntilTurnedOnAgain() async throws {
         let fixture = try LibraryWorkflowFixture()

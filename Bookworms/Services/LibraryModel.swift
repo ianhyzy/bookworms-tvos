@@ -1443,7 +1443,7 @@ final class LibraryModel {
             switch argument.dropFirst("--account-prompt=".count) {
             case "other": otherICloudAccounts = [account("9001", "maple_reader")]
             case "deletion": showsICloudDeletionHelp = true
-            case "mergeFailed": mergeFailure = UserFacingError.message(CloudStorageError.incomplete)
+            case "mergeFailed": mergeFailure = Self.mergeFailedMessage
             case "choose":
                 iCloudLibraryChoices = [
                     account("9001", "maple_reader"), account("9002", "birch_pages"),
@@ -1877,7 +1877,7 @@ final class LibraryModel {
             return true
         case .otherAccounts(let accounts):
             otherICloudAccounts = accounts
-            cloudStatus = "iCloud sync is paused until you choose Merge or Keep iCloud off."
+            cloudStatus = "iCloud sync is paused until you choose Merge or Keep iCloud Off."
         case .chooseLibrary(let accounts):
             iCloudLibraryChoices = accounts
             cloudStatus = "iCloud sync is paused until you choose a library."
@@ -1892,6 +1892,9 @@ final class LibraryModel {
         }
         return false
     }
+
+    /// The **Couldn't merge** alert's message for a failed copy or save.
+    static let mergeFailedMessage = "Bookworms couldn't finish the merge. Try again later."
 
     /// **Merge**: copies each other account's companion records to the books it shares with
     /// this account's library (`copyAccountRecords`), newest account first so it wins a shared
@@ -1913,7 +1916,7 @@ final class LibraryModel {
                 try await dependencies.copyAccountRecords(account.id, accountID, shared)
             }
         } catch {
-            mergeFailure = UserFacingError.message(error)
+            mergeFailure = Self.mergeFailedMessage
             return
         }
         // Storage turned off or the account changed while copying: that check decides.
@@ -1926,7 +1929,7 @@ final class LibraryModel {
         queueCloudSync(delay: .zero)
     }
 
-    /// **Keep iCloud off**: turns iCloud storage off, which ends the prompt until the reader
+    /// **Keep iCloud Off**: turns iCloud storage off, which ends the prompt until the reader
     /// turns storage on again, and explains how to delete Bookworms data from iCloud.
     func keepICloudOff() {
         iCloudEnabled = false
