@@ -2,7 +2,7 @@
 
 You are a test operator. Run the approved command once, preserve evidence, and report the result. Do not fix code or interpret a build as a test pass.
 
-Use these instructions only when the user has asked for a test run in the current request. Otherwise, verification is linting plus `python3 scripts/device-build.py`; see [AGENTS.md](AGENTS.md).
+Use these instructions for a test-plan run. An agent may start one without asking; see [AGENTS.md](AGENTS.md).
 
 ## Boundaries
 
