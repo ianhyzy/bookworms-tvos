@@ -1128,6 +1128,34 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertNil(model.message)
     }
 
+    func testReconnectingAfterARejectedSyncDownloadsAStaleLibraryAtOnce() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        var dependencies = fixture.dependencies()
+        var rejects = true
+        dependencies.fetchHardcover = { _, _ in
+            if rejects { throw HardcoverError.invalidToken }
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(model.books.map(\.id), [1])
+
+        // The rejected sync started the five-minute wait, which a reconnection doesn't serve.
+        rejects = false
+        fixture.time += 60
+        let connected = await model.connect("hc_pat_fictional_replacement")
+        XCTAssertTrue(connected)
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertFalse(model.hardcoverSessionExpired)
+        XCTAssertNil(model.message)
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_replacement")
+    }
+
     func testSyncRenewsAnExpiringTokenAndSpendsEachRefreshTokenOnce() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -1322,15 +1350,20 @@ final class LibraryWorkflowTests: XCTestCase {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        fixture.defaults.set(["hardcover": "Saved sync error"], forKey: "sourceErrors")
         // The fixture's renewal fails the test, so this also checks that none starts.
         let model = LibraryModel(dependencies: fixture.dependencies())
         await model.start()
+        XCTAssertEqual(model.sourceStatus(.hardcover), "Saved sync error")
         do {
             _ = try await model.renewHardcoverToken(rejected: "hc_pat_fictional_original")
             XCTFail("A login without a refresh token can't be renewed.")
         } catch HardcoverError.invalidToken {
         } catch { XCTFail("Unexpected error: \(error)") }
         XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(
+            model.sourceStatus(.hardcover), HardcoverError.invalidToken.localizedDescription,
+            "A login rejected outside a library sync outranks an older sync error")
         XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_original")
     }
 
@@ -1561,6 +1594,25 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertNotNil(fixture.secrets["hardcover-token"])
         XCTAssertEqual(model.message, "The saved Hardcover login could not be removed.")
         XCTAssertFalse(model.hardcoverConnected)
+    }
+
+    func testDisconnectEndsTheHardcoverSyncErrorAndNextCheck() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.fetchHardcover = { _, _ in throw URLError(.timedOut) }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertEqual(
+            model.sourceStatus(.hardcover)?.hasPrefix("Next check: "), true,
+            "A fresh library's next check is a day after its sync")
+        await model.refresh(manual: true)
+        XCTAssertNotNil(model.sourceErrors["hardcover"])
+
+        model.disconnect()
+        XCTAssertNil(model.sourceErrors["hardcover"])
+        XCTAssertNil(model.sourceStatus(.hardcover), "No check is scheduled without a login")
     }
 
     func testTokenWithoutRefreshReplacesTheSavedRefreshToken() async throws {
@@ -1888,10 +1940,16 @@ final class LibraryWorkflowTests: XCTestCase {
                 source: .cwa, accountID: "https://other.invalid/fixture",
                 books: [fixture.book(2)], syncedAt: fixture.time)
         ])
-        fixture.defaults.set(fixture.time.addingTimeInterval(-1000), forKey: "syncAttempt.cwa")
+        // A connected CWA inside its five-minute wait: the start fetches nothing.
+        fixture.defaults.set(true, forKey: "cwaEnabled")
+        fixture.secrets["cwa-password"] = "fictional-password"
+        fixture.defaults.set(fixture.time.addingTimeInterval(-100), forKey: "syncAttempt.cwa")
         fixture.secrets.removeValue(forKey: "hardcover-token")
         let model = LibraryModel(dependencies: fixture.dependencies())
         await model.start()
+        XCTAssertNotNil(model.sourceStatus(.cwa), "The next check follows the wait")
+        XCTAssertNil(model.sourceStatus(.hardcover), "A source without a login has no schedule")
+        fixture.time += 300
         XCTAssertNil(
             model.sourceStatus(.cwa),
             "Another account's sync today doesn't push the active account's check to tomorrow")
@@ -3606,6 +3664,41 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(
             fixture.defaults.object(forKey: "syncSuccess.hardcover") as? Date, remote.syncedAt)
         XCTAssertEqual(reads, 1, "The read before the fetch replaces the read after the check")
+    }
+
+    func testAnICloudSnapshotNewerThanAFailedSyncEndsItsError() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let stale = fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)
+        try fixture.save([stale])
+        var remote = stale
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            // The 10-second limit on the read never elapses; the model cancels it.
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+        }
+        dependencies.syncCloud = { _ in CloudLibraryArchive(sources: [remote]) }
+        var fetches = 0
+        dependencies.fetchHardcover = { _, _ in
+            fetches += 1
+            throw URLError(.timedOut)
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertNotNil(model.sourceErrors["hardcover"])
+        XCTAssertNotNil(model.message)
+
+        // Another device syncs the account before the next check here, which reads iCloud first.
+        fixture.time += 3_600
+        remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 60)
+        await model.refresh()
+        await model.waitForCloudSync()
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertNil(model.sourceErrors["hardcover"])
+        XCTAssertNil(model.message)
+        XCTAssertEqual(fetches, 1, "The fresh snapshot ends the check without a download")
     }
 
     /// Launch's iCloud user check holds the sync back, and a due refresh waits for the check

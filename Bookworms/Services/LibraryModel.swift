@@ -659,8 +659,14 @@ final class LibraryModel {
     /// saved; Settings offers a new link code instead of showing the account as connected.
     private(set) var hardcoverSessionExpired = false
     private(set) var connectionRevision = 0
-    var isConnected: Bool {
-        !isSample && ((hardcoverEnabled && hardcoverConnected) || (cwaEnabled && hasCWAPassword))
+    var isConnected: Bool { !isSample && LibrarySource.allCases.contains { syncs($0) } }
+    /// Whether a refresh syncs `source`: it is on and has a saved login. The cached flags
+    /// answer without a Keychain read.
+    private func syncs(_ source: LibrarySource) -> Bool {
+        switch source {
+        case .hardcover: hardcoverEnabled && hardcoverConnected
+        case .cwa: cwaEnabled && hasCWAPassword
+        }
     }
     /// The empty shelf's hint: how to connect a source, which setting to change when shelf
     /// choices hide every book, or that a connected library has no books.
@@ -1121,9 +1127,10 @@ final class LibraryModel {
         return await connectValidatedToken(HardcoverTokens(accessToken: token), revision: revision)
     }
 
-    /// Validates `tokens`, downloads the account's library, and saves both. A login that isn't
-    /// saved, because the download fails, the account changes, or another source change wins,
-    /// is revoked (`revokeUnsaved(_:)`).
+    /// Validates `tokens` and saves the login, downloading the account's library first unless it
+    /// is the active account's and less than a day old. A login that isn't saved, because the
+    /// download fails, the account changes, or another source change wins, is revoked
+    /// (`revokeUnsaved(_:)`).
     private func connectValidatedToken(_ tokens: HardcoverTokens, revision: Int) async -> Bool {
         hardcoverConnectionPhase = .validatingAccount
         message = nil
@@ -1136,23 +1143,21 @@ final class LibraryModel {
         do {
             let accountID = try await dependencies.validateHardcover(token)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
-            let hasSnapshot =
-                activeHardcoverAccountID == accountID
-                && sourceSnapshots.contains {
+            // The validated account's own newest snapshot, whose covers a download keeps; the
+            // active account may be another one.
+            let previous =
+                sourceSnapshots.filter {
                     $0.source == .hardcover && $0.accountID == accountID
                 }
-            let accountChanged = activeHardcoverAccountID != accountID
-            // Credential rotation must remain available between scheduled library syncs.
-            if hasSnapshot
-                && !schedule
-                    .isDue(
-                        .hardcover, now: dependencies.now(),
-                        hasSnapshot: hasSnapshot)
+                .max { $0.syncedAt < $1.syncedAt }
+            // The active account's fresh library isn't downloaded again: the replacement login
+            // is saved, and the library keeps its daily schedule.
+            if activeHardcoverAccountID == accountID, let previous,
+                RefreshPolicy.isFresh(previous.syncedAt, now: dependencies.now())
             {
                 try saveHardcoverCredential(tokens)
                 saved = true
                 hardcoverConnected = true
-                setActiveHardcoverAccountID(accountID)
                 hardcoverSessionExpired = false
                 connectionRevision += 1
                 isSample = false
@@ -1161,18 +1166,8 @@ final class LibraryModel {
                 message = Self.verifiedTokenMessage
                 return true
             }
-            try schedule
-                .begin(
-                    .hardcover, now: dependencies.now(), manual: accountChanged,
-                    hasSnapshot: hasSnapshot)
+            schedule.recordAttempt(.hardcover, now: dependencies.now())
             hardcoverConnectionPhase = .downloadingLibrary
-            // The validated account's own newest snapshot keeps its covers; the active account
-            // may be another one.
-            let previous =
-                sourceSnapshots.filter {
-                    $0.source == .hardcover && $0.accountID == accountID
-                }
-                .max { $0.syncedAt < $1.syncedAt }
             let result = try await dependencies.fetchHardcover(token, previous)
             guard revision == sourceRevision, !Task.isCancelled else { return false }
             guard result.accountID == accountID else { throw HardcoverError.invalidToken }
@@ -1244,11 +1239,10 @@ final class LibraryModel {
         // Another device may have saved a fresh snapshot of the same account, so a due automatic
         // check reads iCloud first. Each source's gate is checked again afterward, and only the
         // sources still due are fetched. A source without a saved credential can't fetch, so it
-        // doesn't hold `isLoading` through the read; the cached flags avoid a Keychain read.
+        // doesn't hold `isLoading` through the read.
         let pullsCloud =
             !manual && iCloudEnabled && !cloudSyncSuppressedForWelcome
-            && ((hardcoverEnabled && hardcoverConnected && isDue(.hardcover))
-                || (cwaEnabled && hasCWAPassword && isDue(.cwa)))
+            && LibrarySource.allCases.contains { syncs($0) && isDue($0) }
         if pullsCloud {
             if cloudTask == nil { queueCloudSync(delay: .zero) }
             await waitForCloudSync(atMost: .seconds(10))
@@ -1259,10 +1253,7 @@ final class LibraryModel {
             let savedToken = hardcoverSession.storedAccessToken()
         {
             do {
-                try schedule
-                    .begin(
-                        .hardcover, now: dependencies.now(), manual: manual,
-                        hasSnapshot: hasActiveSnapshot(.hardcover))
+                schedule.recordAttempt(.hardcover, now: dependencies.now())
                 let token = await hardcoverSession.renewedIfExpiring(savedToken)
                 let result: HardcoverLibrary
                 do {
@@ -1294,10 +1285,7 @@ final class LibraryModel {
             let password = dependencies.readCredential("cwa-password")
         {
             do {
-                try schedule
-                    .begin(
-                        .cwa, now: dependencies.now(), manual: manual,
-                        hasSnapshot: hasActiveSnapshot(.cwa))
+                schedule.recordAttempt(.cwa, now: dependencies.now())
                 let configuration = cwaConfiguration
                 let result = try await dependencies.fetchCWA(configuration, password)
                 // A response belongs to the configuration captured before suspension.
@@ -1317,13 +1305,11 @@ final class LibraryModel {
         if !pullsCloud { queueCloudSync() }
     }
 
-    /// Whether `source` has a snapshot of its active account. Without one, the daily gate ignores
-    /// the last success.
-    private func hasActiveSnapshot(_ source: LibrarySource) -> Bool {
+    /// The snapshot of the source's active account, which decides the source's schedule.
+    private func activeSnapshot(_ source: LibrarySource) -> SourceSnapshot? {
         switch source {
-        case .hardcover:
-            activeHardcoverSnapshot() != nil && activeHardcoverAccountID != nil
-        case .cwa: activeCWASnapshot() != nil
+        case .hardcover: activeHardcoverSnapshot()
+        case .cwa: activeCWASnapshot()
         }
     }
 
@@ -1333,9 +1319,14 @@ final class LibraryModel {
         sourceSnapshots.first { $0.source == .cwa && $0.accountID == cwaConfiguration.identity }
     }
 
-    /// Whether an automatic check of `source` is due.
+    /// Whether an automatic check of `source` is due. Without a snapshot of the source's active
+    /// account, the daily gate ignores the last success; a Hardcover snapshot shown before an
+    /// account is active doesn't count.
     private func isDue(_ source: LibrarySource) -> Bool {
-        schedule.isDue(source, now: dependencies.now(), hasSnapshot: hasActiveSnapshot(source))
+        let hasSnapshot =
+            activeSnapshot(source) != nil
+            && (source != .hardcover || activeHardcoverAccountID != nil)
+        return schedule.isDue(source, now: dependencies.now(), hasSnapshot: hasSnapshot)
     }
 
     func connectCWA(_ configuration: CWAConfiguration, password: String) async -> Bool {
@@ -1349,8 +1340,7 @@ final class LibraryModel {
                 !password.isEmpty
             else { throw SourceError.invalidCredentials }
             if sourceSnapshots.contains(where: { $0.source == .cwa }) {
-                // The reader asked for this connection, so new login details skip the daily gate.
-                try schedule.begin(.cwa, now: dependencies.now(), manual: true)
+                schedule.recordAttempt(.cwa, now: dependencies.now())
             } else {
                 // A failed first connection has no library to sync; allow corrected login details.
                 schedule.seed(.cwa, date: dependencies.now())
@@ -1374,13 +1364,18 @@ final class LibraryModel {
         }
     }
 
-    /// The source's sync error or next scheduled check, or `nil` when a check is already due.
+    /// A rejected Hardcover login, else the source's sync error, else the next scheduled check.
+    /// `nil` when no check is scheduled: one is already due, or no refresh syncs the source.
     func sourceStatus(_ source: LibrarySource, dateFormat: AppDateFormat = .monthName) -> String? {
+        // The rejection comes first because Settings shows **Reconnect Hardcover** beside this
+        // status. The saved error can be an older one of another kind, or none: social sync can
+        // find the rejection, and a sync error ends when iCloud brings a newer library.
+        if source == .hardcover, hardcoverSessionExpired {
+            return HardcoverError.invalidToken.localizedDescription
+        }
         if let error = sourceErrors[source.rawValue] { return error }
-        guard let last = schedule.lastAttempt(source) else { return "Not synced yet" }
-        let successful =
-            source == .hardcover
-            ? activeHardcoverSnapshot()?.syncedAt : activeCWASnapshot()?.syncedAt
+        guard syncs(source), let last = schedule.lastAttempt(source) else { return nil }
+        let successful = activeSnapshot(source)?.syncedAt
         let next = successful.map { $0.addingTimeInterval(86400) } ?? last.addingTimeInterval(300)
         return next > dependencies.now()
             ? "Next check: " + dateFormat.string(from: next) + " · "
@@ -1516,7 +1511,7 @@ final class LibraryModel {
         updateShelf()
     }
 
-    /// The status after a replacement login is verified between daily syncs, shown while the
+    /// The status after a replacement login is saved for a fresh library, shown while the
     /// reconnection's social load runs.
     static let verifiedTokenMessage = "Hardcover token verified. Loading library…"
     static let unsavedScopeMessage =
@@ -1535,6 +1530,7 @@ final class LibraryModel {
         do { try hardcoverSession.remove() } catch { message = readable(error) }
         hardcoverConnected = false
         hardcoverSessionExpired = false
+        sourceErrors[LibrarySource.hardcover.rawValue] = nil
         cloudAccountsCleared = false
         hardcoverEnabled = false
         isSample = false
@@ -1614,12 +1610,20 @@ final class LibraryModel {
     /// another account's: an older snapshot, such as the legacy `"hardcover"` placeholder that
     /// merges never remove, would set the last success and make the source look due again five
     /// minutes after each attempt.
+    ///
+    /// A snapshot newer than the source's last attempt, such as one another device saved to
+    /// iCloud after a failed sync here, also ends that attempt's sync error and the `message`
+    /// that reported it, as a sync here does (`install`).
     private func seedSchedule() {
-        if let snapshot = activeHardcoverSnapshot() {
-            schedule.seed(.hardcover, date: snapshot.syncedAt)
-        }
-        if let snapshot = activeCWASnapshot() {
-            schedule.seed(.cwa, date: snapshot.syncedAt)
+        for source in LibrarySource.allCases {
+            guard let synced = activeSnapshot(source)?.syncedAt else { continue }
+            if let attempt = schedule.lastAttempt(source), attempt < synced,
+                sourceErrors[source.rawValue] != nil
+            {
+                sourceErrors[source.rawValue] = nil
+                message = nil
+            }
+            schedule.seed(source, date: synced)
         }
     }
 

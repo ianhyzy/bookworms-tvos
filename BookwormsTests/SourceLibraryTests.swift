@@ -487,13 +487,12 @@ final class SourceLibraryTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let now = Date()
-        try SourceSyncSchedule(defaults: defaults).begin(.hardcover, now: now)
+        SourceSyncSchedule(defaults: defaults).recordAttempt(.hardcover, now: now)
         SourceSyncSchedule(defaults: defaults).seed(.hardcover, date: now)
         let reloaded = SourceSyncSchedule(defaults: defaults)
         XCTAssertFalse(reloaded.isDue(.hardcover, now: now.addingTimeInterval(86399)))
         XCTAssertTrue(reloaded.isDue(.hardcover, now: now.addingTimeInterval(86400)))
         XCTAssertTrue(reloaded.isDue(.cwa, now: now))
-        XCTAssertThrowsError(try reloaded.begin(.hardcover, now: now.addingTimeInterval(-1)))
     }
 
     /// The merge keeps each account's newest snapshot with the older one's username when it has
@@ -705,17 +704,17 @@ final class SourceLibraryTests: XCTestCase {
     }
 
     @MainActor
-    func testManualSyncBypassesDailyGateAndResetsAutomaticSchedule() throws {
+    func testManualSyncInsideTheDailyGateRestartsTheAutomaticSchedule() throws {
         let suite = "ManualSyncTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let schedule = SourceSyncSchedule(defaults: defaults)
         let now = Date()
         for source in LibrarySource.allCases {
-            try schedule.begin(source, now: now)
+            schedule.recordAttempt(source, now: now)
             schedule.seed(source, date: now)
-            XCTAssertThrowsError(try schedule.begin(source, now: now.addingTimeInterval(60)))
-            try schedule.begin(source, now: now.addingTimeInterval(60), manual: true)
+            XCTAssertFalse(schedule.isDue(source, now: now.addingTimeInterval(60)))
+            schedule.recordAttempt(source, now: now.addingTimeInterval(60))
             schedule.seed(source, date: now.addingTimeInterval(60))
             XCTAssertEqual(schedule.lastAttempt(source), now.addingTimeInterval(60))
             XCTAssertFalse(schedule.isDue(source, now: now.addingTimeInterval(86400)))

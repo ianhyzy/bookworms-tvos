@@ -84,7 +84,12 @@ actor ArtworkStore {
     private let session: URLSession
     private let usesSavedCWAConfiguration: Bool
     private var pendingDownloads: [URL: Task<Data, Error>] = [:]
+    /// When each URL's download last failed, and when each host was last found unreachable
+    /// (`fetchOriginal`). Both wait five minutes before another request (`backoff(for:)`).
     private var failedDownloads: [URL: Date] = [:]
+    private var unreachableHosts: [String: Date] = [:]
+    /// When each host last answered a request.
+    private var answeredHosts: [String: Date] = [:]
     /// Set by each new library download, and at launch so each launch trims the cache once.
     /// `prefetch` prunes once when it finishes, so preparing many covers doesn't list and measure
     /// both cache directories after each one. Other downloads prune once their burst settles.
@@ -141,26 +146,38 @@ actor ArtworkStore {
 
     /// Downloads browsing covers that neither tier has yet and returns how many it saved.
     ///
-    /// Skips the work when the device has little free space, and stops at the browsing budget.
+    /// Skips the work when the device has little free space. A background pass takes `urls` in
+    /// priority order and stops at the first cover that doesn't fit the browsing budget, so it
+    /// never stores a cover that pruning then removes; a full tier costs one discarded download
+    /// per pass. Pass `evictingOldest` for covers the reader is looking at: each one downloads,
+    /// and pruning removes the oldest covers to make room.
+    ///
     /// Library preparation should finish first; this never replaces library covers.
-    func prefetchBrowsing(_ urls: [URL]) async -> Int {
+    func prefetchBrowsing(_ urls: [URL], evictingOldest: Bool = false) async -> Int {
         guard Self.hasRoomForBrowsing() else { return 0 }
         try? FileManager.default.createDirectory(
             at: browsingRoot, withIntermediateDirectories: true)
+        var room =
+            evictingOldest
+            ? Int.max
+            : Self.browsingBudget
+                - Self.budgetedFiles(in: browsingRoot).reduce(0) { $0 + $1.size }
         var saved = 0
         for url in urls where url.scheme == "https" {
-            guard !Task.isCancelled else { break }
+            guard !Task.isCancelled, room > 0 else { break }
             let target = browsingFile(for: url)
             if FileManager.default.fileExists(atPath: target.path())
                 || FileManager.default.fileExists(
                     atPath: file(for: url, suffix: "@source2400").path())
-                || Date().timeIntervalSince(failedDownloads[url] ?? .distantPast) < 300
+                || backoff(for: url) != nil
             {
                 continue
             }
             do {
                 let data = try await Self.resized(try await fetchOriginal(url), size: 900)
+                guard data.count <= room else { break }
                 try data.write(to: target, options: .atomic)
+                room -= data.count
                 saved += 1
             } catch {
                 failedDownloads[url] = Date()
@@ -207,9 +224,7 @@ actor ArtworkStore {
         }
         guard allowsNetwork else { throw URLError(.resourceUnavailable) }
         if let task = pendingDownloads[url] { return try await task.value }
-        guard Date().timeIntervalSince(failedDownloads[url] ?? .distantPast) >= 300 else {
-            throw URLError(.resourceUnavailable)
-        }
+        if let backoff = backoff(for: url) { throw backoff }
         let task = Task {
             let data = try await self.fetchOriginal(url)
             let original = try await Self.resized(data, size: 2400)
@@ -232,6 +247,19 @@ actor ArtworkStore {
             failedDownloads[url] = Date()
             throw error
         }
+    }
+
+    /// The error for a download that has to wait, or `nil` when `url` may be requested. A
+    /// waiting host's error is one `isTransient` accepts, so `prefetch` reports its covers for
+    /// the caller's retry.
+    private func backoff(for url: URL) -> URLError? {
+        func isRecent(_ failure: Date?) -> Bool {
+            Date().timeIntervalSince(failure ?? .distantPast) < 300
+        }
+        if let host = url.host(), isRecent(unreachableHosts[host]) {
+            return URLError(.cannotConnectToHost)
+        }
+        return isRecent(failedDownloads[url]) ? URLError(.resourceUnavailable) : nil
     }
 
     private nonisolated static func thumbnail(_ data: Data, size: Int) throws -> CGImage {
@@ -269,13 +297,24 @@ actor ArtworkStore {
     }
 
     /// Downloads an image, retrying failures that may pass with `TransientRetry` backoff.
+    ///
+    /// A download that ends without an answer starts its host's wait, since the host's other
+    /// downloads would each wait out the same timeout. When the host answered another request
+    /// while this one ran, only this image is stalling, and the host keeps downloading. A
+    /// download that ran alone can't tell the two apart, so it starts the wait.
     private func fetchOriginal(_ url: URL) async throws -> Data {
+        let started = Date()
         var attempt = 0
         while true {
             do {
                 return try await fetchOnce(url)
             } catch {
                 guard let delay = TransientRetry.delay(after: error, attempt: attempt) else {
+                    if Self.lostConnection(error), let host = url.host(),
+                        answeredHosts[host] ?? .distantPast < started
+                    {
+                        unreachableHosts[host] = Date()
+                    }
                     throw error
                 }
                 attempt += 1
@@ -301,6 +340,10 @@ actor ArtworkStore {
                 url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
         } else {
             (data, response) = try await OfflineTestPolicy.data(for: request, session: session)
+        }
+        if let host = url.host() {
+            answeredHosts[host] = Date()
+            unreachableHosts[host] = nil
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 429 || (500...599).contains(status) { throw URLError(.badServerResponse) }
@@ -335,27 +378,39 @@ actor ArtworkStore {
     /// Cover aspect ratios by book ID, and the books and avatars that could not be prepared.
     struct Preparation: Sendable {
         var ratios: [Int: Double] = [:]
-        /// Books whose covers failed for a reason that may pass, such as a timeout. Missing,
-        /// rejected, or undecodable images are not retried.
+        /// Books whose covers failed for a reason that may pass, such as a timeout or a host
+        /// that is waiting after one. Missing, rejected, or undecodable images are not retried.
         var failed: [Book] = []
         var failureCount = 0
         /// Avatar URLs whose photos could not be stored, for any reason.
         var failedAvatars: [URL] = []
     }
 
-    private nonisolated static func isTransient(_ error: Error) -> Bool {
+    /// Whether a request got no answer from its host. A server error doesn't count: one cover's
+    /// can persist while the rest of the host answers.
+    private nonisolated static func lostConnection(_ error: Error) -> Bool {
         guard let code = (error as? URLError)?.code else { return false }
         return [
             .timedOut, .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
-            .cannotFindHost, .dnsLookupFailed, .badServerResponse,
+            .cannotFindHost, .dnsLookupFailed,
         ]
         .contains(code)
+    }
+
+    /// Whether a failed download may succeed later: it got no answer, or a server error.
+    private nonisolated static func isTransient(_ error: Error) -> Bool {
+        lostConnection(error) || (error as? URLError)?.code == .badServerResponse
     }
 
     /// Stores the complete bounded collections' covers on disk before their views mount.
     ///
     /// Reads each cover's dimensions from its header without decoding pixels; views decode the
     /// size they display. Books without a cover URL are not reported as failed.
+    ///
+    /// A host that gives no answer holds the views for one batch's attempts, not every cover's:
+    /// its later covers and photos fail at once (`backoff(for:)`) and are reported for the
+    /// caller's retry, while other hosts' still download. One stalling cover doesn't stop its
+    /// host, whose other covers in the batch answer (`fetchOriginal`).
     func prefetch(books: [Book], avatarURLs: [URL]) async -> Preparation {
         activePrefetches += 1
         defer { activePrefetches -= 1 }
@@ -412,6 +467,7 @@ actor ArtworkStore {
     /// Clears download backoff so a deliberate retry of failed covers can reach the network.
     func forgetFailures() {
         failedDownloads.removeAll()
+        unreachableHosts.removeAll()
     }
 
     /// Removes the oldest covers over each tier's budget. Browsing covers go first: all of them
@@ -425,23 +481,28 @@ actor ArtworkStore {
         Self.trim(root, to: Self.libraryBudget)
     }
 
-    /// Deletes the least recently written files in `directory` until it fits `budget`.
-    static func trim(_ directory: URL, to budget: Int) {
+    /// The files in `directory` that count toward its budget, with their sizes and write dates.
+    /// Folders and JSON files don't count.
+    private static func budgetedFiles(in directory: URL) -> [(url: URL, size: Int, modified: Date)]
+    {
         let keys: Set<URLResourceKey> = [
             .fileSizeKey, .contentModificationDateKey, .isDirectoryKey,
         ]
         let files =
             (try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: Array(keys))) ?? []
-        let entries =
-            files.compactMap { url -> (url: URL, size: Int, modified: Date)? in
-                guard url.pathExtension != "json",
-                    let values = try? url.resourceValues(forKeys: keys),
-                    values.isDirectory != true
-                else { return nil }
-                return (url, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
-            }
-            .sorted { $0.modified < $1.modified }
+        return files.compactMap { url -> (url: URL, size: Int, modified: Date)? in
+            guard url.pathExtension != "json",
+                let values = try? url.resourceValues(forKeys: keys),
+                values.isDirectory != true
+            else { return nil }
+            return (url, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
+        }
+    }
+
+    /// Deletes the least recently written files in `directory` until it fits `budget`.
+    static func trim(_ directory: URL, to budget: Int) {
+        let entries = budgetedFiles(in: directory).sorted { $0.modified < $1.modified }
         var size = entries.reduce(0) { $0 + $1.size }
         for entry in entries where size > budget {
             try? FileManager.default.removeItem(at: entry.url)

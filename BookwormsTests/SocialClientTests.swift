@@ -13,7 +13,8 @@ final class SocialClientTests: XCTestCase {
 
     func testPublishedActivityPayloadsAndUnknownEvents() async throws {
         let activities = try await client().feed(users: [2], token: "hc_pat_fixture")
-        XCTAssertEqual(activities.count, 3)
+        XCTAssertEqual(
+            activities.count, 3, "The goal and the event without a reader are left out")
         XCTAssertEqual(activities[0].summary, "Reading progress: 90%")
         XCTAssertEqual(activities[0].rating, 4.5)
         XCTAssertEqual(activities[0].review, "A thoughtful ending.")
@@ -52,7 +53,9 @@ final class SocialClientTests: XCTestCase {
         let owner = try await client.owner(token: "hc_pat_fixture")
         XCTAssertEqual(owner.username, "fixture")
         let following = try await client.following(owner: 1, token: "hc_pat_fixture")
-        XCTAssertEqual(following.map(\.id), [2], "Blocked reader 3 is left out")
+        XCTAssertEqual(
+            following.map(\.id), [2],
+            "Blocked reader 3 and readers whose profile Hardcover withholds are left out")
     }
 
     /// Without the block list, followed readers and community reviews fail instead of showing
@@ -126,7 +129,10 @@ private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
                     "followed_users": [
                         ["followed_user": profile],
                         ["followed_user": ["id": 3, "username": "blocked"]],
-                    ]
+                        // Hardcover withholds these two readers' profiles.
+                        ["followed_user": NSNull()],
+                        ["followed_user": ["id": 4]],
+                    ] as [[String: Any]]
                 ]
             } else if query == SocialQuery.blocked.rawValue {
                 data = ["user_blocks": [["blocked_user_id": 3]]]
@@ -162,13 +168,16 @@ private final class SocialResponseStub: URLProtocol, @unchecked Sendable {
                     ("ListActivity", ["list": ["name": "Memoirs"]]),
                     ("FutureActivity", ["unsupported": true]),
                     ("GoalActivity", ["goal": ["goal": 40, "progress": 30]]),
+                    // Hardcover withholds the last event's reader, so the feed leaves it out.
+                    ("UserBookActivity", ["userBook": ["statusId": 3]]),
                 ]
                 data = [
                     "activities": events.enumerated()
                         .map { index, event in
                             [
                                 "id": 3 - index, "event": event.0, "data": event.1,
-                                "likes_count": 2, "user": profile,
+                                "likes_count": 2,
+                                "user": index == events.count - 1 ? NSNull() : profile,
                                 // Goals have no book, so the feed leaves them out.
                                 "book": event.0 == "GoalActivity"
                                     ? NSNull()

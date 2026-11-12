@@ -69,10 +69,27 @@ final class SocialLibraryModel {
         return
             "Connect Hardcover with social read permissions in Settings. Activity from people you follow appears here."
     }
+    /// What Compare Shelves and Book Club show without a reader to compare with: a pointer to the
+    /// reader picker when the reader follows someone, and otherwise a loading note while social
+    /// data loads, how to follow readers once an empty Following list has loaded, a note that the
+    /// list couldn't load after a failed load or while an account's data lacks it, and otherwise
+    /// how to connect.
+    var noReaderMessage: String {
+        if !following.isEmpty { return "Choose a reader above." }
+        if isLoading { return "Loading the people you follow…" }
+        if snapshot?.dates["following"] != nil {
+            return "Follow readers on Hardcover to compare your books with theirs."
+        }
+        if loadFailed || snapshot != nil {
+            return "The people you follow couldn't load. Try again later."
+        }
+        return
+            "Connect Hardcover with social read permissions in Settings to compare your books with people you follow."
+    }
     private(set) var revision = 0
     @ObservationIgnored private let client: any SocialLibraryFetching
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private let cacheRoot: URL
+    @ObservationIgnored private let cache: SocialSnapshotCache
     @ObservationIgnored private var identity: String?
     @ObservationIgnored private var requestRevision = 0
     @ObservationIgnored private var requestedReader: Int?
@@ -90,7 +107,7 @@ final class SocialLibraryModel {
     ) {
         self.client = client
         self.defaults = defaults
-        self.cacheRoot = cacheRoot
+        cache = SocialSnapshotCache(root: cacheRoot)
         self.now = now
     }
     var following: [ReaderProfile] { snapshot?.following ?? [] }
@@ -156,15 +173,7 @@ final class SocialLibraryModel {
         if identity != fingerprint {
             snapshot = nil
             identity = fingerprint
-            // An account or credential fingerprint is local-only and never enters requests or
-            // iCloud.
-            if let ownerID = defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int,
-                let data = try? Data(contentsOf: cacheRoot.appending(path: "\(ownerID).json"))
-            {
-                snapshot = try? JSONDecoder().decode(SocialSnapshot.self, from: data)
-            }
         }
-        if PerformanceDiagnostics.isolates("background") { return }
         isLoading = true
         loadFailed = false
         let task = Task { [weak self] in
@@ -207,46 +216,69 @@ final class SocialLibraryModel {
                 }
             }
             do {
+                // The account's cached copy shows before any request. An account or credential
+                // fingerprint is local-only and never enters requests or iCloud.
+                if snapshot == nil,
+                    let ownerID = defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int,
+                    let cached = await cache.load(owner: ownerID)
+                {
+                    guard isCurrent(request) else { return }
+                    snapshot = cached
+                }
+                if PerformanceDiagnostics.isolates("background") { return }
                 var current: SocialSnapshot
                 if let snapshot {
                     current = snapshot
                 } else {
+                    // A credential this device hasn't used can belong to an account that
+                    // already has a cache file.
                     let owner = try await authorized { try await client.owner(token: $0) }
-                    try Task.checkCancellation()
-                    guard request == requestRevision else { return }
+                    let cached = await cache.load(owner: owner.id)
+                    guard isCurrent(request) else { return }
                     defaults.set(owner.id, forKey: "socialOwner.\(fingerprint)")
-                    current = SocialSnapshot(owner: owner)
-                    if let data = try? Data(
-                        contentsOf: cacheRoot.appending(path: "\(owner.id).json")),
-                        let cached = try? JSONDecoder().decode(SocialSnapshot.self, from: data)
-                    {
-                        current = cached
-                    }
+                    current = cached ?? SocialSnapshot(owner: owner)
                 }
-                if begin(
-                    owner: current.owner.id, dataset: "following", manual: manual,
-                    lastSuccess: current.dates["following"])
-                {
+                // Fetches `dataset` when it's due, then shows and saves it. A failed fetch
+                // starts the dataset's five-minute backoff. A fetch that ends because a newer
+                // load replaced this one doesn't, so the newer load can fetch the dataset.
+                @MainActor func refresh(
+                    _ dataset: String, _ fetch: () async throws -> Void
+                ) async throws {
+                    let key = "\(current.owner.id).\(dataset)"
+                    let lastSuccess = current.dates[dataset]
+                    guard
+                        RefreshPolicy.isDue(
+                            lastAttempt: defaults.object(forKey: "socialAttempt.\(key)") as? Date,
+                            lastSuccess: lastSuccess
+                                ?? defaults.object(forKey: "socialSuccess.\(key)") as? Date,
+                            hasSnapshot: lastSuccess != nil, manual: manual, now: now())
+                    else { return }
+                    do {
+                        try await fetch()
+                    } catch {
+                        if isCurrent(request) {
+                            defaults.set(now(), forKey: "socialAttempt.\(key)")
+                        }
+                        throw error
+                    }
+                    current.dates[dataset] = now()
+                    try await install(current, request: request)
+                }
+                try await refresh("following") {
                     current.following = try await authorized {
                         try await client.following(owner: current.owner.id, token: $0)
                     }
                     let allowed = Set(current.following.map(\.id))
                     current.readerBooks = current.readerBooks.filter { allowed.contains($0.key) }
                     current.activities.removeAll { !allowed.contains($0.reader.id) }
-                    current.dates["following"] = now()
-                    try install(current, request: request)
                 }
-                if socialViews.contains(.following) || needsPicks,
-                    begin(
-                        owner: current.owner.id, dataset: "feed", manual: manual,
-                        lastSuccess: current.dates["feed"])
-                {
+                if socialViews.contains(.following) || needsPicks {
                     do {
-                        current.activities = try await authorized {
-                            try await client.feed(users: current.following.map(\.id), token: $0)
+                        try await refresh("feed") {
+                            current.activities = try await authorized {
+                                try await client.feed(users: current.following.map(\.id), token: $0)
+                            }
                         }
-                        current.dates["feed"] = now()
-                        try install(current, request: request)
                     } catch {
                         // Friends' Picks can rank from libraries alone, so a transient feed
                         // failure only stops the sync when the Feed view shows it. Credential and
@@ -267,58 +299,48 @@ final class SocialLibraryModel {
                     }
                 }
                 feedSettled = true
-                if needsComparison || needsPicks,
-                    begin(
-                        owner: current.owner.id, dataset: "mine", manual: manual,
-                        lastSuccess: current.dates["mine"])
-                {
-                    current.mine = try await authorized {
-                        try await client.library(user: current.owner.id, token: $0)
+                if needsComparison || needsPicks {
+                    try await refresh("mine") {
+                        current.mine = try await authorized {
+                            try await client.library(user: current.owner.id, token: $0)
+                        }
                     }
-                    current.dates["mine"] = now()
-                    try install(current, request: request)
                 }
+                // Each library refreshes on its own daily gate, which Compare Shelves and
+                // Friends' Picks share. The selected reader's library comes first.
+                var readers: [Int] = []
                 if needsComparison, let readerID,
-                    current.following.contains(where: { $0.id == readerID }),
-                    begin(
-                        owner: current.owner.id, dataset: "reader.\(readerID)", manual: manual,
-                        lastSuccess: current.dates["reader.\(readerID)"])
+                    current.following.contains(where: { $0.id == readerID })
                 {
-                    current.readerBooks[readerID] = try await readerLibrary(readerID)
-                    current.dates["reader.\(readerID)"] = now()
-                    try install(current, request: request)
+                    readers.append(readerID)
                 }
-                // Each library refreshes on its own daily gate, shared with Compare Shelves.
                 if needsPicks {
                     for id in FriendPick.readersToSync(current, limit: Self.pickReaderLimit)
-                    where begin(
-                        owner: current.owner.id, dataset: "reader.\(id)", manual: manual,
-                        lastSuccess: current.dates["reader.\(id)"])
-                    {
+                    where !readers.contains(id) {
+                        readers.append(id)
+                    }
+                }
+                for id in readers {
+                    try await refresh("reader.\(id)") {
                         current.readerBooks[id] = try await readerLibrary(id)
-                        current.dates["reader.\(id)"] = now()
-                        try install(current, request: request)
                     }
                 }
                 // Each due dataset installed as it arrived. `snapshot` is still nil only when this
                 // load fetched the owner and nothing was due, so it installs the cached copy; any
                 // other load with nothing due leaves the cache file and `revision` alone.
-                if snapshot == nil { try install(current, request: request) }
-                guard request == requestRevision else { return }
+                if snapshot == nil { try await install(current, request: request) }
+                guard isCurrent(request) else { return }
                 status =
                     "Social data is cached. Automatic checks run once a day."
             } catch {
-                guard !Task.isCancelled, request == requestRevision else { return }
+                guard isCurrent(request) else { return }
                 switch error {
                 case HardcoverError.insufficientScope, HardcoverError.forbidden,
                     HardcoverError.invalidToken:
                     // A first load can be denied before it installs the cache file it read.
-                    if let owner = snapshot?.owner.id
+                    let owner =
+                        snapshot?.owner.id
                         ?? defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int
-                    {
-                        try? FileManager.default.removeItem(
-                            at: cacheRoot.appending(path: "\(owner).json"))
-                    }
                     snapshot = nil
                     revision += 1
                     // Only Settings → Sources shows this, so it names that page's buttons. A
@@ -334,6 +356,7 @@ final class SocialLibraryModel {
                         default:
                             "Hardcover denied access to social data."
                         }
+                    if let owner { await cache.remove(owner: owner) }
                 default:
                     loadFailed = !feedSettled
                     status =
@@ -346,34 +369,24 @@ final class SocialLibraryModel {
         await task.value
     }
 
-    private func begin(owner: Int, dataset: String, manual: Bool, lastSuccess: Date?) -> Bool {
-        let key = "socialAttempt.\(owner).\(dataset)"
-        let successful =
-            lastSuccess ?? defaults.object(forKey: "socialSuccess.\(owner).\(dataset)") as? Date
-        guard
-            RefreshPolicy.isDue(
-                lastAttempt: defaults.object(forKey: key) as? Date,
-                lastSuccess: successful, hasSnapshot: lastSuccess != nil, manual: manual, now: now()
-            )
-        else { return false }
-        defaults.set(now(), forKey: key)
-        return true
+    /// Whether the load numbered `request` is the newest one and hasn't been cancelled.
+    private func isCurrent(_ request: Int) -> Bool {
+        !Task.isCancelled && request == requestRevision
     }
 
-    private func install(_ value: SocialSnapshot, request: Int) throws {
+    /// Shows `value` and saves it to the cache. Throws `CancellationError` without showing it
+    /// when a newer load replaced the load numbered `request`.
+    private func install(_ value: SocialSnapshot, request: Int) async throws {
+        guard isCurrent(request) else { throw CancellationError() }
         let measurement = PerformanceDiagnostics.begin("SocialInstall")
-        defer { measurement.end() }
-        try Task.checkCancellation()
-        guard request == requestRevision else { throw CancellationError() }
         snapshot = value
         loadFailed = false
         for (dataset, date) in value.dates {
             defaults.set(date, forKey: "socialSuccess.\(value.owner.id).\(dataset)")
         }
         revision += 1
-        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
-        try JSONEncoder().encode(value)
-            .write(to: cacheRoot.appending(path: "\(value.owner.id).json"), options: .atomic)
+        measurement.end()
+        try await cache.save(value)
     }
 
     /// The most followed readers whose libraries Friends' Picks downloads.
@@ -382,20 +395,8 @@ final class SocialLibraryModel {
     #if DEBUG && targetEnvironment(simulator)
         /// Shows the newest cached social snapshot without a credential or network requests, for
         /// previewing downloaded data in the simulator. Like the sample, it blocks later loads.
-        func useCachedSnapshotForPreview() {
-            let files =
-                (try? FileManager.default.contentsOfDirectory(
-                    at: cacheRoot, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-            let newest = files.filter { $0.pathExtension == "json" }
-                .max {
-                    let lhs = try? $0.resourceValues(forKeys: [.contentModificationDateKey])
-                    let rhs = try? $1.resourceValues(forKeys: [.contentModificationDateKey])
-                    return (lhs?.contentModificationDate ?? .distantPast)
-                        < (rhs?.contentModificationDate ?? .distantPast)
-                }
-            guard let newest, let data = try? Data(contentsOf: newest),
-                let cached = try? JSONDecoder().decode(SocialSnapshot.self, from: data)
-            else { return }
+        func useCachedSnapshotForPreview() async {
+            guard let cached = await cache.newest() else { return }
             activeTask?.cancel()
             isSample = true
             snapshot = cached
@@ -481,5 +482,48 @@ final class SocialLibraryModel {
             }, mine: mine, readerBooks: [other.id: theirs, second.id: secondBooks])
         status = "Sample social data. No accounts or AI requests are used."
         revision += 1
+    }
+}
+
+/// Reads and writes each account's social snapshot file away from the UI actor, one at a time.
+private actor SocialSnapshotCache {
+    private let root: URL
+    init(root: URL) { self.root = root }
+
+    private func url(owner: Int) -> URL { root.appending(path: "\(owner).json") }
+
+    private func snapshot(at url: URL) -> SocialSnapshot? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(SocialSnapshot.self, from: data)
+    }
+
+    /// Returns the saved snapshot of the account `owner`, or `nil` without a readable one.
+    func load(owner: Int) -> SocialSnapshot? { snapshot(at: url(owner: owner)) }
+
+    #if DEBUG && targetEnvironment(simulator)
+        /// Returns the most recently saved snapshot of any account.
+        func newest() -> SocialSnapshot? {
+            let files =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: root, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            return files.filter { $0.pathExtension == "json" }
+                .max {
+                    let lhs = try? $0.resourceValues(forKeys: [.contentModificationDateKey])
+                    let rhs = try? $1.resourceValues(forKeys: [.contentModificationDateKey])
+                    return (lhs?.contentModificationDate ?? .distantPast)
+                        < (rhs?.contentModificationDate ?? .distantPast)
+                }
+                .flatMap(snapshot(at:))
+        }
+    #endif
+
+    func save(_ snapshot: SocialSnapshot) throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try JSONEncoder().encode(snapshot)
+            .write(to: url(owner: snapshot.owner.id), options: .atomic)
+    }
+
+    func remove(owner: Int) {
+        try? FileManager.default.removeItem(at: url(owner: owner))
     }
 }

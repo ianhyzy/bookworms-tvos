@@ -49,7 +49,7 @@ struct CWAConfiguration: Codable, Equatable, Sendable {
 
 enum SourceError: LocalizedError {
     case invalidServer, invalidCredentials, credentials, forbidden, invalidFeed, incomplete,
-        unsafeLink, dailyLimit
+        unsafeLink
     case http(Int)
     var errorDescription: String? {
         switch self {
@@ -71,7 +71,6 @@ enum SourceError: LocalizedError {
             "The source could not be synced completely. Its saved books are unchanged."
         case .unsafeLink:
             "The catalog linked outside its server. The request was stopped to protect your login."
-        case .dailyLimit: "This source was checked recently. Use Sync now to retry sooner."
         }
     }
 }
