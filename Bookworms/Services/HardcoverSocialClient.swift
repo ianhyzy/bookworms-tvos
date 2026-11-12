@@ -89,16 +89,17 @@ actor HardcoverSocialClient: SocialLibraryFetching {
     func owner(token: String) async throws -> ReaderProfile {
         struct Result: Decodable { let me: [Profile] }
         let result: Result = try await fetch(.owner, variables: SocialVariables(), token: token)
-        guard result.me.count == 1, let profile = result.me.first else {
+        guard result.me.count == 1, let owner = result.me.first?.model else {
             throw HardcoverError.invalidToken
         }
-        return profile.model
+        return owner
     }
 
-    /// Returns the readers `owner` follows, leaving out readers they blocked on Hardcover.
+    /// Returns the readers `owner` follows, leaving out readers they blocked on Hardcover and
+    /// readers whose profile Hardcover withholds.
     func following(owner: Int, token: String) async throws -> [ReaderProfile] {
         struct Row: Decodable {
-            let followedUser: Profile
+            let followedUser: Profile?
             enum CodingKeys: String, CodingKey { case followedUser = "followed_user" }
         }
         struct Result: Decodable {
@@ -111,8 +112,9 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             try Task.checkCancellation()
             let result: Result = try await fetch(
                 .following, variables: SocialVariables(user: owner, offset: offset), token: token)
-            for row in result.followedUsers where !blocked.contains(row.followedUser.id) {
-                profiles[row.followedUser.id] = row.followedUser.model
+            for reader in result.followedUsers.compactMap(\.followedUser?.model)
+            where !blocked.contains(reader.id) {
+                profiles[reader.id] = reader
             }
             if result.followedUsers.count < 100 {
                 // Readers who share a name keep one order from load to load.
@@ -159,7 +161,9 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                 variables: SocialVariables(
                     users: Array(users[start..<min(start + 200, users.count)]),
                     language: HardcoverClient.coverLanguage), token: token)
-            for activity in result.activities { activities[activity.id] = activity.model }
+            for activity in result.activities.compactMap(\.model) {
+                activities[activity.id] = activity
+            }
         }
         return FeedActivity.latestPerBook(Array(activities.values))
     }
@@ -214,8 +218,8 @@ actor HardcoverSocialClient: SocialLibraryFetching {
     /// after sanitization and reviews by readers the account blocked on Hardcover. Callers invoke this only on an
     /// explicit request, never while browsing.
     func reviews(book: Int, token: String) async throws -> [BookReview] {
-        // Hardcover can return null or partial reviewer profiles, for example for private
-        // accounts. Show those reviews anonymously and skip only rows that can't be read at all.
+        // A review whose reader Hardcover withholds shows anonymously. Skip only rows that
+        // can't be read at all.
         struct Row: Decodable {
             let id: Int
             let rating: Double?
@@ -292,13 +296,16 @@ actor HardcoverSocialClient: SocialLibraryFetching {
             sources: [.hardcover], publicationYear: source.releaseYear)
     }
 
+    /// A Hardcover user as the social queries return one. Hardcover can return a null profile
+    /// or one without a username, for example for private accounts.
     private struct Profile: Decodable {
         let id: Int
-        let username: String
+        let username: String?
         let name: String?
         let image: CoverImage?
-        var model: ReaderProfile {
-            ReaderProfile(id: id, username: username, name: name, avatarURL: image?.url)
+        /// The reader, or `nil` without a username to name them by.
+        var model: ReaderProfile? {
+            username.map { ReaderProfile(id: id, username: $0, name: name, avatarURL: image?.url) }
         }
     }
 
@@ -308,14 +315,16 @@ actor HardcoverSocialClient: SocialLibraryFetching {
         let event: String
         let data: JSONValue
         let likesCount: Int
-        let user: Profile
+        let user: Profile?
         let book: SourceBook?
         enum CodingKeys: String, CodingKey {
             case id, event, data, user, book
             case createdAt = "created_at"
             case likesCount = "likes_count"
         }
-        var model: FeedActivity {
+        /// The activity, or `nil` when Hardcover withholds its reader.
+        var model: FeedActivity? {
+            guard let reader = user?.model else { return nil }
             let status = (data.value("statusId") ?? data.value("status_id"))?.number
             let progress = data.value("progress")?.number
             let summary: String
@@ -341,7 +350,7 @@ actor HardcoverSocialClient: SocialLibraryFetching {
                 summary = "Shared a reading update"
             }
             return FeedActivity(
-                id: id, reader: user.model, createdAt: createdAt, summary: summary,
+                id: id, reader: reader, createdAt: createdAt, summary: summary,
                 book: book.map { HardcoverSocialClient.book($0) }, likes: max(0, likesCount),
                 rating: data.value("rating")?.number,
                 review: ReviewText.clean(

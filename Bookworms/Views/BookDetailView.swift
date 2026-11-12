@@ -1176,7 +1176,7 @@ private struct SeriesPopup: View {
         for start in stride(from: 0, to: missing.count, by: 6) {
             guard !Task.isCancelled else { return }
             let fetched = await ArtworkStore.shared.prefetchBrowsing(
-                Array(missing[start..<min(start + 6, missing.count)]))
+                Array(missing[start..<min(start + 6, missing.count)]), evictingOldest: true)
             if fetched > 0 { artworkGeneration += 1 }
         }
     }

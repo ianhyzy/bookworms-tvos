@@ -318,10 +318,7 @@ struct SocialViews: View {
                     }
                     comparisonCaption(reader: reader).frame(height: 124, alignment: .topLeading)
                 } else {
-                    empty(
-                        "Choose a reader",
-                        "Select someone you follow above to compare your books."
-                    )
+                    empty("Compare Shelves", social.noReaderMessage)
                 }
             }
         }
@@ -400,6 +397,15 @@ struct SocialViews: View {
     private var sharedBooks: [SharedRead] {
         social.presentation.shared
     }
+
+    /// What Book Club shows without shared books. A reader's library can still be downloading
+    /// after the reader is chosen.
+    private var emptySharedMessage: String {
+        if reader == nil { return social.noReaderMessage }
+        return social.isLoading
+            ? "Loading books…" : "No books with ratings from both readers are available."
+    }
+
     private var shared: some View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 16) {
@@ -471,12 +477,7 @@ struct SocialViews: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
-                    empty(
-                        "Book Club",
-                        reader == nil
-                            ? "Choose a reader above."
-                            : "No books with ratings from both readers are available."
-                    )
+                    empty("Book Club", emptySharedMessage)
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)

@@ -47,20 +47,30 @@ struct ShelfView: View {
     @State private var requestedWallData: BookWallData?
     @State private var wallDetail = BookWallDetailState()
     @State private var wallViewportFrame = CGRect.zero
+    /// The palette and size of the backdrop `bookWallScene` holds.
+    @State private var renderedWallBackdrop: WallBackdropKey?
     @Environment(\.colorScheme) private var colorScheme
     private var palette: ShelfPalette {
         ShelfPalette(isDark: colorScheme == .dark, isWood: woodBackground)
     }
+    private var wallBackdropKey: WallBackdropKey {
+        WallBackdropKey(
+            isDark: palette.isDark, isWood: palette.isWood,
+            width: wallViewportFrame.width, height: wallViewportFrame.height)
+    }
 
     /// Renders the wall background once per palette and size for Book Wall's lit backdrop,
-    /// at one pixel per point to match the scene's 1080p render cap.
+    /// at one pixel per point to match the scene's 1080p render cap. The scene keeps its
+    /// backdrop while another tab shows, so returning to Book Wall renders nothing.
     private func renderWallBackdrop() {
-        let size = wallViewportFrame.size
-        guard size.width > 0, size.height > 0 else { return }
+        let key = wallBackdropKey
+        guard key != renderedWallBackdrop, key.width > 0, key.height > 0 else { return }
         let renderer = ImageRenderer(
-            content: WoodBackground(palette: palette).frame(width: size.width, height: size.height))
+            content: WoodBackground(palette: palette).frame(width: key.width, height: key.height))
         renderer.scale = 1
-        if let image = renderer.cgImage { bookWallScene.setBackdrop(image) }
+        guard let image = renderer.cgImage else { return }
+        bookWallScene.setBackdrop(image)
+        renderedWallBackdrop = key
     }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
@@ -261,13 +271,7 @@ struct ShelfView: View {
                     .allowsHitTesting(false)
                 }
                 .ignoresSafeArea()
-                .task(
-                    id: WallBackdropKey(
-                        isDark: palette.isDark, isWood: palette.isWood,
-                        width: wallViewportFrame.width, height: wallViewportFrame.height)
-                ) {
-                    renderWallBackdrop()
-                }
+                .task(id: wallBackdropKey) { renderWallBackdrop() }
             }
         }
         .environment(\.artworkGeneration, artworkGeneration)
@@ -693,7 +697,7 @@ struct ShelfView: View {
     private func loadSocial(manual: Bool = false) async {
         #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("--cached-social-preview") {
-                social.useCachedSnapshotForPreview()
+                await social.useCachedSnapshotForPreview()
                 ensureComparisonReader()
                 return
             }

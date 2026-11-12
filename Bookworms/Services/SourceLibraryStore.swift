@@ -31,13 +31,9 @@ struct SourceSyncSchedule {
             lastSuccess: defaults.object(forKey: "syncSuccess.\(source.rawValue)") as? Date,
             hasSnapshot: hasSnapshot, manual: false, now: now)
     }
-    func begin(
-        _ source: LibrarySource, now: Date = Date(), manual: Bool = false,
-        hasSnapshot: Bool = true
-    ) throws {
-        guard manual || isDue(source, now: now, hasSnapshot: hasSnapshot) else {
-            throw SourceError.dailyLimit
-        }
+    /// Records a sync that is about to start. Until it succeeds (`seed`), automatic checks wait
+    /// five minutes from `now`.
+    func recordAttempt(_ source: LibrarySource, now: Date) {
         defaults.set(now, forKey: "syncAttempt.\(source.rawValue)")
     }
     func seed(_ source: LibrarySource, date: Date) {
@@ -50,14 +46,16 @@ struct SourceSyncSchedule {
 
 /// Successful snapshots last a day; failures back off briefly without blocking cache recovery.
 enum RefreshPolicy {
+    /// Whether a sync at `date` is less than a day old.
+    static func isFresh(_ date: Date, now: Date) -> Bool {
+        now.timeIntervalSince(date) < 86400
+    }
     static func isDue(
         lastAttempt: Date?, lastSuccess: Date?, hasSnapshot: Bool,
         manual: Bool, now: Date
     ) -> Bool {
         if manual { return true }
-        if hasSnapshot, let lastSuccess, now.timeIntervalSince(lastSuccess) < 86400 {
-            return false
-        }
+        if hasSnapshot, let lastSuccess, isFresh(lastSuccess, now: now) { return false }
         // A purged successful snapshot can be rebuilt immediately. Failed attempts wait five minutes.
         if let lastAttempt, lastSuccess == nil || lastAttempt > lastSuccess! {
             return now.timeIntervalSince(lastAttempt) >= 300
