@@ -4,16 +4,18 @@ The Local test plan combines deterministic service tests with tvOS remote-driven
 
 ## When to run tests
 
-Run tests only when the owner asks. Routine verification after a change is:
+Run the tests a change touches before it merges, without asking. Routine verification after a change is:
 
 1. Lint each edited Swift file with `xcrun swift-format lint --strict`.
-2. Build and install on the Apple TV with `python3 scripts/device-build.py`, which compiles a Release build and launches it for manual testing.
+2. Compile for the simulator, and run the affected test classes, or the plan that holds them, on a slim simulator.
 
-Update affected tests alongside behavior changes, list the tests that would add signal, and ask before running them. A Unit run takes about a minute; a Local run adds several minutes of UI tests; `--major` repeats Local on each runtime. Local and `--major` add one shorter Reduce Motion pass.
+Build and install on the Apple TV with `python3 scripts/device-build.py`, which compiles a Release build and launches it for manual testing, only when the owner asks and outside TV quiet hours.
+
+Update affected tests alongside behavior changes, and run them. A Unit run takes about a minute; a Local run adds several minutes of UI tests; `--major` repeats Local on each runtime. Local and `--major` add one shorter Reduce Motion pass.
 
 ## Local test worker
 
-When the owner asks for a run, use `python3 scripts/test-worker.py --detach`. Wait for the printed worker PID to exit in a background command that the agent harness tracks, or end the agent turn with the dispatch-log path. Do not poll with repeated checks; the worker needs no model supervision. The worker disables and verifies Device Hub’s tvOS audio-output preference before booting a simulator. Unsupported audio controls block the run. See [operator instructions](../SUBAGENT-TEST-INSTRUCTIONS.md). The worker wraps the runner below, serializes runs, limits build jobs to two, stops the test runner after two hours, and writes `handoff.md` and `handoff.json`. Read these first instead of streaming build logs into an agent.
+For a test-plan run, use `python3 scripts/test-worker.py --detach`. Wait for the printed worker PID to exit in a background command that the agent harness tracks, or end the agent turn with the dispatch-log path. Do not poll with repeated checks; the worker needs no model supervision. The worker disables and verifies Device Hub’s tvOS audio-output preference before booting a simulator. Unsupported audio controls block the run. See [operator instructions](../SUBAGENT-TEST-INSTRUCTIONS.md). The worker wraps the runner below, serializes runs, limits build jobs to two, stops the test runner after two hours, and writes `handoff.md` and `handoff.json`. Read these first instead of streaming build logs into an agent.
 
 `--profile unit` selects Unit; `--profile major` selects the runtime matrix. No profile runs on a device or contacts live providers. Offline builds route all app HTTP requests through fixture protocols followed by a deny-all handler. Real Keychain access is disabled, and CloudKit's existing simulator guard remains active. Unit and UI checks provide offline-enforcement evidence, including app relaunch. This is an application transport boundary, not an operating-system firewall.
 

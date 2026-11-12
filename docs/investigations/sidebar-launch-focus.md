@@ -2,7 +2,7 @@
 
 Bookworms is meant to open on My Shelf with the first book focused and the sidebar closed, at launch and after the first sign-in. It does on tvOS 26.5. On tvOS 27.2, the sidebar opens with focus first. Sidebar-first is the platform's behavior on both versions, the app overrides it, and tvOS 27.2 leaves the override nothing to focus. No public API changes that, so the app keeps the difference until one does.
 
-See [focus and remote navigation](FOCUS_NAVIGATION.md) for the app's focus rules.
+See [focus and remote navigation](../FOCUS_NAVIGATION.md) for the app's focus rules.
 
 ## What the viewer sees
 
@@ -92,7 +92,7 @@ Use simulators for tvOS 26.5 and 27.2.
 
 ## Limits of this record
 
-- tvOS 27.0 was not checked. [Focus and remote navigation](FOCUS_NAVIGATION.md) records that it launches on the first book.
+- tvOS 27.0 was not checked. [Focus and remote navigation](../FOCUS_NAVIGATION.md) records that it launches on the first book.
 - A physical Apple TV on tvOS 27.2 was not checked. Nothing in the cause depends on the simulator.
 - The three assignments were skipped together, so which of them decides the launch focus on tvOS 26.5 is not known.
 - Launches on the social views and Year in Review were not compared between the two versions.
