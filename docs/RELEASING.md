@@ -65,15 +65,17 @@ The verifier checks that the app bundles the example profile, display names, the
 
 ## App Store submission
 
-Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. When the [privacy policy text](#privacy-policy-text) has changed, publish the same wording and effective date at ian.gay/bookworms-privacy-policy, and paste the text into the **Apple TV Privacy Policy** field in App Store Connect. The production schema contains `LibraryArchive` with its `archive` asset and the companion records.
+Local preparation ends before upload. Before uploading, deploy any new CloudKit record type or field to production. When the [privacy policy text](#privacy-policy-text) has changed, publish the same wording and effective date at ian.gay/bookworms-privacy-policy, and paste the text into the **Apple TV Privacy Policy** field in App Store Connect. The production schema needs `LibraryArchive` with its `archive` asset and the companion records; the owner confirms in CloudKit Console that each is deployed.
 
-The companion records are `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, and `SeriesLookV1`, each with a `payload` Bytes field. The Apple TV writes `SeriesLookV1` and `SeriesLinkV1` records as well as reading them. Once TestFlight builds of the iPhone and Mac app exist, install them and a TestFlight build of this Apple TV version on devices signed in to one iCloud account and one Hardcover account, and turn on iCloud storage on the Apple TV, so the check runs in Production. Confirm that a companion writes a design and the Apple TV reads and caches it from the same private container, that a series look saved on one device is the look the other draws, that a series picked in Apple TV book details names the book on the iPhone and Mac, and the reverse, and that a design or look a companion upgrades from a lower model tier replaces the one the Apple TV draws after its next read.
+The companion records are `SpineWorklistV1`, `SpineDesignV1`, `CoverChoiceV1`, `SeriesLinkV1`, `SeriesLookV1`, and `TopFivePinsV1`, each with a `payload` Bytes field. The Apple TV writes the `SpineWorklistV1` record, reads `SpineDesignV1` and `CoverChoiceV1` records, and both reads and writes `SeriesLookV1` and `SeriesLinkV1` records. It never shows Top Five pins: it reads and writes `TopFivePinsV1` only for **Merge**, which copies another Hardcover account's designs, cover choices, series links, series looks, and pins to this account as new records; see [sources and iCloud](SOURCES_AND_ICLOUD.md#icloud).
+
+Once TestFlight builds of the iPhone and Mac app exist, install them and a TestFlight build of this Apple TV version on devices signed in to one iCloud account and one Hardcover account, and turn on **iCloud storage** in **Settings > General** on the Apple TV, so the check runs in Production. Confirm that a companion writes a design and the Apple TV reads and caches it from the same private container, that a series look saved on one device is the look the other draws, that a series picked in Apple TV book details names the book on the iPhone and Mac, and the reverse, and that a design or look a companion upgrades from a lower model tier replaces the one the Apple TV draws after its next read.
 
 After an authorized upload:
 
 1. Wait for Apple to finish processing the build.
 2. In App Store Connect, open the tvOS version whose number matches `MARKETING_VERSION`, or create it. Under **Build**, select the uploaded build. If Xcode changed the build number, record and verify the final number.
-3. Complete the listing, **App Privacy**, **Age Rating**, **App Review Information**, and **Pricing and Availability** from [App Store information](#app-store-information).
+3. Complete the listing, including **What's New in This Version**, **App Privacy**, **Age Rating**, **App Review Information**, and **Pricing and Availability** from [App Store information](#app-store-information).
 4. Under **App Store Version Release**, choose **Manually release this version** so an approved build goes live only when you release it.
 5. Select **Add for Review**, then **Submit to App Review**.
 6. For 1.2.0, keep the manual release and release it together with or after the iPhone and Mac app, because **Settings > Spines** sends readers to that app.
@@ -81,6 +83,48 @@ After an authorized upload:
 To check the exact candidate with production signing and production CloudKit before submission, export it from Xcode Organizer with **Release Testing** and install it on the registered Apple TV. Verify launch, navigation, source credentials, refresh and cache behavior, Top Shelf, offline recovery, and production iCloud.
 
 Compilation and local signature verification do not establish distribution or physical-device readiness.
+
+## TestFlight
+
+A processed build can go to TestFlight testers before it goes to App Review. Inviting testers and deploying the production CloudKit schema each need the owner's authorization, as an upload does. The owner confirms every App Store Connect state this section names: groups, testers, review status, and saved fields.
+
+1. **Deploy the CloudKit schema.** `release.py upload` signs the build for the Production CloudKit environment, so a TestFlight build reads and writes Production, not Development. Deploy every record type and field that [App Store submission](#app-store-submission) lists before a tester turns on **iCloud storage**. Production keeps every record type and field deployed to it, so deploy only a schema that the released apps will keep.
+2. **Internal testers first.** Add the build to an internal group. Internal testers are App Store Connect users on the team, at most 100; see [Add internal testers](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers). Run the companion check in [App Store submission](#app-store-submission) with this build.
+3. **Then external testers.** Create an external group, which App Store Connect allows once an internal group exists, add the build, and submit it to TestFlight App Review. The first build of a version needs a full review; later builds of that version might not. See [Invite external testers](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers).
+4. **Invite the same people to the iPhone and Mac build.** **Settings > Spines** sends readers to the iPhone and Mac app, and companion designs reach the Apple TV only from it. Put each Apple TV tester in the matching group of that app, internal with internal and external with external. Tell testers to use one iCloud account and one Hardcover account on all their devices, and to turn on **iCloud storage** in **Settings > General** on the Apple TV.
+
+### Test information
+
+Fill in **Test Information** on the app's TestFlight tab before submitting a build for external testing; see [Provide test information](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-test-information). The owner confirms each field's name and saved value in App Store Connect.
+
+| Field | Value |
+| --- | --- |
+| Beta App Description | Required. The owner writes it: what Bookworms shows on Apple TV, and that it only reads the Hardcover account. |
+| Feedback Email | bookworms@ian.gay |
+| Marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
+| Privacy Policy URL | https://ian.gay/bookworms-privacy-policy/ |
+| Contact information | The owner's name, phone number, and email address. Enter them only in App Store Connect. |
+| Sign-in information | The demo Hardcover account from [App Store information](#app-store-information). Enter its credentials only in App Store Connect. |
+| Review notes | The App Review notes in [App Store information](#app-store-information), adjusted to the build. For TestFlight, replace "is in App Review at the same time" with where testers get the iPhone and Mac build. |
+| What to Test | Entered for each build. Use [What to Test for 1.2.0](#what-to-test-for-120). |
+
+### What to Test for 1.2.0
+
+This text covers changes merged after build 11, the last build numbered 1.1.0. The owner confirms which build shipped as 1.1.0 and edits the text.
+
+```text
+New since 1.1.0:
+
+- Example profile. "View example profile" in the welcome popup shows a read-only example library before you connect Hardcover.
+- Sign-in. Scan the QR code, or enter the code at hardcover.app/link.
+- Navigation. The app opens on My Shelf with the first book focused. Press Left from the leftmost book, or Back, to open the sidebar.
+- Book Wall (Apple TV 4K, 2nd generation or later; turn it on in Settings > Views). A large year splits into pages, with a page menu at the top right.
+- Spine designs from Bookworms on iPhone and Mac. Install that TestFlight build, sign in to the same iCloud and Hardcover accounts, and turn on iCloud storage in Settings > General on the Apple TV. Book Wall then draws your designs, books in a series share one look, and a cover you choose on iPhone or Mac shows here too. Settings > Spines lists which models made the designs.
+- Book details. Select the series label to list the book's series and choose the one it names. "Friends who read this" lists the readers you follow who read the book.
+- iCloud. If iCloud holds Bookworms data from another Hardcover account, the app asks whether to merge it or keep iCloud off.
+
+Please report books or buttons the remote can't reach, text that's hard to read from the couch, and sync or iCloud errors. Settings > Sources and Settings > General show their status.
+```
 
 ## Public storefront availability
 
@@ -104,18 +148,21 @@ Apple documents the selection controls in [Manage availability for your app](htt
 | Support and marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
+| What's New in This Version | Required for every version after the first, so 1.2.0 needs it; at most 4,000 characters. The owner writes it. [What to Test for 1.2.0](#what-to-test-for-120) lists what changed. |
 | Price | Free, with no in-app purchases. Bookworms is free and open source. |
 | Availability | All current storefronts except China mainland; automatic availability in future storefronts is off. Follow [public storefront availability](#public-storefront-availability). |
 | Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; create the output folder with `mkdir -p .local/app-store-screenshots`, then resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
 | App Privacy | **Data Not Collected**; see [privacy implementation](PRIVACY.md) |
 | Age rating | The app shows Hardcover reviews, which are user-generated content. Answer the questionnaire accordingly. |
 | Content rights | The app shows third-party content: Hardcover metadata, covers, profile photos, and reviews. |
-| App Review sign-in | A demo Hardcover account with finished books, including books finished this year, a current read, and followed readers. Enter its credentials only in App Store Connect. |
+| App Review sign-in | A demo Hardcover account with a current read, followed readers, and read books that have finish dates, some of them in the current calendar year. Book Wall shows only books finished this year, and Year in Review shows only books with a finish date, so without them both are empty. Enter its credentials only in App Store Connect. |
 
 Use these App Review notes, adjusted to the build:
 
 ```text
 Bookworms shows a Hardcover (hardcover.app) reading library on Apple TV. It only reads the account; it never changes it.
+
+The app opens on My Shelf with the first book focused and the sidebar closed. To open the sidebar, press Left from the leftmost book, or press Back.
 
 Without an account: select "View example profile" in the welcome popup. If the popup has already been dismissed, select "View example profile" on My Shelf. It shows a read-only copy of the developer's own reading that ships in the app, without social views, so use the demo account to review sign-in and social views.
 
@@ -123,19 +170,19 @@ With the demo account: select "Connect Hardcover" in the welcome popup, or open 
 
 Social views show only readers the account follows. Book details can also show public Hardcover reviews of that book. Hardcover moderates all reviews; users report and block readers in the Hardcover app and website. Bookworms reads the account's block list and never shows readers the account blocked.
 
-Book Wall requires Apple TV 4K (2nd generation) or later. The example profile already shows it in the sidebar menu, and its Settings > Views toggles are disabled. With the demo account, Book Wall starts off; turn it on in Settings > Views.
+Book Wall requires Apple TV 4K (2nd generation) or later. The example profile already shows it in the sidebar, and its Settings > Views toggles are disabled. With the demo account, Book Wall starts off; turn it on in Settings > Views. Book Wall shows the books finished this calendar year. When a year has more books than one wall holds, a "Page 1 of 2" menu at the top right chooses the page.
 
-The companion Bookworms app for iPhone and Mac is in App Review at the same time. It designs the book spines that Settings > Spines describes.
+The companion Bookworms app for iPhone and Mac is in App Review at the same time. It designs the book spines that Settings > Spines describes. The example profile's Book Wall already draws such designs. With the demo account, they arrive through iCloud: turn on "iCloud storage" in Settings > General, which is off by default, on an Apple TV that shares an iCloud account with an iPhone or Mac running Bookworms on the same Hardcover account. Without them, Book Wall draws the Apple TV's own spine looks.
 ```
 
 ### Privacy policy text
 
-One policy covers Bookworms on Apple TV, iPhone, and Mac. Publish this text at ian.gay/bookworms-privacy-policy, and paste it into the **Apple TV Privacy Policy** field. Change the effective date whenever the text changes, and update both places together.
+One policy covers Bookworms on Apple TV, iPhone, and Mac. The text below is the policy published at [ian.gay/bookworms-privacy-policy](https://ian.gay/bookworms-privacy-policy/), word for word. Paste it into the **Apple TV Privacy Policy** field; the owner confirms what that field holds. To change the policy, change this text and its effective date, publish the same text on the web page, and paste it into the field again.
 
 ```text
 Bookworms privacy policy
 
-Effective November 8, 2026. Contact: bookworms@ian.gay
+Effective November 13, 2026. Contact: bookworms@ian.gay
 Web version: ian.gay/bookworms-privacy-policy
 
 Summary
@@ -165,13 +212,13 @@ Where data is stored
 Downloaded information, images, and settings stay on your device, except for the iCloud copy below. Bookworms and the system may remove cached data to save space; Bookworms downloads it again when needed. The Apple TV also keeps each source's latest sync error on the device.
 
 iCloud
-On Apple TV, iCloud storage is optional and off by default; turn it on in Settings > General. On iPhone and Mac, Bookworms uses iCloud whenever the device is signed in to iCloud, and has no iCloud setting. Bookworms saves a copy of your Hardcover library, including your Hardcover account ID and your own reviews, to your private iCloud database so your Apple devices can share and restore it. It also saves spine designs (which can include a cover's title text), series looks, cover choices, series choices, a list of books to design, and, from iPhone and Mac, your Top Five pins. The copy excludes your sign-in, API keys, images, and friends' information. The developer can't access any of it. Apple's privacy policy governs iCloud.
+On Apple TV, iCloud storage is optional and off by default; turn it on in Settings > General. On iPhone and Mac, Bookworms uses iCloud whenever the device is signed in to iCloud. If iCloud already holds Bookworms data from another Hardcover account, Bookworms asks first, and Keep iCloud Off stops that device from using iCloud until you choose Turn on iCloud storage in Bookworms' Hardcover settings. Bookworms saves a copy of your Hardcover library, including your Hardcover account ID and username, your own reviews, and the time of the last sync, to your private iCloud database so your Apple devices can share and restore it. It also saves spine designs (which can include a cover's title text), series looks, cover choices, series choices, a list of books to design, and, from iPhone and Mac, your Top Five pins. The copy excludes your sign-in, API keys, images, and friends' information. The developer can't access any of it. Apple's privacy policy governs iCloud.
 
 Your choices
 - On Apple TV, Settings > Sources > Disconnect Hardcover removes your saved sign-in from the Apple TV and asks Hardcover to end it. Your downloaded information stays on the Apple TV until tvOS clears it or you delete Bookworms, and the iCloud copy stays in iCloud. If Settings shows Reconnect Hardcover instead, reconnect first, then disconnect.
 - On iPhone or Mac, Sign out in Bookworms' Hardcover settings removes your saved sign-in, the downloaded library, and friends' information from that device and asks Hardcover to end the sign-in. Bookworms can still show the copy in iCloud.
 - Revoke Bookworms' access at any time on Hardcover's Authorized Apps page.
-- Turning off iCloud storage stops syncing on that Apple TV, and an iPhone or Mac stops when it signs out of iCloud. Neither removes the iCloud copy, which stays until you remove Bookworms' data in your Apple Account's iCloud storage settings, and any device still using iCloud with Bookworms can save it again.
+- Turning off iCloud storage stops syncing on that Apple TV. An iPhone or Mac stops when it signs out of iCloud or when you choose Keep iCloud Off. None of these removes the iCloud copy, which stays until you remove Bookworms' data in your Apple Account's iCloud storage settings, and any device still using iCloud with Bookworms can save it again.
 - Deleting Bookworms from a device removes its files and settings, but not the iCloud copy, and your sign-in and API keys may remain in that device's Keychain. To remove them, disconnect or sign out of Hardcover and remove your API key first.
 
 Children
@@ -181,9 +228,9 @@ Changes
 Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new effective date.
 ```
 
-Publish this text only after the iPhone and Mac app's consent alert is on its main branch and asks before every third-party provider receives book data, including an OpenAI-compatible endpoint that needs no key.
+The text relies on the iPhone and Mac app's consent alert, which asks before a third-party provider's first API key, or an OpenAI-compatible endpoint's address, saves on a device (`SpineDesigner.hasConsent(of:)` in that app's repository). Don't release an iPhone or Mac build without the alert while this text is published.
 
-Keep the published policy and this text consistent with both apps' builds. For the Apple TV, it describes Hardcover as the only source, iCloud storage as off by default, no design-model requests, and Google Fonts requests for the fonts of companion designs and series looks (`BookPresentation.showsCompanionSpines`) and the example profile's designs. For the iPhone and Mac, it describes iCloud saves whenever the device is signed in to iCloud, Top Five pins, readers looked up by username, design-model requests and the reader's consent before a third-party provider receives book data, Google Fonts requests, and add-only Photos saves. Update it before enabling CWA (`BookPresentation.offersCWA`) or generated spines (`BookPresentation.showsGeneratedSpines`) on the Apple TV, and whenever either app sends data somewhere new. The iPhone and Mac app's release workflow lists its requests in more detail.
+Keep the published policy and this text consistent with both apps' builds. For the Apple TV, it describes Hardcover as the only source, iCloud storage as off by default, the Hardcover username and last sync time in the iCloud copy, the latest sync error kept on the device, no design-model requests, and Google Fonts requests for the fonts of companion designs and series looks (`BookPresentation.showsCompanionSpines`) and the example profile's designs. For the iPhone and Mac, it describes iCloud saves whenever the device is signed in to iCloud, **Keep iCloud Off** when iCloud holds another Hardcover account's data and **Turn on iCloud storage** in the Hardcover settings to undo it, the Hardcover username and last sync time in the iCloud copy, Top Five pins, readers looked up by username, design-model requests and the reader's consent before a third-party provider receives book data, Google Fonts requests, and add-only Photos saves. Update it before enabling CWA (`BookPresentation.offersCWA`) or generated spines (`BookPresentation.showsGeneratedSpines`) on the Apple TV, and whenever either app sends data somewhere new. The iPhone and Mac app's release workflow lists its requests in more detail.
 
 ## Verify the release candidate
 
