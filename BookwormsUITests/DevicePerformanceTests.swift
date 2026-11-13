@@ -139,8 +139,8 @@ final class DevicePerformanceTests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(wallBooks).firstMatch.waitForExistence(timeout: 90))
         // Let preparation and the fall finish before measuring.
         Thread.sleep(forTimeInterval: 10)
-        // A direct launch leaves focus on the collapsed tab control, where Menu would leave the
-        // app. Down enters the wall at its entry book, as it does for a viewer.
+        // A direct launch focuses the wall's entry book. If focus is elsewhere, Down enters the
+        // wall, as it does for a viewer.
         let focusedBook = NSCompoundPredicate(andPredicateWithSubpredicates: [
             wallBooks, NSPredicate(format: "hasFocus == true"),
         ])
@@ -159,7 +159,7 @@ final class DevicePerformanceTests: XCTestCase {
             .max { $0.frame.midY < $1.frame.midY }?
             .id
         XCTAssertEqual(app.buttons.matching(focusedBook).firstMatch.identifier, entry)
-        // Records the starting screen, such as a tab control left over the wall.
+        // Records the starting screen.
         let start = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         start.name = "ready"
         start.lifetime = .keepAlways

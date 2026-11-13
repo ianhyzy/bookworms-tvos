@@ -735,6 +735,8 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.series(for: book)?.membership, saga)
 
         // A pick made while the check finds another user is never saved: storage turns off.
+        // Turning storage on above cleared the saved user; a sync saves it again.
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         savesBefore = saves.count
         cloudUser = "_fictional_user_2"
         duringUserRead = { model.pickSeries(8, for: book) }
@@ -745,13 +747,14 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertFalse(model.canPickSeries(for: book))
     }
 
-    /// Unsaved picks, including a pick of the default series, belong to their account: once a
-    /// restore adopts another account, that account's series links show.
+    /// Unsaved picks, including a pick of the default series, belong to their account: once
+    /// another device merges the chosen library into another account, that account's series
+    /// links show.
     func testAnAccountChangeDropsUnsavedSeriesPicks() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
         fixture.defaults.set(true, forKey: "iCloudEnabled")
-        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        fixture.defaults.set("_fictional_account_a", forKey: "activeHardcoverAccountID")
         fixture.secrets.removeValue(forKey: "hardcover-token")
         let saga = SeriesMembership(
             seriesID: 7, name: "Fictional Saga", position: 12, featured: true, size: 20)
@@ -764,14 +767,12 @@ final class LibraryWorkflowTests: XCTestCase {
             SourceSnapshot(
                 source: .hardcover, accountID: accountID, books: [book], syncedAt: fixture.time)
         }
-        var worklistAccount = "_fictional_account_a"
-        var archive = CloudLibraryArchive(sources: [snapshot("_fictional_account_a")])
+        var archive = CloudLibraryArchive(sources: [
+            snapshot("_fictional_account_a"), snapshot("_fictional_account_b"),
+        ])
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
         dependencies.syncCloud = { _ in archive }
-        dependencies.readSpineWorklist = {
-            SpineWorklistV1(accountID: worklistAccount, syncedAt: fixture.time, bookIDs: [1])
-        }
         // Account B's iPhone linked the book to the Fictional Saga.
         dependencies.fetchSeriesLinks = { accountID, _ in
             guard accountID == "_fictional_account_b" else { return ([:], true) }
@@ -798,14 +799,140 @@ final class LibraryWorkflowTests: XCTestCase {
         model.pickSeries(8, for: book)
         XCTAssertEqual(model.series(for: book)?.membership, arc)
 
-        worklistAccount = "_fictional_account_b"
-        archive = CloudLibraryArchive(sources: [snapshot("_fictional_account_b")])
+        archive.merges = ["_fictional_account_a": "_fictional_account_b"]
+        model.queueCloudSync(delay: .zero)
+        await model.waitForCloudSync()
+        XCTAssertNil(fixture.defaults.string(forKey: "activeHardcoverAccountID"))
+        save.resolve(())
+        await model.waitForSeriesLinkSaves()
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, saga)
+    }
+
+    /// A credential-free shelf's pick belongs to the shown snapshot's account, so choosing that
+    /// library when another one appears keeps the pick while its save runs.
+    func testChoosingTheShownLibraryKeepsAnUnsavedPick() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        let saga = SeriesMembership(
+            seriesID: 7, name: "Fictional Saga", position: 12, featured: true, size: 20)
+        let arc = SeriesMembership(seriesID: 8, name: "Fictional Arc", position: 2, size: 3)
+        var book = fixture.book(1)
+        book.seriesID = 7
+        book.seriesName = "Fictional Saga"
+        book.seriesMemberships = [saga, arc]
+        let account = "_fictional_account_a"
+        let shown = SourceSnapshot(
+            source: .hardcover, accountID: account, books: [book], syncedAt: fixture.time)
+        var archive = CloudLibraryArchive(sources: [shown])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in archive }
+        // iCloud still links the book to the Fictional Saga, as before the pick.
+        dependencies.fetchSeriesLinks = { accountID, _ in
+            (
+                [
+                    1: SeriesLinkV1(
+                        accountID: accountID, bookID: 1, linkedSeriesID: 7,
+                        chosenAt: fixture.time)
+                ], true
+            )
+        }
+        let save = ControlledLibraryResponse<Void>("Series link save started")
+        dependencies.saveSeriesLink = { _, _, _ in try await save.value() }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.canPickSeries(for: book))
+        XCTAssertNil(fixture.defaults.string(forKey: "activeHardcoverAccountID"))
+
+        model.pickSeries(8, for: book)
+        await fulfillment(of: [save.started], timeout: 5)
+        archive.sources.append(
+            SourceSnapshot(
+                source: .hardcover, accountID: "_fictional_account_b", books: [book],
+                syncedAt: fixture.time.addingTimeInterval(-60)))
+        model.queueCloudSync(delay: .zero)
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            model.iCloudLibraryChoices.map(\.id), [account, "_fictional_account_b"])
+        XCTAssertFalse(model.canPickSeries(for: book))
+        model.chooseLibrary(account)
+        await model.waitForCloudSync()
+        XCTAssertEqual(fixture.defaults.string(forKey: "activeHardcoverAccountID"), account)
+        await model.becameActive()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+        save.resolve(())
+        await model.waitForSeriesLinkSaves()
+    }
+
+    /// On a credential-free shelf without a worklist, a newer snapshot of another account
+    /// changes the account whose records apply, which drops an unsaved pick of the default
+    /// series too, so it can't hide the new account's link.
+    func testANewerSnapshotOfAnotherAccountDropsUnsavedDefaultPicks() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        let saga = SeriesMembership(
+            seriesID: 7, name: "Fictional Saga", position: 12, featured: true, size: 20)
+        let arc = SeriesMembership(seriesID: 8, name: "Fictional Arc", position: 2, size: 3)
+        var book = fixture.book(1)
+        book.seriesID = 7
+        book.seriesName = "Fictional Saga"
+        book.seriesMemberships = [saga, arc]
+        var archive = CloudLibraryArchive(sources: [
+            SourceSnapshot(
+                source: .hardcover, accountID: "_fictional_account_a", books: [book],
+                syncedAt: fixture.time)
+        ])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in archive }
+        // Account B's iPhone linked the book to the Fictional Saga.
+        dependencies.fetchSeriesLinks = { accountID, _ in
+            guard accountID == "_fictional_account_b" else { return ([:], true) }
+            return (
+                [
+                    1: SeriesLinkV1(
+                        accountID: accountID, bookID: 1, linkedSeriesID: 7,
+                        chosenAt: fixture.time)
+                ], true
+            )
+        }
+        let save = ControlledLibraryResponse<Void>("Series link save started")
+        dependencies.saveSeriesLink = { _, _, _ in try await save.value() }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.canPickSeries(for: book))
+        XCTAssertEqual(model.series(for: book)?.membership, arc)
+
+        // The Fictional Saga's save is under way when the default is picked again.
+        model.pickSeries(7, for: book)
+        await fulfillment(of: [save.started], timeout: 5)
+        model.pickSeries(8, for: book)
+
+        archive = CloudLibraryArchive(sources: [
+            SourceSnapshot(
+                source: .hardcover, accountID: "_fictional_account_b", books: [book],
+                syncedAt: fixture.time.addingTimeInterval(60))
+        ])
         model.queueCloudSync(delay: .zero)
         await model.waitForCloudSync()
         save.resolve(())
         await model.waitForSeriesLinkSaves()
         await model.becameActive()
         await model.waitForCompanionRecords()
+        XCTAssertNil(fixture.defaults.string(forKey: "activeHardcoverAccountID"))
         XCTAssertEqual(model.series(for: book)?.membership, saga)
     }
 
@@ -999,6 +1126,34 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(model.message, "Hardcover token verified. Loading library…")
         model.clearVerifiedTokenMessage()
         XCTAssertNil(model.message)
+    }
+
+    func testReconnectingAfterARejectedSyncDownloadsAStaleLibraryAtOnce() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        var dependencies = fixture.dependencies()
+        var rejects = true
+        dependencies.fetchHardcover = { _, _ in
+            if rejects { throw HardcoverError.invalidToken }
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(2)])
+        }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(model.books.map(\.id), [1])
+
+        // The rejected sync started the five-minute wait, which a reconnection doesn't serve.
+        rejects = false
+        fixture.time += 60
+        let connected = await model.connect("hc_pat_fictional_replacement")
+        XCTAssertTrue(connected)
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertFalse(model.hardcoverSessionExpired)
+        XCTAssertNil(model.message)
+        XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_replacement")
     }
 
     func testSyncRenewsAnExpiringTokenAndSpendsEachRefreshTokenOnce() async throws {
@@ -1195,15 +1350,20 @@ final class LibraryWorkflowTests: XCTestCase {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        fixture.defaults.set(["hardcover": "Saved sync error"], forKey: "sourceErrors")
         // The fixture's renewal fails the test, so this also checks that none starts.
         let model = LibraryModel(dependencies: fixture.dependencies())
         await model.start()
+        XCTAssertEqual(model.sourceStatus(.hardcover), "Saved sync error")
         do {
             _ = try await model.renewHardcoverToken(rejected: "hc_pat_fictional_original")
             XCTFail("A login without a refresh token can't be renewed.")
         } catch HardcoverError.invalidToken {
         } catch { XCTFail("Unexpected error: \(error)") }
         XCTAssertTrue(model.hardcoverSessionExpired)
+        XCTAssertEqual(
+            model.sourceStatus(.hardcover), HardcoverError.invalidToken.localizedDescription,
+            "A login rejected outside a library sync outranks an older sync error")
         XCTAssertEqual(fixture.secrets["hardcover-token"], "hc_pat_fictional_original")
     }
 
@@ -1434,6 +1594,25 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertNotNil(fixture.secrets["hardcover-token"])
         XCTAssertEqual(model.message, "The saved Hardcover login could not be removed.")
         XCTAssertFalse(model.hardcoverConnected)
+    }
+
+    func testDisconnectEndsTheHardcoverSyncErrorAndNextCheck() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.fetchHardcover = { _, _ in throw URLError(.timedOut) }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertEqual(
+            model.sourceStatus(.hardcover)?.hasPrefix("Next check: "), true,
+            "A fresh library's next check is a day after its sync")
+        await model.refresh(manual: true)
+        XCTAssertNotNil(model.sourceErrors["hardcover"])
+
+        model.disconnect()
+        XCTAssertNil(model.sourceErrors["hardcover"])
+        XCTAssertNil(model.sourceStatus(.hardcover), "No check is scheduled without a login")
     }
 
     func testTokenWithoutRefreshReplacesTheSavedRefreshToken() async throws {
@@ -1761,10 +1940,16 @@ final class LibraryWorkflowTests: XCTestCase {
                 source: .cwa, accountID: "https://other.invalid/fixture",
                 books: [fixture.book(2)], syncedAt: fixture.time)
         ])
-        fixture.defaults.set(fixture.time.addingTimeInterval(-1000), forKey: "syncAttempt.cwa")
+        // A connected CWA inside its five-minute wait: the start fetches nothing.
+        fixture.defaults.set(true, forKey: "cwaEnabled")
+        fixture.secrets["cwa-password"] = "fictional-password"
+        fixture.defaults.set(fixture.time.addingTimeInterval(-100), forKey: "syncAttempt.cwa")
         fixture.secrets.removeValue(forKey: "hardcover-token")
         let model = LibraryModel(dependencies: fixture.dependencies())
         await model.start()
+        XCTAssertNotNil(model.sourceStatus(.cwa), "The next check follows the wait")
+        XCTAssertNil(model.sourceStatus(.hardcover), "A source without a login has no schedule")
+        fixture.time += 300
         XCTAssertNil(
             model.sourceStatus(.cwa),
             "Another account's sync today doesn't push the active account's check to tomorrow")
@@ -2044,6 +2229,8 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertTrue(model.hasLoadedLibrarySnapshot)
         XCTAssertFalse(model.hasReadCompanionRecords)
         release.finish()
+        // The read starts once the sync's Hardcover account check clears.
+        await model.waitForCloudSync()
         await model.waitForCompanionRecords()
         XCTAssertTrue(model.hasReadCompanionRecords)
     }
@@ -2265,6 +2452,30 @@ final class LibraryWorkflowTests: XCTestCase {
         }
     }
 
+    /// **Settings → Spines** counts the books with no design yet only while storage is on,
+    /// since turning it off hides designs rather than removing them.
+    func testSpinesNoteCountsUndesignedBooksOnlyWithStorageOn() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { _ in throw CloudStorageError.unavailable }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        XCTAssertEqual(
+            model.spinesNote, "1 book has no design yet, so it gets the Apple TV's own look.")
+
+        model.iCloudEnabled = false
+        XCTAssertEqual(
+            model.spinesNote,
+            "iCloud storage is off, so Book Wall uses the Apple TV's own looks. Turn it on in General."
+        )
+    }
+
     func testAFailedLookSaveDoesNotStopTheOtherGroups() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -2323,7 +2534,7 @@ final class LibraryWorkflowTests: XCTestCase {
         dependencies.syncCloud = { $0 }
         // The fixture fails any Hardcover validation: publishing must not call the API.
         var published: [SpineWorklistV1] = []
-        dependencies.publishSpineWorklist = { published.append($0) }
+        dependencies.publishSpineWorklist = { worklist, _ in published.append(worklist) }
         let designFetch = expectation(description: "Complete Hardcover design cache requested")
         let cachePrune = expectation(description: "Companion design cache cleared when disabled")
         var requestedDesignIDs: [Int] = []
@@ -2362,15 +2573,19 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(published.last?.bookIDs, [])
     }
 
-    func testCloudRestoreChoosesWorklistAccountWithoutLocalCredential() async throws {
+    /// A restored Apple TV without a credential asks which of two libraries to show, whatever
+    /// the worklist names, and reads no account's companion records until the reader chooses. A
+    /// saved choice is kept.
+    func testCredentialFreeRestoreAsksWhichLibraryToShow() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
         fixture.defaults.set(true, forKey: "iCloudEnabled")
         fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
         fixture.secrets.removeValue(forKey: "hardcover-token")
-        let old = SourceSnapshot(
+        var old = SourceSnapshot(
             source: .hardcover, accountID: "old-account", books: [fixture.book(1)],
             syncedAt: fixture.time.addingTimeInterval(1))
+        old.username = "old_reader"
         let active = SourceSnapshot(
             source: .hardcover, accountID: "active-account", books: [fixture.book(2)],
             syncedAt: fixture.time)
@@ -2381,12 +2596,34 @@ final class LibraryWorkflowTests: XCTestCase {
             SpineWorklistV1(
                 accountID: "active-account", syncedAt: active.syncedAt, bookIDs: [2])
         }
+        var readAccounts: [String] = []
+        dependencies.fetchSpineDesigns = { accountID, _ in
+            readAccounts.append(accountID)
+            return ([:], true)
+        }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         await model.waitForCloudSync()
+        XCTAssertEqual(
+            model.iCloudLibraryChoices.map(\.name), ["account active-account", "@old_reader"])
+        XCTAssertEqual(model.cloudStatus, "iCloud sync is paused until you choose a library.")
+        XCTAssertEqual(model.books.map(\.id), [])
+        XCTAssertEqual(readAccounts, [])
+
+        model.chooseLibrary("active-account")
+        await model.waitForCloudSync()
+        await model.waitForCompanionRecords()
+        XCTAssertTrue(model.iCloudLibraryChoices.isEmpty)
         XCTAssertEqual(model.books.map(\.id), [2])
         XCTAssertEqual(
             fixture.defaults.string(forKey: "activeHardcoverAccountID"), "active-account")
+        XCTAssertEqual(Set(readAccounts), ["active-account"])
+
+        let relaunched = LibraryModel(dependencies: dependencies)
+        await relaunched.start()
+        await relaunched.waitForCloudSync()
+        XCTAssertTrue(relaunched.iCloudLibraryChoices.isEmpty)
+        XCTAssertEqual(relaunched.books.map(\.id), [2])
     }
 
     func testCredentialFreeRestorePreservesRemoteEmptyWorklist() async throws {
@@ -2406,12 +2643,415 @@ final class LibraryWorkflowTests: XCTestCase {
                 accountID: "restored-account", syncedAt: snapshot.syncedAt, bookIDs: [])
         }
         var published: [SpineWorklistV1] = []
-        dependencies.publishSpineWorklist = { published.append($0) }
+        dependencies.publishSpineWorklist = { worklist, _ in published.append(worklist) }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         await model.waitForCloudSync()
         XCTAssertEqual(model.books.map(\.id), [1])
         XCTAssertTrue(published.isEmpty)
+    }
+
+    /// A signed-in Apple TV that finds another Hardcover account's snapshot or worklist in iCloud
+    /// asks before it syncs, reads companion records, publishes, or saves a series pick.
+    func testSignedInTVAsksBeforeUsingAnotherAccountsICloudData() async throws {
+        for worklistOnly in [false, true] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            let book = fixture.book(1)
+            try fixture.save([fixture.snapshot(.hardcover, books: [book])])
+            var other = SourceSnapshot(
+                source: .hardcover, accountID: "_fictional_other", books: [book],
+                syncedAt: fixture.time)
+            other.username = "other_reader"
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.readCloudArchive = {
+                CloudLibraryArchive(sources: worklistOnly ? [] : [other])
+            }
+            dependencies.readSpineWorklist = {
+                worklistOnly
+                    ? SpineWorklistV1(
+                        accountID: "_fictional_other", syncedAt: fixture.time, bookIDs: [1])
+                    : nil
+            }
+            dependencies.publishSpineWorklist = { _, _ in XCTFail("Unexpected worklist") }
+            var reads = 0
+            dependencies.fetchSpineDesigns = { _, _ in
+                reads += 1
+                return ([:], true)
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            XCTAssertEqual(
+                model.otherICloudAccounts.map(\.name),
+                [worklistOnly ? "account _fictional_other" : "@other_reader"])
+            XCTAssertEqual(
+                model.cloudStatus,
+                "iCloud sync is paused until you choose Merge or Keep iCloud Off.")
+            XCTAssertEqual(reads, 0)
+            XCTAssertFalse(model.canPickSeries(for: book))
+            XCTAssertEqual(model.books.map(\.id), [1])
+        }
+    }
+
+    /// Another account's data that arrives after the check stops the sync before the merge, the
+    /// worklist, and the companion read that follow it.
+    func testAnotherAccountFoundAfterTheUploadStopsTheSync() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        let other = SourceSnapshot(
+            source: .hardcover, accountID: "_fictional_other", books: [fixture.book(2)],
+            syncedAt: fixture.time)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.syncCloud = { $0.merging(CloudLibraryArchive(sources: [other])) }
+        dependencies.publishSpineWorklist = { _, _ in XCTFail("Unexpected worklist") }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(model.otherICloudAccounts.map(\.id), ["_fictional_other"])
+        XCTAssertFalse(model.cloudAccountsCleared)
+        XCTAssertEqual(
+            dependencies.sourceStore.load().map(\.accountID), [fixture.hardcoverAccountID])
+    }
+
+    /// **Merge** copies the other account's records to the shared books, then uploads the
+    /// merge, after which the sync goes on and asks no more.
+    func testMergeCopiesSharedRecordsAndUploadsTheMerge() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([
+            fixture.snapshot(.hardcover, books: [fixture.book(1), fixture.book(2)])
+        ])
+        let older = SourceSnapshot(
+            source: .hardcover, accountID: "_fictional_older", books: [fixture.book(1)],
+            syncedAt: fixture.time.addingTimeInterval(-60))
+        let newer = SourceSnapshot(
+            source: .hardcover, accountID: "_fictional_newer",
+            books: [fixture.book(2), fixture.book(3)], syncedAt: fixture.time)
+        let stored = CloudLibraryArchive(sources: [older, newer])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.readCloudArchive = { stored }
+        var uploaded: [CloudLibraryArchive] = []
+        dependencies.syncCloud = { archive in
+            uploaded.append(archive)
+            return stored.merging(archive)
+        }
+        var copies: [String] = []
+        dependencies.copyAccountRecords = { source, target, books in
+            copies.append("\(source)>\(target):\(books.map(\.id))")
+        }
+        var published: [SpineWorklistV1] = []
+        dependencies.publishSpineWorklist = { worklist, merges in
+            XCTAssertEqual(merges.count, 2)
+            published.append(worklist)
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            model.otherICloudAccounts.map(\.id), ["_fictional_newer", "_fictional_older"])
+        XCTAssertTrue(uploaded.isEmpty)
+
+        await model.mergeOtherAccounts()
+        await model.waitForCloudSync()
+        // The newest account copies first, so it wins a book both accounts have.
+        XCTAssertEqual(
+            copies,
+            [
+                "_fictional_newer>fixture-account:[2]",
+                "_fictional_older>fixture-account:[1]",
+            ])
+        let merges = [
+            "_fictional_newer": fixture.hardcoverAccountID,
+            "_fictional_older": fixture.hardcoverAccountID,
+        ]
+        XCTAssertEqual(uploaded.last?.merges, merges)
+        XCTAssertEqual(
+            fixture.defaults.dictionary(forKey: "iCloudAccountMerges") as? [String: String],
+            merges)
+        XCTAssertTrue(model.otherICloudAccounts.isEmpty)
+        XCTAssertEqual(published.last?.accountID, fixture.hardcoverAccountID)
+        XCTAssertTrue(model.cloudStatus.contains("Saved to iCloud"))
+    }
+
+    /// A failed copy records no merge, and the next sync asks again.
+    func testFailedMergeRecordsNothing() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        let other = SourceSnapshot(
+            source: .hardcover, accountID: "_fictional_other", books: [fixture.book(1)],
+            syncedAt: fixture.time)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.readCloudArchive = { CloudLibraryArchive(sources: [other]) }
+        dependencies.copyAccountRecords = { _, _, _ in throw CloudStorageError.conflict }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        await model.mergeOtherAccounts()
+        XCTAssertEqual(model.mergeFailure, LibraryModel.mergeFailedMessage)
+        XCTAssertNil(fixture.defaults.object(forKey: "iCloudAccountMerges"))
+        XCTAssertFalse(model.cloudAccountsCleared)
+
+        model.queueCloudSync(delay: .zero)
+        await model.waitForCloudSync()
+        XCTAssertEqual(model.otherICloudAccounts.map(\.id), ["_fictional_other"])
+    }
+
+    /// **Keep iCloud Off** turns storage off and explains deleting the data; turning storage on
+    /// again checks again.
+    func testKeepICloudOffTurnsStorageOffUntilTurnedOnAgain() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        let other = SourceSnapshot(
+            source: .hardcover, accountID: "_fictional_other", books: [fixture.book(1)],
+            syncedAt: fixture.time)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        dependencies.readCloudArchive = { CloudLibraryArchive(sources: [other]) }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertFalse(model.otherICloudAccounts.isEmpty)
+
+        model.keepICloudOff()
+        XCTAssertFalse(model.iCloudEnabled)
+        XCTAssertFalse(fixture.defaults.bool(forKey: "iCloudEnabled"))
+        XCTAssertTrue(model.otherICloudAccounts.isEmpty)
+        XCTAssertTrue(model.showsICloudDeletionHelp)
+
+        model.iCloudEnabled = true
+        await model.waitForCloudSync()
+        XCTAssertEqual(model.otherICloudAccounts.map(\.id), ["_fictional_other"])
+    }
+
+    /// An Apple TV without a credential reads the companion records of the account whose
+    /// snapshot it shows, such as an iPhone's library with no worklist, without saving that
+    /// account or listing work. The legacy `"hardcover"` placeholder has no records.
+    func testCredentialFreeShelfReadsTheShownAccountsCompanionRecords() async throws {
+        for accountID in ["_fictional_iphone_account", "hardcover"] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+            fixture.secrets.removeValue(forKey: "hardcover-token")
+            let book = fixture.book(1)
+            let snapshot = SourceSnapshot(
+                source: .hardcover, accountID: accountID, books: [book], syncedAt: fixture.time)
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.syncCloud = { _ in CloudLibraryArchive(sources: [snapshot]) }
+            var readAccounts: [String] = []
+            dependencies.fetchSpineDesigns = { accountID, _ in
+                readAccounts.append(accountID)
+                return ([:], true)
+            }
+            dependencies.fetchCoverChoices = { accountID, _ in
+                (
+                    [
+                        1: CoverChoiceV1(
+                            version: 1, accountID: accountID, bookID: 1,
+                            coverURL: URL(string: "https://covers.example.test/chosen.jpg")!,
+                            chosenAt: fixture.time)
+                    ], true
+                )
+            }
+            dependencies.publishSpineWorklist = { _, _ in XCTFail("Unexpected worklist") }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            XCTAssertEqual(model.books.map(\.id), [1])
+            XCTAssertNil(fixture.defaults.string(forKey: "activeHardcoverAccountID"))
+            if accountID == "hardcover" {
+                XCTAssertEqual(readAccounts, [])
+                XCTAssertFalse(model.canPickSeries(for: book))
+                XCTAssertNil(model.books.first?.chosenCoverURL)
+            } else {
+                XCTAssertEqual(readAccounts, [accountID])
+                XCTAssertTrue(model.canPickSeries(for: book))
+                XCTAssertNotNil(model.books.first?.chosenCoverURL)
+            }
+        }
+    }
+
+    /// Before the Hardcover account check clears, because iCloud can't be read or holds another
+    /// account's data, the shelf shows its own account's cached companion records and makes no
+    /// CloudKit read. Without a credential, that is the library the last clear check used.
+    func testUnclearedCheckShowsOnlyTheOwnAccountsCachedRecords() async throws {
+        enum Case { case offline, otherAccount, credentialFree, credentialFreeNeverCleared }
+        for testCase in [Case.offline, .otherAccount, .credentialFree, .credentialFreeNeverCleared]
+        {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            let book = fixture.book(1)
+            var accountID = fixture.hardcoverAccountID
+            if testCase == .credentialFree || testCase == .credentialFreeNeverCleared {
+                accountID = "_fictional_iphone_account"
+                fixture.defaults.removeObject(forKey: "activeHardcoverAccountID")
+                fixture.secrets.removeValue(forKey: "hardcover-token")
+                if testCase == .credentialFree {
+                    fixture.defaults.set(accountID, forKey: LibraryModel.clearedLibraryKey)
+                }
+            }
+            try fixture.save([
+                SourceSnapshot(
+                    source: .hardcover, accountID: accountID, books: [book],
+                    syncedAt: fixture.time)
+            ])
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.readCloudArchive = {
+                guard testCase == .otherAccount else {
+                    throw CloudStorageError.temporarilyUnavailable
+                }
+                return CloudLibraryArchive(sources: [
+                    SourceSnapshot(
+                        source: .hardcover, accountID: "_fictional_other", books: [book],
+                        syncedAt: fixture.time)
+                ])
+            }
+            var cloudReads = 0
+            dependencies.fetchSpineDesigns = { _, _ in
+                cloudReads += 1
+                return ([:], true)
+            }
+            var cachedReads: [String] = []
+            dependencies.readCachedCompanionRecords = { accountID, _ in
+                cachedReads.append(accountID)
+                var records = CachedCompanionRecords()
+                records.coverChoices = [
+                    1: CoverChoiceV1(
+                        version: 1, accountID: accountID, bookID: 1,
+                        coverURL: URL(string: "https://covers.example.test/chosen.jpg")!,
+                        chosenAt: fixture.time)
+                ]
+                return records
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            XCTAssertFalse(model.cloudAccountsCleared, "\(testCase)")
+            XCTAssertEqual(cloudReads, 0, "\(testCase)")
+            XCTAssertEqual(model.otherICloudAccounts.isEmpty, testCase != .otherAccount)
+            if testCase == .credentialFreeNeverCleared {
+                XCTAssertEqual(cachedReads, [])
+                XCTAssertNil(model.books.first?.chosenCoverURL)
+            } else {
+                XCTAssertEqual(Set(cachedReads), [accountID], "\(testCase)")
+                XCTAssertNotNil(model.books.first?.chosenCoverURL, "\(testCase)")
+            }
+        }
+    }
+
+    /// A sync uploads only the signed-in account's Hardcover snapshots and those of accounts
+    /// merged into it, and a credential-free Apple TV uploads none, so a library deleted from
+    /// iCloud doesn't return from a local copy.
+    func testSyncUploadsNoOtherAccountsHardcoverSnapshot() async throws {
+        for signedIn in [true, false] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            let own = signedIn ? fixture.hardcoverAccountID : "_fictional_chosen"
+            if !signedIn {
+                fixture.defaults.set(own, forKey: "activeHardcoverAccountID")
+                fixture.secrets.removeValue(forKey: "hardcover-token")
+            }
+            let ownSnapshot = SourceSnapshot(
+                source: .hardcover, accountID: own, books: [fixture.book(1)],
+                syncedAt: fixture.time)
+            try fixture.save([
+                ownSnapshot,
+                SourceSnapshot(
+                    source: .hardcover, accountID: "_fictional_deleted", books: [fixture.book(2)],
+                    syncedAt: fixture.time),
+            ])
+            let stored = CloudLibraryArchive(sources: [ownSnapshot])
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            dependencies.readCloudArchive = { stored }
+            var uploaded: [CloudLibraryArchive] = []
+            dependencies.syncCloud = { archive in
+                uploaded.append(archive)
+                return stored.merging(archive)
+            }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            await model.waitForCloudSync()
+            XCTAssertTrue(model.cloudAccountsCleared)
+            XCTAssertEqual(
+                uploaded.last?.sources.map(\.accountID), signedIn ? [own] : [], "\(signedIn)")
+            // The local copy keeps both, so nothing is lost when iCloud has no copy.
+            XCTAssertEqual(
+                Set(dependencies.sourceStore.load().map(\.accountID)), [own, "_fictional_deleted"])
+        }
+    }
+
+    /// The empty shelf names the setting that hides a connected reader's books, which the
+    /// screen labels Collection, and tells a library with no books apart from one that is
+    /// loading or couldn't load.
+    func testEmptyShelfHintNamesWhyTheShelfIsEmpty() async throws {
+        let signedOut = try LibraryWorkflowFixture()
+        defer { signedOut.cleanUp() }
+        signedOut.secrets.removeValue(forKey: "hardcover-token")
+        let model = LibraryModel(dependencies: signedOut.dependencies())
+        await model.start()
+        XCTAssertEqual(
+            model.emptyShelfHint, "Connect a source in Settings to explore your books.")
+
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [])])
+        let empty = LibraryModel(dependencies: fixture.dependencies())
+        await empty.start()
+        XCTAssertTrue(empty.books.isEmpty)
+        XCTAssertEqual(
+            empty.emptyShelfHint,
+            "Your library has no books yet. Books you add appear after the next sync.")
+
+        let filtered = try LibraryWorkflowFixture()
+        defer { filtered.cleanUp() }
+        let unread = Book(id: 2, title: "Fixture 2", author: "Fictional author")
+        try filtered.save([filtered.snapshot(.hardcover, books: [unread])])
+        let hidden = LibraryModel(dependencies: filtered.dependencies())
+        await hidden.start()
+        hidden.shelfPreferences = ShelfPreferences(collection: .read)
+        XCTAssertTrue(hidden.books.isEmpty, "Read Books leaves out an unread book")
+        XCTAssertEqual(
+            hidden.emptyShelfHint,
+            "No books match your shelf choices. Change Collection in Settings → Shelf.")
+
+        let loading = try LibraryWorkflowFixture()
+        defer { loading.cleanUp() }
+        var dependencies = loading.dependencies()
+        var heldFetch: CheckedContinuation<Void, Never>?
+        dependencies.fetchHardcover = { _, _ in
+            await withCheckedContinuation { heldFetch = $0 }
+            throw URLError(.notConnectedToInternet)
+        }
+        let first = LibraryModel(dependencies: dependencies)
+        let start = Task { await first.start() }
+        for _ in 0..<100 where heldFetch == nil { await Task.yield() }
+        XCTAssertEqual(first.emptyShelfHint, "Loading your books…")
+        try XCTUnwrap(heldFetch).resume()
+        await start.value
+        XCTAssertNotNil(first.sourceErrors["hardcover"])
+        XCTAssertEqual(
+            first.emptyShelfHint,
+            "Your books couldn't load. Check Settings → Sources, then sync again.")
     }
 
     func testSnapshotInstalledDuringWorklistReadSurvivesCloudSync() async throws {
@@ -2430,8 +3070,9 @@ final class LibraryWorkflowTests: XCTestCase {
         var reads = 0
         dependencies.readSpineWorklist = {
             reads += 1
-            // A newer CWA snapshot lands while the cloud task awaits the worklist read.
-            if reads == 1 {
+            // A newer CWA snapshot lands while the cloud task awaits the second worklist read,
+            // the check after the archive upload and before the merge.
+            if reads == 2 {
                 fixture.time = fixture.time.addingTimeInterval(60)
                 await model.refresh(manual: true)
             }
@@ -2440,7 +3081,8 @@ final class LibraryWorkflowTests: XCTestCase {
         model = LibraryModel(dependencies: dependencies)
         await model.start()
         await model.waitForCloudSync()
-        XCTAssertEqual(reads, 2)
+        // The check before the first upload, then the check after each of the two uploads.
+        XCTAssertEqual(reads, 3)
         XCTAssertEqual(model.books.map(\.id), [5])
         XCTAssertEqual(
             dependencies.sourceStore.load().first { $0.source == .cwa }?.books.map(\.id), [5])
@@ -2470,7 +3112,7 @@ final class LibraryWorkflowTests: XCTestCase {
             return archive
         }
         var published: [SpineWorklistV1] = []
-        dependencies.publishSpineWorklist = { published.append($0) }
+        dependencies.publishSpineWorklist = { worklist, _ in published.append(worklist) }
         model = LibraryModel(dependencies: dependencies)
         await model.start()
         await model.waitForCloudSync()
@@ -2489,7 +3131,7 @@ final class LibraryWorkflowTests: XCTestCase {
         dependencies.syncCloud = { $0 }
         dependencies.fetchHardcover = { _, _ in throw HardcoverError.invalidToken }
         var published: [SpineWorklistV1] = []
-        dependencies.publishSpineWorklist = { published.append($0) }
+        dependencies.publishSpineWorklist = { worklist, _ in published.append(worklist) }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
         XCTAssertTrue(model.hardcoverSessionExpired)
@@ -2559,6 +3201,107 @@ final class LibraryWorkflowTests: XCTestCase {
         await model.cloudAccountChanged()
         XCTAssertFalse(model.iCloudEnabled)
         XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+        XCTAssertEqual(
+            model.cloudStatus,
+            "Your iCloud account changed, so iCloud storage turned off. Turn it on to sync this library with the current account."
+        )
+    }
+
+    /// CloudKit posts no notice for an account change made while the app wasn't running, so
+    /// launch compares the user with the last sync's before any sync or companion read, without
+    /// waiting for the read itself. The same user, or one it can't read, as offline, keeps
+    /// storage on; a later sync that reads another user then stops before it uploads.
+    func testLaunchChecksTheICloudUserBeforeCloudWork() async throws {
+        for launchUser in ["_fictional_user_2", "_fictional_user_1", nil] as [String?] {
+            let fixture = try LibraryWorkflowFixture()
+            defer { fixture.cleanUp() }
+            fixture.defaults.set(true, forKey: "iCloudEnabled")
+            fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+            try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+            var dependencies = fixture.dependencies()
+            dependencies.sleep = { _ in }
+            var syncs = 0
+            dependencies.syncCloud = {
+                syncs += 1
+                return $0
+            }
+            var reads = 0
+            dependencies.fetchSpineDesigns = { _, _ in
+                reads += 1
+                return ([:], true)
+            }
+            var user = launchUser
+            // Launch's read is held, so `start()` returning shows it doesn't wait for the read.
+            var holdsRead = true
+            var heldRead: CheckedContinuation<Void, Never>?
+            dependencies.cloudUserRecordName = {
+                if holdsRead {
+                    holdsRead = false
+                    await withCheckedContinuation { heldRead = $0 }
+                }
+                return user
+            }
+            dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+            let model = LibraryModel(dependencies: dependencies)
+            await model.start()
+            XCTAssertEqual(syncs, 0)
+            XCTAssertEqual(reads, 0)
+            XCTAssertFalse(model.hasReadCompanionRecords)
+            for _ in 0..<100 where heldRead == nil { await Task.yield() }
+            try XCTUnwrap(heldRead).resume()
+            await model.waitForCloudUserChecks()
+            await model.waitForCloudSync()
+            await model.waitForCompanionRecords()
+            if launchUser == "_fictional_user_2" {
+                XCTAssertFalse(model.iCloudEnabled)
+                XCTAssertEqual(syncs, 0)
+                XCTAssertEqual(reads, 0)
+                XCTAssertTrue(model.cloudStatus.hasPrefix("Your iCloud account changed"))
+                continue
+            }
+            XCTAssertTrue(model.iCloudEnabled)
+            XCTAssertEqual(syncs, 1)
+            XCTAssertGreaterThan(reads, 0)
+
+            user = "_fictional_user_2"
+            model.queueCloudSync(delay: .zero)
+            await model.waitForCloudSync()
+            XCTAssertFalse(model.iCloudEnabled)
+            XCTAssertEqual(syncs, 1, "The sync stopped before it uploaded")
+        }
+    }
+
+    /// Before any sync saved a user, an account notice, such as the one that follows signing
+    /// in to iCloud as a failed sync asks, keeps storage on and syncs.
+    func testSigningInToICloudAfterAFailedSyncKeepsStorageOn() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        var signedIn = false
+        dependencies.syncCloud = {
+            guard signedIn else { throw CloudStorageError.unavailable }
+            return $0
+        }
+        dependencies.cloudUserRecordName = { signedIn ? "_fictional_user_1" : nil }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            model.cloudStatus,
+            "iCloud could not sync. Local data is retained. Sign in to iCloud in Apple TV Settings, then sync again."
+        )
+
+        signedIn = true
+        await model.cloudAccountChanged()
+        XCTAssertTrue(model.iCloudEnabled)
+        await model.waitForCloudSync()
+        XCTAssertEqual(
+            fixture.defaults.string(forKey: LibraryModel.cloudUserKey), "_fictional_user_1")
+        XCTAssertTrue(model.cloudStatus.hasPrefix("Saved to iCloud."))
     }
 
     /// No sync starts while `cloudAccountChanged()` reads the user, so a sync queued then can't
@@ -2610,8 +3353,7 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertFalse(library.iCloudEnabled)
     }
 
-    /// A user that changes during a sync isn't recorded, and a storage toggle made while
-    /// CloudKit reads the user outlasts the notice.
+    /// A user that changes during a sync isn't recorded.
     func testCloudAccountChangeChecksTheUserAroundEachSync() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
@@ -2623,29 +3365,128 @@ final class LibraryWorkflowTests: XCTestCase {
         dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
         // Every read before a sync sees one user and every read after it another.
         var reads = 0
-        var model: LibraryModel?
-        var turnOnDuringRead = false
         dependencies.cloudUserRecordName = {
             reads += 1
-            if turnOnDuringRead {
-                turnOnDuringRead = false
-                model?.iCloudEnabled = true
-            }
             return reads.isMultiple(of: 2) ? "_fictional_user_2" : "_fictional_user_1"
         }
-        model = LibraryModel(dependencies: dependencies)
-        let library = try XCTUnwrap(model)
+        let library = LibraryModel(dependencies: dependencies)
         await library.start()
         await library.waitForCloudSync()
         XCTAssertGreaterThan(reads, 1)
         XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+    }
 
-        fixture.defaults.set("_fictional_user_0", forKey: LibraryModel.cloudUserKey)
-        library.iCloudEnabled = false
-        turnOnDuringRead = true
-        await library.cloudAccountChanged()
-        XCTAssertTrue(library.iCloudEnabled)
+    /// A user that changes during a sync, even before any sync saved a user, turns storage off
+    /// without merging, so the first user's iCloud library never reaches the second user.
+    func testASyncWhoseUserChangesMergesNothing() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        // The first user's iCloud library has a newer snapshot with another book.
+        let remote = fixture.snapshot(
+            .hardcover, books: [fixture.book(1), fixture.book(2)], age: -60)
+        var syncs = 0
+        dependencies.syncCloud = { _ in
+            syncs += 1
+            return CloudLibraryArchive(sources: [remote])
+        }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        var reads = 0
+        dependencies.cloudUserRecordName = {
+            reads += 1
+            return reads == 1 ? "_fictional_user_1" : "_fictional_user_2"
+        }
+        let library = LibraryModel(dependencies: dependencies)
+        await library.start()
         await library.waitForCloudSync()
+        XCTAssertEqual(syncs, 1)
+        XCTAssertFalse(library.iCloudEnabled)
+        XCTAssertNil(fixture.defaults.string(forKey: LibraryModel.cloudUserKey))
+        XCTAssertEqual(library.books.map(\.id), [1])
+    }
+
+    /// When the read before a sync fails, the read after it is compared with the saved user, so
+    /// another user's library isn't merged.
+    func testASyncComparesAFailedFirstReadsSuccessorWithTheSavedUser() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        let remote = fixture.snapshot(
+            .hardcover, books: [fixture.book(1), fixture.book(2)], age: -60)
+        dependencies.syncCloud = { _ in CloudLibraryArchive(sources: [remote]) }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        // Launch reads the saved user, the sync's first read fails, and its second finds another.
+        var reads = 0
+        dependencies.cloudUserRecordName = {
+            reads += 1
+            return [1: "_fictional_user_1", 2: nil][reads] ?? "_fictional_user_2"
+        }
+        let library = LibraryModel(dependencies: dependencies)
+        await library.start()
+        await library.waitForCloudUserChecks()
+        await library.waitForCloudSync()
+        XCTAssertGreaterThanOrEqual(reads, 3)
+        XCTAssertFalse(library.iCloudEnabled)
+        XCTAssertEqual(library.books.map(\.id), [1])
+    }
+
+    /// Storage that is off has nothing to stop, so an account notice leaves it off with its
+    /// status, and keeps the shown account.
+    func testCloudAccountChangeLeavesStorageThatIsOffAlone() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+        fixture.secrets.removeValue(forKey: "hardcover-token")
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        var reads = 0
+        dependencies.cloudUserRecordName = {
+            reads += 1
+            return "_fictional_user_2"
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.cloudAccountChanged()
+        XCTAssertFalse(model.iCloudEnabled)
+        XCTAssertEqual(reads, 0)
+        XCTAssertEqual(model.cloudStatus, "")
+        XCTAssertEqual(
+            fixture.defaults.string(forKey: "activeHardcoverAccountID"),
+            fixture.hardcoverAccountID)
+        XCTAssertEqual(model.books.map(\.id), [1])
+    }
+
+    /// Turning storage on clears the user the last sync saved, so the next sync keeps storage
+    /// on and saves the current user.
+    func testTurningStorageOnSyncsWithTheCurrentUser() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { _ in }
+        var syncs = 0
+        dependencies.syncCloud = {
+            syncs += 1
+            return $0
+        }
+        dependencies.cloudUserRecordName = { "_fictional_user_2" }
+        dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        model.iCloudEnabled = true
+        await model.waitForCloudSync()
+        XCTAssertTrue(model.iCloudEnabled)
+        XCTAssertEqual(syncs, 1)
+        XCTAssertEqual(
+            fixture.defaults.string(forKey: LibraryModel.cloudUserKey), "_fictional_user_2")
     }
 
     /// Turning storage off and on again while CloudKit reads the user is a newer choice too,
@@ -2654,7 +3495,6 @@ final class LibraryWorkflowTests: XCTestCase {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
         fixture.defaults.set(true, forKey: "iCloudEnabled")
-        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
         var dependencies = fixture.dependencies()
         dependencies.sleep = { _ in }
@@ -2675,6 +3515,7 @@ final class LibraryWorkflowTests: XCTestCase {
         await library.start()
         await library.waitForCloudSync()
 
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         toggleDuringRead = true
         await library.cloudAccountChanged()
         XCTAssertFalse(toggleDuringRead)
@@ -2732,6 +3573,7 @@ final class LibraryWorkflowTests: XCTestCase {
             calls += 1
             return try await (calls == 1 ? old : current).value()
         }
+        dependencies.cloudUserRecordName = { nil }
         dependencies.validateHardcover = { _ in fixture.hardcoverAccountID }
         let model = LibraryModel(dependencies: dependencies)
         await model.start()
@@ -2744,6 +3586,7 @@ final class LibraryWorkflowTests: XCTestCase {
             oldFinished.fulfill()
         }
         await fulfillment(of: [waiting], timeout: 5)
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
         await model.cloudAccountChanged()
         model.iCloudEnabled = true
         await fulfillment(of: [current.started], timeout: 5)
@@ -2792,7 +3635,7 @@ final class LibraryWorkflowTests: XCTestCase {
         delay.resolve(())
         await fulfillment(of: [completed], timeout: 5)
         await work.value
-        XCTAssertTrue(model.cloudStatus.contains("storage is off"))
+        XCTAssertEqual(model.cloudStatus, "")
         XCTAssertEqual(model.books.map(\.id), [1])
     }
 
@@ -2821,6 +3664,121 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertEqual(
             fixture.defaults.object(forKey: "syncSuccess.hardcover") as? Date, remote.syncedAt)
         XCTAssertEqual(reads, 1, "The read before the fetch replaces the read after the check")
+    }
+
+    func testAnICloudSnapshotNewerThanAFailedSyncEndsItsError() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        let stale = fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)
+        try fixture.save([stale])
+        var remote = stale
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            // The 10-second limit on the read never elapses; the model cancels it.
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+        }
+        dependencies.syncCloud = { _ in CloudLibraryArchive(sources: [remote]) }
+        var fetches = 0
+        dependencies.fetchHardcover = { _, _ in
+            fetches += 1
+            throw URLError(.timedOut)
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertNotNil(model.sourceErrors["hardcover"])
+        XCTAssertNotNil(model.message)
+
+        // Another device syncs the account before the next check here, which reads iCloud first.
+        fixture.time += 3_600
+        remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 60)
+        await model.refresh()
+        await model.waitForCloudSync()
+        XCTAssertEqual(model.books.map(\.id), [2])
+        XCTAssertNil(model.sourceErrors["hardcover"])
+        XCTAssertNil(model.message)
+        XCTAssertEqual(fetches, 1, "The fresh snapshot ends the check without a download")
+    }
+
+    /// Launch's iCloud user check holds the sync back, and a due refresh waits for the check
+    /// and the sync that follows it, so a fresh iCloud snapshot still skips the fetch.
+    func testADueLaunchFetchWaitsForTheICloudUserCheckAndItsSync() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        let remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 3_600)
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+        }
+        dependencies.cloudUserRecordName = { "_fictional_user_1" }
+        var reads = 0
+        dependencies.syncCloud = { _ in
+            reads += 1
+            return CloudLibraryArchive(sources: [remote])
+        }
+        var fetches = 0
+        dependencies.fetchHardcover = { _, _ in
+            fetches += 1
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(3)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        await model.waitForCloudSync()
+        XCTAssertEqual(fetches, 0)
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(model.books.map(\.id), [2])
+    }
+
+    /// An account-change notice that cancels the sync a due refresh waits for, and finds the
+    /// same user, requeues the sync, and the refresh waits for that one too.
+    func testADueFetchWaitsForASyncThatAnAccountChangeRequeues() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(true, forKey: "iCloudEnabled")
+        fixture.defaults.set("_fictional_user_1", forKey: LibraryModel.cloudUserKey)
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)], age: 86_401)])
+        let remote = fixture.snapshot(.hardcover, books: [fixture.book(2)], age: 3_600)
+        let firstSync = ControlledLibraryResponse<Void>("Launch sync started")
+        let debounce = ControlledLibraryResponse<Void>("Requeued sync scheduled")
+        var dependencies = fixture.dependencies()
+        dependencies.sleep = { duration in
+            if duration == .seconds(10) { try await Task.sleep(for: .seconds(3_600)) }
+            if duration == .seconds(2) { try await debounce.value() }
+        }
+        dependencies.cloudUserRecordName = { "_fictional_user_1" }
+        var reads = 0
+        dependencies.syncCloud = { _ in
+            reads += 1
+            if reads == 1 { try await firstSync.value() }
+            return CloudLibraryArchive(sources: [remote])
+        }
+        var fetches = 0
+        let fetched = expectation(description: "Hardcover fetched")
+        fetched.isInverted = true
+        dependencies.fetchHardcover = { _, _ in
+            fetches += 1
+            fetched.fulfill()
+            return HardcoverLibrary(
+                accountID: fixture.hardcoverAccountID, books: [fixture.book(3)])
+        }
+        let model = LibraryModel(dependencies: dependencies)
+        let launch = Task { await model.start() }
+        await fulfillment(of: [firstSync.started], timeout: 5)
+        await model.cloudAccountChanged()
+        await fulfillment(of: [debounce.started], timeout: 5)
+        firstSync.resolve(())
+        // The cancelled sync has returned; the refresh must still wait for the requeued one.
+        await fulfillment(of: [fetched], timeout: 1)
+        debounce.resolve(())
+        await launch.value
+        await model.waitForCloudSync()
+        XCTAssertEqual(fetches, 0)
+        XCTAssertEqual(model.books.map(\.id), [2])
     }
 
     func testICloudReadBeforeAFetchRechecksEachSource() async throws {
@@ -3060,12 +4018,18 @@ private final class LibraryWorkflowFixture {
             XCTFail("Unexpected cloud request")
             throw URLError(.unsupportedURL)
         }
+        dependencies.readCloudArchive = { nil }
         dependencies.readSpineWorklist = { nil }
-        dependencies.publishSpineWorklist = { _ in }
+        dependencies.publishSpineWorklist = { _, _ in }
+        dependencies.copyAccountRecords = { _, _, _ in
+            XCTFail("Unexpected record copy")
+            throw URLError(.unsupportedURL)
+        }
         dependencies.fetchSpineDesigns = { _, _ in ([:], true) }
         dependencies.fetchCoverChoices = { _, _ in ([:], true) }
         dependencies.fetchSeriesLinks = { _, _ in ([:], true) }
         dependencies.fetchSeriesLooks = { _, _ in ([:], true) }
+        dependencies.readCachedCompanionRecords = { _, _ in CachedCompanionRecords() }
         dependencies.createSeriesLook = { _ in
             XCTFail("Unexpected series look")
             throw URLError(.unsupportedURL)
@@ -3298,6 +4262,7 @@ final class ExampleProfileWorkflowTests: XCTestCase {
         model.iCloudEnabled = false
         XCTAssertTrue(model.isExample, "Turning storage off keeps the example's records")
         XCTAssertEqual(model.spineDesigns, profile.designs)
+        XCTAssertNil(model.spinesNote, "The example keeps its designs, so Spines has no note")
 
         model.iCloudEnabled = true
         XCTAssertFalse(model.isExample)

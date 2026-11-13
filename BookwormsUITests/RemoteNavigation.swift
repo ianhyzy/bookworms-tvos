@@ -195,28 +195,41 @@ enum RemoteNavigation {
         to element: XCUIElement, in app: XCUIApplication,
         file: StaticString = #filePath, line: UInt = #line
     ) {
-        for _ in 0..<12 where !isFocused(element) {
-            let focused = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "hasFocus == true")).allElementsBoundByIndex.last
-            guard let from = focused?.frame, element.exists else {
+        var stuckAt: CGRect?
+        // Enough presses to climb a full Book Wall stack, one book per press.
+        for _ in 0..<40 where !isFocused(element) {
+            guard let from = focusedFrame(in: app), element.exists else {
                 XCUIRemote.shared.press(.down)
                 continue
             }
             let to = element.frame
+            let vertical: XCUIRemote.Button = to.midY > from.midY ? .down : .up
             // Left or Right in the Settings section bar would switch sections, so leave it first.
             let bar = app.descendants(matching: .any)["settings-sections"]
             let inBar = bar.exists && bar.frame.contains(CGPoint(x: from.midX, y: from.midY))
             // Change columns first; moving vertically in the wrong column can miss the target.
+            // When the last column move left focus in place, as at the end of a row that stops
+            // short of the target, move vertically instead.
             let direction: XCUIRemote.Button =
                 inBar
                 ? .down
-                : to.maxX <= from.minX
-                    ? .left
-                    : to.minX >= from.maxX
-                        ? .right : to.midY > from.midY ? .down : .up
+                : from == stuckAt
+                    ? vertical
+                    : to.maxX <= from.minX
+                        ? .left : to.minX >= from.maxX ? .right : vertical
+            stuckAt = direction == .left || direction == .right ? from : nil
             XCUIRemote.shared.press(direction)
+            let moved = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in focusedFrame(in: app) != from }, object: nil)
+            _ = XCTWaiter.wait(for: [moved], timeout: 1)
         }
         waitForFocus(element, file: file, line: line)
+    }
+
+    private static func focusedFrame(in app: XCUIApplication) -> CGRect? {
+        app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
+            .allElementsBoundByIndex.last?
+            .frame
     }
 
     /// Opens the Settings sidebar item and, when `section` is set, selects that section segment.
@@ -251,7 +264,8 @@ enum RemoteNavigation {
     ) {
         let picker = app.buttons["reader-picker-menu"]
         XCTAssertTrue(picker.waitForExistence(timeout: 30), file: file, line: line)
-        for _ in 0..<3 where !isFocused(picker) { XCUIRemote.shared.press(.up) }
+        // One Up from the entry row reaches the header. Another would open the sidebar on tvOS 27.
+        if !isFocused(picker) { XCUIRemote.shared.press(.up) }
         for _ in 0..<2 where !isFocused(picker) { XCUIRemote.shared.press(.right) }
         XCTAssertTrue(isFocused(picker), "Reader picker unreachable", file: file, line: line)
         XCUIRemote.shared.press(.select)
@@ -306,7 +320,7 @@ enum RemoteNavigation {
     /// Whether the focused element is labeled `name` or contains an element labeled `name`.
     ///
     /// Sidebar rows and menu items report focus on a container, while a query by name can match a
-    /// different element with the same label, such as the Settings tab's `gearshape` button.
+    /// different element with the same label, such as the Settings row's `gearshape` image.
     static func hasFocus(labeled name: String, in app: XCUIApplication) -> Bool {
         let focused = app.descendants(matching: .any)
             .matching(NSPredicate(format: "hasFocus == true"))

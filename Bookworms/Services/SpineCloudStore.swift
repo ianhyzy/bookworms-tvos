@@ -359,6 +359,11 @@ enum SpineCloudIdentity {
             recordName: "series-look-v1-" + sha256("\(accountID):\(key.seriesID):\(key.group)"))
     }
 
+    /// The account's Top Five pins, which only the iPhone and Mac read and write.
+    static func topFivePinsRecordID(accountID: String) -> CKRecord.ID {
+        CKRecord.ID(recordName: "top-five-pins-v1-" + sha256(accountID))
+    }
+
     static func workItemHash(accountID: String, book: Book) -> String {
         sha256(
             [
@@ -418,6 +423,14 @@ private struct AppleSpineCloudDatabase: SpineCloudDatabase {
             _ = try await database.deleteRecord(withID: id)
         } catch let error as CKError where error.code == .unknownItem {}
     }
+}
+
+/// One account's companion records from the disk caches (`SpineCloudStore.cachedRecords`).
+struct CachedCompanionRecords: Sendable {
+    var designs: [Int: SpineDesignV1] = [:]
+    var coverChoices: [Int: CoverChoiceV1] = [:]
+    var seriesLinks: [Int: SeriesLinkV1] = [:]
+    var seriesLooks: [SeriesLookKey: SeriesLookV1] = [:]
 }
 
 actor SpineCloudStore {
@@ -504,7 +517,11 @@ actor SpineCloudStore {
         return value
     }
 
-    func publish(_ worklist: SpineWorklistV1) async throws {
+    /// Saves `worklist` unless the stored one is newer for the same account. Throws
+    /// `CloudStorageError.otherAccount`, saving nothing, when the stored worklist names an
+    /// account that `merges` doesn't absorb into `worklist`'s, so a check that iCloud outdated
+    /// can't replace another account's work.
+    func publish(_ worklist: SpineWorklistV1, merges: [String: String]) async throws {
         guard worklist.isValid else { throw CloudStorageError.incomplete }
         let database = try await availableDatabase()
         let encoder = JSONEncoder()
@@ -526,6 +543,10 @@ actor SpineCloudStore {
                 guard let current = try? JSONDecoder().decode(SpineWorklistV1.self, from: saved),
                     current.isValid
                 else { throw CloudStorageError.incomplete }
+                guard
+                    CloudLibraryArchive.absorbs(
+                        current.accountID, merges, into: worklist.accountID)
+                else { throw CloudStorageError.otherAccount }
                 if current.accountID == worklist.accountID,
                     current.syncedAt > worklist.syncedAt
                 {
@@ -581,6 +602,34 @@ actor SpineCloudStore {
         try await records(
             .seriesLooks(cacheURL: seriesLookCacheURL), accountID: accountID,
             subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    /// Reads `accountID`'s companion records for `books` from the disk caches alone, without
+    /// CloudKit or writes, for a shelf whose Hardcover account check hasn't cleared. The looks
+    /// are those of the look groups that the cached links decide.
+    func cachedRecords(accountID: String, books: [Book]) -> CachedCompanionRecords {
+        let byID = Self.byID(books)
+        var records = CachedCompanionRecords()
+        records.designs =
+            cached(.designs(cacheURL: cacheURL), accountID: accountID, subjects: byID)
+            .values
+        records.coverChoices =
+            cached(
+                .coverChoices(cacheURL: coverChoiceCacheURL), accountID: accountID, subjects: byID
+            )
+            .values
+        let links =
+            cached(.seriesLinks(cacheURL: seriesLinkCacheURL), accountID: accountID, subjects: byID)
+            .values
+        records.seriesLinks = links
+        let keys = books.compactMap { SeriesDesigns.lookKey(of: $0, link: links[$0.id]) }
+        records.seriesLooks =
+            cached(
+                .seriesLooks(cacheURL: seriesLookCacheURL), accountID: accountID,
+                subjects: Dictionary(keys.map { ($0, $0) }, uniquingKeysWith: { first, _ in first })
+            )
+            .values
+        return records
     }
 
     /// Saves `look` as its group's look unless another device saved one first, and returns the
@@ -673,6 +722,130 @@ actor SpineCloudStore {
             to: CompanionRecordKind.seriesLinks(cacheURL: seriesLinkCacheURL))
     }
 
+    /// Copies `source`'s companion records for `books` into `target`, for **Merge**: spine
+    /// designs, cover choices, series links, the series looks of the books' look groups, and Top
+    /// Five pins.
+    ///
+    /// Each copy changes only the payload's `accountID`, a design's `workItemHash`, and the pins'
+    /// `bookIDs`, which keep only `books`, so fields this app doesn't decode survive. A copy never
+    /// replaces a record `target` has. A source record that is missing, of another type,
+    /// unreadable, or for another account is skipped. Nothing is deleted.
+    ///
+    /// Throws when CloudKit is unavailable or a read or save fails. The copies already made then
+    /// belong to `target`, so a repeat keeps them.
+    func copyRecords(from source: String, into target: String, books: [Book]) async throws {
+        let database = try await availableDatabase()
+        let books = Self.byID(books)
+        let ids = books.keys.sorted()
+        try await copy(
+            ids.map { SpineCloudIdentity.designRecordID(accountID: source, bookID: $0) },
+            to: ids.map { SpineCloudIdentity.designRecordID(accountID: target, bookID: $0) },
+            type: "SpineDesignV1", from: source, into: target, in: database
+        ) { payload, index in
+            guard let book = books[ids[index]] else { return nil }
+            var payload = payload
+            payload["workItemHash"] = SpineCloudIdentity.workItemHash(
+                accountID: target, book: book)
+            return payload
+        }
+        try await copy(
+            ids.map { SpineCloudIdentity.coverChoiceRecordID(accountID: source, bookID: $0) },
+            to: ids.map { SpineCloudIdentity.coverChoiceRecordID(accountID: target, bookID: $0) },
+            type: "CoverChoiceV1", from: source, into: target, in: database)
+        let oldLinks = try await copy(
+            ids.map { SpineCloudIdentity.seriesLinkRecordID(accountID: source, bookID: $0) },
+            to: ids.map { SpineCloudIdentity.seriesLinkRecordID(accountID: target, bookID: $0) },
+            type: "SeriesLinkV1", from: source, into: target, in: database)
+        let newLinks = try await payloads(
+            ids.map { SpineCloudIdentity.seriesLinkRecordID(accountID: target, bookID: $0) },
+            type: "SeriesLinkV1", accountID: target, in: database)
+        func link(_ payload: [String: Any]?) -> SeriesLinkV1? {
+            payload.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                .flatMap { try? JSONDecoder().decode(SeriesLinkV1.self, from: $0) }
+        }
+        // A group counts whether the book's look follows this account's link, the old
+        // account's, or no link.
+        var keys = Set<SeriesLookKey>()
+        for (index, id) in ids.enumerated() {
+            guard let book = books[id] else { continue }
+            for chosen in [newLinks[index], oldLinks[index], nil] {
+                if let key = SeriesDesigns.lookKey(of: book, link: link(chosen)) {
+                    keys.insert(key)
+                }
+            }
+        }
+        let sortedKeys = keys.sorted()
+        try await copy(
+            sortedKeys.map { SpineCloudIdentity.seriesLookRecordID(accountID: source, key: $0) },
+            to: sortedKeys.map {
+                SpineCloudIdentity.seriesLookRecordID(accountID: target, key: $0)
+            },
+            type: "SeriesLookV1", from: source, into: target, in: database)
+        try await copy(
+            [SpineCloudIdentity.topFivePinsRecordID(accountID: source)],
+            to: [SpineCloudIdentity.topFivePinsRecordID(accountID: target)],
+            type: "TopFivePinsV1", from: source, into: target, in: database
+        ) { payload, _ in
+            let pins = (payload["bookIDs"] as? [Int] ?? []).filter { books[$0] != nil }
+            guard !pins.isEmpty else { return nil }
+            var payload = payload
+            payload["bookIDs"] = pins
+            return payload
+        }
+    }
+
+    /// Creates each `targets` record from the `sources` record at the same index, with the
+    /// payload's `accountID` set to `target` after `change`, which returns `nil` to skip a
+    /// record. An existing target record stays. Returns the source payloads by index.
+    @discardableResult
+    private func copy(
+        _ sources: [CKRecord.ID], to targets: [CKRecord.ID], type: String,
+        from source: String, into target: String, in database: any SpineCloudDatabase,
+        change: ([String: Any], Int) -> [String: Any]? = { payload, _ in payload }
+    ) async throws -> [Int: [String: Any]] {
+        let found = try await payloads(sources, type: type, accountID: source, in: database)
+        for (index, payload) in found.sorted(by: { $0.key < $1.key }) {
+            guard var payload = change(payload, index) else { continue }
+            payload["accountID"] = target
+            let record = CKRecord(recordType: type, recordID: targets[index])
+            record["payload"] =
+                try JSONSerialization.data(withJSONObject: payload, options: .sortedKeys) as NSData
+            do {
+                // A new record without a change tag fails when the record already exists.
+                try await database.save(record)
+            } catch let error as CKError where error.code == .serverRecordChanged {}
+        }
+        return found
+    }
+
+    /// The JSON payloads of the `ids` records that exist, have `type`, and name `accountID`, by
+    /// index in `ids`, read in batches of 100. Throws when a batch or a record read fails for a
+    /// reason other than the record not existing.
+    private func payloads(
+        _ ids: [CKRecord.ID], type: String, accountID: String, in database: any SpineCloudDatabase
+    ) async throws -> [Int: [String: Any]] {
+        var found: [Int: [String: Any]] = [:]
+        for start in stride(from: 0, to: ids.count, by: 100) {
+            let batch = Array(ids[start..<min(start + 100, ids.count)])
+            let fetched = try await database.records(for: batch)
+            for (offset, id) in batch.enumerated() {
+                let record: CKRecord
+                switch fetched[id] {
+                case .success(let value): record = value
+                case .failure(let error as CKError) where error.code == .unknownItem: continue
+                case .failure(let error): throw error
+                case nil: throw CloudStorageError.incomplete
+                }
+                guard record.recordType == type, let data = record["payload"] as? Data,
+                    let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    payload["accountID"] as? String == accountID
+                else { continue }
+                found[start + offset] = payload
+            }
+        }
+        return found
+    }
+
     /// Writes `value`, or removes it when `nil`, in `kind`'s cache under a new generation, so a
     /// read of that type that started earlier stops (`checkCurrentGeneration`) instead of
     /// saving its older copy of the cache over the write.
@@ -712,24 +885,11 @@ actor SpineCloudStore {
             var status = ReadStatus(phase: "loading_cache", requestedCount: selected.count)
             writeReadStatus(status, name: kind.statusName)
         #endif
-        let selectedRecordNames = Set(
-            selected.keys.map {
-                kind.recordID(accountID, $0).recordName
-            })
         let keyByRecordName = Dictionary(
             uniqueKeysWithValues: selected.keys.map {
                 (kind.recordID(accountID, $0).recordName, $0)
             })
-        var cache = loadCache(kind).filter { selectedRecordNames.contains($0.key) }
-        var accepted: [Key: Value] = [:]
-        for (key, subject) in selected {
-            let name = kind.recordID(accountID, key).recordName
-            if let value = cache[name], kind.isValid(value, accountID, subject) {
-                accepted[key] = value
-            } else {
-                cache.removeValue(forKey: name)
-            }
-        }
+        var (accepted, cache) = cached(kind, accountID: accountID, subjects: selected)
         #if DEBUG
             status.acceptedCount = accepted.count
             status.phase = "checking_cloud"
@@ -867,6 +1027,25 @@ actor SpineCloudStore {
         #endif
         try checkCurrentGeneration(generation, of: kind)
         return (accepted, isComplete)
+    }
+
+    /// `kind`'s valid cached records for `accountID` and `selected`, and the cache narrowed to
+    /// them.
+    private func cached<Key: Hashable, Subject, Value: Codable & Sendable>(
+        _ kind: CompanionRecordKind<Key, Subject, Value>, accountID: String,
+        subjects selected: [Key: Subject]
+    ) -> (values: [Key: Value], cache: [String: Value]) {
+        let full = loadCache(kind)
+        var cache: [String: Value] = [:]
+        var accepted: [Key: Value] = [:]
+        for (key, subject) in selected {
+            let name = kind.recordID(accountID, key).recordName
+            if let value = full[name], kind.isValid(value, accountID, subject) {
+                accepted[key] = value
+                cache[name] = value
+            }
+        }
+        return (accepted, cache)
     }
 
     private func checkCurrentGeneration<Key, Subject, Value>(

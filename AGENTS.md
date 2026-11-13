@@ -2,7 +2,9 @@
 
 These instructions apply throughout this repository. Follow explicit user instructions when they change the task's scope or requirements.
 
-`README.md` is reserved for owner-authored public content; leave it blank unless the owner asks you to populate it.
+The owner's standing rules for tests, review, merging, design sign-off, devices, and sessions are in the Standing rules section of the workspace `AGENTS.md` (`~/Developer/BookwormsApps/AGENTS.md`). Read that section before you work in this checkout or in a worktree of it, because a worktree is outside the workspace folder.
+
+`README.md` is the owner's public overview. Never edit it; put technical documentation in `docs/`.
 
 ## Start here
 
@@ -30,9 +32,11 @@ Run commands from the repository root:
 | --- | --- |
 | Regenerate the Xcode project | `xcodegen generate` |
 | Check formatting on an edited file | `xcrun swift-format lint --strict path/to/ChangedFile.swift` |
-| Build and install on the Apple TV (default verification) | `python3 scripts/device-build.py` |
-| Compile without a TV | `xcodebuild -project Bookworms.xcodeproj -scheme Bookworms -destination 'generic/platform=tvOS Simulator' -derivedDataPath .build-compilecheck build CODE_SIGNING_ALLOWED=NO -quiet` |
-| Run tests (only when the user asks) | `python3 scripts/test-worker.py --detach`, with `--profile unit` or `--profile major` when requested |
+| Compile for the simulator | `xcodebuild -project Bookworms.xcodeproj -scheme Bookworms -destination 'generic/platform=tvOS Simulator' -derivedDataPath .build-compilecheck build CODE_SIGNING_ALLOWED=NO -quiet` |
+| Run a test plan | `python3 scripts/test-worker.py --detach`, with `--profile unit` for the Unit plan or `--profile major` for the runtime matrix |
+| Check a commit before its pull request merges | `python3 scripts/premerge.py`; see [the pre-merge check](docs/TESTING.md#pre-merge-check) |
+| Capture the views a change touches, before and after | `python3 scripts/visual-check.py`; see [the visual check](docs/TESTING.md#visual-check) |
+| Build and install on the Apple TV (when the owner asks, outside TV quiet hours) | `python3 scripts/device-build.py` |
 
 `device-build.py` reads the Apple TV UDID and team ID from the ignored `.local/device-build.json` (`{"device": "…", "team": "…"}`) when `--device` and `--team` are omitted.
 
@@ -82,16 +86,16 @@ Maintain [VIEWS.md](VIEWS.md) for tvOS view options and [DATASOURCES.md](DATASOU
 
 ## Review and verification
 
-- **Do not run tests unless the user asks in the current request.** Test plans, individual tests, `scripts/test-local.py`, `scripts/test-worker.py`, and `device-build.py --test` all require that request. Default verification is: lint each edited Swift file with `xcrun swift-format lint --strict`, then install on the Apple TV with `python3 scripts/device-build.py`, which compiles a Release build. If the TV is unreachable, compile with the simulator build command instead. Report which checks ran and name any tests that would add signal, then ask before running them.
-- When the user asks for a test run, follow [the local test worker instructions](SUBAGENT-TEST-INSTRUCTIONS.md): start `python3 scripts/test-worker.py --detach` once, then wait for the printed worker PID to exit in a background command that the agent harness tracks. Without one, end the turn with the dispatch-log path. Do not poll with repeated checks. Read only `handoff.md` afterward. Do not open `build.log`, `coverage.json`, `test-tree.json`, or result bundles unless the user asks; search them with bounded `grep` output instead of reading them whole. Do not retry or rerun single tests to investigate; report the failure.
+- **Run the tests a change touches before it merges, without asking.** Default verification is: lint each edited Swift file with `xcrun swift-format lint --strict`, compile with the simulator build command, and run the affected test classes, or the plan that holds them, on a slim simulator. Report which checks ran and any failure with its output. Install on the Apple TV with `python3 scripts/device-build.py`, which compiles a Release build, or run `device-build.py --test`, only when the owner asks and outside TV quiet hours.
+- For a test-plan run, follow [the local test worker instructions](SUBAGENT-TEST-INSTRUCTIONS.md): start `python3 scripts/test-worker.py --detach` once, then wait for the printed worker PID to exit in a background command that the agent harness tracks. Without one, end the turn with the dispatch-log path. Do not poll with repeated checks. Read only `handoff.md` afterward. Do not open `build.log`, `coverage.json`, `test-tree.json`, or result bundles unless the user asks; search them with bounded `grep` output instead of reading them whole. Do not retry or rerun single tests to investigate; report the failure.
 
 - Keep review findings distinct from fixes. Track App Store requirements in [the release workflow](docs/RELEASING.md).
-- Keep [the testing procedure](docs/TESTING.md) current when behavior changes, and update affected tests without running them unless asked. For documentation-only changes, check accuracy and links; do not claim runtime verification that was not performed.
+- Keep [the testing procedure](docs/TESTING.md) current when behavior changes, and update and run the affected tests. For documentation-only changes, check accuracy and links; do not claim runtime verification that was not performed.
 - Use the repository's `.swift-format` configuration when editing Swift. Report which checks ran and any material checks that remain pending.
 
 ## Before you push
 
-Check each item that your change touches. These are the problems CodeRabbit finds most often here.
+Check each item that your change touches. These are the problems that reviews have found most often here.
 
 - **After an `await` or a delay,** recheck the state the action needs before acting, and cancel the task when its view resets. Run a cache lookup, match, and insert under the same lock that invalidation takes, as `GoogleFontLibrary.registeredFacesLock` does.
 - **Hardcover tokens.** Only HTTP 400 or 401 with OAuth error `invalid_grant` ends a login. Keep the token for `invalid_client`, other OAuth errors, timeouts, and malformed replies. Renew at most once per social load. When a renewal finishes after the login was removed or replaced, revoke the rotated refresh token. Release checks never replay a spent refresh token, which revokes the login.
@@ -100,20 +104,20 @@ Check each item that your change touches. These are the problems CodeRabbit find
 - **Tests.** When you change a table that tests pin, such as `slantedReplacements`, search the tests for its entries and update their expectations. Fixtures use invented titles and names.
 - **Docs.** Search `docs/` for each name your change touches and correct every statement. State the settings and limits a checklist step assumes.
 
-## CodeRabbit
+## Review
 
-- Before you open a pull request into `main`, run `coderabbit review --agent --base main` in the background and wait until it reports `complete`. Fix its Critical and Major findings and any useful Minor ones. Run it again on fix commits before you push them; a result with `reused: true` didn't review again, so rerun it with `--fresh`. Never pass `--use-credits`.
-- CodeRabbit reviews a pull request once, when it opens; fix pushes don't start a review. Open pull requests ready for review, and don't merge while a review runs: merging cancels it.
-- Critical and Major findings block a merge. Minor and Trivial findings never block testing, merging, or installs, but read each one, because the Minor label includes real bugs. Fix useful Minor findings in the same pull request; list any that need larger changes in a follow-up pull request. Fix a Trivial nitpick in the same pull request only when it's one line.
-- When you decline a finding, reply in its thread with the reason. CodeRabbit can withdraw the finding and save the reason as a learning.
-- Comment `@coderabbitai review` at most once per pull request, after a fix that changes credentials, a shared record, or concurrency, or that fixes a Critical or Major finding. Each review uses part of an hourly allowance.
+- Before a pull request merges into `main`, run the `defect-review` and `slop-review` skills once on its diff. For a change to how the app looks, run them after the owner approves the design.
+- High-severity findings block a merge. Lower findings never block testing, merging, or installs, but fix them, because they include real bugs: the small ones in the same pull request, and the larger ones in one follow-up pull request.
+- Review again at most once, and only after a fix that changes credentials, a shared record, or concurrency, or that fixes a blocking finding. Put findings that appear later in the follow-up pull request, not in another round on the same one.
+- When you decline a finding, give the reason in the pull request.
+- The Standing rules section of the workspace `AGENTS.md` holds the full review and merge rules.
 
 ## tvOS architecture and performance
 
 - Target tvOS 26 and later. Prefer current, nondeprecated Apple APIs and verify tvOS availability; an API available on iOS is not necessarily available on tvOS. Do not add compatibility branches for older tvOS versions.
 - Use native SwiftUI controls, navigation, focus, and system materials where they fit the interaction. Follow [Apple's tvOS design guidance](https://developer.apple.com/design/human-interface-guidelines/designing-for-tvos) and [focus guidance](https://developer.apple.com/design/human-interface-guidelines/focus-and-selection). Keep UIKit bridges narrow and explain why they are needed.
 - Design for Siri Remote input and TV viewing distance. Preserve stable book identity, directional page entry, and focus when returning from details. Verify that every control is reachable. Respect VoiceOver, Reduce Motion, and system appearance unless the user selects an override.
-- Let the tvOS focus engine own directional movement; follow [focus and remote navigation](docs/FOCUS_NAVIGATION.md). Shape movement with layout, `.focusSection()`, and `.defaultFocus`, and show horizontal collections with `PagedRow` so every item stays mounted. Never set focus from `.onMoveCommand`, timers, data changes, or loading completion, except the one request when the first artwork preparation finishes; assign it only at the entry events that guide lists. If a focus bug survives one fix, report the conflicting focus writers instead of adding another.
+- Let the tvOS focus engine own directional movement; follow [focus and remote navigation](docs/FOCUS_NAVIGATION.md). Shape movement with layout, `.focusSection()`, and `.defaultFocus`, and show horizontal collections with `PagedRow` so every item stays mounted. Never set focus from `.onMoveCommand`, timers, data changes, or loading completion, or at launch; assign it only at the entry events that guide lists. If a focus bug survives one fix, report the conflicting focus writers instead of adding another.
 - Keep the sidebar reachable with Left from the leftmost item and with Back; do not intercept either. Add a navigation test using `RemoteNavigation.press(_:in:expecting:)` for every direction out of every section whenever introducing or changing a view.
 - Treat the library as a read-only snapshot between explicit syncs. Prepare sorting, intersections, eligibility, and page layouts when their data or configuration changes. Remote movement and focus changes must not query Keychain, poll sources, sort libraries, or restart layout preparation. Cache credential-presence flags, not secrets, and refresh them at lifecycle or credential-change boundaries.
 - Track idle deadlines without publishing an observed revision for each press. Defer pending artwork repacking until input settles, but do not create new repacking work merely because input occurred.
@@ -122,7 +126,7 @@ Check each item that your change touches. These are the problems CodeRabbit find
 - Use Swift concurrency with explicit isolation. Keep UI state on the main actor; isolate service state in actors. Do not assume that creating a `Task` moves expensive work off the main actor. Handle cancellation and prevent stale asynchronous results from replacing newer state.
 - Bound memory and disk caches, downsample images, share duplicate in-flight requests, and reuse computed layouts. Preserve saved design choices when reconstructible images or fonts are evicted. Avoid new timers, blur layers, offscreen rendering, or whole-view rasterization without evidence that they improve the experience.
 - Measure performance in optimized Release builds on Apple TV. Use Instruments and a repeatable interaction sequence to assess launch time, hitches, CPU, and memory. Do not infer physical-device performance from simulator or coverage-instrumented timings. Follow [Apple's SwiftUI performance guidance](https://developer.apple.com/documentation/xcode/understanding-and-improving-swiftui-performance).
-- Keep local tests deterministic and independent of live credentials or paid AI. Install on the Apple TV for the owner's manual check of focus, typography, rendering, and performance changes.
+- Keep local tests deterministic and independent of live credentials or paid AI. Focus, typography, rendering, and performance changes need the owner's manual check on the Apple TV; install there when he asks.
 - When the user asks to verify a major change, run the minimum/current simulator matrix with `python3 scripts/test-worker.py --detach --profile major`. An unexpected skip, missing evidence, or blocked runtime is not a pass. Report pending visual, live-service, and device checks separately.
 - Control asynchronous completion and inject clocks in tests. Keep real parsing, application state, rendering, and local persistence under test; substitute external services at their boundaries. Do not add arbitrary sleeps or retry a failing test until it passes. Keep simulator scenario hooks inside `DEBUG && targetEnvironment(simulator)`.
 
@@ -133,6 +137,7 @@ Check each item that your change touches. These are the problems CodeRabbit find
 - `ExampleProfile/` holds the owner's real reading history for **View example profile** (`scripts/export-example-profile.py`). This repository is public: Git ignores the folder apart from its placeholder, so never commit it, print its contents, publish screenshots made from it, or load it in tests. Scenarios and tests use fictional profiles.
 - Keep literal credentials out of repository files, command arguments, logs, screenshots, and test fixtures. Use Keychain and authorized 1Password references; see [Hardcover authentication](docs/HARDCOVER_AUTHENTICATION.md).
 - Keep credentials provider-specific and library access read-only. Preserve source provenance when merging books. A credential replacement is not permission to combine unrelated accounts from the same provider.
+- Each person has one Hardcover account. Never mix another Hardcover account's iCloud data into this account's without the reader's **Merge** (`LibraryModel.mergeOtherAccounts()`); see [sources and iCloud](docs/SOURCES_AND_ICLOUD.md#icloud).
 
 ## Versioning and releases
 
@@ -149,6 +154,6 @@ Check each item that your change touches. These are the problems CodeRabbit find
 
 ## Visual revision evidence
 
-- For each major visual revision, capture the main views on the owner’s Apple TV with the real library: launch with `--start-view=shelf|yearInReview|following|comparison|shared` and use `xcrun devicectl device capture screenshot`. Store the original PNGs and a `capture.json` (commit, date, device) in a new dated folder under the ignored `.local/screenshots/`; never overwrite prior captures. These images contain real library and reader data; do not publish them without authorization.
+- For each major visual revision, when the owner asks and outside TV quiet hours, capture the main views on the owner’s Apple TV with the real library: launch with `--start-view=shelf|yearInReview|following|comparison|shared` and use `xcrun devicectl device capture screenshot`. Store the original PNGs and a `capture.json` (commit, date, device) in a new dated folder under the ignored `.local/screenshots/`; never overwrite prior captures. These images contain real library and reader data; do not publish them without authorization.
 - The tracked `screenshots/` folder holds only images the README displays.
 - Local installs through `scripts/device-build.py` use the LOCAL icon and Bookworms Local display name. Keep the standard icon and public name for release archives.

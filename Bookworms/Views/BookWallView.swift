@@ -1,7 +1,7 @@
 import RealityKit
 import SwiftUI
 
-/// Keeps native tab focus controls aligned with the full-screen 3D wall.
+/// Keeps Book Wall's native focus controls aligned with the full-screen 3D wall.
 struct BookWallView: View {
     let library: LibraryModel
     let coordinator: BookwormsCoordinator
@@ -87,20 +87,20 @@ struct BookWallView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            // RealityKit projects into the full-screen canvas. Tab content can have a
+            // RealityKit projects into the full-screen canvas. The page can have a
             // different origin, so convert both hit targets and detail destinations.
-            let tabFrame = geometry.frame(in: .global)
-            let tabOrigin = CGPoint(
-                x: tabFrame.minX - viewportFrame.minX,
-                y: tabFrame.minY - viewportFrame.minY)
-            // Details occupy the rectangle cover details do. The tab extends above the viewport,
+            let pageFrame = geometry.frame(in: .global)
+            let pageOrigin = CGPoint(
+                x: pageFrame.minX - viewportFrame.minX,
+                y: pageFrame.minY - viewportFrame.minY)
+            // Details occupy the rectangle cover details do. The page extends above the viewport,
             // under the top safe area that cover details respect, so restore that inset.
-            let topInset = max(0, -tabOrigin.y)
+            let topInset = max(0, -pageOrigin.y)
             let detailFrame = CGRect(
-                x: tabOrigin.x, y: tabOrigin.y + topInset,
+                x: pageOrigin.x, y: pageOrigin.y + topInset,
                 width: geometry.size.width, height: geometry.size.height - topInset)
             // Until the scene publishes frames for this configuration, the planned resting
-            // frames place the spines, so they exist in the tab's first render and the
+            // frames place the spines, so they exist in the page's first render and the
             // sidebar's focus handoff finds the entry book through `.defaultFocus`.
             let spineFrames =
                 frames.isEmpty
@@ -157,7 +157,7 @@ struct BookWallView: View {
                     .focusSection()
                 }
                 if rendererStatus.failure == nil, detailBook == nil, !isReturning {
-                    // Spine targets exist from the tab's first render at each book's resting
+                    // Spine targets exist from the page's first render at each book's resting
                     // position and stay mounted while books fall. Opening details waits for the
                     // books to settle.
                     ZStack(alignment: .topLeading) {
@@ -189,12 +189,12 @@ struct BookWallView: View {
                                 .accessibilityHint("Opens book details.")
                                 .accessibilityIdentifier("book-wall-\(book.id)")
                                 // Position last: modifiers after `.position` apply to a
-                                // container that fills the tab, which accessibility would
+                                // container that fills the page, which accessibility would
                                 // then report as every spine's frame.
                                 .frame(width: frame.width, height: frame.height)
                                 .position(
-                                    x: frame.midX - tabOrigin.x,
-                                    y: frame.midY - tabOrigin.y
+                                    x: frame.midX - pageOrigin.x,
+                                    y: frame.midY - pageOrigin.y
                                 )
                             }
                         }
@@ -527,8 +527,8 @@ struct BookWallView: View {
 }
 
 /// Book Wall's detail presentation, shared with the Back overlay that `ShelfView` places above
-/// the tab control. Keeping it out of `ShelfView`'s own state means opening or closing details
-/// updates only the views that read it, not the whole tab hierarchy.
+/// the collapsed sidebar. Keeping it out of `ShelfView`'s own state means opening or closing
+/// details updates only the views that read it, not the whole shell.
 @MainActor @Observable
 final class BookWallDetailState {
     var isPresented = false

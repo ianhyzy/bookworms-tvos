@@ -72,6 +72,84 @@ final class ServiceIntegrationTests: XCTestCase {
         XCTAssertTrue(preparation.failed.isEmpty, "A 404 is permanent, so it is not retried")
     }
 
+    func testUnreachableHostWaitsWhileOtherHostsStillDownload() async {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Two batches on a host that gives no answer, then one on a host that does.
+        let books = (1...12)
+            .map { id in
+                let host = id <= 8 ? "unreachable.invalid" : "image.invalid"
+                return Book(
+                    id: id, title: "Fixture", author: "Author",
+                    coverURL: URL(string: "https://\(host)/\(UUID().uuidString)"))
+            }
+        let avatar = URL(string: "https://image.invalid/\(UUID().uuidString)")!
+        let store = ArtworkStore(root: root, session: session())
+        let preparation = await store.prefetch(books: books, avatarURLs: [avatar])
+        XCTAssertEqual(preparation.failed.map(\.id).sorted(), Array(1...8))
+        XCTAssertEqual(preparation.ratios.keys.sorted(), Array(9...12))
+        XCTAssertTrue(preparation.failedAvatars.isEmpty)
+        for book in books[4..<8] {
+            XCTAssertEqual(
+                LocalResponseStub.count(for: book.coverURL!.absoluteString), 0,
+                "After its first batch, the unreachable host isn't asked again")
+        }
+    }
+
+    func testOneStalledCoverLeavesItsHostDownloading() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // The first of two batches holds a cover whose request gets no answer.
+        let books = (1...8)
+            .map { id in
+                Book(
+                    id: id, title: "Fixture", author: "Author",
+                    coverURL: URL(
+                        string: "https://image.invalid/\(id == 1 ? "stalled/" : "")\(UUID())"))
+            }
+        let store = ArtworkStore(root: root, session: session())
+        async let preparation = store.prefetch(books: books, avatarURLs: [])
+        // The stalled request ends only after the host has answered its batch's other covers,
+        // as a timeout does.
+        for book in books[1...3] {
+            while (try? await store.data(for: book.coverURL!, allowsNetwork: false)) == nil {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        while !LocalResponseStub.failStalled() { try await Task.sleep(for: .milliseconds(10)) }
+        let result = await preparation
+        XCTAssertEqual(result.failed.map(\.id), [1])
+        XCTAssertEqual(
+            result.ratios.keys.sorted(), Array(2...8), "The second batch still downloads")
+    }
+
+    func testBackgroundBrowsingCoversStopAtTheBudget() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let browse = root.appending(path: "browse")
+        try FileManager.default.createDirectory(at: browse, withIntermediateDirectories: true)
+        // A sparse file leaves the browsing tier one byte of room without writing its bytes.
+        let filler = browse.appending(path: "filler")
+        XCTAssertTrue(FileManager.default.createFile(atPath: filler.path(), contents: nil))
+        let handle = try FileHandle(forWritingTo: filler)
+        try handle.truncate(atOffset: UInt64(ArtworkStore.browsingBudget - 1))
+        try handle.close()
+        let url = URL(string: "https://image.invalid/\(UUID().uuidString)")!
+        let store = ArtworkStore(root: root, session: session())
+        let background = await store.prefetchBrowsing([url])
+        XCTAssertEqual(background, 0)
+        XCTAssertEqual(LocalResponseStub.count(for: url.absoluteString), 1)
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: browse.path()), ["filler"],
+            "A cover that doesn't fit is downloaded once and not stored")
+        let requested = await store.prefetchBrowsing([url], evictingOldest: true)
+        XCTAssertEqual(requested, 1)
+        XCTAssertEqual(LocalResponseStub.count(for: url.absoluteString), 2)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: filler.path()),
+            "The oldest file makes room for a cover the reader asked for")
+    }
+
     func testMemoryCacheServesNearestSizeLargerFirst() throws {
         let cache = CoverImageCache()
         let book = Book(
@@ -242,9 +320,22 @@ private final class LocalResponseStub: URLProtocol, @unchecked Sendable {
     private final class Counts: @unchecked Sendable {
         let lock = NSLock()
         var values: [String: Int] = [:]
+        var stalled: [LocalResponseStub] = []
     }
     private static let counts = Counts()
     static func count(for key: String) -> Int { counts.lock.withLock { counts.values[key] ?? 0 } }
+    /// Ends the held `image.invalid/stalled/` requests the way a host that gives no answer does,
+    /// and returns whether any were held.
+    static func failStalled() -> Bool {
+        let held = counts.lock.withLock {
+            defer { counts.stalled = [] }
+            return counts.stalled
+        }
+        for request in held {
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotFindHost))
+        }
+        return !held.isEmpty
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     static func feed(title: String, id: String, summary: String = "", next: String? = nil) -> String
@@ -296,6 +387,12 @@ private final class LocalResponseStub: URLProtocol, @unchecked Sendable {
         case let host? where host.hasPrefix("status"):
             status = Int(host.dropFirst(6).prefix(3))!
             data = Data()
+        case "unreachable.invalid":
+            client?.urlProtocol(self, didFailWithError: URLError(.cannotFindHost))
+            return
+        case "image.invalid" where url.path.hasPrefix("/stalled/"):
+            Self.counts.lock.withLock { Self.counts.stalled.append(self) }
+            return
         case "image.invalid":
             status = 200
             // Core Graphics avoids main-thread UIKit work inside URLProtocol's callback.

@@ -42,8 +42,8 @@ struct BookWallRendererView: UIViewRepresentable {
     }
 }
 
-/// Why the wall's renderer stopped, shared with the Retry button in Book Wall's tab. The surface
-/// is noninteractive and hidden from accessibility, so the tab shows the error.
+/// Why the wall's renderer stopped, shared with the Retry button on Book Wall's page. The surface
+/// is noninteractive and hidden from accessibility, so the page shows the error.
 @MainActor @Observable
 final class BookWallRendererStatus {
     /// The renderer's error, or nil while it runs.

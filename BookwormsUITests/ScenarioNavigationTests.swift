@@ -206,15 +206,15 @@ final class ScenarioNavigationTests: XCTestCase {
     }
 
     /// Focus updates from Select on **View example profile** to the first book: the choice leaves
-    /// with the preparation card, the closing popup returns focus to the shelf, and the shelf
-    /// restores its entry book. More means app code moved focus again.
+    /// with the preparation card, the closing popup releases focus, and the focus engine places
+    /// it on the shelf's entry book. More means app code moved focus as well.
     private let exampleEntryUpdates = 3
     /// Focus updates into the example's sign-in sheet, and back out of it with Back, where the
     /// closing sheet's focus leaves before the status row's button takes it.
     private let sheetEntryUpdates = 1
     private let sheetExitUpdates = 2
     /// Focus updates as details that a restore closed leave, as for the sheet: focus leaves the
-    /// closing presentation before the focus engine places it in the tabs.
+    /// closing presentation before the focus engine places it in the view beneath.
     private let restoreExitUpdates = 2
 
     func testWelcomeDefaultFocusAndExampleChoicePersistAcrossRelaunch() throws {
@@ -300,7 +300,7 @@ final class ScenarioNavigationTests: XCTestCase {
     }
 
     /// The shelf an author filtered over the example's book details offers Connect Hardcover too,
-    /// and its sign-in presents over that shelf, which covers the tabs.
+    /// and its sign-in presents over that shelf, which covers the shell.
     func testExampleFilteredShelfConnectHardcoverOpensSignInAndBackReturns() throws {
         let app = launch("welcome", focusProbe: true)
         let example = app.buttons["welcome-example-profile"]
@@ -312,7 +312,7 @@ final class ScenarioNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let author = app.buttons["detail-author"]
         RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"], timeout: 15)
-        // The details cover the tabs, so they show the example's capsule themselves.
+        // The details cover the shell, so they show the example's capsule themselves.
         capture(app, "scenario-example-details")
         RemoteNavigation.press(.right, in: app, expecting: author)
         XCUIRemote.shared.press(.select)

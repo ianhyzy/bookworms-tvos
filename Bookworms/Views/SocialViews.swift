@@ -35,6 +35,8 @@ struct SocialViews: View {
     let returnRevision: Int
     @FocusState private var focusedItem: Int?
     @FocusState private var isReaderPickerFocused: Bool
+    /// The Compare Shelves row that holds focus: 0 for yours, 1 for the reader's.
+    @FocusState private var focusedComparisonRow: Int?
     @State private var review: ReviewPresentation?
     @AppStorage("dateFormat") private var dateFormat = AppDateFormat.monthName
     /// Chooses the Compare Shelves shelf photos; changes each time the view appears.
@@ -51,7 +53,11 @@ struct SocialViews: View {
             switch coordinator.current {
             case .following: following
             case .comparison: comparison
-            case .shared: shared
+            case .shared:
+                // Focus enters the view on the remembered cover, not on the header above it.
+                shared.defaultFocus(
+                    $focusedItem, coordinator.sharedSelection ?? sharedBooks.first?.id,
+                    priority: .userInitiated)
             case .friendsPicks: friendsPicks
             case .shelf, .yearInReview, .bookWall: EmptyView()
             }
@@ -182,10 +188,7 @@ struct SocialViews: View {
     private var following: some View {
         Group {
             if social.activities.isEmpty {
-                empty(
-                    "Your following feed",
-                    "Connect Hardcover with social read permissions in Settings. Activity from people you follow appears here."
-                )
+                empty("Your following feed", social.emptyFeedMessage)
             } else {
                 GeometryReader { geometry in
                     let pageSize = 4
@@ -207,7 +210,6 @@ struct SocialViews: View {
                     }
                     .focusSection()
                     .defaultFocus($focusedItem, entryID, priority: .userInitiated)
-                    .onAppear { focusedItem = entryID }
                 }
             }
         }
@@ -278,7 +280,6 @@ struct SocialViews: View {
                             books: social.presentation.mine,
                             state: coordinator.upper, rowHeight: rowHeight,
                             width: geometry.size.width - 2 * PagedRowLayout.edgeInset,
-                            activatesOnAppear: coordinator.comparisonRow == 0,
                             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[0],
                             isLoading: social.isLoading,
                             column: coordinator.comparisonColumn,
@@ -292,6 +293,7 @@ struct SocialViews: View {
                         )
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("comparison-upper")
+                        .focused($focusedComparisonRow, equals: 0)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         ReaderLabel(
@@ -304,7 +306,6 @@ struct SocialViews: View {
                             books: social.presentation.theirs,
                             state: coordinator.lower, rowHeight: rowHeight,
                             width: geometry.size.width - 2 * PagedRowLayout.edgeInset,
-                            activatesOnAppear: coordinator.comparisonRow == 1,
                             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[1],
                             isLoading: social.isLoading,
                             column: coordinator.comparisonColumn,
@@ -318,16 +319,17 @@ struct SocialViews: View {
                         )
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("comparison-lower")
+                        .focused($focusedComparisonRow, equals: 1)
                     }
                     comparisonCaption(reader: reader).frame(height: 124, alignment: .topLeading)
                 } else {
-                    empty(
-                        "Choose a reader",
-                        "Select someone you follow above to compare your books."
-                    )
+                    empty("Compare Shelves", social.noReaderMessage)
                 }
             }
         }
+        // Focus enters the view on the row it last left, not on the header above the rows. The
+        // row's own default focus then picks the book.
+        .defaultFocus($focusedComparisonRow, coordinator.comparisonRow, priority: .userInitiated)
         .onAppear { photoSeed = Int.random(in: 0..<1000) }
     }
 
@@ -403,6 +405,15 @@ struct SocialViews: View {
     private var sharedBooks: [SharedRead] {
         social.presentation.shared
     }
+
+    /// What Book Club shows without shared books. A reader's library can still be downloading
+    /// after the reader is chosen.
+    private var emptySharedMessage: String {
+        if reader == nil { return social.noReaderMessage }
+        return social.isLoading
+            ? "Loading books…" : "No books with ratings from both readers are available."
+    }
+
     private var shared: some View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 16) {
@@ -442,7 +453,6 @@ struct SocialViews: View {
                         .focusSection()
                         .defaultFocus($focusedItem, entryID, priority: .userInitiated)
                         .accessibilityIdentifier("shared-cover-rail")
-                        .onAppear { focusedItem = entryID }
 
                         if let selected = sharedBooks.first(where: {
                             $0.id == coordinator.sharedSelection
@@ -474,12 +484,7 @@ struct SocialViews: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
-                    empty(
-                        "Book Club",
-                        reader == nil
-                            ? "Choose a reader above."
-                            : "No books with ratings from both readers are available."
-                    )
+                    empty("Book Club", emptySharedMessage)
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
@@ -509,6 +514,7 @@ struct SocialViews: View {
                 .frame(maxWidth: 900)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .holdsFocus()
     }
 
     @ViewBuilder
@@ -871,6 +877,8 @@ struct ReviewReadingView: View {
                 // The text holds focus so Up, Down, and Back reach this sheet.
                 .focusable()
                 .focusEffectDisabled()
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Press up or down to read more. Press Back to close the review.")
                 .accessibilityIdentifier("review-text")
             }
         }

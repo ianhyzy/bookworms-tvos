@@ -111,7 +111,7 @@ Pass one `--variant` with `--diagnostics`. `profile-device.py` accepts several B
 | `wall-warm-light` | Keeps the detail key light enabled at zero intensity, so opening a book does not change the scene's light count. |
 | `wall-no-replay` | Hides Book Wall's glass **Drop again** button. |
 | `wall-no-detail-panel` | Hides the SwiftUI book details while a Book Wall book is open. The wall, Back button, and Menu handling remain. |
-| `wall-no-detail-corner` | Hides the wood corner that covers the tab control while a Book Wall book is open. The Back button remains. |
+| `wall-no-detail-corner` | Hides the wood corner that covers the collapsed sidebar while a Book Wall book is open. The Back button remains. |
 | `wall-no-detail-back` | Hides Book Wall's glass **Back to view** button while a book is open. Menu still closes the details. |
 | `wall-no-show-more` | Hides Book Wall's **Show more** button under long book descriptions. |
 | `wall-show-more-glass`, `wall-show-more-bordered` | Draws Book Wall's **Show more** with glass or the native bordered style instead of its flat platter. |

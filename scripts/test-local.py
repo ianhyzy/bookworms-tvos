@@ -331,11 +331,18 @@ def version_tuple(value):
 
 
 def select_runtimes(inventory, requested):
+    """Pairs each requested runtime with an installed one. A major version alone, such as "27",
+    selects the newest installed point release of it, so the matrix follows Apple's updates; an
+    exact version or identifier selects only that runtime."""
     available = [r for r in inventory["runtimes"] if r.get("isAvailable") and "tvOS" in r["identifier"]]
     if requested:
         selected = []
         for version in requested:
-            matches = [r for r in available if r["version"] == version or r["identifier"] == version]
+            if version.isdigit():
+                matches = sorted((r for r in available if r["version"].split(".")[0] == version),
+                                 key=lambda runtime: version_tuple(runtime["version"]), reverse=True)
+            else:
+                matches = [r for r in available if r["version"] == version or r["identifier"] == version]
             selected.append((version, matches[0] if matches else None))
         return selected
     if not available:
@@ -361,6 +368,32 @@ def simulator_name(output):
     return "Bookworms tests " + output.parent.name
 
 
+def boot_simulator(device):
+    """Boots a new simulator, slim when simslim is installed, and waits until it is ready.
+
+    Returns "full" for a slim boot, "failed" when slimming failed and the simulator booted stock
+    instead, and None without simslim.
+    """
+    slimmed = None
+    if shutil.which("simslim"):
+        # Boots the new simulator with every simslim category off. The offline tests replace
+        # CloudKit with fakes, use the local keychain, and call no on-device models, so they
+        # need neither the icloud nor the siri category.
+        try:
+            run(["simslim", "on", device], capture_output=True, text=True)
+            slimmed = "full"
+        except subprocess.CalledProcessError:
+            # simslim may have persisted some disables before failing, and `simctl erase` keeps
+            # them. `simslim off` re-enables every daemon and boots the stock simulator; if it
+            # fails too, the run fails rather than using a partly slimmed simulator.
+            slimmed = "failed"
+            run(["simslim", "off", device], capture_output=True, text=True)
+    else:
+        run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
+    run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
+    return slimmed
+
+
 def execute_runtime(runtime, device_type, output, plan, required, baseline=None, reduce_motion=False,
                     derived_data=None):
     """Runs `required` tests on a new simulator, then deletes it.
@@ -381,22 +414,9 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None,
             raise VerificationError("simctl did not return a simulator UUID")
         record["simulator_id"] = device
         save_json(output / "owned-simulator.json", {"id": device})
-        if shutil.which("simslim"):
-            # Boots the new simulator with every simslim category off. The offline tests replace
-            # CloudKit with fakes, use the local keychain, and call no on-device models, so they
-            # need neither the icloud nor the siri category.
-            try:
-                run(["simslim", "on", device], capture_output=True, text=True)
-                record["simslim"] = "full"
-            except subprocess.CalledProcessError:
-                # simslim may have persisted some disables before failing, and `simctl erase` keeps
-                # them. `simslim off` re-enables every daemon and boots the stock simulator; if it
-                # fails too, the run fails rather than testing a partly slimmed simulator.
-                record["simslim"] = "failed"
-                run(["simslim", "off", device], capture_output=True, text=True)
-        else:
-            run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
-        run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
+        slimmed = boot_simulator(device)
+        if slimmed:
+            record["simslim"] = slimmed
         environment = offline_environment()
         if reduce_motion:
             enable_reduce_motion(device)
@@ -532,7 +552,7 @@ def write_report(output, report):
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", choices=["Local", "Unit"], default="Local")
-    parser.add_argument("--runtime", action="append", help="Exact tvOS version or runtime identifier; repeat for multiple runtimes")
+    parser.add_argument("--runtime", action="append", help="tvOS major version (newest installed point release), exact version, or runtime identifier; repeat for multiple runtimes")
     parser.add_argument("--major", action="store_true", help="Run Local on every required runtime in TestPlans/runtime-matrix.json")
     parser.add_argument("--output", type=Path, help="New artifact directory outside source control; must not already exist")
     parser.add_argument("--baseline-dir", type=Path,
@@ -588,7 +608,9 @@ def main(argv=None):
             if reduce_motion:
                 derived_data = runtime_output / "DerivedData"
                 runtime_output = output / ("tvOS-" + runtime["version"] + "-reduce-motion")
-            baseline = args.baseline_dir.resolve() / runtime_output.name if args.baseline_dir else None
+            # Baselines are kept per major version, so a point-release update keeps its references.
+            baseline_name = "tvOS-" + runtime["version"].split(".")[0] + ("-reduce-motion" if reduce_motion else "")
+            baseline = args.baseline_dir.resolve() / baseline_name if args.baseline_dir else None
             tests = reduce_motion_tests(required) if reduce_motion else required
             record = execute_runtime(runtime, device_type, runtime_output, args.plan, tests, baseline,
                                      reduce_motion, derived_data)

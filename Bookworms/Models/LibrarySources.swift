@@ -15,6 +15,9 @@ struct SourceSnapshot: Codable, Sendable {
     /// Series that the books belong to; Hardcover only. `nil` in snapshots saved before series
     /// were fetched.
     var series: [SeriesInfo]? = nil
+    /// The Hardcover account's username, which the one-account prompts name. `nil` for other
+    /// sources and in snapshots saved before usernames were fetched.
+    var username: String? = nil
 }
 
 struct CWAConfiguration: Codable, Equatable, Sendable {
@@ -46,7 +49,7 @@ struct CWAConfiguration: Codable, Equatable, Sendable {
 
 enum SourceError: LocalizedError {
     case invalidServer, invalidCredentials, credentials, forbidden, invalidFeed, incomplete,
-        unsafeLink, dailyLimit
+        unsafeLink
     case http(Int)
     var errorDescription: String? {
         switch self {
@@ -68,7 +71,6 @@ enum SourceError: LocalizedError {
             "The source could not be synced completely. Its saved books are unchanged."
         case .unsafeLink:
             "The catalog linked outside its server. The request was stopped to protect your login."
-        case .dailyLimit: "This source was checked recently. Use Sync now to retry sooner."
         }
     }
 }
