@@ -192,8 +192,8 @@ def main():
         "passed_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, indent=2) + "\n")
     print(f"PASS premerge {sha[:9]}; marker {marker}")
     if surfaces:
-        print(f"NEXT this commit changes how {', '.join(surfaces)} look, so it also needs a visual "
-              f"check before it merges: python3 {SCRIPTS}/visual-check.py")
+        print(f"NEXT this commit changes how {', '.join(surfaces)} look; the workspace rules ask for a "
+              f"visual check before it merges: python3 {SCRIPTS}/visual-check.py")
     return 0
 
 

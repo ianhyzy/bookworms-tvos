@@ -16,8 +16,8 @@ stays in the ignored `.local/visual-check/` folder: never commit or publish it.
 
 The bundle's `REVIEW.md` gives a reviewing agent the images and a fixed list of questions.
 After the agent reports `VERDICT: pass`, `--record pass` writes the visual-check marker, the
-record that the commit was checked; the workspace's merge gate doesn't require it. docs/TESTING.md, Visual check,
-describes the review step and what the check can't judge.
+record that the commit was checked; the workspace's merge gate doesn't require it.
+docs/TESTING.md, Visual check, describes the review step and what the check can't judge.
 
 Run it with the Bash sandbox off, because xcodebuild can't reach the Metal toolchain inside it.
 """
