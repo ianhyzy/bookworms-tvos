@@ -8,10 +8,49 @@ Run the tests a change touches before it merges, without asking. Routine verific
 
 1. Lint each edited Swift file with `xcrun swift-format lint --strict`.
 2. Compile for the simulator, and run the affected test classes, or the plan that holds them, on a slim simulator.
+3. Before the pull request merges, run the [pre-merge check](#pre-merge-check) on its head commit, and the [visual check](#visual-check) when the change touches a view.
 
 Build and install on the Apple TV with `python3 scripts/device-build.py`, which compiles a Release build and launches it for manual testing, only when the owner asks and outside TV quiet hours.
 
 Update affected tests alongside behavior changes, and run them. A Unit run takes about a minute; a Local run adds several minutes of UI tests; `--major` repeats Local on each runtime. Local and `--major` add one shorter Reduce Motion pass.
+
+## Pre-merge check
+
+Run `python3 scripts/premerge.py` on a pull request's head commit before it merges, with the Bash sandbox off, because `xcodebuild` can't reach the Metal toolchain inside it. The script prints one `PASS`, `FAIL`, or `SKIP` line per step and a last line for the whole run, writes all command output to `.local/premerge/<commit>/premerge.log`, and exits with 0 for a pass and 1 for a failure.
+
+| Step | What passes |
+| --- | --- |
+| `tree` | The working tree has no uncommitted or untracked files, at the start and at the end, so the pass names one commit. |
+| `lint` | `xcrun swift-format lint --strict` on the Swift files changed against the base, with the repository's `.swift-format`. |
+| `build Apple TV` | A Release build of the `BookwormsDevice` scheme for the Apple TV simulator, which compiles the code that Debug-only hooks leave out. |
+| `test` | The Unit plan through `scripts/test-local.py`, on the one slim simulator that the runner creates and deletes. The step fails without starting a simulator when ten are booted or less than 15 percent of memory is free. |
+| `links` | Every relative link in the changed Markdown files leads to a file. |
+
+A change that touches only Markdown files, `docs/`, and `LICENSE` skips `lint`, `build Apple TV`, and `test`. `--base BRANCH` compares with another branch than `origin/main`.
+
+When every step passes, the script writes `premerge/<commit>.json` to the repository's shared Git folder (`git rev-parse --git-common-dir`), which every worktree uses. The workspace's merge gate, a `PreToolUse` hook on `Bash` (`.claude/hooks/merge-gate.py` in the workspace folder), refuses `gh pr merge` until the pull request's head commit has that file, so a new commit needs a new run. A branch that predates the script merges `main` first. The pass also lists the views the change touches (`scripts/visual-check.py --list`); when it lists any, the gate also needs the [visual check](#visual-check) for that commit.
+
+## Visual check
+
+Before a change to how the app looks or moves merges, run `python3 scripts/visual-check.py`, with the Bash sandbox off. It maps the files changed against `origin/main` to views, builds the base commit and the head commit in Debug, and launches each on one slim Apple TV simulator at 1080p, which it creates and deletes. It turns off Device Hub's tvOS sound first, as the test runner does. A change that touches no view prints `SKIP` and needs no check.
+
+| View | Changed files that touch it | Launches |
+| --- | --- | --- |
+| My Shelf (`shelf`) | `ShelfView`, `ShelfControls`, `ShelfLayout` | The launch screen, with the first book focused. |
+| Book details (`details`) | `BookDetailView`, `RatingsView`, and My Shelf's files | `--show-book=ID` for the example profile's first book. |
+| Year in Review (`yearInReview`) | Files named `YearInReview` | `--start-view=yearInReview`. |
+| Book Wall (`bookWall`) | Files named `BookWall`, `SeriesDesigns`, `GoogleFontLibrary`, `SpineText`, or `HouseOfLeaves` | The drop, and a book's flight to its details (`--book-wall-open-entry`), each with a motion strip. |
+| Settings, the social views, ambient mode, and the welcome screens | `SettingsView`, `SocialViews`, `ComparisonBookshelf`, `SocialPresentation`, files named `Ambient`, `LibraryWelcomeView`, `HardcoverConnectionView`, `QRCodeView` | None: a launch argument can't open them with the example profile. The script lists them as not captured. |
+
+`CoverView`, `BookText`, `SpineView`, `SpineStyle`, `BookPresentation`, `AppAppearance`, `ViewPreferences`, `BookwormsApp.swift`, and the asset catalog touch every view. Any other file under `Views/`, a shader, or an asset counts as a view without launches. `RULES` and `SHOTS` in the script hold the map; add a view's launches there.
+
+Every launch passes `--example-profile`, so the captures show the owner's real reading. The script takes the profile from `ExampleProfile/` in the checkout, else in the main checkout, else from the newest `.local/example-profile-*` folder there, and stops when none holds one. Each launch saves a screenshot after a fixed wait. A launch with motion also records the simulator and keeps eight evenly spaced frames, among those where the picture changed, as one image, because agents read images, not video. The bundle is `.local/visual-check/<commit>/`: the `-before`, `-after`, and side-by-side `-pair` images, the recordings, `manifest.json`, and `REVIEW.md`. It is private: never commit or publish it. The pair images are also the before-and-after sample sheet for the owner's styling approval, which this check doesn't replace.
+
+The last line the script prints names the bundle's `REVIEW.md`, which lists the images, the commits, the changed files, and nine fixed questions drawn from the workspace rules: regressions, physical realism, legible lettering, the camera facing the action, motion, focus on the Apple TV, clipped or overlapping content, the Mac layout, and eyebrow labels. Start one agent on it, which may be a Sonnet agent, and have it follow that file and end with `VERDICT: pass` or `VERDICT: fail`. After a pass, run `python3 scripts/visual-check.py --record pass`, which writes `premerge/<commit>.visual.json` beside the pre-merge pass. After a fail, fix the regression and capture the new commit. `--record` needs the bundle of the checked-out commit.
+
+`--surfaces shelf,bookWall` captures the named views instead of the mapped ones, `--head COMMIT --base COMMIT` checks another change, such as a merged one, and `--keep-builds` keeps both builds in `.local/visual-check/build/` for another run.
+
+The check can't judge taste, performance, or focus behavior on a physical Apple TV, and a 1080p simulator screenshot can't show how the screen reads from across a room. A view that the script doesn't capture still needs a look by hand.
 
 ## Local test worker
 
