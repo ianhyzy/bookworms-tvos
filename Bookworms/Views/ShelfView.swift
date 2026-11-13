@@ -19,6 +19,10 @@ struct ShelfView: View {
     /// The sidebar selection. Ambient and Settings are sidebar destinations that leave
     /// `coordinator.current` on the last main view.
     @State private var sidebarItem: SidebarItem
+    /// The sidebar column. It starts closed, so launch focus goes to the selected view; the system
+    /// opens it on Left from the view's leading edge and on Back, and closes it on Select.
+    @State private var sidebarVisibility = NavigationSplitViewVisibility.detailOnly
+    @FocusState private var focusedSidebarItem: SidebarItem?
     @State private var settingsSection = SettingsView.initialSection()
     @State private var ambient = AmbientController()
     @State private var requestedShelfPreparationKey: ShelfPreparationKey?
@@ -27,7 +31,6 @@ struct ShelfView: View {
     /// Chooses the shelf photo; changes each time My Shelf appears.
     @State private var photoSeed = Int.random(in: 0..<1000)
     @State private var activity = InteractionActivity()
-    @State private var hasEnteredShelf = false
     @State private var isWelcomePresented = false
     /// Whether My Shelf's **Connect Hardcover** shows the sign-in over the example profile.
     @State private var connectsFromExample = false
@@ -61,7 +64,7 @@ struct ShelfView: View {
 
     /// Renders the wall background once per palette and size for Book Wall's lit backdrop,
     /// at one pixel per point to match the scene's 1080p render cap. The scene keeps its
-    /// backdrop while another tab shows, so returning to Book Wall renders nothing.
+    /// backdrop while another view shows, so returning to Book Wall renders nothing.
     private func renderWallBackdrop() {
         let key = wallBackdropKey
         guard key != renderedWallBackdrop, key.width > 0, key.height > 0 else { return }
@@ -151,6 +154,8 @@ struct ShelfView: View {
     /// filter, or the book last opened from that shelf, so Back from its details returns to it.
     /// `shelfFocus.last` keeps the book that opened the first details.
     @State private var detailFilterEntryID: Int?
+    /// Whether My Shelf is appearing beneath the closing shelf whose filter the reader cleared.
+    @State private var returnsFromClearedFilter = false
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
         case ambient
@@ -171,7 +176,6 @@ struct ShelfView: View {
                 "artworkReady": preparedArtwork == artworkKey,
                 "pagesReady": !preparedPages.isEmpty,
                 "pagesCurrent": shelfPagesAreReady,
-                "hasEnteredShelf": hasEnteredShelf,
                 "focusedBook": shelfFocus.focused ?? -1,
                 "requestedBook": bookFocusRequest?.id ?? -1,
                 "focusRequests": bookFocusRequest?.revision ?? 0,
@@ -202,10 +206,11 @@ struct ShelfView: View {
     }
 
     /// Maps sidebar selection to the coordinator. Only main views change `coordinator.current`.
-    private var sidebarSelection: Binding<SidebarItem> {
+    private var sidebarSelection: Binding<SidebarItem?> {
         Binding(
             get: { sidebarItem },
             set: { item in
+                guard let item else { return }
                 sidebarItem = item
                 if case .view(let view) = item { coordinator.current = view }
             })
@@ -227,31 +232,38 @@ struct ShelfView: View {
         coordinator.current = shown
     }
 
-    /// The tab hierarchy with its backgrounds and overlays.
-    private var tabs: some View {
-        TabView(selection: sidebarSelection) {
-            ForEach(sidebarViews) { view in
-                Tab(view.rawValue, systemImage: view.systemImage, value: SidebarItem.view(view)) {
-                    tabContent(for: view)
+    /// The sidebar and the selected destination, with their backgrounds and overlays.
+    private var shell: some View {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
+            List(selection: sidebarSelection) {
+                ForEach(sidebarViews) { view in
+                    sidebarRow(.view(view), view.rawValue, systemImage: view.systemImage)
                 }
+                sidebarRow(.ambient, "Ambient", systemImage: "play.rectangle")
+                sidebarRow(.settings, "Settings", systemImage: "gearshape")
             }
-            Tab("Ambient", systemImage: "play.rectangle", value: SidebarItem.ambient) {
-                ambientLauncher
+            .safeAreaInset(edge: .top) {
+                // The header sits outside the content that carries the environment value.
+                sidebarHeader.environment(\.artworkGeneration, artworkGeneration)
             }
-            Tab("Settings", systemImage: "gearshape", value: SidebarItem.settings) {
-                SettingsView(
-                    library: library, social: social, coordinator: coordinator,
-                    section: $settingsSection, onShowShelf: { showView(.shelf) },
-                    onSyncNow: {
-                        await library.refresh(manual: true)
-                        await loadSocial(manual: true)
-                    })
-            }
+            // The sidebar opens with focus on the selected row, not on its first row.
+            .defaultFocus($focusedSidebarItem, sidebarItem)
+        } detail: {
+            destination
+                // One instance per destination, so a view's state never carries into another.
+                .id(sidebarItem)
+                // tvOS 27 takes the destination out of the focus system while the sidebar is
+                // open. tvOS 26 leaves it in, so Right from a row level with a book would focus a
+                // far book before the closing sidebar moves focus to the entry item: two focus
+                // updates for one press.
+                .disabled(sidebarVisibility != .detailOnly)
         }
-        .tabViewStyle(.sidebarAdaptable)
+        // A view that mounts while the welcome popup animates in would take focus from it for
+        // good. Disabled content can't take focus; it takes it natively when the popup closes.
+        .disabled(isWelcomePresented)
         .background {
-            // Measured on every tab, so Book Wall can place its spine targets in its first
-            // render, before its renderer exists.
+            // Measured for every destination, so Book Wall can place its spine targets in its
+            // first render, before its renderer exists.
             Color.clear
                 .ignoresSafeArea()
                 .onGeometryChange(for: CGRect.self) { geometry in
@@ -275,10 +287,6 @@ struct ShelfView: View {
             }
         }
         .environment(\.artworkGeneration, artworkGeneration)
-        .tvOSSidebarHeader {
-            // The header sits outside the content that carries the environment value.
-            sidebarHeader.environment(\.artworkGeneration, artworkGeneration)
-        }
         .overlay { BookWallDetailOverlay(state: wallDetail, palette: palette) }
         .fullScreenCover(
             isPresented: detailFilterBinding(when: false), onDismiss: finishDetailFilter
@@ -318,6 +326,29 @@ struct ShelfView: View {
         }
     }
 
+    private func sidebarRow(_ item: SidebarItem, _ title: String, systemImage: String)
+        -> some View
+    {
+        NavigationLink(value: item) { Label(title, systemImage: systemImage) }
+            .focused($focusedSidebarItem, equals: item)
+    }
+
+    /// The selected sidebar item's page.
+    @ViewBuilder private var destination: some View {
+        switch sidebarItem {
+        case .view(let view): mainContent(for: view)
+        case .ambient: ambientLauncher
+        case .settings:
+            SettingsView(
+                library: library, social: social, coordinator: coordinator,
+                section: $settingsSection, onShowShelf: { showView(.shelf) },
+                onSyncNow: {
+                    await library.refresh(manual: true)
+                    await loadSocial(manual: true)
+                })
+        }
+    }
+
     /// Closes book details and the shelf they filtered once the example ends under them. A data
     /// change closes them, so focus goes where the focus engine places it, not back to the
     /// item that opened them (`restoreSelection()`).
@@ -330,7 +361,7 @@ struct ShelfView: View {
     }
 
     var body: some View {
-        // The tab hierarchy and these lifecycle modifiers are separate expressions; together
+        // The shell and these lifecycle modifiers are separate expressions; together
         // they exceed the type checker's time limit.
         welcomePresentation
             .fullScreenCover(isPresented: waitsForBookWall) {
@@ -414,6 +445,9 @@ struct ShelfView: View {
                 } else {
                     ambient.stop()
                 }
+                // An app left through the open sidebar would otherwise return with it open on
+                // tvOS 27, where the sidebar then holds focus.
+                if scenePhase == .background { sidebarVisibility = .detailOnly }
             }
             .task(id: artworkKey) { await prepareArtwork() }
             .onChange(of: voiceOver) {
@@ -477,7 +511,7 @@ struct ShelfView: View {
                     }
                 )
                 // A filter from these details covers them here; Book Wall's details, which
-                // aren't presented, use the cover on `tabs`.
+                // aren't presented, use the cover on `shell`.
                 .background {
                     Color.clear
                         .fullScreenCover(
@@ -516,8 +550,8 @@ struct ShelfView: View {
     /// Startup decides eligibility before the sheet appears. Choosing a source keeps the same
     /// presentation alive through authorization, download, and the first artwork preparation.
     private var welcomePresentation: some View {
-        tabs
-            .sheet(isPresented: $isWelcomePresented, onDismiss: finishWelcomeDismissal) {
+        shell
+            .sheet(isPresented: $isWelcomePresented, onDismiss: recordActivity) {
                 LibraryWelcomeView(
                     library: library,
                     isLibraryReady: {
@@ -545,16 +579,6 @@ struct ShelfView: View {
             .onChange(of: library.shouldOfferWelcome, initial: true) {
                 if library.shouldOfferWelcome { isWelcomePresented = true }
             }
-    }
-
-    private func finishWelcomeDismissal() {
-        recordActivity()
-        guard isShowingMainView, coordinator.current == .shelf else { return }
-        let entry = preparedPages.first?.books.first?.id ?? library.books.first?.id
-        if let entry {
-            hasEnteredShelf = true
-            requestBookFocus(shelfFocus.last ?? entry)
-        }
     }
 
     private func finishAmbientDismissal() {
@@ -761,40 +785,16 @@ struct ShelfView: View {
         }
     }
 
-    /// Prefetches covers and avatars for the active views, then moves focus into the first view
-    /// once. Kept out of `body`, whose modifier chain is near the type checker's time limit.
+    /// Prefetches covers and avatars for the active views. Kept out of `body`, whose modifier
+    /// chain is near the type checker's time limit.
     private func prepareArtwork() async {
         let key = artworkKey
         let preparation = await ArtworkStore.shared.prefetch(
             books: key.books, avatarURLs: key.avatarURLs)
         guard !Task.isCancelled, key == artworkKey else { return }
         for (id, ratio) in preparation.ratios { library.recordCoverRatio(ratio, for: id) }
-        let firstShelfEntry =
-            !hasEnteredShelf && !library.books.isEmpty && coordinator.current == .shelf
-        let firstPreparation = !hasPreparedArtwork
         preparedArtwork = key
         artworkGeneration &+= 1
-        // Later preparations keep content mounted and must not move focus.
-        if firstShelfEntry || firstPreparation {
-            DispatchQueue.main.async {
-                // A newer library can replace the prepared books before this focus transaction runs.
-                guard key == artworkKey, preparedArtwork == key else { return }
-                // Selecting a main view later moves focus into it natively.
-                guard isShowingMainView, selectedBook == nil, !ambient.isActive,
-                    !isWelcomePresented
-                else { return }
-                if coordinator.current == .shelf {
-                    guard
-                        let entry =
-                            preparedPages.first?.books.first?.id ?? library.books.first?.id
-                    else { return }
-                    hasEnteredShelf = true
-                    requestBookFocus(entry)
-                } else {
-                    socialReturnRevision += 1
-                }
-            }
-        }
         // Browsing covers follow the library's and don't wait for the retry below; a newer
         // preparation cancels this one and resumes after the covers already saved.
         _ = await ArtworkStore.shared.prefetchBrowsing(library.browsingCoverURLs)
@@ -854,8 +854,8 @@ struct ShelfView: View {
     }
 
     /// Names the example profile at the top of the screen, level with a view's title, without
-    /// taking focus; VoiceOver hears it from My Shelf's Connect Hardcover instead. The tabs and
-    /// each cover over them show it, since a full-screen cover hides the tabs' overlay.
+    /// taking focus; VoiceOver hears it from My Shelf's Connect Hardcover instead. The shell and
+    /// each cover over it show it, since a full-screen cover hides the shell's overlay.
     @ViewBuilder private var exampleCapsule: some View {
         if library.isExample {
             Text("Example profile")
@@ -872,8 +872,8 @@ struct ShelfView: View {
     }
 
     /// Presents the example's sign-in from the topmost presentation that shows Connect
-    /// Hardcover: the filtered shelf over details when `overDetailFilter`, otherwise the tabs. A
-    /// sheet on the tabs can't present while a full-screen cover is up.
+    /// Hardcover: the filtered shelf over details when `overDetailFilter`, otherwise the shell. A
+    /// sheet on the shell can't present while a full-screen cover is up.
     private func exampleConnectionBinding(overDetailFilter: Bool) -> Binding<Bool> {
         Binding(
             get: { connectsFromExample && showsDetailFilter == overDetailFilter },
@@ -901,7 +901,7 @@ struct ShelfView: View {
     }
 
     /// Presents the filtered shelf from cover details when `fromCoverDetails`, otherwise from
-    /// the tabs, over Book Wall's details. Only one of the two presents it at a time.
+    /// the shell, over Book Wall's details. Only one of the two presents it at a time.
     private func detailFilterBinding(when fromCoverDetails: Bool) -> Binding<Bool> {
         Binding(
             get: { showsDetailFilter && (selectedBook != nil) == fromCoverDetails },
@@ -920,6 +920,7 @@ struct ShelfView: View {
     /// way out.
     private func finishDetailFilter() {
         guard !showsDetailFilter else { return }
+        returnsFromClearedFilter = false
         filteredShelfBook = nil
         library.shelfFilter = nil
     }
@@ -929,7 +930,7 @@ struct ShelfView: View {
     // ponytail: one filter over the first details; chain further presentations if readers need
     // Back to step through every filter.
     private var filteredShelf: some View {
-        tabContent(for: .shelf, coversDetails: true)
+        mainContent(for: .shelf, coversDetails: true)
             .environment(\.artworkGeneration, artworkGeneration)
             .appTypography()
             .overlay(alignment: .top) { exampleCapsule }
@@ -979,10 +980,10 @@ struct ShelfView: View {
             library: library, social: social, preferences: coordinator.preferences)
     }
 
-    /// The content of `view`'s tab. With `coversDetails`, My Shelf shows over the details that
+    /// The page of the main view `view`. With `coversDetails`, My Shelf shows over the details that
     /// filtered it (`filteredShelf`).
     @ViewBuilder
-    private func tabContent(for view: BookwormsView, coversDetails: Bool = false) -> some View {
+    private func mainContent(for view: BookwormsView, coversDetails: Bool = false) -> some View {
         GeometryReader { geometry in
             let rowHeight = geometry.size.height * 0.60
             // Matches the shelf's horizontal padding and PagedRow's inner edge insets.
@@ -991,13 +992,14 @@ struct ShelfView: View {
                 revision: library.presentationRevision, fontRevision: library.fontRevision,
                 width: available, height: rowHeight)
             ZStack(alignment: .bottomTrailing) {
-                // The wall renders behind the TabView in a full-screen surface. Its tab
-                // stays transparent so sidebar chrome remains above the same 3D models.
+                // The wall renders behind the split view in a full-screen surface. Its page
+                // stays transparent so the sidebar remains above the same 3D models.
                 if view != .bookWall { WoodBackground(palette: palette) }
                 VStack(alignment: .leading, spacing: 0) {
                     if !hasPreparedArtwork {
                         ProgressView("Loading view…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .holdsFocus()
                     } else if view == .bookWall {
                         if let prepared = bookWallPreparation.prepared {
                             BookWallView(
@@ -1052,6 +1054,7 @@ struct ShelfView: View {
                             shelfRow(rowHeight: rowHeight, coversDetails: coversDetails)
                         } else {
                             ProgressView("Preparing shelf…").frame(height: rowHeight)
+                                .holdsFocus()
                         }
                         ShelfBoard(palette: palette)
                         selectionCaption.frame(height: 134, alignment: .topLeading)
@@ -1093,7 +1096,7 @@ struct ShelfView: View {
                     shelfPreparationKey.fontRevision == library.fontRevision
                 else { return }
                 requestedShelfPreparationKey = shelfPreparationKey
-                // Pages prepared for this key, as when the tab appears again, stay as they are.
+                // Pages prepared for this key, as when My Shelf appears again, stay as they are.
                 guard preparedShelf?.key != shelfPreparationKey else { return }
                 if !preparedPages.isEmpty {
                     do { try await activity.waitUntilQuiet() } catch { return }
@@ -1150,9 +1153,9 @@ struct ShelfView: View {
         }
     }
 
-    /// The Hardcover profile above the sidebar list. The photo centers on the rows' icons and the
-    /// name starts where their titles start; the name takes the sidebar's font, like the rows.
-    /// Offsets measured from the tvOS 27 sidebar on Apple TV.
+    /// The Hardcover profile above the sidebar's rows. The photo centers on the rows' icons and
+    /// the name starts where their titles start; the name takes the sidebar's font, like the rows.
+    /// Offsets measured from the tvOS 27 sidebar in the simulator.
     ///
     /// Without a profile, such as while signed out or after Hardcover rejects the login, the
     /// sidebar has no header. A reader without a photo gets their initial.
@@ -1173,6 +1176,7 @@ struct ShelfView: View {
                 Spacer()
             }
             .padding(.leading, 12)
+            .padding(.bottom, 30)
         }
     }
 
@@ -1375,6 +1379,7 @@ struct ShelfView: View {
             entryBookID: entryBookID,
             focusRequest: bookFocusRequest,
             presentationStyles: presentationStyles,
+            focusesEntryOnAppear: coversDetails || returnsFromClearedFilter,
             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[0],
             onFocus: { id in
                 shelfFocus.focus(id)
@@ -1399,6 +1404,7 @@ struct ShelfView: View {
     private func clearShelfFilter() {
         if showsDetailFilter {
             shelfFocus.last = detailFilterEntryID ?? shelfFocus.last
+            returnsFromClearedFilter = true
             showsDetailFilter = false
             filteredShelfBook = nil
             selectedBook = nil
@@ -1493,7 +1499,7 @@ private struct BookWallDetailOverlay: View {
     }
 }
 
-/// Places Back above the tab control, which tvOS draws outside the selected tab's content.
+/// Places Back above the collapsed sidebar, which tvOS draws outside the selected view's page.
 private struct BookWallDetailNavigationCover: View {
     let palette: ShelfPalette
     let detailFrame: CGRect
@@ -1504,7 +1510,7 @@ private struct BookWallDetailNavigationCover: View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 if !PerformanceDiagnostics.isolates("wall-no-detail-corner") {
-                    // The wood sample covers the floating tab pill only while details are open.
+                    // The wood sample covers the collapsed sidebar only while details are open.
                     // Darken it like the detail wall image near the top of the frame.
                     WoodBackground(palette: palette)
                         .frame(width: geometry.size.width, height: geometry.size.height)
@@ -1984,10 +1990,11 @@ struct ShelfFocusReader<Content: View>: View {
 
 /// Presents prepared shelf pages as one paged row of book buttons.
 ///
-/// Native focus handles movement within and between pages. The row assigns focus only when it
-/// appears and when `focusRequest` changes, such as after returning from book details. Focus that
-/// enters the row from another section lands on `entryBookID`. When `entryColumn` is set, focus
-/// instead lands on that position within the page containing `entryBookID`.
+/// Native focus handles movement within and between pages. The row assigns focus only when
+/// `focusRequest` changes, such as after returning from book details, and, with
+/// `focusesEntryOnAppear`, when it appears. Focus that enters the row lands on `entryBookID`.
+/// When `entryColumn` is set, focus instead lands on that position within the page containing
+/// `entryBookID`.
 struct ShelfRow: View {
     let library: LibraryModel
     let pages: [ShelfPage]
@@ -1997,7 +2004,11 @@ struct ShelfRow: View {
     var entryColumn: Int?
     let focusRequest: ShelfBookFocusRequest?
     let presentationStyles: [Int: SpineStyle]
-    var activatesOnAppear = true
+    /// Whether the row focuses its entry book when it appears. Set it for a row that appears in
+    /// a presentation or beneath a closing one, such as the shelf that covers book details and
+    /// My Shelf when that shelf's filter is cleared: tvOS 26 ignores `defaultFocus` when a
+    /// presentation opens or closes. A row that the sidebar opens never needs it.
+    var focusesEntryOnAppear = false
     var emptySpacePhoto: String?
     let onFocus: (Int?) -> Void
     let onSelect: (Book) -> Void
@@ -2041,13 +2052,7 @@ struct ShelfRow: View {
         .focusSection()
         .defaultFocus($focusedBook, entryID, priority: .userInitiated)
         .onChange(of: focusedBook) { onFocus(focusedBook) }
-        .onAppear {
-            if activatesOnAppear { focusedBook = entryID }
-        }
-        .task {
-            // Focus can be unavailable during the first appearance pass.
-            if activatesOnAppear && focusedBook == nil { focusedBook = entryID }
-        }
+        .onAppear { if focusesEntryOnAppear { focusedBook = entryID } }
         .onChange(of: focusRequest) { _, request in
             guard let request, contains(request.id) else { return }
             focusedBook = request.id
@@ -2095,14 +2100,10 @@ struct ShelfRow: View {
 }
 
 extension View {
-    @ViewBuilder
-    fileprivate func tvOSSidebarHeader<Content: View>(@ViewBuilder _ content: () -> Content)
-        -> some View
-    {
-        if #available(tvOS 27.0, *) {
-            self.tabViewSidebarHeader(content: content)
-        } else {
-            self
-        }
+    /// Lets a page's only content take focus when it has no control, such as a progress view or
+    /// an empty-state message. Left and Back open the sidebar from the focused item, so a page
+    /// with nothing focusable would leave the sidebar unreachable and Back would leave the app.
+    func holdsFocus() -> some View {
+        focusable()
     }
 }
