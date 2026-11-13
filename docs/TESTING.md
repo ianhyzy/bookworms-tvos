@@ -34,7 +34,7 @@ When every step passes, the script writes `premerge/<commit>.json` to the reposi
 
 Before a change to how the app looks or moves merges, run `python3 scripts/visual-check.py`, with the Bash sandbox off. It maps the files changed against `origin/main` to views, builds the base commit and the head commit in Debug, and launches each on one slim Apple TV simulator at 1080p, which it creates and deletes. It turns off Device Hub's tvOS sound first, as the test runner does, and starts no simulator when ten are booted or less than 15 percent of memory is free. The script stops with an error when a launch saves no screenshot. A change that touches no view prints `SKIP` and needs no check.
 
-`RULES` in the script maps changed files to views, and `python3 scripts/visual-check.py --list` prints the views a change touches. A file that matches no rule still counts as a view when it is under `Views/`, is a shader or an asset, or has a name that suggests drawing code. `SHOTS` holds each view's launches; add a view's launches there.
+`RULES` in the script maps changed files to views, and `python3 scripts/visual-check.py --list` prints the views a change touches. A file that matches no rule still counts as a view when it is under `Views/`, is a shader or an asset, or is a model whose name suggests drawing code, such as `BookPresentation`. `SHOTS` holds each view's launches; add a view's launches there.
 
 | View | Launches |
 | --- | --- |

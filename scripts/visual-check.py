@@ -56,7 +56,7 @@ SURFACES = {
 EVERY_VIEW = [name for name in SURFACES if name != "other"]
 # A changed file under Bookworms/, BookwormsTopShelf/, or Shared/ whose path matches a pattern
 # touches those views. A file that matches no pattern touches "other" when it is under Views/,
-# is a shader or an asset, or has a name that suggests drawing code (`DRAWS`).
+# is a shader or an asset, or is a model whose name suggests drawing code (`DRAWS`).
 RULES = [
     (r"Views/ShelfView|Views/ShelfControls|Models/ShelfLayout", ["shelf", "details"]),
     (r"Views/BookDetailView|Views/RatingsView", ["details"]),
@@ -72,7 +72,7 @@ RULES = [
     (r"Views/CoverView|Views/BookText|Views/SpineView|Models/SpineStyle|Models/BookPresentation"
      r"|Models/AppAppearance|Models/ViewPreferences|BookwormsApp\.swift|\.xcassets/", EVERY_VIEW),
 ]
-DRAWS = r"/Views/|\.metal$|\.xcassets/|Presentation|Layout|Style|Appearance|Spine|Cover|Artwork|Font|Color"
+DRAWS = r"/Views/|\.metal$|\.xcassets/|/Models/.*(Presentation|Layout|Style|Appearance|Spine)"
 
 
 @dataclass
