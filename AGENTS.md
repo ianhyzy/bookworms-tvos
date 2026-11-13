@@ -34,6 +34,8 @@ Run commands from the repository root:
 | Check formatting on an edited file | `xcrun swift-format lint --strict path/to/ChangedFile.swift` |
 | Compile for the simulator | `xcodebuild -project Bookworms.xcodeproj -scheme Bookworms -destination 'generic/platform=tvOS Simulator' -derivedDataPath .build-compilecheck build CODE_SIGNING_ALLOWED=NO -quiet` |
 | Run a test plan | `python3 scripts/test-worker.py --detach`, with `--profile unit` for the Unit plan or `--profile major` for the runtime matrix |
+| Check a commit before its pull request merges | `python3 scripts/premerge.py`; see [the pre-merge check](docs/TESTING.md#pre-merge-check) |
+| Capture the views a change touches, before and after | `python3 scripts/visual-check.py`; see [the visual check](docs/TESTING.md#visual-check) |
 | Build and install on the Apple TV (when the owner asks, outside TV quiet hours) | `python3 scripts/device-build.py` |
 
 `device-build.py` reads the Apple TV UDID and team ID from the ignored `.local/device-build.json` (`{"device": "…", "team": "…"}`) when `--device` and `--team` are omitted.
