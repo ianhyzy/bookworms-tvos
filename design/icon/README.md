@@ -14,7 +14,7 @@ blender -b -P design/icon/bookworms.py
 
 It writes three images with transparent backgrounds into `layers/`:
 
-- `tv-book.png` and `tv-worms.png`, 1280 × 768: the Apple TV icon's front and middle layers. The book runs past the bottom and both sides of the frame, so parallax never shows one of its edges.
+- `tv-book.png` and `tv-worms.png`, 1280 × 768: the Apple TV icon's front and middle layers. The book runs past the bottom and both sides of the frame, which crops it.
 - `shelf.png`, 4640 × 1440: the worms and the book in one image for the Top Shelf fallback, with a wider book.
 
 For the iPhone and Mac icon, pass a folder, such as the `ios` repository's `Bookworms/AppIcon.icon/Assets`:

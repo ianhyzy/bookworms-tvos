@@ -27,7 +27,7 @@ FRAMINGS = {
     "square": dict(book=(2.2, 1.45), fold=20, drop=0, spread=0, width=2.75, size=(1024, 1024),
                    layers={"worms": {"worms"}, "eyes": {"eyes"}, "face": {"face"}, "book": {"book"}}),
     # The landscape framings lay the book flatter and lower so that it doesn't dominate, and run it
-    # past the bottom and both sides so that parallax never shows one of its edges.
+    # past the bottom and both sides, so that the frame crops it and its own edges stay out of view.
     "tv": dict(book=(3.0, 2.0), fold=9, drop=0.16, spread=0.09, width=4.6, size=(1280, 768),
                layers={"tv-worms": {"worms", "eyes", "face"}, "tv-book": {"book"}}),
     "shelf": dict(book=(5.8, 2.0), fold=9, drop=0.16, spread=0.09, width=8.9, size=(4640, 1440),
@@ -198,6 +198,7 @@ def worm(name, pts, R, mats, look_at):
     for r0, r1 in zip(rings, rings[1:]):
         for k in range(SIDES):
             bm.faces.new((r0[k], r0[(k + 1) % SIDES], r1[(k + 1) % SIDES], r1[k]))
+    # The tail end stays open: it starts behind the book, which hides it in every framing.
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
