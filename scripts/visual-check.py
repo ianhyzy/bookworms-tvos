@@ -15,8 +15,8 @@ images, not video. The app shows the owner's real library from an exported examp
 stays in the ignored `.local/visual-check/` folder: never commit or publish it.
 
 The bundle's `REVIEW.md` gives a reviewing agent the images and a fixed list of questions.
-After the agent reports `VERDICT: pass`, `--record pass` writes the visual-check marker that the
-workspace's merge gate needs for a commit that touches a view. docs/TESTING.md, Visual check,
+After the agent reports `VERDICT: pass`, `--record pass` writes the visual-check marker, the
+record that the commit was checked; the workspace's merge gate doesn't require it. docs/TESTING.md, Visual check,
 describes the review step and what the check can't judge.
 
 Run it with the Bash sandbox off, because xcodebuild can't reach the Metal toolchain inside it.

@@ -14,7 +14,8 @@ A change that touches only documentation (Markdown files, docs/, and LICENSE) sk
 build, and test. When every step passes, the script writes `premerge/<commit>.json` in the
 repository's shared Git folder, which all worktrees use. The workspace's merge gate refuses
 `gh pr merge` for a head commit without that file. The file also lists the views the change
-touches (scripts/visual-check.py --list); a commit that touches any needs a visual check too.
+touches (scripts/visual-check.py --list), and the last line names the visual check for a commit
+that touches any; the gate doesn't require that check.
 
 Run it with the Bash sandbox off, because xcodebuild can't reach the Metal toolchain inside it.
 Exit codes: 0 pass, 1 fail.
