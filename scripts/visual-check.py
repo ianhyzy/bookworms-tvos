@@ -10,8 +10,8 @@
 The script maps the files changed between the base and HEAD to views (`RULES`), builds both
 commits for the Apple TV simulator, and runs each view's launches (`SHOTS`) on one slim
 simulator that it creates and deletes. Each launch saves a screenshot, and a launch with motion
-also saves a short recording, reduced to a strip of frames, because agents read images, not
-video. The app shows the owner's real library from an exported example profile, so the bundle
+also saves a short recording, reduced to twelve frames in one image, because agents read
+images, not video. The app shows the owner's real library from an exported example profile, so the bundle
 stays in the ignored `.local/visual-check/` folder: never commit or publish it.
 
 The bundle's `REVIEW.md` gives a reviewing agent the images and a fixed list of questions.
@@ -24,8 +24,10 @@ The check can't judge taste, performance, or focus behavior on a physical Apple 
 Run it with the Bash sandbox off, because xcodebuild can't reach the Metal toolchain inside it.
 """
 import argparse
+import bisect
 import datetime
 import importlib.util
+import itertools
 import json
 import re
 import shutil
@@ -186,23 +188,37 @@ def create_simulator(name, log):
     return simulator
 
 
-def frame_strip(clip, strip, scratch):
-    """Reduces a recording to eight evenly spaced frames among those where the picture changed."""
-    frames = scratch / "frames"
+def motion_strip(clip, strip, scratch, tiles="3x4", scale="640:-2"):
+    """Reduces a recording to twelve frames in one image, then halves the recording's size.
+
+    The frames are spaced by how much the picture changes, not by time, so most of them show
+    the motion and few show a loading screen or a still view. ffmpeg's scene score measures the
+    change from the frame before; a cut counts no more than a fast frame of motion (0.02), and
+    change below 0.001, such as a spinner, counts as none.
+    """
     shutil.rmtree(scratch, ignore_errors=True)
-    frames.mkdir(parents=True)
-    quiet(["ffmpeg", "-loglevel", "error", "-i", clip, "-vf", "fps=10,mpdecimate,scale=640:-2",
-           "-fps_mode", "vfr", frames / "%05d.png"])
-    found = sorted(frames.glob("*.png"))
-    if not found:
-        return False
-    chosen = [found[round(index * (len(found) - 1) / 7)] for index in range(8)]
-    for index, frame in enumerate(chosen):
-        shutil.copy(frame, scratch / f"{index}.png")
-    quiet(["ffmpeg", "-loglevel", "error", "-y", "-i", scratch / "%d.png", "-vf", "tile=2x4",
-           "-frames:v", "1", strip])
+    scratch.mkdir(parents=True)
+    quiet(["ffmpeg", "-loglevel", "error", "-i", clip, "-vf",
+           f"fps=10,scale={scale},select='gte(scene,0)',metadata=print:file=scores.txt",
+           "-fps_mode", "vfr", "-q:v", "4", "%05d.jpg"], cwd=scratch)
+    frames = sorted(scratch.glob("*.jpg"))
+    scores = [min(max(float(score) - 0.001, 0), 0.02)
+              for score in re.findall(r"scene_score=([\d.]+)", (scratch / "scores.txt").read_text())]
+    if frames and len(scores) == len(frames):
+        if not sum(scores):
+            scores = [1] * len(frames)
+        moved = list(itertools.accumulate(scores))
+        for index in range(12):
+            frame = frames[bisect.bisect_left(moved, moved[-1] * (index + 0.5) / 12)]
+            shutil.copy(frame, scratch / f"{index}.jpg")
+        quiet(["ffmpeg", "-loglevel", "error", "-y", "-i", scratch / "%d.jpg", "-vf", f"tile={tiles}",
+               "-frames:v", "1", strip])
     shutil.rmtree(scratch, ignore_errors=True)
-    return strip.exists()
+    small = clip.with_suffix(".small.mp4")
+    quiet(["ffmpeg", "-loglevel", "error", "-y", "-i", clip, "-vf", "scale=trunc(iw/4)*2:-2", "-an",
+           "-crf", "30", small])
+    if small.exists():
+        small.replace(clip)
 
 
 def capture(simulator, shot, book, prefix):
@@ -221,7 +237,7 @@ def capture(simulator, shot, book, prefix):
     if recorder:
         recorder.send_signal(signal.SIGINT)
         recorder.wait(timeout=60)
-        frame_strip(clip, prefix.with_name(prefix.name + "-motion.png"), prefix.with_name("scratch"))
+        motion_strip(clip, prefix.with_name(prefix.name + "-motion.png"), prefix.with_name("scratch"))
     quiet(["xcrun", "simctl", "terminate", simulator, BUNDLE_ID])
 
 
@@ -245,7 +261,8 @@ def review_brief(manifest):
         "don't copy them anywhere or quote book lists. For each shot, answer the questions that",
         "apply with PASS, FAIL, or CAN'T TELL and one line of evidence that names the image and",
         "the place in it. In a pair image, before is on the left and after is on the right. A",
-        "motion image holds eight frames of one launch in time order, left to right, then down.",
+        "motion image holds twelve frames of one launch in time order, left to right, then down,",
+        "chosen where the picture changes most, so they aren't evenly spaced in time.",
         "Judge the after images against the questions, and use the before images to find what",
         "changed. Don't judge taste, and don't guess: a detail too small to see is CAN'T TELL.", "",
         "End with a list of regressions (or \"none\"), then one line: `VERDICT: pass` when no",
