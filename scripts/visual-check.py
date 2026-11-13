@@ -36,6 +36,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import premerge
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = Path(__file__).resolve().parent.relative_to(ROOT)
 BUNDLE_ID = "gay.ian.Bookworms"
@@ -148,11 +150,15 @@ def example_profile(main):
 
 
 def build(sha, profile, work, log):
-    """Builds the Debug simulator app of commit `sha` with the example profile and returns it."""
+    """Builds the Debug simulator app of commit `sha` with the example profile and returns it.
+
+    A marker file records a finished build, so a run never reuses one that was interrupted.
+    """
     products = work / "build" / sha[:9]
     app = products / "Build/Products/Debug-appletvsimulator/Bookworms.app"
-    if app.exists():
+    if (products / ".built").exists():
         return app
+    shutil.rmtree(products, ignore_errors=True)
     source = work / "source" / sha[:9]
     shutil.rmtree(source, ignore_errors=True)
     source.mkdir(parents=True)
@@ -167,12 +173,13 @@ def build(sha, profile, work, log):
         cwd=source, stdout=log, stderr=subprocess.STDOUT)
     if built.returncode != 0 or not app.exists():
         sys.exit(f"The build of {sha[:9]} failed; log {log.name}")
+    (products / ".built").touch()
     return app
 
 
-def sibling(name):
-    """Loads another script of this folder as a module; their hyphenated names can't be imported."""
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), Path(__file__).with_name(name + ".py"))
+def test_runner():
+    """Loads scripts/test-local.py as a module; its hyphenated name can't be imported."""
+    spec = importlib.util.spec_from_file_location("test_local", Path(__file__).with_name("test-local.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -184,7 +191,7 @@ def create_simulator(name, runner):
     Stops first when one more simulator would break the workspace's simulator limits, and
     turns off Device Hub's tvOS sound as the test runner (`runner`) does.
     """
-    limit = sibling("premerge").simulator_limit()
+    limit = premerge.simulator_limit()
     if limit:
         sys.exit(f"No simulator started: {limit}.")
     runner.mute_simulator_audio()
@@ -315,6 +322,25 @@ def record(verdict, note):
         print("Not captured, so check by hand: " + ", ".join(SURFACES[name] for name in manifest["not_captured"]))
 
 
+def capture_on_apple_tv(apps, shots, book, bundle):
+    """Runs the launches of both builds on one slim simulator, created and deleted here."""
+    runner = test_runner()
+    simulator = create_simulator(f"visual-check-{bundle.name}", runner)
+    try:
+        # The app loads covers and fonts over the network and draws with Metal; neither needs a
+        # simslim category.
+        runner.boot_simulator(simulator)
+        for label, app in apps.items():
+            quiet(["xcrun", "simctl", "uninstall", simulator, BUNDLE_ID])
+            quiet(["xcrun", "simctl", "install", simulator, app])
+            for surface, shot in shots:
+                print(f"capturing {label} {surface} {shot.name}", flush=True)
+                capture(simulator, shot, book, bundle / f"{surface}-{shot.name}-{label}")
+    finally:
+        quiet(["xcrun", "simctl", "shutdown", simulator])
+        quiet(["xcrun", "simctl", "delete", simulator])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--base", default="origin/main", help="commit to compare with (default: origin/main)")
@@ -357,43 +383,29 @@ def main():
     bundle = work / head[:9]
     shutil.rmtree(bundle, ignore_errors=True)
     bundle.mkdir(parents=True)
-    captured = [name for name in surfaces if name in SHOTS]
-    missing = []
+    shots = [(surface, shot) for surface in surfaces for shot in SHOTS.get(surface, [])]
     manifest = {"head": head, "base": base, "surfaces": surfaces, "files": files, "shots": [],
                 "commits": git("log", "--format=%s", f"{base}..{head}").splitlines(),
                 "not_captured": [name for name in surfaces if name not in SHOTS]}
-    if captured:
-        with (bundle / "capture.log").open("w") as log:
-            apps = {"before": build(base, profile, work, log), "after": build(head, profile, work, log)}
-            runner = sibling("test-local")
-            simulator = create_simulator(f"visual-check-{head[:9]}", runner)
-            try:
-                # The app loads covers and fonts over the network and draws with Metal; neither
-                # needs a simslim category.
-                runner.boot_simulator(simulator)
-                for label, app in apps.items():
-                    quiet(["xcrun", "simctl", "uninstall", simulator, BUNDLE_ID])
-                    quiet(["xcrun", "simctl", "install", simulator, app])
-                    for surface in captured:
-                        for shot in SHOTS[surface]:
-                            print(f"capturing {label} {surface} {shot.name}", flush=True)
-                            capture(simulator, shot, book, bundle / f"{surface}-{shot.name}-{label}")
-            finally:
-                quiet(["xcrun", "simctl", "shutdown", simulator])
-                quiet(["xcrun", "simctl", "delete", simulator])
-        for surface in captured:
-            for shot in SHOTS[surface]:
-                stem = f"{surface}-{shot.name}"
-                images = [f"{stem}-before.png", f"{stem}-after.png", f"{stem}-pair.png",
-                          f"{stem}-before-motion.png", f"{stem}-after-motion.png"]
-                pair(bundle / images[0], bundle / images[1], bundle / images[2])
-                manifest["shots"].append({"platform": PLATFORM, "surface": surface, "name": shot.name,
-                                          "images": [image for image in images if (bundle / image).exists()]})
-                if not all((bundle / image).exists() for image in images[:2]):
-                    missing.append(f"{surface} {shot.name}")
+    try:
+        if shots:
+            with (bundle / "capture.log").open("w") as log:
+                apps = {"before": build(base, profile, work, log), "after": build(head, profile, work, log)}
+            capture_on_apple_tv(apps, shots, book, bundle)
+    finally:
         if not arguments.keep_builds:
             shutil.rmtree(work / "build", ignore_errors=True)
             shutil.rmtree(work / "source", ignore_errors=True)
+    missing = []
+    for surface, shot in shots:
+        stem = f"{surface}-{shot.name}"
+        images = [f"{stem}-before.png", f"{stem}-after.png", f"{stem}-pair.png",
+                  f"{stem}-before-motion.png", f"{stem}-after-motion.png"]
+        pair(bundle / images[0], bundle / images[1], bundle / images[2])
+        manifest["shots"].append({"platform": PLATFORM, "surface": surface, "name": shot.name,
+                                  "images": [image for image in images if (bundle / image).exists()]})
+        if not all((bundle / image).exists() for image in images[:2]):
+            missing.append(f"{surface} {shot.name}")
     if missing:
         sys.exit(f"The capture failed for {', '.join(missing)}; log {bundle / 'capture.log'}")
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

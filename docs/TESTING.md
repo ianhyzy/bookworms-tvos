@@ -23,7 +23,7 @@ Run `python3 scripts/premerge.py` on a pull request's head commit before it merg
 | `tree` | The working tree has no uncommitted or untracked files, at the start and at the end, so the pass names one commit. |
 | `lint` | `xcrun swift-format lint --strict` on the Swift files changed against the base, with the repository's `.swift-format`. |
 | `build Apple TV` | A Release build of the `BookwormsDevice` scheme for the Apple TV simulator, which compiles the code that Debug-only hooks leave out. |
-| `test` | The Unit plan through `scripts/test-local.py`, on the one slim simulator that the runner creates and deletes. The step fails without starting a simulator when ten are booted or less than 15 percent of memory is free. |
+| `test` | The Unit plan through `scripts/test-local.py`, on the one slim simulator that the runner creates and deletes. The step fails without starting a simulator when ten are booted (four without simslim) or less than 15 percent of memory is free. |
 | `links` | Every relative link in the changed Markdown files leads to a file. |
 
 A change that touches only Markdown files, `docs/`, and `LICENSE` skips `lint`, `build Apple TV`, and `test`. `--base BRANCH` compares with another branch than `origin/main`.
@@ -32,7 +32,7 @@ When every step passes, the script writes `premerge/<commit>.json` to the reposi
 
 ## Visual check
 
-Before a change to how the app looks or moves merges, run `python3 scripts/visual-check.py`, with the Bash sandbox off. It maps the files changed against `origin/main` to views, builds the base commit and the head commit in Debug, and launches each on one slim Apple TV simulator at 1080p, which it creates and deletes. It turns off Device Hub's tvOS sound first, as the test runner does, and starts no simulator when ten are booted or less than 15 percent of memory is free. The script stops with an error when a launch saves no screenshot. A change that touches no view prints `SKIP` and needs no check.
+Before a change to how the app looks or moves merges, run `python3 scripts/visual-check.py`, with the Bash sandbox off. It maps the files changed against `origin/main` to views, builds the base commit and the head commit in Debug, and launches each on one slim Apple TV simulator at 1080p, which it creates and deletes. It turns off Device Hub's tvOS sound first, as the test runner does, and starts no simulator when ten are booted (four without simslim) or less than 15 percent of memory is free. The script stops with an error when a launch saves no screenshot. A change that touches no view prints `SKIP` and needs no check.
 
 `RULES` in the script maps changed files to views, and `python3 scripts/visual-check.py --list` prints the views a change touches. A file that matches no rule still counts as a view when it is under `Views/`, is a shader or an asset, or is a model whose name suggests drawing code, such as `BookPresentation`. `SHOTS` holds each view's launches; add a view's launches there.
 

@@ -84,7 +84,8 @@ def simulator_limit():
     """
     booted = subprocess.run(["xcrun", "simctl", "list", "devices", "booted"],
                             capture_output=True, text=True).stdout.count("(Booted)")
-    if booted >= 10:
+    # Without simslim the new simulator boots stock, and the limit for stock ones is four.
+    if booted >= (10 if shutil.which("simslim") else 4):
         return f"{booted} simulators are already booted"
     pressure = subprocess.run(["memory_pressure", "-Q"], capture_output=True, text=True).stdout
     free = re.search(r"free percentage: (\d+)%", pressure)
