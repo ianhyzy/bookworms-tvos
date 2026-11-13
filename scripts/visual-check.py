@@ -16,11 +16,9 @@ stays in the ignored `.local/visual-check/` folder: never commit or publish it.
 
 The bundle's `REVIEW.md` gives a reviewing agent the images and a fixed list of questions.
 After the agent reports `VERDICT: pass`, `--record pass` writes the visual-check marker that the
-workspace's merge gate needs for a commit that touches a view. A touched view without launches
-is listed as not captured; check it by hand. The pair images also serve as the before-and-after
-sample sheet for the owner's styling approval, which this check doesn't replace.
+workspace's merge gate needs for a commit that touches a view. docs/TESTING.md, Visual check,
+describes the review step and what the check can't judge.
 
-The check can't judge taste, performance, or focus behavior on a physical Apple TV.
 Run it with the Bash sandbox off, because xcodebuild can't reach the Metal toolchain inside it.
 """
 import argparse
@@ -57,13 +55,15 @@ SURFACES = {
 }
 EVERY_VIEW = [name for name in SURFACES if name != "other"]
 # A changed file under Bookworms/, BookwormsTopShelf/, or Shared/ whose path matches a pattern
-# touches those views. A file under Views/, a shader, or an asset that matches no pattern
-# touches "other".
+# touches those views. A file that matches no pattern touches "other" when it is under Views/,
+# is a shader or an asset, or has a name that suggests drawing code (`DRAWS`).
 RULES = [
     (r"Views/ShelfView|Views/ShelfControls|Models/ShelfLayout", ["shelf", "details"]),
     (r"Views/BookDetailView|Views/RatingsView", ["details"]),
     (r"YearInReview", ["yearInReview"]),
-    (r"BookWall|SeriesDesigns|GoogleFontLibrary|SpineText|HouseOfLeaves", ["bookWall"]),
+    (r"BookWall|HouseOfLeaves", ["bookWall"]),
+    # Spine lettering and series looks draw on shelf spines, in details, and on Book Wall.
+    (r"SpineText|SeriesDesigns|GoogleFontLibrary", ["shelf", "details", "bookWall"]),
     (r"Views/SettingsView", ["settings"]),
     (r"SocialViews|ComparisonBookshelf|SocialPresentation", ["social"]),
     (r"Ambient", ["ambient"]),
@@ -72,6 +72,7 @@ RULES = [
     (r"Views/CoverView|Views/BookText|Views/SpineView|Models/SpineStyle|Models/BookPresentation"
      r"|Models/AppAppearance|Models/ViewPreferences|BookwormsApp\.swift|\.xcassets/", EVERY_VIEW),
 ]
+DRAWS = r"/Views/|\.metal$|\.xcassets/|Presentation|Layout|Style|Appearance|Spine|Cover|Artwork|Font|Color"
 
 
 @dataclass
@@ -108,13 +109,11 @@ QUESTIONS = """\
 5. **Motion.** In a motion strip, does each frame follow from the one before, with no jump, no
    pop, and no book passing through another? Does a pulled book come straight out toward the
    viewer?
-6. **Focus.** On the Apple TV, is exactly one item visibly focused, and is the sidebar closed
-   at launch?
+6. **Focus.** Is exactly one item visibly focused, and is the sidebar closed at launch? When
+   you can't see which item is focused, answer CAN'T TELL.
 7. **Nothing clipped or overlapping.** Does all text and every control sit inside its container
    and the screen, with no text over other text?
-8. **Mac layout.** In a Mac window, does the layout suit the sidebar and the wide window, with no
-   stretched lines of text or large empty areas?
-9. **No eyebrow labels.** Did the change add small, tracked, all-caps text above a title?
+8. **No eyebrow labels.** Did the change add small, tracked, all-caps text above a title?
 """
 
 
@@ -133,7 +132,7 @@ def touched(files):
         if not re.match(r"(Bookworms|BookwormsTopShelf|Shared)/", name):
             continue
         matched = [view for pattern, views in RULES if re.search(pattern, name) for view in views]
-        if not matched and re.search(r"/Views/|\.metal$|\.xcassets/", name):
+        if not matched and re.search(DRAWS, name):
             matched = ["other"]
         found.update(matched)
     return [name for name in SURFACES if name in found]
@@ -157,8 +156,9 @@ def build(sha, profile, work, log):
     source = work / "source" / sha[:9]
     shutil.rmtree(source, ignore_errors=True)
     source.mkdir(parents=True)
-    archive = subprocess.Popen(["git", "archive", sha], cwd=ROOT, stdout=subprocess.PIPE)
-    subprocess.run(["tar", "-x", "-C", str(source)], stdin=archive.stdout, check=True)
+    exported = quiet(["git", "archive", "--output", source / "source.tar", sha], cwd=ROOT)
+    if exported.returncode != 0 or quiet(["tar", "-xf", source / "source.tar", "-C", source]).returncode != 0:
+        sys.exit(f"Couldn't export the source of {sha[:9]}: {exported.stderr.strip()}")
     shutil.copytree(profile, source / "ExampleProfile", dirs_exist_ok=True)
     built = subprocess.run([
         "xcodebuild", "-quiet", "-project", "Bookworms.xcodeproj", "-scheme", "Bookworms",
@@ -178,29 +178,23 @@ def sibling(name):
     return module
 
 
-def create_simulator(name, log):
-    """Creates and boots one slim Apple TV simulator on the newest tvOS runtime.
+def create_simulator(name, runner):
+    """Creates, without booting it, one Apple TV simulator at 1080p on the newest tvOS runtime.
 
     Stops first when one more simulator would break the workspace's simulator limits, and
-    turns off Device Hub's tvOS sound as the test runner does.
+    turns off Device Hub's tvOS sound as the test runner (`runner`) does.
     """
     limit = sibling("premerge").simulator_limit()
     if limit:
         sys.exit(f"No simulator started: {limit}.")
-    sibling("test-local").mute_simulator_audio()
-    listing = json.loads(quiet(["xcrun", "simctl", "list", "--json", "runtimes"]).stdout)
-    runtime = max((runtime for runtime in listing["runtimes"]
-                   if runtime["isAvailable"] and runtime["platform"] == "tvOS"),
-                  key=lambda runtime: tuple(map(int, runtime["version"].split("."))))
-    device = next(device for device in runtime["supportedDeviceTypes"] if "1080p" in device["identifier"])
-    simulator = quiet(["xcrun", "simctl", "create", name, device["identifier"], runtime["identifier"]]).stdout.strip()
-    # The app loads covers and fonts over the network and draws with Metal; neither needs a
-    # simslim category. If slimming fails or simslim is missing, the simulator boots stock.
-    if not shutil.which("simslim") or subprocess.run(["simslim", "on", simulator], stdout=log, stderr=log).returncode:
-        quiet(["simslim", "off", simulator])
-        quiet(["xcrun", "simctl", "boot", simulator])
-    quiet(["xcrun", "simctl", "bootstatus", simulator, "-b"])
-    return simulator
+    runner.mute_simulator_audio()
+    inventory = json.loads(quiet(["xcrun", "simctl", "list", "--json"]).stdout)
+    runtime = runner.select_runtimes(inventory, None)[0][1]
+    device = next((device for device in inventory["devicetypes"]
+                   if "Apple-TV-4K-3rd-generation-1080p" in device["identifier"]), None)
+    if not runtime or not device:
+        sys.exit("No tvOS runtime or Apple TV 4K (at 1080p) device type is installed.")
+    return quiet(["xcrun", "simctl", "create", name, device["identifier"], runtime["identifier"]]).stdout.strip()
 
 
 def motion_strip(clip, strip, scratch, tiles="3x4", scale="640:-2"):
@@ -371,8 +365,12 @@ def main():
     if captured:
         with (bundle / "capture.log").open("w") as log:
             apps = {"before": build(base, profile, work, log), "after": build(head, profile, work, log)}
-            simulator = create_simulator(f"visual-check-{head[:9]}", log)
+            runner = sibling("test-local")
+            simulator = create_simulator(f"visual-check-{head[:9]}", runner)
             try:
+                # The app loads covers and fonts over the network and draws with Metal; neither
+                # needs a simslim category.
+                runner.boot_simulator(simulator)
                 for label, app in apps.items():
                     quiet(["xcrun", "simctl", "uninstall", simulator, BUNDLE_ID])
                     quiet(["xcrun", "simctl", "install", simulator, app])
@@ -408,4 +406,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # A stopped run still deletes its simulator.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     main()

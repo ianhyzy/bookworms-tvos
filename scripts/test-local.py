@@ -368,6 +368,32 @@ def simulator_name(output):
     return "Bookworms tests " + output.parent.name
 
 
+def boot_simulator(device):
+    """Boots a new simulator, slim when simslim is installed, and waits until it is ready.
+
+    Returns "full" for a slim boot, "failed" when slimming failed and the simulator booted stock
+    instead, and None without simslim.
+    """
+    slimmed = None
+    if shutil.which("simslim"):
+        # Boots the new simulator with every simslim category off. The offline tests replace
+        # CloudKit with fakes, use the local keychain, and call no on-device models, so they
+        # need neither the icloud nor the siri category.
+        try:
+            run(["simslim", "on", device], capture_output=True, text=True)
+            slimmed = "full"
+        except subprocess.CalledProcessError:
+            # simslim may have persisted some disables before failing, and `simctl erase` keeps
+            # them. `simslim off` re-enables every daemon and boots the stock simulator; if it
+            # fails too, the run fails rather than using a partly slimmed simulator.
+            slimmed = "failed"
+            run(["simslim", "off", device], capture_output=True, text=True)
+    else:
+        run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
+    run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
+    return slimmed
+
+
 def execute_runtime(runtime, device_type, output, plan, required, baseline=None, reduce_motion=False,
                     derived_data=None):
     """Runs `required` tests on a new simulator, then deletes it.
@@ -388,22 +414,9 @@ def execute_runtime(runtime, device_type, output, plan, required, baseline=None,
             raise VerificationError("simctl did not return a simulator UUID")
         record["simulator_id"] = device
         save_json(output / "owned-simulator.json", {"id": device})
-        if shutil.which("simslim"):
-            # Boots the new simulator with every simslim category off. The offline tests replace
-            # CloudKit with fakes, use the local keychain, and call no on-device models, so they
-            # need neither the icloud nor the siri category.
-            try:
-                run(["simslim", "on", device], capture_output=True, text=True)
-                record["simslim"] = "full"
-            except subprocess.CalledProcessError:
-                # simslim may have persisted some disables before failing, and `simctl erase` keeps
-                # them. `simslim off` re-enables every daemon and boots the stock simulator; if it
-                # fails too, the run fails rather than testing a partly slimmed simulator.
-                record["simslim"] = "failed"
-                run(["simslim", "off", device], capture_output=True, text=True)
-        else:
-            run(["xcrun", "simctl", "boot", device], capture_output=True, text=True)
-        run(["xcrun", "simctl", "bootstatus", device, "-b"], capture_output=True, text=True)
+        slimmed = boot_simulator(device)
+        if slimmed:
+            record["simslim"] = slimmed
         environment = offline_environment()
         if reduce_motion:
             enable_reduce_motion(device)

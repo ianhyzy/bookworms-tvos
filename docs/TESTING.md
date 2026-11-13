@@ -34,19 +34,19 @@ When every step passes, the script writes `premerge/<commit>.json` to the reposi
 
 Before a change to how the app looks or moves merges, run `python3 scripts/visual-check.py`, with the Bash sandbox off. It maps the files changed against `origin/main` to views, builds the base commit and the head commit in Debug, and launches each on one slim Apple TV simulator at 1080p, which it creates and deletes. It turns off Device Hub's tvOS sound first, as the test runner does, and starts no simulator when ten are booted or less than 15 percent of memory is free. The script stops with an error when a launch saves no screenshot. A change that touches no view prints `SKIP` and needs no check.
 
-| View | Changed files that touch it | Launches |
-| --- | --- | --- |
-| My Shelf (`shelf`) | `ShelfView`, `ShelfControls`, `ShelfLayout` | The launch screen, with the first book focused. |
-| Book details (`details`) | `BookDetailView`, `RatingsView`, and My Shelf's files | `--show-book=ID` for the example profile's first book. |
-| Year in Review (`yearInReview`) | Files named `YearInReview` | `--start-view=yearInReview`. |
-| Book Wall (`bookWall`) | Files named `BookWall`, `SeriesDesigns`, `GoogleFontLibrary`, `SpineText`, or `HouseOfLeaves` | The drop, and a book's flight to its details (`--book-wall-open-entry`), each with a motion strip. |
-| Settings, the social views, ambient mode, the welcome screens, and Top Shelf | `SettingsView`, `SocialViews`, `ComparisonBookshelf`, `SocialPresentation`, files named `Ambient`, `LibraryWelcomeView`, `HardcoverConnectionView`, `QRCodeView`, files named `TopShelf` | None: a launch argument can't open them with the example profile, and Top Shelf is on the Home Screen. The script lists them as not captured. |
+`RULES` in the script maps changed files to views, and `python3 scripts/visual-check.py --list` prints the views a change touches. A file that matches no rule still counts as a view when it is under `Views/`, is a shader or an asset, or has a name that suggests drawing code. `SHOTS` holds each view's launches; add a view's launches there.
 
-`CoverView`, `BookText`, `SpineView`, `SpineStyle`, `BookPresentation`, `AppAppearance`, `ViewPreferences`, `BookwormsApp.swift`, and the asset catalog touch every view. Any other file under `Views/`, a shader, or an asset counts as a view without launches. `RULES` and `SHOTS` in the script hold the map; add a view's launches there.
+| View | Launches |
+| --- | --- |
+| My Shelf (`shelf`) | The launch screen, with the first book focused. |
+| Book details (`details`) | `--show-book=ID` for the example profile's first book. |
+| Year in Review (`yearInReview`) | `--start-view=yearInReview`. |
+| Book Wall (`bookWall`) | The drop, and a book's flight to its details (`--book-wall-open-entry`), each with a motion image. |
+| Settings, the social views, ambient mode, the welcome screens, Top Shelf, and unmapped drawing code | None: a launch argument can't open them with the example profile, and Top Shelf is on the Home Screen. The script lists them as not captured. |
 
 Every launch passes `--example-profile`, so the captures show the owner's real reading. The script takes the profile from `ExampleProfile/` in the checkout, else in the main checkout, else from the newest `.local/example-profile-*` folder there, and stops when none holds one. Each launch saves a screenshot after a fixed wait. A launch with motion also records the simulator and keeps twelve frames as one image, because agents read images, not video. The frames are spaced by how much the picture changes, so most show the motion and few show a loading screen. The recording stays in the bundle at reduced size. The bundle is `.local/visual-check/<commit>/`: the `-before`, `-after`, and side-by-side `-pair` images, the recordings, `manifest.json`, and `REVIEW.md`. It is private: never commit or publish it. The pair images are also the before-and-after sample sheet for the owner's styling approval, which this check doesn't replace.
 
-The last line the script prints names the bundle's `REVIEW.md`, which lists the images, the commits, the changed files, and nine fixed questions drawn from the workspace rules: regressions, physical realism, legible lettering, the camera facing the action, motion, focus on the Apple TV, clipped or overlapping content, the Mac layout, and eyebrow labels. Start one agent on it, which may be a Sonnet agent, and have it follow that file and end with `VERDICT: pass` or `VERDICT: fail`. After a pass, run `python3 scripts/visual-check.py --record pass`, which writes `premerge/<commit>.visual.json` beside the pre-merge pass. After a fail, fix the regression and capture the new commit. `--record` needs the bundle of the checked-out commit.
+The last line the script prints names the bundle's `REVIEW.md`, which lists the images, the commits, the changed files, and eight fixed questions drawn from the workspace rules: regressions, physical realism, legible lettering, the camera facing the action, motion, focus, clipped or overlapping content, and eyebrow labels. Start one agent on it, which may be a Sonnet agent, and have it follow that file and end with `VERDICT: pass` or `VERDICT: fail`. After a pass, run `python3 scripts/visual-check.py --record pass`, which writes `premerge/<commit>.visual.json` beside the pre-merge pass. After a fail, fix the regression and capture the new commit. `--record` needs the bundle of the checked-out commit.
 
 `--surfaces shelf,bookWall` captures the named views instead of the mapped ones, `--head COMMIT --base COMMIT` checks another change, such as a merged one, and `--keep-builds` keeps both builds in `.local/visual-check/build/` for another run.
 

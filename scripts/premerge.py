@@ -44,10 +44,6 @@ class Run:
     def __init__(self, sha):
         self.sha = sha
         self.folder = ROOT / ".local" / "premerge" / sha[:9]
-        # Earlier runs' logs and results go; the build folder stays for incremental builds.
-        for earlier in self.folder.parent.glob("*"):
-            if not earlier.name.startswith("DerivedData"):
-                shutil.rmtree(earlier, ignore_errors=True)
         self.folder.mkdir(parents=True)
         self.log = self.folder / "premerge.log"
         self.results = {}
@@ -69,6 +65,16 @@ class Run:
     @property
     def failed(self):
         return [step for step, result in self.results.items() if result == "FAIL"]
+
+
+def remove_earlier_runs():
+    """Deletes earlier runs' logs and results in this checkout; one run at a time uses it.
+
+    The build folder stays, so the next build is incremental.
+    """
+    for earlier in (ROOT / ".local" / "premerge").glob("*"):
+        if not earlier.name.startswith("DerivedData"):
+            shutil.rmtree(earlier, ignore_errors=True)
 
 
 def simulator_limit():
@@ -130,6 +136,7 @@ def main():
     arguments = parser.parse_args()
 
     sha = git("rev-parse", "HEAD")
+    remove_earlier_runs()
     run = Run(sha)
     print(f"premerge {sha[:9]} ({git('rev-parse', '--abbrev-ref', 'HEAD')}); log {run.log}", flush=True)
     dirty = git("status", "--porcelain")
@@ -145,12 +152,10 @@ def main():
     code_changed = [name for name in every_change if not DOCUMENTATION.search(name)]
     changed = [name for name in every_change if (ROOT / name).is_file()]
 
-    if run.failed:
-        pass
-    elif not code_changed:
+    if not run.failed and not code_changed:
         for step in ("lint", "build Apple TV", "test"):
             run.report(step, "SKIP", "documentation only")
-    else:
+    elif not run.failed:
         swift = [name for name in changed if name.endswith(".swift")]
         run.check("lint", not swift or run.command(
             ["xcrun", "swift-format", "lint", "--strict", "--configuration", ".swift-format", *swift]) == 0,
