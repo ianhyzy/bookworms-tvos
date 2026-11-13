@@ -252,7 +252,7 @@ The label letters at 23 points or larger (`minimumLabelPoints`) on the 1920 × 1
 
 The scene uses full-screen point coordinates independently of the renderer's texture dimensions. Native SwiftUI remains at display resolution. Convert focus and detail rectangles using measured canvas/tab origins; padding compensation is not an equivalent coordinate conversion.
 
-`BookDetailCoverLayout` shares the column fraction, Back position, and 300 × 144-point tab-cover size with the scene and the Back overlay. The overlay places Back where cover details do, using the detail frame that `BookWallDetailState` carries. Keep the fit below Back and centered by the projected neutral silhouette. Geometry changes must not obscure native Back navigation or the sidebar.
+`BookDetailCoverLayout` shares the column fraction, Back position, and the 300 × 144-point size of the cover over the collapsed sidebar with the scene and the Back overlay. The overlay places Back where cover details do, using the detail frame that `BookWallDetailState` carries. Keep the fit below Back and centered by the projected neutral silhouette. Geometry changes must not obscure native Back navigation or the sidebar.
 
 Leaving Book Wall, backgrounding, replacing prepared books, or resizing the viewport cancels transitions and restores resting poses, camera depth, visibility, and lighting. The native focus engine still owns directional movement. See [focus and remote navigation](FOCUS_NAVIGATION.md).
 

@@ -23,11 +23,12 @@ The shell needs three things beyond that, each in `ShelfView`:
 
 A view enters at its remembered item through `.defaultFocus`, not through a focus assignment in `onAppear`: the page can't take focus while the sidebar is open, so an assignment made as the page appears is lost. A view with a header above its collection declares the entry item at its root, because the focus engine otherwise enters at the header.
 
+The detail holds one view, so a page exists only while its row is selected, and `ShelfView` gives the page its row's identity. State that outlives a visit lives in `BookwormsCoordinator`, `ShelfFocus`, or `BookWallScene`.
+
 ## Known limits of the split view
 
 - **Launch fade-in.** On tvOS 27.2, for about 80 ms of the launch fade-in, while the screen is still nearly black, the sidebar's rows are drawn expanded and dim before they shrink into the pill.
 - **Returning to the app.** tvOS 27.2 reopens an app that was left through the open sidebar with the sidebar still open and focused. `ShelfView` closes the sidebar when the app moves to the background, so the app returns on its page.
-- **A page is rebuilt when its row is selected.** State that outlives a visit lives in `BookwormsCoordinator`, `ShelfFocus`, or `BookWallScene`.
 - **Presentations on tvOS 26.5.** When a full-screen cover opens or closes there, focus ignores a row's `.defaultFocus` and lands on another item. The shelf that book details filter, and My Shelf when that filter is cleared, therefore focus their entry book in `onAppear` (`ShelfRow.focusesEntryOnAppear`).
 - **No header API.** `tabViewSidebarHeader` belongs to `TabView`. The profile above the rows is a `safeAreaInset` on the list.
 - **Row spacing.** On tvOS 27.2 the list's rows sit 66 points apart, and a tab sidebar's sit 76 points apart. On tvOS 26.5 both sit 78 points apart. `defaultMinListRowHeight` changes the spacing; the app keeps the system's.
@@ -130,5 +131,6 @@ In the app, `ShelfNavigationTests.testLaunchFocusesTheFirstBookWithTheSidebarClo
 ## Limits of this record
 
 - tvOS 27.0 was not checked.
+- On tvOS 26.5, a launch straight onto Book Wall (`--start-view=bookWall`) focuses the top book of the first stack, not the entry book at its foot. tvOS 27.2 focuses the entry book. The cause was not traced; entering Book Wall from the sidebar focuses the entry book on both.
 - A physical Apple TV was not checked. Nothing in the cause depends on the simulator.
 - Siri Remote swipes were not checked; simulator tests use discrete presses.

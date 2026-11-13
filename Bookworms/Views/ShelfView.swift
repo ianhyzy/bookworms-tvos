@@ -20,7 +20,7 @@ struct ShelfView: View {
     /// `coordinator.current` on the last main view.
     @State private var sidebarItem: SidebarItem
     /// The sidebar column. It starts closed, so launch focus goes to the selected view; the system
-    /// opens it on Left from the view's leading edge and on Back, and closes it on Select.
+    /// opens it on Left from the view's leading edge and on Back, and closes it on Select or Right.
     @State private var sidebarVisibility = NavigationSplitViewVisibility.detailOnly
     @FocusState private var focusedSidebarItem: SidebarItem?
     @State private var settingsSection = SettingsView.initialSection()
@@ -154,7 +154,9 @@ struct ShelfView: View {
     /// filter, or the book last opened from that shelf, so Back from its details returns to it.
     /// `shelfFocus.last` keeps the book that opened the first details.
     @State private var detailFilterEntryID: Int?
-    /// Whether My Shelf is appearing beneath the closing shelf whose filter the reader cleared.
+    /// Whether My Shelf is appearing beneath the closing shelf whose filter the reader cleared
+    /// from Book Wall's details. Cover details restore focus themselves when they close
+    /// (`restoreSelection()`).
     @State private var returnsFromClearedFilter = false
     private enum SidebarItem: Hashable {
         case view(BookwormsView)
@@ -250,7 +252,9 @@ struct ShelfView: View {
             .defaultFocus($focusedSidebarItem, sidebarItem)
         } detail: {
             destination
-                // One instance per destination, so a view's state never carries into another.
+                // One instance per sidebar row, so a main view's state never carries into the
+                // next. An intentional exception to the stable-identity rule in
+                // docs/FOCUS_NAVIGATION.md: the page changes with its row either way.
                 .id(sidebarItem)
                 // tvOS 27 takes the destination out of the focus system while the sidebar is
                 // open. tvOS 26 leaves it in, so Right from a row level with a book would focus a
@@ -1155,7 +1159,8 @@ struct ShelfView: View {
 
     /// The Hardcover profile above the sidebar's rows. The photo centers on the rows' icons and
     /// the name starts where their titles start; the name takes the sidebar's font, like the rows.
-    /// Offsets measured from the tvOS 27 sidebar in the simulator.
+    /// The leading offset was measured in the tvOS 27 simulator and fits tvOS 26 too. The bottom
+    /// padding keeps the name clear of the first row's focused pill.
     ///
     /// Without a profile, such as while signed out or after Hardcover rejects the login, the
     /// sidebar has no header. A reader without a photo gets their initial.
@@ -1404,7 +1409,7 @@ struct ShelfView: View {
     private func clearShelfFilter() {
         if showsDetailFilter {
             shelfFocus.last = detailFilterEntryID ?? shelfFocus.last
-            returnsFromClearedFilter = true
+            returnsFromClearedFilter = selectedBook == nil
             showsDetailFilter = false
             filteredShelfBook = nil
             selectedBook = nil
