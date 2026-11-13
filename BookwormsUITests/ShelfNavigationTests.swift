@@ -2,12 +2,44 @@ import XCTest
 
 @MainActor
 final class ShelfNavigationTests: XCTestCase {
+    /// The app opens on My Shelf with the first book focused and the sidebar closed, without a
+    /// press, and focus stays there. A page can't hold focus while the sidebar is open, so focus
+    /// on the book also shows that the sidebar is closed.
+    func testLaunchFocusesTheFirstBookWithTheSidebarClosed() {
+        let app = RemoteNavigation.launch()
+        let first = app.buttons["book-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(first)
+        RemoteNavigation.assertSettled(
+            app, after: RemoteNavigation.transitions(app), expectedUpdates: 0,
+            file: #filePath, line: #line)
+        XCTAssertTrue(first.hasFocus)
+    }
+
+    /// An app left with Back from the open sidebar returns on its page, with the sidebar closed
+    /// and focus on the book it left.
+    func testReturningAfterLeavingThroughTheSidebarShowsTheShelf() {
+        let app = RemoteNavigation.launch()
+        let first = app.buttons["book-1"]
+        let second = app.buttons["book-2"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        RemoteNavigation.waitForFocus(first)
+        RemoteNavigation.press(.right, in: app, expecting: second)
+        XCUIRemote.shared.press(.menu)
+        RemoteNavigation.waitForSidebarFocus("My Shelf", in: app)
+        XCUIRemote.shared.press(.menu)
+        let left = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in app.state != .runningForeground }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [left], timeout: 10), .completed)
+        app.activate()
+        RemoteNavigation.waitForFocus(second)
+    }
+
     func testSelectBookReadDetailsAndReturnToShelf() {
         let app = RemoteNavigation.launch()
         let first = app.buttons["book-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
-        if !first.hasFocus { XCUIRemote.shared.press(.up) }
-        XCTAssertTrue(first.hasFocus)
+        RemoteNavigation.waitForFocus(first)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["detail-title"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["detail-title"].label, "The Orchard at Night")
@@ -436,8 +468,8 @@ final class ShelfNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.left)
         RemoteNavigation.waitForSidebarFocus("Year in Review", in: app)
         XCTAssertNil(RemoteNavigation.focused(app, prefix: "year-book-"))
-        // Right from the sidebar reaches the year menu, not the cover row.
-        RemoteNavigation.press(.right, in: app, expecting: year)
+        // Right closes the sidebar, and focus returns to the remembered cover.
+        RemoteNavigation.press(.right, in: app, expecting: first)
         let capture = XCTAttachment(screenshot: app.screenshot())
         capture.name = "Year in Review"
         capture.lifetime = .keepAlways

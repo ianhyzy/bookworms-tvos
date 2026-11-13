@@ -7,7 +7,6 @@ struct ComparisonBookshelf: View {
     @Bindable var state: ComparisonRowState
     let rowHeight: CGFloat
     let width: CGFloat
-    var activatesOnAppear = true
     var emptySpacePhoto: String?
     var isLoading = false
     /// The shared page position where focus lands when it enters this row from the other row.
@@ -31,7 +30,7 @@ struct ComparisonBookshelf: View {
                     library: library, pages: pages, rowHeight: rowHeight, palette: palette,
                     entryBookID: state.selectedID, entryColumn: column,
                     focusRequest: focusRequest,
-                    presentationStyles: [:], activatesOnAppear: activatesOnAppear,
+                    presentationStyles: [:],
                     emptySpacePhoto: emptySpacePhoto,
                     onFocus: { id in
                         guard let id else { return }

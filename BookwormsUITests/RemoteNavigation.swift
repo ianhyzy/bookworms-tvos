@@ -18,34 +18,7 @@ enum RemoteNavigation {
             ["--reset-test-settings", "--sample-library", "--focus-probe"]
             + arguments + (view.map { ["--start-view=\($0)"] } ?? [])
         app.launch()
-        enterContent(app)
         return app
-    }
-
-    /// Presses Right when the app shows its sidebar open and focused, as a viewer does.
-    ///
-    /// tvOS 27.2 opens a `.sidebarAdaptable` `TabView`'s sidebar at launch, and again when the
-    /// focused content goes away, and content cannot take focus until the sidebar closes: on
-    /// Right, on Select, or after 8 idle seconds. Right lands on the content's default focus.
-    /// Earlier releases draw sidebar rows as buttons, so only 27.2's open sidebar has a focused
-    /// cell. The settle window lets focus land before the check. When content has no button yet,
-    /// as while a view loads, focus stays in the sidebar, because Right would close it and leave
-    /// nothing focused.
-    static func enterContent(_ app: XCUIApplication) {
-        let focus = NSPredicate(format: "hasFocus == true")
-        _ = app.descendants(matching: .any).matching(focus).firstMatch.waitForExistence(timeout: 15)
-        _ = XCTWaiter.wait(
-            for: [XCTestExpectation(description: "Focus settles")], timeout: settleWindow)
-        guard sidebarHasFocus(app), app.buttons.count > app.cells.buttons.count else { return }
-        XCUIRemote.shared.press(.right)
-        let entered = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !sidebarHasFocus(app) }, object: nil)
-        _ = XCTWaiter.wait(for: [entered], timeout: 5)
-    }
-
-    /// Whether tvOS 27.2's open sidebar has focus. See `enterContent(_:)`.
-    static func sidebarHasFocus(_ app: XCUIApplication) -> Bool {
-        app.cells.matching(NSPredicate(format: "hasFocus == true")).count > 0
     }
 
     /// Launches on My Shelf and opens the view titled `title` from the sidebar, as a user does.
@@ -291,7 +264,8 @@ enum RemoteNavigation {
     ) {
         let picker = app.buttons["reader-picker-menu"]
         XCTAssertTrue(picker.waitForExistence(timeout: 30), file: file, line: line)
-        for _ in 0..<3 where !isFocused(picker) { XCUIRemote.shared.press(.up) }
+        // One Up from the entry row reaches the header. Another would open the sidebar on tvOS 27.
+        if !isFocused(picker) { XCUIRemote.shared.press(.up) }
         for _ in 0..<2 where !isFocused(picker) { XCUIRemote.shared.press(.right) }
         XCTAssertTrue(isFocused(picker), "Reader picker unreachable", file: file, line: line)
         XCUIRemote.shared.press(.select)
@@ -346,7 +320,7 @@ enum RemoteNavigation {
     /// Whether the focused element is labeled `name` or contains an element labeled `name`.
     ///
     /// Sidebar rows and menu items report focus on a container, while a query by name can match a
-    /// different element with the same label, such as the Settings tab's `gearshape` button.
+    /// different element with the same label, such as the Settings row's `gearshape` image.
     static func hasFocus(labeled name: String, in app: XCUIApplication) -> Bool {
         let focused = app.descendants(matching: .any)
             .matching(NSPredicate(format: "hasFocus == true"))

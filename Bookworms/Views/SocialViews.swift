@@ -35,6 +35,8 @@ struct SocialViews: View {
     let returnRevision: Int
     @FocusState private var focusedItem: Int?
     @FocusState private var isReaderPickerFocused: Bool
+    /// The Compare Shelves row that holds focus: 0 for yours, 1 for the reader's.
+    @FocusState private var focusedComparisonRow: Int?
     @State private var review: ReviewPresentation?
     @AppStorage("dateFormat") private var dateFormat = AppDateFormat.monthName
     /// Chooses the Compare Shelves shelf photos; changes each time the view appears.
@@ -51,7 +53,11 @@ struct SocialViews: View {
             switch coordinator.current {
             case .following: following
             case .comparison: comparison
-            case .shared: shared
+            case .shared:
+                // Focus enters the view on the remembered cover, not on the header above it.
+                shared.defaultFocus(
+                    $focusedItem, coordinator.sharedSelection ?? sharedBooks.first?.id,
+                    priority: .userInitiated)
             case .friendsPicks: friendsPicks
             case .shelf, .yearInReview, .bookWall: EmptyView()
             }
@@ -204,7 +210,6 @@ struct SocialViews: View {
                     }
                     .focusSection()
                     .defaultFocus($focusedItem, entryID, priority: .userInitiated)
-                    .onAppear { focusedItem = entryID }
                 }
             }
         }
@@ -275,7 +280,6 @@ struct SocialViews: View {
                             books: social.presentation.mine,
                             state: coordinator.upper, rowHeight: rowHeight,
                             width: geometry.size.width - 2 * PagedRowLayout.edgeInset,
-                            activatesOnAppear: coordinator.comparisonRow == 0,
                             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[0],
                             isLoading: social.isLoading,
                             column: coordinator.comparisonColumn,
@@ -289,6 +293,7 @@ struct SocialViews: View {
                         )
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("comparison-upper")
+                        .focused($focusedComparisonRow, equals: 0)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         ReaderLabel(
@@ -301,7 +306,6 @@ struct SocialViews: View {
                             books: social.presentation.theirs,
                             state: coordinator.lower, rowHeight: rowHeight,
                             width: geometry.size.width - 2 * PagedRowLayout.edgeInset,
-                            activatesOnAppear: coordinator.comparisonRow == 1,
                             emptySpacePhoto: ShelfPhoto.names(seed: photoSeed)[1],
                             isLoading: social.isLoading,
                             column: coordinator.comparisonColumn,
@@ -315,6 +319,7 @@ struct SocialViews: View {
                         )
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("comparison-lower")
+                        .focused($focusedComparisonRow, equals: 1)
                     }
                     comparisonCaption(reader: reader).frame(height: 124, alignment: .topLeading)
                 } else {
@@ -322,6 +327,9 @@ struct SocialViews: View {
                 }
             }
         }
+        // Focus enters the view on the row it last left, not on the header above the rows. The
+        // row's own default focus then picks the book.
+        .defaultFocus($focusedComparisonRow, coordinator.comparisonRow, priority: .userInitiated)
         .onAppear { photoSeed = Int.random(in: 0..<1000) }
     }
 
@@ -445,7 +453,6 @@ struct SocialViews: View {
                         .focusSection()
                         .defaultFocus($focusedItem, entryID, priority: .userInitiated)
                         .accessibilityIdentifier("shared-cover-rail")
-                        .onAppear { focusedItem = entryID }
 
                         if let selected = sharedBooks.first(where: {
                             $0.id == coordinator.sharedSelection
@@ -507,6 +514,7 @@ struct SocialViews: View {
                 .frame(maxWidth: 900)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .holdsFocus()
     }
 
     @ViewBuilder

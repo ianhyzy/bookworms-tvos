@@ -25,7 +25,6 @@ final class ScenarioNavigationTests: XCTestCase {
             app.launchArguments.append("--test-appearance=\(appearance)")
         }
         app.launch()
-        RemoteNavigation.enterContent(app)
         return app
     }
 
@@ -95,24 +94,9 @@ final class ScenarioNavigationTests: XCTestCase {
             app.descendants(matching: .any)["welcome-preparing-library"].firstMatch
                 .waitForExistence(timeout: 3), file: file, line: line)
         command("release-example", app: app)
-        let landed = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in
-                RemoteNavigation.isFocused(first) || RemoteNavigation.sidebarHasFocus(app)
-            }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [landed], timeout: 15), .completed, file: file, line: line)
-        guard RemoteNavigation.sidebarHasFocus(app) else {
-            RemoteNavigation.assertSettled(
-                app, after: before, expectedUpdates: exampleEntryUpdates, file: file, line: line)
-            return
-        }
-        // On tvOS 27.2 focus falls back to the sidebar when the choice leaves, and the viewer
-        // presses Right to reach the shelf in one focus update. The settle window lets the
-        // sidebar finish opening first.
-        _ = XCTWaiter.wait(
-            for: [XCTestExpectation(description: "Sidebar settles")],
-            timeout: RemoteNavigation.settleWindow)
-        RemoteNavigation.press(.right, in: app, expecting: first, file: file, line: line)
+        RemoteNavigation.waitForFocus(first, timeout: 15, file: file, line: line)
+        RemoteNavigation.assertSettled(
+            app, after: before, expectedUpdates: exampleEntryUpdates, file: file, line: line)
     }
 
     private func command(_ command: String, app: XCUIApplication) {
@@ -222,15 +206,15 @@ final class ScenarioNavigationTests: XCTestCase {
     }
 
     /// Focus updates from Select on **View example profile** to the first book: the choice leaves
-    /// with the preparation card, the closing popup returns focus to the shelf, and the shelf
-    /// restores its entry book. More means app code moved focus again.
+    /// with the preparation card, the closing popup releases focus, and the focus engine places
+    /// it on the shelf's entry book. More means app code moved focus as well.
     private let exampleEntryUpdates = 3
     /// Focus updates into the example's sign-in sheet, and back out of it with Back, where the
     /// closing sheet's focus leaves before the status row's button takes it.
     private let sheetEntryUpdates = 1
     private let sheetExitUpdates = 2
     /// Focus updates as details that a restore closed leave, as for the sheet: focus leaves the
-    /// closing presentation before the focus engine places it in the tabs.
+    /// closing presentation before the focus engine places it in the view beneath.
     private let restoreExitUpdates = 2
 
     func testWelcomeDefaultFocusAndExampleChoicePersistAcrossRelaunch() throws {
@@ -316,7 +300,7 @@ final class ScenarioNavigationTests: XCTestCase {
     }
 
     /// The shelf an author filtered over the example's book details offers Connect Hardcover too,
-    /// and its sign-in presents over that shelf, which covers the tabs.
+    /// and its sign-in presents over that shelf, which covers the shell.
     func testExampleFilteredShelfConnectHardcoverOpensSignInAndBackReturns() throws {
         let app = launch("welcome", focusProbe: true)
         let example = app.buttons["welcome-example-profile"]
@@ -328,7 +312,7 @@ final class ScenarioNavigationTests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let author = app.buttons["detail-author"]
         RemoteNavigation.waitForFocus(app.buttons["back-to-shelf"], timeout: 15)
-        // The details cover the tabs, so they show the example's capsule themselves.
+        // The details cover the shell, so they show the example's capsule themselves.
         capture(app, "scenario-example-details")
         RemoteNavigation.press(.right, in: app, expecting: author)
         XCUIRemote.shared.press(.select)

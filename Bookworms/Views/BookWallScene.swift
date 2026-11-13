@@ -576,7 +576,7 @@ final class BookWallScene {
     }
 
     /// Sends each spine's rectangle at rest and whether the books have settled. Targets exist
-    /// from the start of a fall, so entering the tab can focus a book while it falls; the view
+    /// from the start of a fall, so entering the wall can focus a book while it falls; the view
     /// opens details only after settling. Never assigns focus.
     private func publishFocusFrames() {
         guard !layout.slots.isEmpty, renderBounds.width > 0, renderBounds.height > 0 else {
@@ -774,7 +774,7 @@ final class BookWallScene {
     /// Spine rectangles for `layout` at rest, in full-screen points for `viewport`.
     ///
     /// Needs neither a renderer nor a configured scene, so `BookWallView` mounts its focus
-    /// targets in the tab's first render, before the sidebar hands focus to the tab. These are
+    /// targets in the page's first render, before the sidebar hands focus to the page. These are
     /// the frames the scene publishes until the books settle. Never assigns focus.
     static func plannedFocusFrames(for layout: BookWallLayout, viewport: CGSize) -> [Int: CGRect] {
         let bounds = CGRect(origin: .zero, size: viewport)

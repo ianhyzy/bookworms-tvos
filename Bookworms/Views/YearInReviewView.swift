@@ -57,6 +57,8 @@ struct YearInReviewView: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
+        // Focus enters the view on the remembered book, not on the year menu above it.
+        .defaultFocus($focusedBook, review.flatMap(entryID), priority: .userInitiated)
         .onAppear { photoSeed = Int.random(in: 0..<1000) }
         .onChange(of: returnRevision) {
             guard focusedBook == nil, let review else { return }
@@ -320,7 +322,6 @@ struct YearInReviewView: View {
             }
             .focusSection()
             .defaultFocus($focusedBook, entryID, priority: .userInitiated)
-            .onAppear { focusedBook = entryID }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("year-shelf")
             ShelfBoard(palette: palette)
@@ -370,6 +371,7 @@ struct YearInReviewView: View {
         }
         .foregroundStyle(palette.text)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .holdsFocus()
     }
 
     // MARK: - Formatting

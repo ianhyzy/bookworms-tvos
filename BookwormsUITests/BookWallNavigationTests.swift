@@ -651,7 +651,6 @@ final class BookWallNavigationTests: XCTestCase {
             ] + arguments
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
-        RemoteNavigation.enterContent(app)
         let shelfBook = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book-'"))
             .firstMatch
         XCTAssertTrue(shelfBook.waitForExistence(timeout: 60))
@@ -671,7 +670,6 @@ final class BookWallNavigationTests: XCTestCase {
             ] + arguments
         app.launchEnvironment["TZ"] = "UTC"
         app.launch()
-        RemoteNavigation.enterContent(app)
         XCTAssertTrue(app.buttons["book-1"].waitForExistence(timeout: 20))
         return app
     }
@@ -679,7 +677,7 @@ final class BookWallNavigationTests: XCTestCase {
     private func openWall(companionDesigns: Bool = false) -> XCUIApplication {
         let app = launchWithWall(arguments: companionDesigns ? ["--test-companion-designs"] : [])
         // The scenario enables Book Wall; enter it through the native sidebar, as a viewer does.
-        // The spines exist in the tab's first render, so Select moves focus once, straight to
+        // The spines exist in the page's first render, so Select moves focus once, straight to
         // the entry book.
         RemoteNavigation.focusSidebarItem("Book Wall", in: app)
         let entry = app.buttons["book-wall-8"]
