@@ -32,7 +32,7 @@ When every step passes, the script writes `premerge/<commit>.json` to the reposi
 
 ## Visual check
 
-Before a change to how the app looks or moves merges, run `python3 scripts/visual-check.py`, with the Bash sandbox off. It maps the files changed against `origin/main` to views, builds the base commit and the head commit in Debug, and launches each on one slim Apple TV simulator at 1080p, which it creates and deletes. It turns off Device Hub's tvOS sound first, as the test runner does. A change that touches no view prints `SKIP` and needs no check.
+Before a change to how the app looks or moves merges, run `python3 scripts/visual-check.py`, with the Bash sandbox off. It maps the files changed against `origin/main` to views, builds the base commit and the head commit in Debug, and launches each on one slim Apple TV simulator at 1080p, which it creates and deletes. It turns off Device Hub's tvOS sound first, as the test runner does, and starts no simulator when ten are booted or less than 15 percent of memory is free. The script stops with an error when a launch saves no screenshot. A change that touches no view prints `SKIP` and needs no check.
 
 | View | Changed files that touch it | Launches |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ Before a change to how the app looks or moves merges, run `python3 scripts/visua
 | Book details (`details`) | `BookDetailView`, `RatingsView`, and My Shelf's files | `--show-book=ID` for the example profile's first book. |
 | Year in Review (`yearInReview`) | Files named `YearInReview` | `--start-view=yearInReview`. |
 | Book Wall (`bookWall`) | Files named `BookWall`, `SeriesDesigns`, `GoogleFontLibrary`, `SpineText`, or `HouseOfLeaves` | The drop, and a book's flight to its details (`--book-wall-open-entry`), each with a motion strip. |
-| Settings, the social views, ambient mode, and the welcome screens | `SettingsView`, `SocialViews`, `ComparisonBookshelf`, `SocialPresentation`, files named `Ambient`, `LibraryWelcomeView`, `HardcoverConnectionView`, `QRCodeView` | None: a launch argument can't open them with the example profile. The script lists them as not captured. |
+| Settings, the social views, ambient mode, the welcome screens, and Top Shelf | `SettingsView`, `SocialViews`, `ComparisonBookshelf`, `SocialPresentation`, files named `Ambient`, `LibraryWelcomeView`, `HardcoverConnectionView`, `QRCodeView`, files named `TopShelf` | None: a launch argument can't open them with the example profile, and Top Shelf is on the Home Screen. The script lists them as not captured. |
 
 `CoverView`, `BookText`, `SpineView`, `SpineStyle`, `BookPresentation`, `AppAppearance`, `ViewPreferences`, `BookwormsApp.swift`, and the asset catalog touch every view. Any other file under `Views/`, a shader, or an asset counts as a view without launches. `RULES` and `SHOTS` in the script hold the map; add a view's launches there.
 

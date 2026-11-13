@@ -140,9 +140,10 @@ def main():
     base = git("merge-base", arguments.base, "HEAD")
     if not base:
         run.check("base", False, f"no merge base with {arguments.base}")
-    changed = [name for name in git("diff", "--name-only", "--diff-filter=d", base, "HEAD").splitlines()
-               if name]
-    code_changed = [name for name in changed if not DOCUMENTATION.search(name)]
+    # A deleted file counts as a change to the code, but has nothing to lint or to link from.
+    every_change = [name for name in git("diff", "--name-only", base, "HEAD").splitlines() if name]
+    code_changed = [name for name in every_change if not DOCUMENTATION.search(name)]
+    changed = [name for name in every_change if (ROOT / name).is_file()]
 
     if run.failed:
         pass

@@ -52,11 +52,13 @@ SURFACES = {
     "social": "Feed, Compare Shelves, Book Club, and Friends' Picks",
     "ambient": "ambient mode",
     "welcome": "the welcome and sign-in screens",
+    "topShelf": "the Home Screen's Top Shelf",
     "other": "a view this script has no rule for",
 }
 EVERY_VIEW = [name for name in SURFACES if name != "other"]
-# A changed file under Bookworms/ or Shared/ whose path matches a pattern touches those views.
-# A file under Views/, a shader, or an asset that matches no pattern touches "other".
+# A changed file under Bookworms/, BookwormsTopShelf/, or Shared/ whose path matches a pattern
+# touches those views. A file under Views/, a shader, or an asset that matches no pattern
+# touches "other".
 RULES = [
     (r"Views/ShelfView|Views/ShelfControls|Models/ShelfLayout", ["shelf", "details"]),
     (r"Views/BookDetailView|Views/RatingsView", ["details"]),
@@ -66,6 +68,7 @@ RULES = [
     (r"SocialViews|ComparisonBookshelf|SocialPresentation", ["social"]),
     (r"Ambient", ["ambient"]),
     (r"LibraryWelcomeView|HardcoverConnectionView|QRCodeView", ["welcome", "settings"]),
+    (r"TopShelf", ["topShelf"]),
     (r"Views/CoverView|Views/BookText|Views/SpineView|Models/SpineStyle|Models/BookPresentation"
      r"|Models/AppAppearance|Models/ViewPreferences|BookwormsApp\.swift|\.xcassets/", EVERY_VIEW),
 ]
@@ -127,7 +130,7 @@ def touched(files):
     """Returns the views that the changed `files` touch, in `SURFACES` order."""
     found = set()
     for name in files:
-        if not re.match(r"(Bookworms|Shared)/", name):
+        if not re.match(r"(Bookworms|BookwormsTopShelf|Shared)/", name):
             continue
         matched = [view for pattern, views in RULES if re.search(pattern, name) for view in views]
         if not matched and re.search(r"/Views/|\.metal$|\.xcassets/", name):
@@ -167,12 +170,24 @@ def build(sha, profile, work, log):
     return app
 
 
+def sibling(name):
+    """Loads another script of this folder as a module; their hyphenated names can't be imported."""
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), Path(__file__).with_name(name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def create_simulator(name, log):
-    """Creates and boots one slim Apple TV simulator on the newest tvOS runtime."""
-    runner = importlib.util.spec_from_file_location("test_local", Path(__file__).with_name("test-local.py"))
-    test_local = importlib.util.module_from_spec(runner)
-    runner.loader.exec_module(test_local)
-    test_local.mute_simulator_audio()
+    """Creates and boots one slim Apple TV simulator on the newest tvOS runtime.
+
+    Stops first when one more simulator would break the workspace's simulator limits, and
+    turns off Device Hub's tvOS sound as the test runner does.
+    """
+    limit = sibling("premerge").simulator_limit()
+    if limit:
+        sys.exit(f"No simulator started: {limit}.")
+    sibling("test-local").mute_simulator_audio()
     listing = json.loads(quiet(["xcrun", "simctl", "list", "--json", "runtimes"]).stdout)
     runtime = max((runtime for runtime in listing["runtimes"]
                    if runtime["isAvailable"] and runtime["platform"] == "tvOS"),
@@ -349,6 +364,7 @@ def main():
     shutil.rmtree(bundle, ignore_errors=True)
     bundle.mkdir(parents=True)
     captured = [name for name in surfaces if name in SHOTS]
+    missing = []
     manifest = {"head": head, "base": base, "surfaces": surfaces, "files": files, "shots": [],
                 "commits": git("log", "--format=%s", f"{base}..{head}").splitlines(),
                 "not_captured": [name for name in surfaces if name not in SHOTS]}
@@ -375,9 +391,13 @@ def main():
                 pair(bundle / images[0], bundle / images[1], bundle / images[2])
                 manifest["shots"].append({"platform": PLATFORM, "surface": surface, "name": shot.name,
                                           "images": [image for image in images if (bundle / image).exists()]})
+                if not all((bundle / image).exists() for image in images[:2]):
+                    missing.append(f"{surface} {shot.name}")
         if not arguments.keep_builds:
             shutil.rmtree(work / "build", ignore_errors=True)
             shutil.rmtree(work / "source", ignore_errors=True)
+    if missing:
+        sys.exit(f"The capture failed for {', '.join(missing)}; log {bundle / 'capture.log'}")
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (bundle / "REVIEW.md").write_text(review_brief(manifest))
     print(f"Bundle: {bundle}")
