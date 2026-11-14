@@ -110,13 +110,13 @@ Fill in **Test Information** on the app's TestFlight tab before submitting a bui
 
 ### What to Test for 1.2.0
 
-This text covers changes merged after build 11, the last build numbered 1.1.0. The owner confirms which build shipped as 1.1.0 and edits the text.
+This text covers changes merged after build 11, which shipped as 1.1.0. The owner edits the text.
 
 ```text
 New since 1.1.0:
 
-- Example profile. "View example profile" in the welcome popup shows a read-only example library before you connect Hardcover.
-- Sign-in. Scan the QR code, or enter the code at hardcover.app/link.
+- Example profile. "View example profile" in the welcome popup replaces the sample library with a read-only example library.
+- Sign-in. The QR code now fills in the code for you, and logins renew by themselves.
 - Navigation. The app opens on My Shelf with the first book focused. Press Left from the leftmost book, or Back, to open the sidebar.
 - Book Wall (Apple TV 4K, 2nd generation or later; turn it on in Settings > Views). A large year splits into pages, with a page menu at the top right.
 - Spine designs from Bookworms on iPhone and Mac. Install that TestFlight build, sign in to the same iCloud and Hardcover accounts, and turn on iCloud storage in Settings > General on the Apple TV. Book Wall then draws your designs, books in a series share one look, and a cover you choose on iPhone or Mac shows here too. Settings > Spines lists which models made the designs.
@@ -148,7 +148,7 @@ Apple documents the selection controls in [Manage availability for your app](htt
 | Support and marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
-| What's New in This Version | Required for every version after the first, so 1.2.0 needs it; at most 4,000 characters. The owner writes it. [What to Test for 1.2.0](#what-to-test-for-120) lists what changed. |
+| What's New in This Version | Required for every version after the first; at most 4,000 characters. The owner approves it. Use [What's New for 1.2.0](#whats-new-for-120). |
 | Price | Free, with no in-app purchases. Bookworms is free and open source. |
 | Availability | All current storefronts except China mainland; automatic availability in future storefronts is off. Follow [public storefront availability](#public-storefront-availability). |
 | Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; create the output folder with `mkdir -p .local/app-store-screenshots`, then resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
@@ -156,6 +156,20 @@ Apple documents the selection controls in [Manage availability for your app](htt
 | Age rating | The app shows Hardcover reviews, which are user-generated content. Answer the questionnaire accordingly. |
 | Content rights | The app shows third-party content: Hardcover metadata, covers, profile photos, and reviews. |
 | App Review sign-in | A demo Hardcover account with a current read, followed readers, and read books that have finish dates, some of them in the current calendar year. Book Wall shows only books finished this year, and Year in Review shows only books with a finish date, so without them both are empty. Enter its credentials only in App Store Connect. |
+
+### What's New for 1.2.0
+
+The owner approved this text for 1.2.0:
+
+```text
+- Spine designs from Bookworms for iPhone and Mac. Turn on iCloud storage in Settings > General, and Book Wall draws the spines that app designs from each cover, with one look for each series. A cover you choose there shows here too.
+- Book Wall splits a big reading year into pages, with a page menu at the top right.
+- Book details: select the series label to see every series a book belongs to, and see which friends read the book.
+- An example profile replaces the sample library, so you can look around before you connect Hardcover.
+- Sign-in: the QR code now fills in the code for you, and logins renew by themselves.
+- Ambient mode can include Year in Review and show a QR code for your Hardcover profile.
+- A new icon, and larger text throughout.
+```
 
 Use these App Review notes, adjusted to the build:
 
