@@ -23,6 +23,7 @@ struct ShelfView: View {
     /// opens it on Left from the view's leading edge and on Back, and closes it on Select or Right.
     @State private var sidebarVisibility = NavigationSplitViewVisibility.detailOnly
     @FocusState private var focusedSidebarItem: SidebarItem?
+    @State private var sidebarAccount = SidebarAccount()
     @State private var settingsSection = SettingsView.initialSection()
     @State private var ambient = AmbientController()
     @State private var requestedShelfPreparationKey: ShelfPreparationKey?
@@ -144,6 +145,9 @@ struct ShelfView: View {
     }
     @State private var openedDevelopmentDetail = false
     @State private var appliedDevelopmentPage = false
+    #if DEBUG && targetEnvironment(simulator)
+        @State private var openedDevelopmentSidebar = false
+    #endif
     @State private var selectedBook: Book?
     /// Whether My Shelf, filtered from book details, covers those details. The details stay
     /// presented beneath it, so Back reveals them as they were, with focus on the chosen filter.
@@ -162,6 +166,12 @@ struct ShelfView: View {
         case view(BookwormsView)
         case ambient
         case settings
+    }
+    /// What the sidebar shows about the Hardcover account: the profile in its header, and
+    /// whether Hardcover rejected the saved login, which marks the header and the Settings row.
+    private struct SidebarAccount: Equatable {
+        var owner: ReaderProfile?
+        var needsReconnect = false
     }
     private var isShowingMainView: Bool {
         if case .view = sidebarItem { true } else { false }
@@ -242,7 +252,9 @@ struct ShelfView: View {
                     sidebarRow(.view(view), view.rawValue, systemImage: view.systemImage)
                 }
                 sidebarRow(.ambient, "Ambient", systemImage: "play.rectangle")
-                sidebarRow(.settings, "Settings", systemImage: "gearshape")
+                sidebarRow(
+                    .settings, "Settings", systemImage: "gearshape",
+                    needsReconnect: sidebarAccount.needsReconnect)
             }
             .safeAreaInset(edge: .top) {
                 // The header sits outside the content that carries the environment value.
@@ -265,6 +277,8 @@ struct ShelfView: View {
         // A view that mounts while the welcome popup animates in would take focus from it for
         // good. Disabled content can't take focus; it takes it natively when the popup closes.
         .disabled(isWelcomePresented)
+        .onChange(of: currentSidebarAccount, initial: true) { updateSidebarAccount() }
+        .onChange(of: sidebarVisibility) { updateSidebarAccount() }
         .background {
             // Measured for every destination, so Book Wall can place its spine targets in its
             // first render, before its renderer exists.
@@ -330,11 +344,35 @@ struct ShelfView: View {
         }
     }
 
-    private func sidebarRow(_ item: SidebarItem, _ title: String, systemImage: String)
-        -> some View
-    {
-        NavigationLink(value: item) { Label(title, systemImage: systemImage) }
-            .focused($focusedSidebarItem, equals: item)
+    /// A sidebar row. `needsReconnect` adds the header's mark to the row that leads to
+    /// **Reconnect Hardcover**.
+    private func sidebarRow(
+        _ item: SidebarItem, _ title: String, systemImage: String, needsReconnect: Bool = false
+    ) -> some View {
+        NavigationLink(value: item) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                if needsReconnect {
+                    Spacer()
+                    ReconnectMark()
+                }
+            }
+        }
+        .focused($focusedSidebarItem, equals: item)
+        .accessibilityValue(needsReconnect ? "Hardcover needs reconnecting" : "")
+    }
+
+    /// The account state now, which the sidebar takes only while it is closed.
+    private var currentSidebarAccount: SidebarAccount {
+        SidebarAccount(
+            owner: social.snapshot?.owner, needsReconnect: library.hardcoverNeedsReconnect)
+    }
+
+    /// Gives the sidebar the current account state unless the sidebar is open. A sync can reject
+    /// the login or load the profile at any moment, and neither may move the rows of an open
+    /// sidebar; the sidebar shows the change the next time the viewer opens it.
+    private func updateSidebarAccount() {
+        if sidebarVisibility == .detailOnly { sidebarAccount = currentSidebarAccount }
     }
 
     /// The selected sidebar item's page.
@@ -1139,6 +1177,17 @@ struct ShelfView: View {
                         shelfFocus.last = preparedPages[requestedPage].books.first?.id
                         requestBookFocus(shelfFocus.last)
                     }
+                    #if targetEnvironment(simulator)
+                        // For captures of the sidebar, which `simctl` can't open: it can't press
+                        // the remote, and tvOS asks the viewer before it opens a URL. Never on a
+                        // device, where the app must launch with the sidebar closed.
+                        if !openedDevelopmentSidebar, !preparedPages.isEmpty,
+                            ProcessInfo.processInfo.arguments.contains("--open-sidebar")
+                        {
+                            openedDevelopmentSidebar = true
+                            sidebarVisibility = .all
+                        }
+                    #endif
                     if !openedDevelopmentDetail,
                         let argument = ProcessInfo.processInfo.arguments.first(where: {
                             $0.hasPrefix("--show-book=")
@@ -1162,26 +1211,38 @@ struct ShelfView: View {
     /// The leading offset was measured in the tvOS 27 simulator and fits tvOS 26 too. The bottom
     /// padding keeps the name clear of the first row's focused pill.
     ///
-    /// Without a profile, such as while signed out or after Hardcover rejects the login, the
-    /// sidebar has no header. A reader without a photo gets their initial.
+    /// A reader without a photo gets their initial. After Hardcover rejects the login, the photo
+    /// carries a mark; social sync drops the profile with the rejected login, so the mark usually
+    /// sits on a person symbol named "Hardcover". Without a profile or a rejected login, such as
+    /// while signed out, the sidebar has no header.
     @ViewBuilder private var sidebarHeader: some View {
-        if let owner = social.snapshot?.owner {
+        let owner = sidebarAccount.owner
+        if owner != nil || sidebarAccount.needsReconnect {
+            let name = owner?.displayName ?? "Hardcover"
             HStack(spacing: 14) {
                 Group {
-                    if let avatarURL = owner.avatarURL {
-                        CachedAvatarView(url: avatarURL, name: owner.displayName)
+                    if let avatarURL = owner?.avatarURL {
+                        CachedAvatarView(url: avatarURL, name: name)
+                    } else if owner != nil {
+                        ReaderMonogram(name: name)
                     } else {
-                        ReaderMonogram(name: owner.displayName)
+                        ReaderSilhouette()
                     }
                 }
                 .frame(width: 40, height: 40)
                 .clipShape(Circle())
-                Text(owner.displayName)
+                .overlay(alignment: .bottomTrailing) {
+                    if sidebarAccount.needsReconnect { ReconnectMark().offset(x: 7, y: 7) }
+                }
+                Text(name)
                     .lineLimit(1)
                 Spacer()
             }
             .padding(.leading, 12)
             .padding(.bottom, 30)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(name)
+            .accessibilityValue(sidebarAccount.needsReconnect ? "Needs reconnecting" : "")
         }
     }
 
@@ -2110,5 +2171,16 @@ extension View {
     /// with nothing focusable would leave the sidebar unreachable and Back would leave the app.
     func holdsFocus() -> some View {
         focusable()
+    }
+}
+
+/// The sign that Hardcover rejected the saved login, on the sidebar's profile and Settings row.
+private struct ReconnectMark: View {
+    var body: some View {
+        Image(systemName: "exclamationmark.circle.fill")
+            .font(.system(size: 22))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.white, .red)
+            .accessibilityHidden(true)
     }
 }
