@@ -19,6 +19,13 @@ final class SocialLibraryModel {
             }
         }
     }
+    /// The reader the saved login belongs to: the snapshot's owner, else the profile saved for
+    /// the account. A denied or rejected login clears the snapshot and leaves the saved profile,
+    /// so the sidebar still shows whose account it is, also after a relaunch.
+    var owner: ReaderProfile? { snapshot?.owner ?? rememberedOwner }
+    /// The saved profile of the account that `identity` names. A load without a token forgets
+    /// it here; the saved copy stays with the account's other cached data.
+    private var rememberedOwner: ReaderProfile?
     private(set) var presentation = SocialPresentation()
     private(set) var presentationRevision = 0
     @ObservationIgnored private var presentationPreferences = ViewPreferences()
@@ -134,10 +141,20 @@ final class SocialLibraryModel {
             requestRevision += 1
             identity = nil
             snapshot = nil
+            rememberedOwner = nil
             isLoading = false
             loadFailed = false
             status = "Connect Hardcover to use social views."
             return
+        }
+        let fingerprint = SHA256.hash(data: Data((account ?? token).utf8)).hex
+        // Before the return below, so that an Apple TV with every social view off still shows
+        // the account's saved profile and never another account's.
+        let isSameAccount = identity == fingerprint
+        if !isSameAccount {
+            snapshot = nil
+            identity = fingerprint
+            rememberedOwner = savedOwner(of: fingerprint)
         }
         let socialViews = enabledViews.filter(\.isSocial)
         guard !socialViews.isEmpty else {
@@ -148,16 +165,15 @@ final class SocialLibraryModel {
             status = "Social views are disabled."
             return
         }
-        let fingerprint = SHA256.hash(data: Data((account ?? token).utf8)).hex
         // A manual load replaces a matching load in flight, so its bypass of the daily gates
         // isn't lost.
-        if !manual, identity == fingerprint, requestedReader == readerID,
+        if !manual, isSameAccount, requestedReader == readerID,
             requestedViews == socialViews, let activeTask
         {
             await activeTask.value
             return
         }
-        if manual, identity == fingerprint,
+        if manual, isSameAccount,
             let lastManualLoad, now().timeIntervalSince(lastManualLoad) < 10
         {
             return
@@ -170,10 +186,6 @@ final class SocialLibraryModel {
         requestedViews = socialViews
         let needsComparison = socialViews.contains(.comparison) || socialViews.contains(.shared)
         let needsPicks = socialViews.contains(.friendsPicks)
-        if identity != fingerprint {
-            snapshot = nil
-            identity = fingerprint
-        }
         isLoading = true
         loadFailed = false
         let task = Task { [weak self] in
@@ -218,9 +230,8 @@ final class SocialLibraryModel {
             do {
                 // The account's cached copy shows before any request. An account or credential
                 // fingerprint is local-only and never enters requests or iCloud.
-                if snapshot == nil,
-                    let ownerID = defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int,
-                    let cached = await cache.load(owner: ownerID)
+                if snapshot == nil, let saved = savedOwner(of: fingerprint),
+                    let cached = await cache.load(owner: saved.id)
                 {
                     guard isCurrent(request) else { return }
                     snapshot = cached
@@ -235,7 +246,9 @@ final class SocialLibraryModel {
                     let owner = try await authorized { try await client.owner(token: $0) }
                     let cached = await cache.load(owner: owner.id)
                     guard isCurrent(request) else { return }
-                    defaults.set(owner.id, forKey: "socialOwner.\(fingerprint)")
+                    defaults.set(
+                        try? JSONEncoder().encode(owner), forKey: "socialOwner.\(fingerprint)")
+                    rememberedOwner = owner
                     current = cached ?? SocialSnapshot(owner: owner)
                 }
                 // Fetches `dataset` when it's due, then shows and saves it. A failed fetch
@@ -338,9 +351,7 @@ final class SocialLibraryModel {
                 case HardcoverError.insufficientScope, HardcoverError.forbidden,
                     HardcoverError.invalidToken:
                     // A first load can be denied before it installs the cache file it read.
-                    let owner =
-                        snapshot?.owner.id
-                        ?? defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int
+                    let cachedOwner = snapshot?.owner.id ?? savedOwner(of: fingerprint)?.id
                     snapshot = nil
                     revision += 1
                     // Only Settings → Sources shows this, so it names that page's buttons. A
@@ -356,7 +367,7 @@ final class SocialLibraryModel {
                         default:
                             "Hardcover denied access to social data."
                         }
-                    if let owner { await cache.remove(owner: owner) }
+                    if let cachedOwner { await cache.remove(owner: cachedOwner) }
                 default:
                     loadFailed = !feedSettled
                     status =
@@ -367,6 +378,13 @@ final class SocialLibraryModel {
         }
         activeTask = task
         await task.value
+    }
+
+    /// The profile saved for the account or credential with `fingerprint`: whose cache file to
+    /// read, and who the sidebar shows before any request answers.
+    private func savedOwner(of fingerprint: String) -> ReaderProfile? {
+        defaults.data(forKey: "socialOwner.\(fingerprint)")
+            .flatMap { try? JSONDecoder().decode(ReaderProfile.self, from: $0) }
     }
 
     /// Whether the load numbered `request` is the newest one and hasn't been cancelled.

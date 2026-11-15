@@ -615,6 +615,48 @@ final class SocialFeatureTests: XCTestCase {
         }
     }
 
+    /// The sidebar shows whose login Hardcover rejected, so the profile outlives the snapshot the
+    /// rejection clears, a relaunch restores it, and a load without a token forgets it.
+    func testOwnerOutlivesARejectedLoginUntilALoadWithoutAToken() async throws {
+        let suite = "SocialOwner.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let client = SocialFixtureClient()
+        var time = Date()
+        let token = "hc_at_fixture_old"
+        let rejectRenewal: @MainActor (String) async throws -> String = { _ in
+            throw HardcoverError.invalidToken
+        }
+        let model = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root, now: { time })
+        await model.load(token: token, readerID: 2)
+        let owner = try XCTUnwrap(model.snapshot?.owner)
+        XCTAssertEqual(model.owner, owner)
+
+        await client.reject(token)
+        time += 11
+        await model.load(token: token, readerID: 2, manual: true, renewToken: rejectRenewal)
+        XCTAssertNil(model.snapshot)
+        XCTAssertEqual(model.owner, owner)
+
+        let relaunched = SocialLibraryModel(client: client, defaults: defaults, cacheRoot: root)
+        await relaunched.load(token: token, readerID: 2, renewToken: rejectRenewal)
+        XCTAssertNil(relaunched.snapshot)
+        XCTAssertEqual(relaunched.owner, owner, "The saved profile needs no request")
+
+        await relaunched.load(token: nil, readerID: 2)
+        XCTAssertNil(relaunched.owner)
+
+        let withoutSocialViews = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root)
+        await withoutSocialViews.load(token: token, readerID: 2, enabledViews: [.shelf])
+        XCTAssertEqual(withoutSocialViews.owner, owner)
+    }
+
     func testDeniedReaderLibraryIsEmptyAndKeepsOtherSocialData() async throws {
         let suite = "SocialDeniedReaderTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

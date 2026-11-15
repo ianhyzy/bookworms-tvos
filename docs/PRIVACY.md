@@ -43,4 +43,4 @@ python3 scripts/verify-release-archive.py PATH_TO_ARCHIVE --expected-version X.Y
 
 The script checks embedded manifests, signature validity, entitlements, versions, deployment target, assets, and extension packaging. It does not contact App Store Connect or validate provider retention policies.
 
-Social snapshots contain reader profiles, activities, ratings, and reviews in the local cache only. They are not included in the private CloudKit archive; only your own reviews travel there, in the library snapshot. Ambient playback uses saved metadata and does not initiate source sync or AI generation.
+Social snapshots contain reader profiles, activities, ratings, and reviews in the local cache only. They are not included in the private CloudKit archive; only your own reviews travel there, in the library snapshot. The app also saves the signed-in reader's own Hardcover name, username, and photo address in its preferences on the Apple TV, outside iCloud, so the sidebar can show whose login Hardcover rejected. Ambient playback uses saved metadata and does not initiate source sync or AI generation.
