@@ -2583,8 +2583,9 @@ enum BookWallSpineTexture {
 
     /// Draws `lettering` in a row `thickness` points across, as `SpineView`'s lettering row
     /// lays it out: each block centered across the row, the title's lines from the head-end
-    /// inset, and the author's lines aligned to the tail-end inset. An author that doesn't
-    /// fit whole truncates at its tail.
+    /// inset at their measured pitch and shift, and the author's lines centered on each other
+    /// with the widest at the tail-end inset. An author that doesn't fit whole truncates at
+    /// its tail.
     private static func draw(
         _ lettering: SpineLettering, of book: Book, style: BookWallLocalSpine.Style,
         thickness: CGFloat
@@ -2592,7 +2593,10 @@ enum BookWallSpineTexture {
         let ink = style.foreground.uiColor
         let titleFont = style.typography.font(size: lettering.titleSize)
         let titleLines = lettering.title.components(separatedBy: "\n")
-        var y = (thickness - CGFloat(titleLines.count) * titleFont.lineHeight) / 2
+        // Each line's box is centered on its pitch, then shifted, as `SpineView` frames it.
+        var y =
+            (thickness - CGFloat(titleLines.count) * lettering.titlePitch) / 2
+            + (lettering.titlePitch - titleFont.lineHeight) / 2 + lettering.titleShift
         for line in titleLines {
             // A spine letters "house" in the blue alone, as `SpineView` does, even where dark
             // ink on a light spine would otherwise glow.
@@ -2603,7 +2607,7 @@ enum BookWallSpineTexture {
                     glows: false)
             )
             .draw(at: CGPoint(x: lettering.inset, y: y))
-            y += titleFont.lineHeight
+            y += lettering.titlePitch
         }
         let authorFont = style.typography.font(size: lettering.authorSize)
         let tail = lettering.length - lettering.inset
@@ -2627,7 +2631,10 @@ enum BookWallSpineTexture {
         y = (thickness - CGFloat(authorLines.count) * authorFont.lineHeight) / 2
         for line in authorLines {
             let width = (line as NSString).size(withAttributes: attributes).width
-            (line as NSString).draw(at: CGPoint(x: tail - width, y: y), withAttributes: attributes)
+            (line as NSString)
+                .draw(
+                    at: CGPoint(x: tail - (lettering.authorWidth + width) / 2, y: y),
+                    withAttributes: attributes)
             y += authorFont.lineHeight
         }
     }

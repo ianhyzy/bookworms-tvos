@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 import UIKit
 
@@ -16,8 +17,14 @@ struct SpineLettering: Equatable, Sendable {
     let title: String
     let titleSize: CGFloat
     let titleWidth: CGFloat
+    /// The height each title line takes: its font's line height, or less where the letters of a
+    /// title on two or three lines fill the box.
+    let titlePitch: CGFloat
+    /// How far down each title line draws from the middle of its pitch, so that a filled
+    /// title's letters, not their line boxes, sit centered across the spine.
+    let titleShift: CGFloat
     /// The author's form: the name on one line, on two lines joined by a line break, or the
-    /// surname.
+    /// surname. A two-line name's lines center on each other.
     let author: String
     let authorSize: CGFloat
     let authorWidth: CGFloat
@@ -41,6 +48,16 @@ enum SpineTextMetrics {
     nonisolated static let minimumAuthorSize: CGFloat = 16
     /// How much larger than the author the title stays, where the author's minimum allows.
     nonisolated static let titleLead: CGFloat = 4
+    /// How many times larger two lines must letter a title to take it off one line.
+    nonisolated static let twoLineGain: CGFloat = 1.25
+    /// The share of the lettered length below which a one-line title is too small to prefer, so
+    /// the title takes whichever of one line and two is larger.
+    nonisolated static let oneLineFloor: CGFloat = 0.045
+    /// The share of the lettering's box that the letters of a title on two or three lines fill,
+    /// where its width allows.
+    nonisolated static let twoLineFill: CGFloat = 0.85
+    /// The gap between a filled title's lines, as a share of its letters' height.
+    nonisolated static let lineGap: CGFloat = 0.2
     nonisolated static let formatIconSize: CGFloat = 18
     /// The format icon's margin from the tail end of a spine without stamped bands.
     nonisolated static let formatIconMargin: CGFloat = 20
@@ -100,14 +117,14 @@ enum SpineTextMetrics {
 
     /// `book`'s lettering on a spine of `dimensions`, from a bounded cache.
     static func lettering(
-        for book: Book, style: SpineStyle, dimensions: SpineDimensions, maximumLines: Int = 3
+        for book: Book, style: SpineStyle, dimensions: SpineDimensions
     ) -> SpineLettering {
         let spine = text(of: book, uppercase: style.uppercase)
         return lettering(
             title: spine.title, author: spine.author, fontName: style.fontName,
             length: letteredLength(
                 for: book, length: dimensions.height, thickness: dimensions.width),
-            thickness: dimensions.width, maximumLines: maximumLines)
+            thickness: dimensions.width)
     }
 
     private struct Key: Hashable {
@@ -121,8 +138,8 @@ enum SpineTextMetrics {
     private static var letterings: [Key: SpineLettering] = [:]
 
     /// `title` and `author` lettered in `length` along a spine `thickness` across, in at most
-    /// `maximumLines` title lines. A third line applies only when two lines can't reach
-    /// `minimumTitleSize`.
+    /// `maximumLines` title lines. A third line applies only when the lettering on one or two
+    /// lines can't reach `minimumTitleSize`.
     static func lettering(
         title: String, author: String, fontName: String, length: CGFloat, thickness: CGFloat,
         maximumLines: Int = 3
@@ -150,27 +167,57 @@ enum SpineTextMetrics {
         title: String, author: String, fontName: String?, font: @escaping (CGFloat) -> UIFont,
         length: CGFloat, thickness: CGFloat, maximumLines: Int = 3
     ) -> SpineLettering {
-        // The rule asks for the same few sizes many times.
-        var fonts: [CGFloat: UIFont] = [:]
-        let cachedFont = { (size: CGFloat) -> UIFont in
-            if let saved = fonts[size] { return saved }
-            let made = font(size)
-            fonts[size] = made
-            return made
-        }
+        let font = cached(font)
         func rule(_ lines: Int) -> SpineLettering {
             LetteringRule(
-                fontName: fontName, font: cachedFont, title: title, author: author, length: length,
+                fontName: fontName, font: font, title: title, author: author, length: length,
                 thickness: thickness, maximumLines: lines
             )
             .lettering()
         }
+        // The rule's rows fit the title beside different author forms, so a rule allowed three
+        // lines can end on three in one row where another row reaches the minimum on two.
+        // Lettering on two lines first keeps the third line for a title that can't reach it.
         var result = rule(min(maximumLines, 2))
         if maximumLines > 2, result.titleSize < minimumTitleSize {
             let threeLines = rule(maximumLines)
             if threeLines.titleSize > result.titleSize { result = threeLines }
         }
         return result
+    }
+
+    /// The size `title` letters at beside `author`, in `length` along a spine `thickness`
+    /// across, on one line or two sized by their line boxes, whichever is larger: the measure a
+    /// spine grows by, on the shelf (`readableDimensions`) and on Book Wall.
+    ///
+    /// Growth doesn't count on a two-line title's letters filling the box. A spine that did
+    /// would stop growing sooner, and the fill would shrink the book in place of enlarging its
+    /// letters, and take the room its author's whole name needs. Where this size reaches
+    /// `minimumTitleSize`, the drawn title does too, though the preference for one line can
+    /// draw it smaller than this size.
+    nonisolated static func growthTitleSize(
+        title: String, author: String, font: @escaping (CGFloat) -> UIFont, length: CGFloat,
+        thickness: CGFloat
+    ) -> CGFloat {
+        LetteringRule(
+            fontName: nil, font: cached(font), title: title, author: author, length: length,
+            thickness: thickness, maximumLines: 2, sizesByLineBoxes: true
+        )
+        .lettering().titleSize
+    }
+
+    /// `font`, remembering the font of each size, because the rule asks for the same few sizes
+    /// many times.
+    private nonisolated static func cached(_ font: @escaping (CGFloat) -> UIFont)
+        -> (CGFloat) -> UIFont
+    {
+        var fonts: [CGFloat: UIFont] = [:]
+        return { size in
+            if let saved = fonts[size] { return saved }
+            let made = font(size)
+            fonts[size] = made
+            return made
+        }
     }
 
     private struct DimensionsKey: Hashable {
@@ -185,17 +232,17 @@ enum SpineTextMetrics {
 
     /// Uses spare shelf height when a title cannot reach `minimumTitleSize`.
     ///
-    /// Growth measures the title on one or two lines, so a spine lengthens, then thickens,
-    /// before its title takes a third line.
+    /// Growth measures the title by `growthTitleSize`, on one or two lines, so a spine
+    /// lengthens, then thickens, before its title takes a third line.
     static func readableDimensions(
         for book: Book, style: SpineStyle,
         natural: SpineDimensions, rowHeight: CGFloat
     ) -> SpineDimensions {
+        let resolved = UIFont(name: style.fontName, size: minimumTitleSize)?.fontName
         let key = DimensionsKey(
             book: book, style: style, width: natural.width, height: natural.height,
-            rowHeight: rowHeight,
-            resolvedFont: UIFont(name: style.fontName, size: 23)?.fontName ?? "system")
-        if let cached = savedDimensions[key] { return cached }
+            rowHeight: rowHeight, resolvedFont: resolved ?? "system")
+        if let saved = savedDimensions[key] { return saved }
         // Prefer extra height so page-count-based thickness changes only as a last resort.
         // The shelf’s top gap accommodates the focus lift; retain the book-shape bounds.
         let maximumHeight = max(
@@ -203,11 +250,17 @@ enum SpineTextMetrics {
             min(
                 rowHeight,
                 natural.width * ShelfLayout.slendernessRange.upperBound))
+        let spine = text(of: book, uppercase: style.uppercase)
+        func reads(_ dimensions: SpineDimensions) -> Bool {
+            growthTitleSize(
+                title: spine.title, author: spine.author,
+                font: { uiFont(name: resolved, size: $0) },
+                length: letteredLength(
+                    for: book, length: dimensions.height, thickness: dimensions.width),
+                thickness: dimensions.width) >= minimumTitleSize
+        }
         var dimensions = natural
-        while lettering(for: book, style: style, dimensions: dimensions, maximumLines: 2)
-            .titleSize < minimumTitleSize,
-            dimensions.height < maximumHeight
-        {
+        while !reads(dimensions), dimensions.height < maximumHeight {
             dimensions = SpineDimensions(
                 width: natural.width,
                 height: min(maximumHeight, dimensions.height + 8))
@@ -219,10 +272,7 @@ enum SpineTextMetrics {
             min(
                 rowHeight * ShelfLayout.widthRange.upperBound,
                 dimensions.height / ShelfLayout.slendernessRange.lowerBound))
-        while lettering(for: book, style: style, dimensions: dimensions, maximumLines: 2)
-            .titleSize < minimumTitleSize,
-            dimensions.width < maximumWidth
-        {
+        while !reads(dimensions), dimensions.width < maximumWidth {
             dimensions = SpineDimensions(
                 width: min(maximumWidth, dimensions.width + 2),
                 height: dimensions.height)
@@ -244,13 +294,15 @@ enum SpineTextMetrics {
     }
 }
 
-/// The iPhone and Mac app's spine lettering rule (`SpineView.lettering(length:thickness:)` and
-/// its `SpineLettering` layout, in `ios/Bookworms/Views/SpineView.swift`), measured with UIKit
-/// so the shelf can size books before it draws them. Keep the shares the same in both apps.
+/// The iPhone and Mac app's spine lettering rule (`SpineLettering` in
+/// `ios/Bookworms/Views/SpineLettering.swift`), measured with UIKit so the shelf can size books
+/// before it draws them. Keep the shares, the title's line rule (`twoLineGain`, `oneLineFloor`,
+/// `twoLineFill`, `lineGap`), and the author's forms the same in both apps.
 ///
-/// The Apple TV adds its safeguards: authors letter at 16 points or more, the title stays 4
-/// points larger than the author where that minimum allows, and a title takes a third line
-/// only when one or two lines can't reach 23 points.
+/// The Apple TV adds its safeguards: sizes sit on a half-point grid, authors letter at 16
+/// points or more, the title stays 4 points larger than the author where that minimum allows,
+/// and a title that its preferred lines letter below 23 points takes whichever of one line and
+/// two letters it larger, or a third line when neither reaches 23 points and three are larger.
 private struct LetteringRule {
     let fontName: String?
     let makeFont: (CGFloat) -> UIFont
@@ -258,6 +310,9 @@ private struct LetteringRule {
     let author: String
     let length: CGFloat
     let maximumLines: Int
+    /// Whether the title takes the larger of one line and two sized by their line boxes, with
+    /// no preference for one line and no fill: `SpineTextMetrics.growthTitleSize`.
+    let sizesByLineBoxes: Bool
     let inset: CGFloat
     /// The row's height and the title's starting size.
     let box: CGFloat
@@ -271,7 +326,7 @@ private struct LetteringRule {
 
     init(
         fontName: String?, font: @escaping (CGFloat) -> UIFont, title: String, author: String,
-        length: CGFloat, thickness: CGFloat, maximumLines: Int
+        length: CGFloat, thickness: CGFloat, maximumLines: Int, sizesByLineBoxes: Bool = false
     ) {
         self.fontName = fontName
         makeFont = font
@@ -279,6 +334,7 @@ private struct LetteringRule {
         self.author = author
         self.length = length
         self.maximumLines = maximumLines
+        self.sizesByLineBoxes = sizesByLineBoxes
         inset = length * 0.035 + thickness * 0.25
         box = thickness * 0.88
         spacing = thickness * 0.3
@@ -297,19 +353,27 @@ private struct LetteringRule {
         let fits: Bool
     }
 
+    struct Title {
+        var lines: [String]
+        var size: CGFloat
+        var pitch: CGFloat
+        var shift: CGFloat = 0
+    }
+
     struct Row {
-        let title: (lines: [String], size: CGFloat)
+        let title: Title
         let titleWidth: CGFloat
         let author: Author
     }
 
     func lettering() -> SpineLettering {
-        // The author's large forms apply only where the title loses no size to them and stays
-        // at least 1.4 times their size. The 1% absorbs the half-point size grid.
+        // The author's large forms apply only where the title keeps its lines, loses no size
+        // to them, and stays at least 1.4 times their size. The 1% absorbs the half-point size
+        // grid.
         let largeRow = row(large: true, least: least)
         var chosen = row(large: false, least: least)
-        if largeRow.title.size >= 0.99 * chosen.title.size,
-            largeRow.title.size >= 1.4 * large
+        if largeRow.title.lines.count == chosen.title.lines.count,
+            largeRow.title.size >= 0.99 * chosen.title.size, largeRow.title.size >= 1.4 * large
         {
             chosen = largeRow
         }
@@ -319,6 +383,7 @@ private struct LetteringRule {
         return SpineLettering(
             fontName: fontName, title: chosen.title.lines.joined(separator: "\n"),
             titleSize: chosen.title.size, titleWidth: chosen.titleWidth,
+            titlePitch: chosen.title.pitch, titleShift: chosen.title.shift,
             author: chosen.author.text, authorSize: chosen.author.size,
             authorWidth: chosen.author.width, authorFits: chosen.author.fits, length: length,
             inset: inset)
@@ -340,18 +405,21 @@ private struct LetteringRule {
         return Row(title: titleFit(free - used), titleWidth: free - used, author: author)
     }
 
-    /// The author's first form that fits `width` and the box: on one line, on two, and as the
-    /// surname, at the large size where `large` allows, then at `least`. Failing those, the
-    /// surname at `least`, truncated.
+    /// The author's first form that fits `width` and the box: the whole name on one line, then
+    /// on two, at the large size where `large` allows, then at `least`. A spine names its
+    /// author in full wherever it can, so the surname comes only after those, at the same
+    /// sizes. Failing every form, the surname at `least`, truncated.
     private func author(in width: CGFloat, large: Bool, least: CGFloat) -> Author {
-        let forms = [author, SpineView.twoLines(author), SpineView.surname(author)]
-            .compactMap { $0 }
-        for size in large ? [self.large, least] : [least] {
-            for form in forms {
-                let lines = form.components(separatedBy: "\n")
-                if fits(lines, size: size, width: width) {
-                    return Author(
-                        text: form, size: size, width: widest(lines, size: size), fits: true)
+        let name = [author, SpineView.twoLines(author)].compactMap { $0 }
+        let surname = [SpineView.surname(author)].compactMap { $0 }
+        for forms in [name, surname] {
+            for size in large ? [self.large, least] : [least] {
+                for form in forms {
+                    let lines = form.components(separatedBy: "\n")
+                    if fits(lines, size: size, width: width) {
+                        return Author(
+                            text: form, size: size, width: widest(lines, size: size), fits: true)
+                    }
                 }
             }
         }
@@ -359,38 +427,108 @@ private struct LetteringRule {
             text: SpineView.surname(author) ?? author, size: least, width: width, fits: false)
     }
 
-    /// The title's largest size and its lines in `width`: one line or two, whichever is
-    /// larger, and three, where `maximumLines` allows, only when neither reaches the minimum.
+    /// The title in `width`: on one line, unless two lines letter it at least
+    /// `SpineTextMetrics.twoLineGain` times larger, or larger at all where one line would fall
+    /// below `SpineTextMetrics.oneLineFloor` of the length. A title on two lines is filled.
+    ///
+    /// Where that letters the title below `SpineTextMetrics.minimumTitleSize`, it takes
+    /// whichever of one line and two filled lines is larger. Where that is below the minimum
+    /// too, it takes three filled lines, if `maximumLines` allows them and they are larger.
     /// Lines break between words alone, so a title without spaces, such as a Chinese one,
     /// keeps to one line.
-    private func titleFit(_ width: CGFloat) -> (lines: [String], size: CGFloat) {
+    private func titleFit(_ width: CGFloat) -> Title {
         let words = title.split(separator: " ").map(String.init)
-        var best = fit(words, into: 1, width: width)
-        for count in 2...3 where words.count >= count && count <= maximumLines {
-            if count == 3 && best.size >= SpineTextMetrics.minimumTitleSize { break }
-            let candidate = fit(words, into: count, width: width)
-            if candidate.size > best.size { best = candidate }
+        let one = fit(words, into: 1, width: width)
+        guard maximumLines >= 2, words.count >= 2 else { return one }
+        let two = fit(words, into: 2, width: width)
+        guard !sizesByLineBoxes else { return two.size > one.size ? two : one }
+        let twoFilled = filled(two, in: width)
+        let gain =
+            one.size >= SpineTextMetrics.oneLineFloor * length ? SpineTextMetrics.twoLineGain : 1
+        let preferred = two.size > one.size * gain ? twoFilled : one
+        guard preferred.size < SpineTextMetrics.minimumTitleSize else { return preferred }
+        var largest = twoFilled.size > one.size ? twoFilled : one
+        if largest.size < SpineTextMetrics.minimumTitleSize, maximumLines >= 3, words.count >= 3 {
+            let three = filled(fit(words, into: 3, width: width), in: width)
+            if three.size > largest.size { largest = three }
         }
-        return best
+        return largest
     }
 
     /// The largest size on the half-point grid, at most the box's, at which `words` fit
     /// `count` lines in `width` and the box, broken where the widest line is narrowest.
-    private func fit(_ words: [String], into count: Int, width: CGFloat) -> (
-        lines: [String], size: CGFloat
-    ) {
+    private func fit(_ words: [String], into count: Int, width: CGFloat) -> Title {
         let candidates = Self.breaks(words[...], into: count)
         let lines =
             candidates.min { widest($0, size: box) < widest($1, size: box) } ?? [title]
         let lineHeight = font(box).lineHeight / box
+        let size = gridSize(
+            min(box, box / (CGFloat(count) * lineHeight), widthLimit(lines, in: width)),
+            above: 0.5
+        ) { fits(lines, size: $0, width: width) }
+        return Title(lines: lines, size: size, pitch: font(size).lineHeight)
+    }
+
+    /// `title`, on two or three lines, grown until its letters fill
+    /// `SpineTextMetrics.twoLineFill` of the box, or its longest line fills `width`.
+    ///
+    /// A font's line height leaves room for the tallest and the lowest letters of any text, and
+    /// most spine titles are capitals, so lines sized by line height leave much of the box
+    /// empty. The letters' own reach, measured from the title's glyphs, sizes the lines instead.
+    private func filled(_ title: Title, in width: CGFloat) -> Title {
+        let face = font(100) as CTFont
+        let ink = ink(title.lines, in: face)
+        let height = ink.top + ink.bottom
+        guard height > 0 else { return title }
+        let count = CGFloat(title.lines.count)
+        let size = gridSize(
+            min(
+                SpineTextMetrics.twoLineFill * box
+                    / ((count + (count - 1) * SpineTextMetrics.lineGap) * height),
+                widthLimit(title.lines, in: width)),
+            above: title.size
+        ) { widest(title.lines, size: $0) <= width }
+        guard size > title.size else { return title }
+        // A line draws with its line box centered on its pitch; the shift centers its letters.
+        let boxCenter =
+            (CTFontGetDescent(face) + CTFontGetLeading(face) - CTFontGetAscent(face)) / 200
+        return Title(
+            lines: title.lines, size: size,
+            pitch: (1 + SpineTextMetrics.lineGap) * height * size,
+            shift: (boxCenter - (ink.bottom - ink.top) / 2) * size)
+    }
+
+    /// The largest size on the half-point grid, at most `size`, at which `fits` holds, or the
+    /// first at or below `least` when none above it does. Fonts with optical sizes don't scale
+    /// exactly, so `fits` confirms each size by measuring at that size.
+    private func gridSize(_ size: CGFloat, above least: CGFloat, fits: (CGFloat) -> Bool)
+        -> CGFloat
+    {
+        var size = (size * 2).rounded(.down) / 2
+        while size > least, !fits(size) { size -= 0.5 }
+        return size
+    }
+
+    /// The size at which `lines` would fill `width` if the face scaled exactly from the box's
+    /// size.
+    private func widthLimit(_ lines: [String], in width: CGFloat) -> CGFloat {
         let widestLine = widest(lines, size: box)
-        var size = min(
-            box, box / (CGFloat(count) * lineHeight),
-            widestLine > 0 ? box * width / widestLine : box)
-        size = (size * 2).rounded(.down) / 2
-        // Fonts with optical sizes don't scale exactly; confirm at the size drawn.
-        while size > 0.5, !fits(lines, size: size, width: width) { size -= 0.5 }
-        return (lines, size)
+        return widestLine > 0 ? box * width / widestLine : box
+    }
+
+    /// How far the letters of `lines` reach above and below the baseline in `face`, a 100-point
+    /// font, per point of size.
+    private func ink(_ lines: [String], in face: CTFont) -> (top: CGFloat, bottom: CGFloat) {
+        var top: CGFloat = 0
+        var bottom: CGFloat = 0
+        for text in lines {
+            let line = CTLineCreateWithAttributedString(
+                NSAttributedString(string: text, attributes: [.font: face]))
+            let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+            top = max(top, bounds.maxY)
+            bottom = max(bottom, -bounds.minY)
+        }
+        return (top / 100, bottom / 100)
     }
 
     /// Every way to break `words` into `count` lines of whole words.

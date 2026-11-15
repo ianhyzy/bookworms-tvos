@@ -330,9 +330,10 @@ struct BookWallLayout: Sendable {
             lengthVariety: Float((UInt64(bitPattern: Int64(book.id)) &* 69_069) % 997) / 996)
     }
 
-    /// The length, and the thinnest thickness, at which `book`'s title letters at
-    /// `SpineTextMetrics.minimumTitleSize` or larger on one or two lines at `pointsPerUnit`,
-    /// grown as the shelf's `SpineTextMetrics.readableDimensions` grows a spine: from `height`,
+    /// The length, and the thinnest thickness, at which `book`'s title reaches
+    /// `SpineTextMetrics.minimumTitleSize` by the growth measure (`titleSize`), on one or two
+    /// lines sized by their line boxes at `pointsPerUnit`, grown as the shelf's
+    /// `SpineTextMetrics.readableDimensions` grows a spine: from `height`,
     /// it lengthens in 8-point steps up to `maximumBookLength` at the page-count `thickness`,
     /// then thickens in 2-point steps up to a sixth of its length. A title that letters at the
     /// minimum without growing needs only `minimumSpineThickness` if it letters there too. A
@@ -375,9 +376,9 @@ struct BookWallLayout: Sendable {
         )
     }
 
-    /// The shortest of the 8-point steps from `start` to `end` at which `book`'s title, on one
-    /// or two lines on a spine `thickness` across, letters as large as at `end`, or at
-    /// `SpineTextMetrics.minimumTitleSize` if it reaches that sooner.
+    /// The shortest of the 8-point steps from `start` to `end` at which `book`'s title, by the
+    /// growth measure on a spine `thickness` across, is as large as at `end`, or reaches
+    /// `SpineTextMetrics.minimumTitleSize` if it does that sooner.
     private static func shortestLength(
         for book: Book, typography: BookWallLocalSpine.Typography, from start: Float,
         to end: Float, thickness: Float, pointsPerUnit: Float
@@ -410,15 +411,19 @@ struct BookWallLayout: Sendable {
         return value(upper)
     }
 
+    /// The size a spine `length` by `thickness` scene units grows `book`'s title by, in points
+    /// at `pointsPerUnit`: the shelf's measure (`SpineTextMetrics.growthTitleSize`).
     private static func titleSize(
         for book: Book, typography: BookWallLocalSpine.Typography, length: Float,
         thickness: Float, pointsPerUnit: Float
     ) -> CGFloat {
-        lettering(
-            for: book, typography: typography, length: length, thickness: thickness,
-            pointsPerUnit: pointsPerUnit, maximumLines: 2
-        )
-        .titleSize
+        let text = SpineTextMetrics.text(of: book, uppercase: typography.uppercase)
+        return SpineTextMetrics.growthTitleSize(
+            title: text.title, author: text.author, font: { typography.font(size: $0) },
+            length: SpineTextMetrics.letteredLength(
+                for: book, length: CGFloat(length * pointsPerUnit),
+                thickness: CGFloat(thickness * pointsPerUnit)),
+            thickness: CGFloat(thickness * pointsPerUnit))
     }
 
     /// `book`'s lettering on a spine `length` by `thickness` scene units in `typography`,
@@ -426,7 +431,7 @@ struct BookWallLayout: Sendable {
     /// (`SpineTextMetrics.measure`), so a spine letters the same in both views at the same frame.
     static func lettering(
         for book: Book, typography: BookWallLocalSpine.Typography, length: Float,
-        thickness: Float, pointsPerUnit: Float, maximumLines: Int = 3
+        thickness: Float, pointsPerUnit: Float
     ) -> SpineLettering {
         let text = SpineTextMetrics.text(of: book, uppercase: typography.uppercase)
         return SpineTextMetrics.measure(
@@ -436,6 +441,6 @@ struct BookWallLayout: Sendable {
             length: SpineTextMetrics.letteredLength(
                 for: book, length: CGFloat(length * pointsPerUnit),
                 thickness: CGFloat(thickness * pointsPerUnit)),
-            thickness: CGFloat(thickness * pointsPerUnit), maximumLines: maximumLines)
+            thickness: CGFloat(thickness * pointsPerUnit))
     }
 }
