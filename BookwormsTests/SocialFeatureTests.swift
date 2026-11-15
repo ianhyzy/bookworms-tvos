@@ -650,6 +650,11 @@ final class SocialFeatureTests: XCTestCase {
 
         await relaunched.load(token: nil, readerID: 2)
         XCTAssertNil(relaunched.owner)
+
+        let withoutSocialViews = SocialLibraryModel(
+            client: client, defaults: defaults, cacheRoot: root)
+        await withoutSocialViews.load(token: token, readerID: 2, enabledViews: [.shelf])
+        XCTAssertEqual(withoutSocialViews.owner, owner)
     }
 
     func testDeniedReaderLibraryIsEmptyAndKeepsOtherSocialData() async throws {
