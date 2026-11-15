@@ -619,6 +619,94 @@ final class BookWallLayoutTests: XCTestCase {
         }
     }
 
+    /// The shelf and Book Wall draw a filled two-line title with its letters, not its line
+    /// boxes, centered across the spine and inside the lettering's box, and a two-line author
+    /// with its lines centered on each other and the wider one at the tail-end margin.
+    @MainActor
+    func testFilledTitleAndTwoLineAuthorDrawAlikeOnShelfAndWall() throws {
+        let book = Book(id: 4, title: "The Long Hall of Lanterns", author: "Mirela K. Le Vant")
+        let cloth = StyleColor(red: 0.1, green: 0.15, blue: 0.3)
+        var style = SpineStyle.fallback(for: book)
+        style.background = cloth
+        style.foreground = .paper
+        style.fontName = "Georgia-Bold"
+        style.uppercase = true
+        let length: CGFloat = 600
+        let thickness: CGFloat = 70
+        let dimensions = SpineDimensions(width: thickness, height: length)
+        let lettering = SpineTextMetrics.lettering(for: book, style: style, dimensions: dimensions)
+        XCTAssertEqual(lettering.title, "THE LONG HALL\nOF LANTERNS")
+        XCTAssertEqual(lettering.author, "Mirela K.\nLe Vant")
+        XCTAssertLessThan(
+            lettering.titlePitch,
+            SpineTextMetrics.uiFont(name: lettering.fontName, size: lettering.titleSize).lineHeight)
+
+        // The wall's texture lies flat, head on the left, at `scale` pixels per point.
+        let points: Float = 64
+        let slot = BookWallLayout.Slot(
+            book: book, column: 0, row: 0, x: 0, laneWidth: 10, restingY: 0,
+            bookHeight: Float(length) / points, spineThickness: Float(thickness) / points,
+            coverWidth: 6, lettering: lettering, pointsPerUnit: points)
+        let wall = try XCTUnwrap(
+            BookWallSpineTexture.make(
+                for: slot,
+                style: BookWallLocalSpine.Style(
+                    background: cloth, foreground: .paper,
+                    typography: BookWallLocalSpine.Typography(
+                        fontName: "Georgia-Bold", uppercase: true))))
+        let scale = BookWallSpineTexture.pixelsPerPoint
+        // The shelf's spine stands upright, head at the top, at one pixel per point: a point
+        // `along` the flat spine and `across` it from the front board's edge is at
+        // (`thickness - across`, `along`).
+        let renderer = ImageRenderer(
+            content: SpineView(
+                book: book, style: style, dimensions: dimensions, lettering: lettering,
+                isFocused: false))
+        renderer.scale = 1
+        let shelf = try XCTUnwrap(renderer.cgImage)
+
+        /// The ink in the flat spine's rectangle from `along` and `across`, in points of the
+        /// flat spine, on the wall's texture and on the shelf's spine.
+        func ink(along: ClosedRange<CGFloat>, across: ClosedRange<CGFloat>) throws -> [CGRect] {
+            let flat = CGRect(
+                x: along.lowerBound, y: across.lowerBound,
+                width: along.upperBound - along.lowerBound,
+                height: across.upperBound - across.lowerBound)
+            let onWall = try inkBounds(
+                wall, in: flat.applying(CGAffineTransform(scaleX: scale, y: scale)))
+            let onShelf = try inkBounds(
+                shelf,
+                in: CGRect(
+                    x: thickness - flat.maxY, y: flat.minX, width: flat.height, height: flat.width))
+            XCTAssertFalse(onWall.isNull)
+            XCTAssertFalse(onShelf.isNull)
+            return [
+                onWall.applying(CGAffineTransform(scaleX: 1 / scale, y: 1 / scale)),
+                CGRect(
+                    x: onShelf.minY, y: thickness - onShelf.maxX, width: onShelf.height,
+                    height: onShelf.width),
+            ]
+        }
+
+        let box = thickness * 0.88
+        let titleEnd = lettering.inset + lettering.titleWidth
+        for title in try ink(along: 0...titleEnd, across: 0...thickness) {
+            XCTAssertEqual(title.midY, thickness / 2, accuracy: 1.5)
+            XCTAssertLessThanOrEqual(title.height, SpineTextMetrics.twoLineFill * box + 1.5)
+            XCTAssertGreaterThan(title.height, SpineTextMetrics.twoLineFill * box - 3)
+            XCTAssertEqual(title.minX, lettering.inset, accuracy: 3)
+        }
+        let tail = lettering.length - lettering.inset
+        let authorStart = tail - lettering.authorWidth - 4
+        let first = try ink(along: authorStart...length, across: 0...thickness / 2)
+        let second = try ink(along: authorStart...length, across: thickness / 2...thickness)
+        for (upper, lower) in zip(first, second) {
+            XCTAssertGreaterThan(abs(upper.width - lower.width), 4)
+            XCTAssertEqual(upper.midX, lower.midX, accuracy: 1.5)
+            XCTAssertEqual(max(upper.maxX, lower.maxX), tail, accuracy: 2.5)
+        }
+    }
+
     /// Each slot carries the lettering the shelf would measure at the slot's frame in points,
     /// in the book's genre face.
     @MainActor

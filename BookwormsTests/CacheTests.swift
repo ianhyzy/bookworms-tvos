@@ -136,11 +136,88 @@ final class CacheTests: XCTestCase {
         XCTAssertFalse(lettering("三体", thickness: 70).title.contains("\n"))
     }
 
-    func testTwoLinesWhenLargerThanOne() {
-        let result = lettering("Small Gods", length: 300, thickness: 100)
-        XCTAssertEqual(result.title, "Small\nGods")
-        let oneLine = lettering("SmallGods", length: 300, thickness: 100)
-        XCTAssertGreaterThan(result.titleSize, oneLine.titleSize)
+    private func oneLine(_ title: String, length: CGFloat, thickness: CGFloat) -> SpineLettering {
+        SpineTextMetrics.lettering(
+            title: title, author: "Tamsin Vellor", fontName: "Georgia-Bold", length: length,
+            thickness: thickness, maximumLines: 1)
+    }
+
+    func testTitleTakesTwoLinesWhenAQuarterLarger() {
+        let title = "The Name of the Wind"
+        let result = lettering(title, length: 520, thickness: 110)
+        XCTAssertEqual(result.title, "The Name\nof the Wind")
+        XCTAssertGreaterThan(
+            result.titleSize,
+            SpineTextMetrics.twoLineGain * oneLine(title, length: 520, thickness: 110).titleSize)
+    }
+
+    func testTitlePrefersOneLine() {
+        // Two lines sized by their line boxes fit this spine and letter the title larger than
+        // one line does, but by less than a quarter, so the title keeps to one line.
+        let result = lettering("The Name of the Wind", length: 700, thickness: 110)
+        XCTAssertFalse(result.title.contains("\n"))
+        XCTAssertGreaterThanOrEqual(result.titleSize, SpineTextMetrics.oneLineFloor * 700)
+        let lineHeight = SpineTextMetrics.uiFont(name: result.fontName, size: 100).lineHeight / 100
+        let twoLineSize = 110 * 0.88 / (2 * lineHeight)
+        let font = SpineTextMetrics.uiFont(name: result.fontName, size: twoLineSize)
+        for line in ["The Name", "of the Wind"] {
+            XCTAssertLessThan(
+                (line as NSString).size(withAttributes: [.font: font]).width, result.titleWidth)
+        }
+        XCTAssertGreaterThan(twoLineSize, result.titleSize)
+        XCTAssertLessThan(twoLineSize, SpineTextMetrics.twoLineGain * result.titleSize)
+    }
+
+    func testTitleBelowOneLineFloorTakesTheLargerLines() {
+        // One line letters above 23 points but below 4.5% of the length, so two lines apply
+        // although they are less than a quarter larger.
+        let title = "Jonathan Strange and Mr Norrell"
+        let result = lettering(title, length: 640, thickness: 64)
+        let single = oneLine(title, length: 640, thickness: 64)
+        XCTAssertGreaterThanOrEqual(single.titleSize, SpineTextMetrics.minimumTitleSize)
+        XCTAssertLessThan(single.titleSize, SpineTextMetrics.oneLineFloor * 640)
+        XCTAssertEqual(result.title, "Jonathan Strange\nand Mr Norrell")
+        XCTAssertGreaterThan(result.titleSize, single.titleSize)
+        XCTAssertLessThan(result.titleSize, SpineTextMetrics.twoLineGain * single.titleSize)
+    }
+
+    func testTitleBelowTheMinimumTakesItsLargestLines() {
+        // One line letters above 4.5% of the length and two lines gain less than a quarter, so
+        // the preference alone would keep one line, below 23 points.
+        let title = "The Name of the Wind"
+        let result = lettering(title, length: 400, thickness: 60)
+        let single = oneLine(title, length: 400, thickness: 60)
+        XCTAssertLessThan(single.titleSize, SpineTextMetrics.minimumTitleSize)
+        XCTAssertGreaterThanOrEqual(single.titleSize, SpineTextMetrics.oneLineFloor * 400)
+        XCTAssertEqual(result.title, "The Name\nof the Wind")
+        XCTAssertGreaterThanOrEqual(result.titleSize, SpineTextMetrics.minimumTitleSize)
+        XCTAssertLessThan(result.titleSize, SpineTextMetrics.twoLineGain * single.titleSize)
+    }
+
+    func testTwoLineTitleFillsTheBoxWithItsLetters() {
+        let result = lettering(
+            "THE LONG HALL OF LANTERNS", author: "Mirela K. Le Vant", length: 600, thickness: 70)
+        XCTAssertEqual(result.title, "THE LONG HALL\nOF LANTERNS")
+        let box: CGFloat = 70 * 0.88
+        let font = SpineTextMetrics.uiFont(name: result.fontName, size: result.titleSize)
+        // Line boxes this size overflow the box; the lines sit closer than their line height.
+        XCTAssertGreaterThan(2 * font.lineHeight, box)
+        XCTAssertLessThan(result.titlePitch, font.lineHeight)
+        // Two lines of capitals and the gap between them fill 85% of the box, to the size grid.
+        let letters = result.titlePitch + font.capHeight
+        XCTAssertLessThanOrEqual(letters, SpineTextMetrics.twoLineFill * box + 1)
+        XCTAssertGreaterThan(letters, SpineTextMetrics.twoLineFill * box - 2)
+        for width in titleLineWidths(result) {
+            XCTAssertLessThanOrEqual(width, result.titleWidth + 0.01)
+        }
+        // A title with ascenders and descenders has no room to grow, so its lines keep their
+        // line height.
+        let mixed = lettering("Jonathan Strange and Mr Norrell", length: 520, thickness: 80)
+        XCTAssertEqual(mixed.title, "Jonathan Strange\nand Mr Norrell")
+        XCTAssertEqual(
+            mixed.titlePitch,
+            SpineTextMetrics.uiFont(name: mixed.fontName, size: mixed.titleSize).lineHeight)
+        XCTAssertEqual(mixed.titleShift, 0)
     }
 
     func testThirdLineOnlyBelowTitleFloor() {
@@ -177,6 +254,32 @@ final class CacheTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(drawn.titleSize, SpineTextMetrics.minimumTitleSize)
     }
 
+    func testSpineGrowsByLineBoxesNotByFilledLetters() {
+        // Filled, the title's two lines already letter at 23 points on the natural spine. The
+        // spine still grows as its line boxes need, so the fill never shrinks a book.
+        let book = Book(id: 5, title: "The Long Hall of Lanterns", author: "Mirela K. Le Vant")
+        var style = SpineStyle.fallback(for: book)
+        style.fontName = "Georgia-Bold"
+        style.uppercase = true
+        let natural = SpineDimensions(width: 54, height: 460)
+        let drawn = SpineTextMetrics.lettering(for: book, style: style, dimensions: natural)
+        XCTAssertEqual(drawn.title, "THE LONG HALL\nOF LANTERNS")
+        XCTAssertGreaterThanOrEqual(drawn.titleSize, SpineTextMetrics.minimumTitleSize)
+        XCTAssertLessThan(
+            SpineTextMetrics.growthTitleSize(
+                title: "THE LONG HALL OF LANTERNS", author: book.author,
+                font: { SpineTextMetrics.uiFont(name: "Georgia-Bold", size: $0) },
+                length: natural.height, thickness: natural.width),
+            SpineTextMetrics.minimumTitleSize)
+
+        let adjusted = SpineTextMetrics.readableDimensions(
+            for: book, style: style, natural: natural, rowHeight: 600)
+        XCTAssertGreaterThan(adjusted.height, natural.height)
+        XCTAssertGreaterThanOrEqual(
+            SpineTextMetrics.lettering(for: book, style: style, dimensions: adjusted).titleSize,
+            SpineTextMetrics.minimumTitleSize)
+    }
+
     /// SwiftUI lays the measured text out within the room UIKit measured for it.
     func testSwiftUIDrawsLetteringWithinItsMeasuredRoom() {
         let cases: [(String, String, CGFloat, CGFloat)] = [
@@ -195,9 +298,14 @@ final class CacheTests: XCTestCase {
                 )
                 .sizeThatFits(in: CGSize(width: 10_000, height: 10_000))
             }
-            let titleSize = size(result.title, result.titleSize)
-            XCTAssertLessThanOrEqual(titleSize.width, result.titleWidth + 0.5, title)
-            XCTAssertLessThanOrEqual(titleSize.height, thickness * 0.88 + 0.5, title)
+            // Each title line draws alone in its pitch, as `SpineView` frames it.
+            let lines = result.title.components(separatedBy: "\n")
+            for line in lines {
+                XCTAssertLessThanOrEqual(
+                    size(line, result.titleSize).width, result.titleWidth + 0.5, title)
+            }
+            XCTAssertLessThanOrEqual(
+                CGFloat(lines.count) * result.titlePitch, thickness * 0.88 + 0.5, title)
             guard result.authorFits else { continue }
             let authorSize = size(result.author, result.authorSize)
             XCTAssertLessThanOrEqual(authorSize.width, result.authorWidth + 0.5, author)
@@ -232,6 +340,18 @@ final class CacheTests: XCTestCase {
         let thin = lettering(
             "The Inheritance Cycle", author: author, length: 300, thickness: 40)
         XCTAssertEqual(thin.author, "Paolini")
+    }
+
+    func testAuthorKeepsItsWholeNameBeforeItsSurnameGrows() {
+        // The surname alone fits at the author's large size, where the whole name doesn't; the
+        // spine letters the whole name at the smaller size instead.
+        let title = "The Name of the Wind"
+        let surname = lettering(title, author: "Vellor", length: 560, thickness: 44)
+        XCTAssertGreaterThan(surname.authorSize, SpineTextMetrics.minimumAuthorSize)
+        let result = lettering(title, length: 560, thickness: 44)
+        XCTAssertEqual(result.author, "Tamsin Vellor")
+        XCTAssertLessThan(result.authorSize, surname.authorSize)
+        XCTAssertTrue(result.authorFits)
     }
 
     func testFormatIconReservesTailRoom() {

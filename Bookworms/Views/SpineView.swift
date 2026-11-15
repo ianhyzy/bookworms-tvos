@@ -61,27 +61,45 @@ struct SpineView: View {
 
     /// The title at the head end and the author at the tail end, at their measured sizes.
     /// Measured text sizes itself (`fixedSize`), so SwiftUI never rewraps or scales it.
+    ///
+    /// Each measured line is a text of its own. `SpineTextRenderer`'s display padding moves the
+    /// lines of a center-aligned or trailing-aligned text past its frame, by the padding or
+    /// twice it, so a stack aligns the lines instead.
     private var letteringRow: some View {
         HStack(spacing: 0) {
-            spineTitle(lettering.title)
-                .font(SpineTextMetrics.font(name: lettering.fontName, size: lettering.titleSize))
-                .textRenderer(SpineTextRenderer(fontSize: lettering.titleSize))
-                .multilineTextAlignment(.leading)
-                .fixedSize()
-                .frame(width: lettering.titleWidth, alignment: .leading)
+            VStack(alignment: .leading, spacing: 0) {
+                let lines = lettering.title.components(separatedBy: "\n")
+                ForEach(Array(lines.enumerated()), id: \.offset) { line in
+                    spineTitle(line.element)
+                        .lineLimit(1)
+                        .fixedSize()
+                        // Shorter than the line's own height where a filled title's letters
+                        // fill the box; the letters draw past it, unclipped.
+                        .frame(height: lettering.titlePitch)
+                        .offset(y: lettering.titleShift)
+                }
+            }
+            .font(SpineTextMetrics.font(name: lettering.fontName, size: lettering.titleSize))
+            .textRenderer(SpineTextRenderer(fontSize: lettering.titleSize))
+            .frame(width: lettering.titleWidth, alignment: .leading)
             Spacer(minLength: 0)
             authorText
                 .font(SpineTextMetrics.font(name: lettering.fontName, size: lettering.authorSize))
                 .textRenderer(SpineTextRenderer(fontSize: lettering.authorSize))
-                .multilineTextAlignment(.trailing)
                 .frame(width: lettering.authorWidth, alignment: .trailing)
         }
         .padding(.horizontal, lettering.inset)
     }
 
+    /// The author's lines, centered on each other, or a surname that doesn't fit, truncated.
     @ViewBuilder private var authorText: some View {
         if lettering.authorFits {
-            Text(verbatim: lettering.author).fixedSize()
+            VStack(spacing: 0) {
+                let lines = lettering.author.components(separatedBy: "\n")
+                ForEach(Array(lines.enumerated()), id: \.offset) { line in
+                    Text(verbatim: line.element).lineLimit(1).fixedSize()
+                }
+            }
         } else {
             Text(verbatim: lettering.author).lineLimit(1).truncationMode(.tail)
         }
