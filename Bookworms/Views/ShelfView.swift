@@ -364,8 +364,7 @@ struct ShelfView: View {
 
     /// The account state now, which the sidebar takes only while it is closed.
     private var currentSidebarAccount: SidebarAccount {
-        SidebarAccount(
-            owner: social.snapshot?.owner, needsReconnect: library.hardcoverNeedsReconnect)
+        SidebarAccount(owner: social.owner, needsReconnect: library.hardcoverNeedsReconnect)
     }
 
     /// Gives the sidebar the current account state unless the sidebar is open. A sync can reject
@@ -702,7 +701,8 @@ struct ShelfView: View {
     private var artworkKey: ViewArtworkKey {
         var books = Array(library.books.prefix(BookLimit.maximum))
         var avatars: [URL] = []
-        if let ownerAvatar = social.snapshot?.owner.avatarURL {
+        // The sidebar shows the owner's photo while a rejected login leaves no snapshot.
+        if let ownerAvatar = social.owner?.avatarURL {
             avatars.append(ownerAvatar)
         }
         // The selected comparison reader appears beside ratings and reviews.
@@ -1212,9 +1212,9 @@ struct ShelfView: View {
     /// padding keeps the name clear of the first row's focused pill.
     ///
     /// A reader without a photo gets their initial. After Hardcover rejects the login, the photo
-    /// carries a mark; social sync drops the profile with the rejected login, so the mark usually
-    /// sits on a person symbol named "Hardcover". Without a profile or a rejected login, such as
-    /// while signed out, the sidebar has no header.
+    /// carries a mark. The profile outlives the rejected login (`SocialLibraryModel.owner`); when
+    /// none was ever downloaded, the mark sits on a person symbol named "Hardcover". Without a
+    /// profile or a rejected login, such as while signed out, the sidebar has no header.
     @ViewBuilder private var sidebarHeader: some View {
         let owner = sidebarAccount.owner
         if owner != nil || sidebarAccount.needsReconnect {

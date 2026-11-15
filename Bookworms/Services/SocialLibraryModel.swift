@@ -6,6 +6,7 @@ import Observation
 final class SocialLibraryModel {
     private(set) var snapshot: SocialSnapshot? {
         didSet {
+            if let shown = snapshot?.owner, shown != owner { owner = shown }
             if snapshot?.activities != oldValue?.activities {
                 activities = FeedActivity.latestPerBook(snapshot?.activities ?? [])
             }
@@ -19,6 +20,11 @@ final class SocialLibraryModel {
             }
         }
     }
+    /// The reader the saved login belongs to, as last downloaded. It outlives `snapshot`, which
+    /// a denied or rejected login clears, so the sidebar still shows whose account it is, and a
+    /// relaunch restores it from the saved copy. A load without a token forgets it here; the
+    /// saved copy stays with the account's other cached data.
+    private(set) var owner: ReaderProfile?
     private(set) var presentation = SocialPresentation()
     private(set) var presentationRevision = 0
     @ObservationIgnored private var presentationPreferences = ViewPreferences()
@@ -134,6 +140,7 @@ final class SocialLibraryModel {
             requestRevision += 1
             identity = nil
             snapshot = nil
+            owner = nil
             isLoading = false
             loadFailed = false
             status = "Connect Hardcover to use social views."
@@ -173,6 +180,7 @@ final class SocialLibraryModel {
         if identity != fingerprint {
             snapshot = nil
             identity = fingerprint
+            owner = savedOwner(of: fingerprint)
         }
         isLoading = true
         loadFailed = false
@@ -218,9 +226,8 @@ final class SocialLibraryModel {
             do {
                 // The account's cached copy shows before any request. An account or credential
                 // fingerprint is local-only and never enters requests or iCloud.
-                if snapshot == nil,
-                    let ownerID = defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int,
-                    let cached = await cache.load(owner: ownerID)
+                if snapshot == nil, let saved = savedOwner(of: fingerprint),
+                    let cached = await cache.load(owner: saved.id)
                 {
                     guard isCurrent(request) else { return }
                     snapshot = cached
@@ -235,7 +242,9 @@ final class SocialLibraryModel {
                     let owner = try await authorized { try await client.owner(token: $0) }
                     let cached = await cache.load(owner: owner.id)
                     guard isCurrent(request) else { return }
-                    defaults.set(owner.id, forKey: "socialOwner.\(fingerprint)")
+                    defaults.set(
+                        try? JSONEncoder().encode(owner), forKey: "socialOwner.\(fingerprint)")
+                    self.owner = owner
                     current = cached ?? SocialSnapshot(owner: owner)
                 }
                 // Fetches `dataset` when it's due, then shows and saves it. A failed fetch
@@ -338,9 +347,7 @@ final class SocialLibraryModel {
                 case HardcoverError.insufficientScope, HardcoverError.forbidden,
                     HardcoverError.invalidToken:
                     // A first load can be denied before it installs the cache file it read.
-                    let owner =
-                        snapshot?.owner.id
-                        ?? defaults.object(forKey: "socialOwner.\(fingerprint)") as? Int
+                    let cachedOwner = snapshot?.owner.id ?? savedOwner(of: fingerprint)?.id
                     snapshot = nil
                     revision += 1
                     // Only Settings → Sources shows this, so it names that page's buttons. A
@@ -356,7 +363,7 @@ final class SocialLibraryModel {
                         default:
                             "Hardcover denied access to social data."
                         }
-                    if let owner { await cache.remove(owner: owner) }
+                    if let cachedOwner { await cache.remove(owner: cachedOwner) }
                 default:
                     loadFailed = !feedSettled
                     status =
@@ -367,6 +374,13 @@ final class SocialLibraryModel {
         }
         activeTask = task
         await task.value
+    }
+
+    /// The profile saved for the account or credential with `fingerprint`: whose cache file to
+    /// read, and who the sidebar shows before any request answers.
+    private func savedOwner(of fingerprint: String) -> ReaderProfile? {
+        defaults.data(forKey: "socialOwner.\(fingerprint)")
+            .flatMap { try? JSONDecoder().decode(ReaderProfile.self, from: $0) }
     }
 
     /// Whether the load numbered `request` is the newest one and hasn't been cancelled.
@@ -409,6 +423,7 @@ final class SocialLibraryModel {
         if isSample {
             isSample = false
             snapshot = nil
+            owner = nil
             identity = nil
         }
     }
