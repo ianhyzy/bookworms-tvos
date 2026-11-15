@@ -1119,7 +1119,8 @@ final class LibraryWorkflowTests: XCTestCase {
         model.hardcoverEnabled = true
         XCTAssertTrue(model.hardcoverNeedsReconnect)
         model.disconnect()
-        XCTAssertFalse(model.hardcoverNeedsReconnect, "No login is not a rejected login")
+        model.hardcoverEnabled = true
+        XCTAssertFalse(model.hardcoverNeedsReconnect, "A source without a login needs no mark")
     }
 
     func testValidatedHardcoverReplacementPreservesDailySnapshotAndSavesCredential() async throws {

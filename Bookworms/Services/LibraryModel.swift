@@ -659,8 +659,10 @@ final class LibraryModel {
     /// saved; Settings offers a new link code instead of showing the account as connected.
     private(set) var hardcoverSessionExpired = false
     /// Whether the reader has to sign in to Hardcover again: Hardcover rejected the saved login
-    /// of a source that is on. An Apple TV that never connected Hardcover needs nothing, because
-    /// a CWA library alone is a complete setup, and neither does a source the reader turned off.
+    /// of a source that is on. A source the reader turned off needs nothing. Neither does an
+    /// Apple TV that never connected Hardcover, because a CWA library alone is a complete setup:
+    /// only a request made with a saved login sets `hardcoverSessionExpired`, and disconnecting
+    /// clears it.
     var hardcoverNeedsReconnect: Bool { hardcoverEnabled && hardcoverSessionExpired }
     private(set) var connectionRevision = 0
     var isConnected: Bool { !isSample && LibrarySource.allCases.contains { syncs($0) } }
@@ -889,8 +891,11 @@ final class LibraryModel {
         }
         hasStarted = true
         #if DEBUG && targetEnvironment(simulator)
-            // `--test-hardcover-rejected` shows the app as it is after Hardcover rejects the
-            // saved login, for captures and UI tests. A simulator has no login to reject.
+            // `--test-hardcover-rejected` marks the sidebar as it is after Hardcover rejects the
+            // saved login, for captures. A simulator has no login to reject, so this sets the
+            // flag without one, which no sync can do: Settings → Sources then shows **Reconnect
+            // Hardcover** beside a Hardcover toggle that is unavailable, as it is while signed
+            // out.
             if dependencies.allowLaunchOverrides,
                 ProcessInfo.processInfo.arguments.contains("--test-hardcover-rejected")
             {
