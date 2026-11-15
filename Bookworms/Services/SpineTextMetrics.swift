@@ -138,8 +138,8 @@ enum SpineTextMetrics {
     private static var letterings: [Key: SpineLettering] = [:]
 
     /// `title` and `author` lettered in `length` along a spine `thickness` across, in at most
-    /// `maximumLines` title lines. A third line applies only when neither one line nor two
-    /// filled lines reach `minimumTitleSize`.
+    /// `maximumLines` title lines. A third line applies only when the lettering on one or two
+    /// lines can't reach `minimumTitleSize`.
     static func lettering(
         title: String, author: String, fontName: String, length: CGFloat, thickness: CGFloat,
         maximumLines: Int = 3
@@ -167,11 +167,23 @@ enum SpineTextMetrics {
         title: String, author: String, fontName: String?, font: @escaping (CGFloat) -> UIFont,
         length: CGFloat, thickness: CGFloat, maximumLines: Int = 3
     ) -> SpineLettering {
-        LetteringRule(
-            fontName: fontName, font: cached(font), title: title, author: author, length: length,
-            thickness: thickness, maximumLines: maximumLines
-        )
-        .lettering()
+        let font = cached(font)
+        func rule(_ lines: Int) -> SpineLettering {
+            LetteringRule(
+                fontName: fontName, font: font, title: title, author: author, length: length,
+                thickness: thickness, maximumLines: lines
+            )
+            .lettering()
+        }
+        // The rule's rows fit the title beside different author forms, so a rule allowed three
+        // lines can end on three in one row where another row reaches the minimum on two.
+        // Lettering on two lines first keeps the third line for a title that can't reach it.
+        var result = rule(min(maximumLines, 2))
+        if maximumLines > 2, result.titleSize < minimumTitleSize {
+            let threeLines = rule(maximumLines)
+            if threeLines.titleSize > result.titleSize { result = threeLines }
+        }
+        return result
     }
 
     /// The size `title` letters at beside `author`, in `length` along a spine `thickness`
