@@ -928,8 +928,7 @@ struct ReaderLabel: View {
                 if let avatarURL {
                     CachedAvatarView(url: avatarURL, allowsNetwork: allowsNetwork)
                 } else {
-                    Image(systemName: "person.crop.circle.fill")
-                        .resizable().scaledToFit().foregroundStyle(.secondary)
+                    ReaderSilhouette()
                 }
             }
             .frame(width: size * avatarScale, height: size * avatarScale)
@@ -958,10 +957,7 @@ struct CachedAvatarView: View {
             } else if let name {
                 ReaderMonogram(name: name)
             } else {
-                Image(systemName: "person.crop.circle.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(.secondary)
+                ReaderSilhouette()
             }
         }
         .task(id: "\(url.absoluteString):\(artworkGeneration)") {
@@ -972,6 +968,14 @@ struct CachedAvatarView: View {
             else { return }
             image = UIImage(data: data)
         }
+    }
+}
+
+/// A generic person symbol, in place of the photo of a reader the app can't name.
+struct ReaderSilhouette: View {
+    var body: some View {
+        Image(systemName: "person.crop.circle.fill")
+            .resizable().scaledToFit().foregroundStyle(.secondary)
     }
 }
 

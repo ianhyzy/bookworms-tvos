@@ -1103,6 +1103,26 @@ final class LibraryWorkflowTests: XCTestCase {
         XCTAssertFalse(model.hardcoverSessionExpired)
     }
 
+    func testOnlyARejectedLoginOfAnEnabledSourceNeedsReconnect() async throws {
+        let fixture = try LibraryWorkflowFixture()
+        defer { fixture.cleanUp() }
+        try fixture.save([fixture.snapshot(.hardcover, books: [fixture.book(1)])])
+        var dependencies = fixture.dependencies()
+        dependencies.fetchHardcover = { _, _ in throw HardcoverError.invalidToken }
+        let model = LibraryModel(dependencies: dependencies)
+        await model.start()
+        XCTAssertFalse(model.hardcoverNeedsReconnect, "A saved login works until a sync says not")
+        await model.refresh(manual: true)
+        XCTAssertTrue(model.hardcoverNeedsReconnect)
+        model.hardcoverEnabled = false
+        XCTAssertFalse(model.hardcoverNeedsReconnect, "A source that is off needs no login")
+        model.hardcoverEnabled = true
+        XCTAssertTrue(model.hardcoverNeedsReconnect)
+        model.disconnect()
+        model.hardcoverEnabled = true
+        XCTAssertFalse(model.hardcoverNeedsReconnect, "A source without a login needs no mark")
+    }
+
     func testValidatedHardcoverReplacementPreservesDailySnapshotAndSavesCredential() async throws {
         let fixture = try LibraryWorkflowFixture()
         defer { fixture.cleanUp() }
