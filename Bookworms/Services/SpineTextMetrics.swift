@@ -117,14 +117,14 @@ enum SpineTextMetrics {
 
     /// `book`'s lettering on a spine of `dimensions`, from a bounded cache.
     static func lettering(
-        for book: Book, style: SpineStyle, dimensions: SpineDimensions, maximumLines: Int = 3
+        for book: Book, style: SpineStyle, dimensions: SpineDimensions
     ) -> SpineLettering {
         let spine = text(of: book, uppercase: style.uppercase)
         return lettering(
             title: spine.title, author: spine.author, fontName: style.fontName,
             length: letteredLength(
                 for: book, length: dimensions.height, thickness: dimensions.width),
-            thickness: dimensions.width, maximumLines: maximumLines)
+            thickness: dimensions.width)
     }
 
     private struct Key: Hashable {
@@ -138,8 +138,8 @@ enum SpineTextMetrics {
     private static var letterings: [Key: SpineLettering] = [:]
 
     /// `title` and `author` lettered in `length` along a spine `thickness` across, in at most
-    /// `maximumLines` title lines. A third line applies only when two lines can't reach
-    /// `minimumTitleSize`.
+    /// `maximumLines` title lines. A third line applies only when neither one line nor two
+    /// filled lines reach `minimumTitleSize`.
     static func lettering(
         title: String, author: String, fontName: String, length: CGFloat, thickness: CGFloat,
         maximumLines: Int = 3
@@ -167,20 +167,11 @@ enum SpineTextMetrics {
         title: String, author: String, fontName: String?, font: @escaping (CGFloat) -> UIFont,
         length: CGFloat, thickness: CGFloat, maximumLines: Int = 3
     ) -> SpineLettering {
-        let font = cached(font)
-        func rule(_ lines: Int) -> SpineLettering {
-            LetteringRule(
-                fontName: fontName, font: font, title: title, author: author, length: length,
-                thickness: thickness, maximumLines: lines
-            )
-            .lettering()
-        }
-        var result = rule(min(maximumLines, 2))
-        if maximumLines > 2, result.titleSize < minimumTitleSize {
-            let threeLines = rule(maximumLines)
-            if threeLines.titleSize > result.titleSize { result = threeLines }
-        }
-        return result
+        LetteringRule(
+            fontName: fontName, font: cached(font), title: title, author: author, length: length,
+            thickness: thickness, maximumLines: maximumLines
+        )
+        .lettering()
     }
 
     /// The size `title` letters at beside `author`, in `length` along a spine `thickness`
@@ -189,8 +180,9 @@ enum SpineTextMetrics {
     ///
     /// Growth doesn't count on a two-line title's letters filling the box. A spine that did
     /// would stop growing sooner, and the fill would shrink the book in place of enlarging its
-    /// letters, and take the room its author's whole name needs. The drawn title is never
-    /// smaller than this size.
+    /// letters, and take the room its author's whole name needs. Where this size reaches
+    /// `minimumTitleSize`, the drawn title does too, though the preference for one line can
+    /// draw it smaller than this size.
     nonisolated static func growthTitleSize(
         title: String, author: String, font: @escaping (CGFloat) -> UIFont, length: CGFloat,
         thickness: CGFloat
@@ -234,10 +226,10 @@ enum SpineTextMetrics {
         for book: Book, style: SpineStyle,
         natural: SpineDimensions, rowHeight: CGFloat
     ) -> SpineDimensions {
+        let resolved = UIFont(name: style.fontName, size: minimumTitleSize)?.fontName
         let key = DimensionsKey(
             book: book, style: style, width: natural.width, height: natural.height,
-            rowHeight: rowHeight,
-            resolvedFont: UIFont(name: style.fontName, size: 23)?.fontName ?? "system")
+            rowHeight: rowHeight, resolvedFont: resolved ?? "system")
         if let saved = savedDimensions[key] { return saved }
         // Prefer extra height so page-count-based thickness changes only as a last resort.
         // The shelf’s top gap accommodates the focus lift; retain the book-shape bounds.
@@ -247,7 +239,6 @@ enum SpineTextMetrics {
                 rowHeight,
                 natural.width * ShelfLayout.slendernessRange.upperBound))
         let spine = text(of: book, uppercase: style.uppercase)
-        let resolved = UIFont(name: style.fontName, size: minimumTitleSize)?.fontName
         func reads(_ dimensions: SpineDimensions) -> Bool {
             growthTitleSize(
                 title: spine.title, author: spine.author,

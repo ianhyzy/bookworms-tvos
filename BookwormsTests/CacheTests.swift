@@ -242,7 +242,9 @@ final class CacheTests: XCTestCase {
         let natural = SpineDimensions(width: 118, height: 466)
         let threeLines = SpineTextMetrics.lettering(for: book, style: style, dimensions: natural)
         let twoLines = SpineTextMetrics.lettering(
-            for: book, style: style, dimensions: natural, maximumLines: 2)
+            title: book.spineTitle, author: book.author, fontName: "Georgia-Bold",
+            length: SpineTextMetrics.letteredLength(for: book, length: 466, thickness: 118),
+            thickness: 118, maximumLines: 2)
         XCTAssertLessThan(twoLines.titleSize, SpineTextMetrics.minimumTitleSize)
         XCTAssertEqual(threeLines.title.components(separatedBy: "\n").count, 3)
 
