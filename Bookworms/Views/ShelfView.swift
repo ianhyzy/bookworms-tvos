@@ -295,10 +295,7 @@ struct ShelfView: View {
                     // The opaque shelf a detail filter shows covers the wall, which keeps its
                     // last frame and stops drawing until Back reveals it.
                     Group {
-                        if BookMetalWall.coversOverlays {
-                            // The wall draws in an overlay above every other view instead.
-                            EmptyView()
-                        } else if BookMetalWall.isEnabled {
+                        if BookMetalWall.isEnabled {
                             BookMetalWallView(
                                 scene: bookWallScene, status: wallRenderer,
                                 isCovered: showsDetailFilter)
@@ -323,16 +320,6 @@ struct ShelfView: View {
             filteredShelf
         }
         .overlay(alignment: .top) { if isShowingMainView { exampleCapsule } }
-        .overlay {
-            if BookMetalWall.coversOverlays, sidebarItem == .view(.bookWall) {
-                BookMetalWallView(
-                    scene: bookWallScene, status: wallRenderer, isCovered: showsDetailFilter
-                )
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
-                .allowsHitTesting(false)
-            }
-        }
         .sheet(isPresented: exampleConnectionBinding(overDetailFilter: false)) {
             exampleConnection
         }

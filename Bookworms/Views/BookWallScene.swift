@@ -50,6 +50,49 @@ struct BookWallDrift: Sendable {
     }
 }
 
+/// A hardcover's part sizes, which both renderers' models are built from.
+struct BookWallBookParts {
+    static let pageCornerRadius: Float = 0.008
+
+    /// The whole book: head to tail, thickness with its covering, and spine to fore edge.
+    let size: SIMD3<Float>
+    let boardThickness: Float
+    let foreedgeCornerRadius: Float
+    let spineCornerRadius: Float
+    let boardBevelWidth: Float
+    let boardBevelDepth: Float
+    let pageSize: SIMD3<Float>
+
+    init(_ slot: BookWallLayout.Slot) {
+        size = [slot.bookHeight, slot.collisionThickness, slot.coverWidth]
+        boardThickness = min(0.045, slot.spineThickness * 0.12)
+        let shortSide = min(slot.bookHeight, slot.coverWidth)
+        foreedgeCornerRadius = shortSide * 0.005
+        spineCornerRadius = shortSide * 0.0015
+        boardBevelWidth = shortSide * 0.005
+        boardBevelDepth = min(boardThickness * 0.18, boardBevelWidth)
+        pageSize = [
+            slot.bookHeight - 0.06, slot.spineThickness - boardThickness * 2 - 0.015,
+            slot.coverWidth - 0.07,
+        ]
+    }
+
+    /// The height of each exposed page edge, which runs along the book's thickness and keeps
+    /// the leaves parallel.
+    var pageEdgeHeight: Float { pageSize.y - Self.pageCornerRadius * 2 }
+
+    /// The exposed page edges, as planes turned about the vertical axis: head, tail, and fore
+    /// edge.
+    var pageEdgeFaces: [(width: Float, position: SIMD3<Float>, angle: Float)] {
+        let inset = Self.pageCornerRadius * 2
+        return [
+            (pageSize.z - inset, [-pageSize.x / 2 - 0.001, 0, 0], -.pi / 2),
+            (pageSize.z - inset, [pageSize.x / 2 + 0.001, 0, 0], .pi / 2),
+            (pageSize.x - inset, [0, 0, -pageSize.z / 2 - 0.001], .pi),
+        ]
+    }
+}
+
 /// The bookmark ribbon's motion: a chain of segments sliding out from under the focused book,
 /// tail first, with a wave that damps out once it hangs free. No renderer simulates cloth, so
 /// the motion is analytic.
@@ -116,8 +159,9 @@ struct BookWallDecor: Sendable {
     var contactShadowOpacity: Float = 0
     /// The ribbon's anchor under the focused book, or `nil` when hidden.
     var ribbon: Transform?
-    /// Whether the ribbon and shadow arrive with the book's pull-out or are already there.
-    var animates = false
+    /// Seconds since the ribbon and shadow started to arrive with the book's pull-out. The
+    /// default is long past their arrival, for ones already in place.
+    var elapsed: Float = 60
 }
 
 /// Owns the 3D scene across detail presentations so returning does not replay the fall.
@@ -286,6 +330,9 @@ final class BookWallScene {
     private var ribbonSubscription: Cancellable?
     private var ribbonElapsed: Float = 0
     private var ribbonVisible = false
+    /// When the ribbon started to arrive, or `nil` for one placed at rest. The Metal renderer
+    /// times the ribbon from this, since no scene update advances `ribbonElapsed` for it.
+    private var ribbonShownAt: CFTimeInterval?
     private let shelfLabel = ModelEntity()
     private var labels: [Int: BookWallShelfLabel.Prepared] = [:]
     private var hintLabel: BookWallShelfLabel.Prepared?
@@ -482,7 +529,7 @@ final class BookWallScene {
         }
         guard ribbonVisible, ribbon.isEnabled else { return decor }
         decor.ribbon = Transform(matrix: ribbon.transformMatrix(relativeTo: root))
-        decor.animates = ribbonElapsed < BookWallRibbon.settleTime
+        decor.elapsed = ribbonShownAt.map { Float(CACurrentMediaTime() - $0) } ?? decor.elapsed
         if contactShadow.isEnabled {
             decor.contactShadow = contactShadow.transformMatrix(relativeTo: root)
             decor.contactShadowOpacity = Self.contactShadowOpacity
@@ -490,12 +537,10 @@ final class BookWallScene {
         return decor
     }
 
-    /// Shows the wall's artwork again after a cover arrives late. A wall with a book open or
-    /// still falling keeps what it shows; its next fall draws the new artwork.
+    /// Shows the artwork of books whose covers arrived after the wall was prepared, in place.
     func refreshMetalArtwork() {
-        guard let metalWall, let shownWall, isSettled, !isFlyingOut else { return }
-        metalWall.show(shownWall, stage: stage, falls: false)
-        metalWall.focus(selectedID, decor: decor)
+        guard let shownWall else { return }
+        metalWall?.refreshArtwork(of: shownWall)
     }
 
     /// The framing, fall, and lights that the Metal renderer shares with this scene.
@@ -590,6 +635,7 @@ final class BookWallScene {
         isFlyingOut = false
         guard !prepared.books.isEmpty else {
             isSettled = true
+            metalWall?.clear()
             onFocusFrames([:], true)
             return
         }
@@ -1363,6 +1409,7 @@ final class BookWallScene {
         hideRibbon()
         setCameraDepth(wallCameraDepth)
         metalWall?.endDetail()
+        metalWall?.focus(nil, decor: decor)
     }
 
     private static let ribbonWidth = BookWallRibbon.width
@@ -1434,6 +1481,7 @@ final class BookWallScene {
         // Start after the book's 0.2-second pull-out. The ribbon hangs at the pulled-out
         // depth, so sliding earlier would put it in front of a book that has not moved yet.
         ribbonElapsed = animated ? -Self.pullOutDuration : Self.ribbonSettleTime
+        ribbonShownAt = animated ? CACurrentMediaTime() : nil
         poseRibbon()
         guard animated, ribbonSubscription == nil else { return }
         ribbonSubscription = subscribe(to: SceneEvents.Update.self) {
@@ -2112,19 +2160,13 @@ final class BookWallScene {
         slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style,
         spine: TextureResource?, cover: TextureResource?, pageEdge: TextureResource?
     ) -> ModelEntity {
-        let size = SIMD3<Float>(slot.bookHeight, slot.collisionThickness, slot.coverWidth)
-        let boardThickness: Float = min(0.045, slot.spineThickness * 0.12)
-        let shortSide = min(slot.bookHeight, slot.coverWidth)
-        let foreedgeCornerRadius = shortSide * 0.005
-        let spineCornerRadius = shortSide * 0.0015
-        let boardBevelWidth = shortSide * 0.005
-        let boardBevelDepth = min(boardThickness * 0.18, boardBevelWidth)
-        let pageSize = SIMD3<Float>(
-            slot.bookHeight - 0.06, slot.spineThickness - boardThickness * 2 - 0.015,
-            slot.coverWidth - 0.07)
-        let pageCornerRadius: Float = 0.008
+        let parts = BookWallBookParts(slot)
+        let (size, boardThickness, pageSize) = (parts.size, parts.boardThickness, parts.pageSize)
+        let (foreedgeCornerRadius, spineCornerRadius) =
+            (parts.foreedgeCornerRadius, parts.spineCornerRadius)
+        let (boardBevelWidth, boardBevelDepth) = (parts.boardBevelWidth, parts.boardBevelDepth)
         let body = ModelEntity(
-            mesh: .generateBox(size: pageSize, cornerRadius: pageCornerRadius),
+            mesh: .generateBox(size: pageSize, cornerRadius: BookWallBookParts.pageCornerRadius),
             materials: [
                 pageMaterial(BookWallPageTexture.paperColor, book: slot.book, style: style)
             ])
@@ -2135,16 +2177,9 @@ final class BookWallScene {
             // plane whose height runs along the book's thickness and keeps the leaves parallel.
             var paper = pageMaterial(.white, book: slot.book, style: style)
             paper.baseColor.texture = .init(pageEdge)
-            let edgeHeight = pageSize.y - pageCornerRadius * 2
-            let faces: [(width: Float, position: SIMD3<Float>, angle: Float)] = [
-                (pageSize.z, [-pageSize.x / 2 - 0.001, 0, 0], -.pi / 2),  // Head
-                (pageSize.z, [pageSize.x / 2 + 0.001, 0, 0], .pi / 2),  // Tail
-                (pageSize.x, [0, 0, -pageSize.z / 2 - 0.001], .pi),  // Fore edge
-            ]
-            for face in faces {
+            for face in parts.pageEdgeFaces {
                 let plane = ModelEntity(
-                    mesh: .generatePlane(
-                        width: face.width - pageCornerRadius * 2, height: edgeHeight),
+                    mesh: .generatePlane(width: face.width, height: parts.pageEdgeHeight),
                     materials: [paper])
                 plane.name = Self.pageEdgeName
                 plane.position = face.position
@@ -2154,8 +2189,8 @@ final class BookWallScene {
         }
         if !plain,
             let mesh = BookWallHardcoverMesh.headbands(
-                length: pageSize.x, thickness: pageSize.y - pageCornerRadius * 2,
-                depth: pageSize.z, width: Self.headbandWidth, raise: Self.headbandRaise,
+                length: pageSize.x, thickness: parts.pageEdgeHeight, depth: pageSize.z,
+                width: Self.headbandWidth, raise: Self.headbandRaise,
                 stripe: Self.headbandStripe)
         {
             let headbands = ModelEntity(mesh: mesh, materials: headbandMaterials(style))
@@ -2227,19 +2262,14 @@ final class BookWallScene {
     }
 
     /// The same hardcover as `makeBook`, as one mesh for the Metal renderer. Each vertex names
-    /// the surface it belongs to, so a book draws in one call.
-    static func metalMesh(for slot: BookWallLayout.Slot, hasCover: Bool) -> BookMetalMesh {
-        let size = SIMD3<Float>(slot.bookHeight, slot.collisionThickness, slot.coverWidth)
-        let boardThickness: Float = min(0.045, slot.spineThickness * 0.12)
-        let shortSide = min(slot.bookHeight, slot.coverWidth)
-        let foreedgeCornerRadius = shortSide * 0.005
-        let spineCornerRadius = shortSide * 0.0015
-        let boardBevelWidth = shortSide * 0.005
-        let boardBevelDepth = min(boardThickness * 0.18, boardBevelWidth)
-        let pageSize = SIMD3<Float>(
-            slot.bookHeight - 0.06, slot.spineThickness - boardThickness * 2 - 0.015,
-            slot.coverWidth - 0.07)
-        let pageCornerRadius: Float = 0.008
+    /// the surface it belongs to, so a book draws in one call. The front board is the same mesh
+    /// with or without cover art, so a cover that arrives late needs no new mesh.
+    static func metalMesh(for slot: BookWallLayout.Slot) -> BookMetalMesh {
+        let parts = BookWallBookParts(slot)
+        let (size, boardThickness, pageSize) = (parts.size, parts.boardThickness, parts.pageSize)
+        let (foreedgeCornerRadius, spineCornerRadius) =
+            (parts.foreedgeCornerRadius, parts.spineCornerRadius)
+        let (boardBevelWidth, boardBevelDepth) = (parts.boardBevelWidth, parts.boardBevelDepth)
         var mesh = BookMetalMesh()
         mesh.append(
             BookWallHardcoverMesh.casingData(
@@ -2248,22 +2278,16 @@ final class BookWallScene {
                 spineWallDepth: (size.z - pageSize.z) / 2,
                 bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
             as: .cloth)
-        // The exposed page edges: head, tail, and fore edge, with leaves along the thickness.
-        let edgeHeight = pageSize.y - pageCornerRadius * 2
-        let faces: [(width: Float, position: SIMD3<Float>, angle: Float)] = [
-            (pageSize.z, [-pageSize.x / 2 - 0.001, 0, 0], -.pi / 2),
-            (pageSize.z, [pageSize.x / 2 + 0.001, 0, 0], .pi / 2),
-            (pageSize.x, [0, 0, -pageSize.z / 2 - 0.001], .pi),
-        ]
-        for face in faces {
+        for face in parts.pageEdgeFaces {
             mesh.appendPlane(
-                width: face.width - pageCornerRadius * 2, height: edgeHeight, as: .pageEdge,
+                width: face.width, height: parts.pageEdgeHeight, as: .pageEdge,
                 transform: Transform(
                     rotation: simd_quatf(angle: face.angle, axis: [0, 1, 0]),
                     translation: face.position))
         }
         let headbands = BookWallHardcoverMesh.headbandData(
-            length: pageSize.x, thickness: edgeHeight, depth: pageSize.z, width: headbandWidth,
+            length: pageSize.x, thickness: parts.pageEdgeHeight, depth: pageSize.z,
+            width: headbandWidth,
             raise: headbandRaise, stripe: headbandStripe)
         mesh.append(headbands, as: .accent, alternate: .lettering)
         mesh.appendPlane(
@@ -2274,7 +2298,7 @@ final class BookWallScene {
                 width: slot.coverWidth, height: slot.bookHeight,
                 foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
                 bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
-            as: hasCover ? .cover : .cloth,
+            as: .cover,
             transform: Transform(
                 rotation: simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
                     * simd_quatf(angle: -.pi / 2, axis: [1, 0, 0]),

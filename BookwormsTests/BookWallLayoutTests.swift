@@ -1053,7 +1053,8 @@ final class BookWallLayoutTests: XCTestCase {
             prepared: BookWallPreparedWall(
                 books: [], page: 0, pageCount: 0, sources: [:], designs: [:], looks: [:],
                 mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
-                layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil),
+                layout: BookWallLayout(books: []), bodies: [:], artwork: BookWallArtworkBox(),
+                labels: [:], hint: nil),
             reduceMotion: false, onFocusFrames: { _, isSettled in settled = isSettled })
         scene.didDrawFrame()
         XCTAssertTrue(settled)
@@ -1065,7 +1066,8 @@ final class BookWallLayoutTests: XCTestCase {
         BookWallPreparedWall(
             books: books, page: page, pageCount: pageCount, sources: [:], designs: [:], looks: [:],
             mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
-            layout: BookWallLayout(books: []), bodies: [:], labels: [:], hint: nil)
+            layout: BookWallLayout(books: []), bodies: [:], artwork: BookWallArtworkBox(),
+            labels: [:], hint: nil)
     }
 
     @MainActor

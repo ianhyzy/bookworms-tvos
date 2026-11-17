@@ -19,10 +19,21 @@ enum BookWallHardcoverMesh {
         do {
             return try data.resource(name: "book-wall-hardcover-casing", includesTexture: false)
         } catch {
-            let roll = min(bevelDepth, bevelWidth, min(boardThickness, size.y / 2) * 0.25)
+            let roll = rollDepth(
+                size: size, boardThickness: boardThickness, bevelWidth: bevelWidth,
+                bevelDepth: bevelDepth)
             return .generateBox(
                 size: size, cornerRadius: min(spineCornerRadius, min(size.x, size.z) / 2, roll))
         }
+    }
+
+    /// How deep a board's edge rolls: no deeper than its bevel is wide or a quarter of the
+    /// board's thickness.
+    private static func rollDepth(
+        size: SIMD3<Float>, boardThickness: Float, bevelWidth: Float, bevelDepth: Float
+    ) -> Float {
+        let bevel = min(bevelWidth, min(size.x, size.z) / 2)
+        return min(bevelDepth, bevel, min(boardThickness, size.y / 2) * 0.25)
     }
 
     /// The casing's triangles, in the book's coordinates: X head to tail, Y thickness, and Z
@@ -36,7 +47,9 @@ enum BookWallHardcoverMesh {
         let spineRadius = min(spineCornerRadius, maximumRadius)
         let thickness = min(boardThickness, size.y / 2)
         let bevel = min(bevelWidth, maximumRadius)
-        let rollDepth = min(bevelDepth, bevel, thickness * 0.25)
+        let rollDepth = rollDepth(
+            size: size, boardThickness: boardThickness, bevelWidth: bevelWidth,
+            bevelDepth: bevelDepth)
         var geometry = Geometry(
             width: size.x, height: size.z,
             cornerRadii: [foreedgeRadius, foreedgeRadius, spineRadius, spineRadius],

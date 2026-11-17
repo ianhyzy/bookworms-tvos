@@ -37,7 +37,7 @@ struct BookWallPreparedWall {
     let bodies: [Int: ModelEntity]
     /// Each book's artwork for the Metal renderer. It is empty when RealityKit draws the wall
     /// (`BookMetalWall.isEnabled` is false), since the models then hold their own textures.
-    var artwork = BookWallArtworkBox()
+    let artwork: BookWallArtworkBox
     /// Shelf-front lettering for each book and for the resting hint.
     let labels: [Int: BookWallShelfLabel.Prepared]
     let hint: BookWallShelfLabel.Prepared?
@@ -422,6 +422,7 @@ final class BookWallPreparation {
                 // The view shows the wall's artwork again when `coverRevision` changes.
                 wall.artwork.byBook[slot.book.id] = BookWallArtwork(
                     style: images.style, spine: mips, cover: images.cover)
+                wall.artwork.changed.insert(slot.book.id)
             } else {
                 guard let spine = try? await mips.texture() else { continue }
                 var coverTexture: TextureResource?

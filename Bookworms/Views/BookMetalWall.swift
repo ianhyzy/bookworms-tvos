@@ -20,35 +20,24 @@ enum BookMetalWall {
         return CGSize(width: clamped * 16 / 9, height: clamped)
     }()
 
-    /// Measurement only. `--wall-metal-stress=N` draws and shades every book N times a frame,
-    /// to find how much load a frame holds, or no books at 0, as a control, and `--wall-metal-continuous` keeps drawing a
-    /// resting wall, to compare frame pacing with and without activity on the main thread.
-    static let stress = max(0, integer("--wall-metal-stress=") ?? 1)
-    static let drawsAtRest = ProcessInfo.processInfo.arguments.contains("--wall-metal-continuous")
-    /// Measurement only. `--wall-metal-trace` logs each late frame with what preceded it and
-    /// times the main thread, which adds a timer there.
-    static let traces = ProcessInfo.processInfo.arguments.contains("--wall-metal-trace")
-    /// Measurement only. `--wall-metal-bare` draws the wall above every other view, so the
-    /// system composes nothing over it: no glass, text, or focus targets show.
-    static let coversOverlays =
-        isEnabled && ProcessInfo.processInfo.arguments.contains("--wall-metal-bare")
-    /// Measurement only. `--wall-metal-commit-delay=MS` holds each frame's GPU work back until
-    /// that long after its callback, so it reaches the GPU behind the system compositor's work
-    /// for the same refresh instead of racing it.
-    static let commitDelay =
-        TimeInterval(min(12, max(0, integer("--wall-metal-commit-delay=") ?? 0))) / 1000
-    /// Measurement only. `--wall-metal-rate=display` leaves the display link at the display's
-    /// own rate instead of asking for exactly 60 frames a second, and `--wall-metal-poke`
-    /// unpauses the running link again on every change from the main thread.
-    static let followsDisplayRate = ProcessInfo.processInfo.arguments.contains(
-        "--wall-metal-rate=display")
-    static let pokes = ProcessInfo.processInfo.arguments.contains("--wall-metal-poke")
-    /// How many refreshes ahead of its presentation a frame is drawn: 2, or the count
-    /// `--wall-metal-latency=` names.
-    static let frameLatency = Float(min(4, max(1, integer("--wall-metal-latency=") ?? 2)))
-    /// The renderer's log in the app's caches, replaced at launch, so a run can be read from the
-    /// Apple TV afterward without a console attached.
-    static let logURL = URL.cachesDirectory.appending(path: "BookMetalWall.log")
+    #if BOOKWORMS_DIAGNOSTICS
+        /// `--wall-metal-stress=N` draws and shades every book N times a frame, to find how
+        /// much load a frame holds, or no books at 0, as a control.
+        static let stress = max(0, integer("--wall-metal-stress=") ?? 1)
+        /// `--wall-metal-continuous` keeps drawing a resting wall, so its frame pacing can be
+        /// measured.
+        static let drawsAtRest = ProcessInfo.processInfo.arguments.contains(
+            "--wall-metal-continuous")
+        /// `--wall-metal-trace` logs each late frame with what preceded it and times the main
+        /// thread, which adds a timer there.
+        static let traces = ProcessInfo.processInfo.arguments.contains("--wall-metal-trace")
+        /// The renderer's log in the app's caches, replaced at launch, so a run can be read
+        /// from the Apple TV afterward without a console attached.
+        static let logURL = URL.cachesDirectory.appending(path: "BookMetalWall.log")
+    #else
+        static let stress = 1
+        static let drawsAtRest = false
+    #endif
 
     private static func integer(_ prefix: String) -> Int? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix(prefix) }
@@ -68,6 +57,8 @@ struct BookWallArtwork {
 @MainActor
 final class BookWallArtworkBox {
     var byBook: [Int: BookWallArtwork] = [:]
+    /// Books whose artwork changed since the renderer last uploaded it.
+    var changed: Set<Int> = []
 }
 
 /// The framing, fall, and lights that the Metal renderer shares with `BookWallScene`.
@@ -197,7 +188,9 @@ private struct BookMetalBook {
     var paper = SIMD4<Float>.zero
     var accent = SIMD4<Float>.zero
     var lettering = SIMD4<Float>.zero
-    var hinge = SIMD4<Float>.zero
+    /// The front board: x and y are the joint's middle and half width across the artwork, and
+    /// z is 1 when the board shows cover art and 0 when it is plain cloth.
+    var cover = SIMD4<Float>.zero
 }
 
 extension StyleColor {
@@ -406,9 +399,47 @@ final class BookMetalWallHost {
         renderer?.focus(id, decor: decor)
     }
 
+    /// A book's colors, and where its front board's joint is shaded when it has cover art.
+    private static func uniforms(
+        for slot: BookWallLayout.Slot, artwork: BookWallArtwork, hasCover: Bool
+    ) -> BookMetalBook {
+        let style = artwork.style
+        var uniforms = BookMetalBook()
+        uniforms.cloth = style.background.linearP3
+        uniforms.paper = BookWallPageEdges.tint(of: slot.book, accent: style.accent).linearP3
+        uniforms.accent = style.accent.linearP3
+        uniforms.lettering = style.foreground.linearP3
+        let hinge = BookWallScene.hinge(of: slot)
+        uniforms.cover = [hinge.x, hinge.y, hasCover ? 1 : 0, 0]
+        return uniforms
+    }
+
+    /// Uploads the artwork of each book whose cover arrived after the wall was prepared, and
+    /// swaps it in where the book is, without moving anything.
+    func refreshArtwork(of wall: BookWallPreparedWall) {
+        guard let renderer, wall.id == shown?.id else { return }
+        for id in wall.artwork.changed {
+            guard let artwork = wall.artwork.byBook[id],
+                let slot = wall.layout.slots.first(where: { $0.book.id == id })
+            else { continue }
+            let cover = artwork.cover.flatMap { renderer.makeTexture($0, mipmapped: true) }
+            renderer.replaceArtwork(
+                of: id, spine: renderer.makeTexture(artwork.spine), cover: cover,
+                uniforms: Self.uniforms(for: slot, artwork: artwork, hasCover: cover != nil))
+        }
+        wall.artwork.changed.removeAll()
+    }
+
+    /// Clears the wall, leaving the wall image, for a wall with no books.
+    func clear() {
+        shown = nil
+        flightEnds.removeAll()
+        renderer?.clear()
+    }
+
     /// Shows `wall`, falling from the drop height or at rest.
-    // ponytail: builds meshes and uploads textures here, on the main actor, when the wall
-    // appears. Move this into BookWallPreparation when this renderer replaces RealityKit.
+    // Meshes are built and textures uploaded here, on the main actor, when the wall appears,
+    // so a large page can hold the main thread for a moment before its fall starts.
     func show(_ wall: BookWallPreparedWall, stage: BookWallStage, falls: Bool) {
         guard let renderer else { return }
         shown = wall
@@ -438,20 +469,11 @@ final class BookMetalWallHost {
             guard let artwork = wall.artwork.byBook[slot.book.id] else { continue }
             let cover = artwork.cover.flatMap { renderer.makeTexture($0, mipmapped: true) }
             let start = mesh.indices.count
-            let bookMesh = BookWallScene.metalMesh(for: slot, hasCover: cover != nil)
+            let bookMesh = BookWallScene.metalMesh(for: slot)
             let base = UInt32(mesh.vertices.count / BookMetalMesh.floatsPerVertex)
             mesh.vertices += bookMesh.vertices
             mesh.indices += bookMesh.indices.map { base + $0 }
-            let style = artwork.style
-            var uniforms = BookMetalBook()
-            uniforms.cloth = style.background.linearP3
-            uniforms.paper = BookWallPageEdges.tint(of: slot.book, accent: style.accent).linearP3
-            uniforms.accent = style.accent.linearP3
-            uniforms.lettering = style.foreground.linearP3
-            if cover != nil {
-                let hinge = BookWallScene.hinge(of: slot)
-                uniforms.hinge = [hinge.x, hinge.y, 0, 0]
-            }
+            let uniforms = Self.uniforms(for: slot, artwork: artwork, hasCover: cover != nil)
             items.append(
                 BookMetalRenderer.Item(
                     id: slot.book.id, indexStart: start, indexCount: bookMesh.indices.count,
@@ -476,8 +498,8 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let id: Int?
         let indexStart: Int
         let indexCount: Int
-        let spine: (any MTLTexture)?
-        let cover: (any MTLTexture)?
+        var spine: (any MTLTexture)?
+        var cover: (any MTLTexture)?
         var uniforms: BookMetalBook
         let rest: Transform
         /// Half the book's box, for the shadow it casts on the wall when open.
@@ -492,10 +514,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let vertices: any MTLBuffer
         let indices: any MTLBuffer
         /// One buffer per frame in flight, each holding every item's constants.
-        // ponytail: three buffers, since the display link keeps at most two frames in
-        // flight. Size the ring from `preferredFrameLatency` if that changes.
+        // Three, since the display link keeps at most two frames in flight at its frame
+        // latency of 2.
         let uniforms: [any MTLBuffer]
-        let items: [Item]
+        var items: [Item]
         let pageEdge: (any MTLTexture)?
         /// Each book's shelf label, and the hint shown without focus.
         let labels: [Int: any MTLTexture]
@@ -540,14 +562,16 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         var decor = BookWallDecor()
         /// When the decor's ribbon and shadow started to arrive; `nil` until the next frame.
         var decorStart: CFTimeInterval?
-        var maxGPUSeconds: CFTimeInterval = 0
-        var totalGPUSeconds: CFTimeInterval = 0
-        var gpuFrames = 0
-        /// The last finished frame's GPU time, from its first GPU work to its last, which
-        /// includes time the system compositor's work ran in between.
-        var lastGPUSeconds: CFTimeInterval = 0
-        /// The longest the main thread went without running its heartbeat.
-        var mainMaxGap: CFTimeInterval = 0
+        #if BOOKWORMS_DIAGNOSTICS
+            var maxGPUSeconds: CFTimeInterval = 0
+            var totalGPUSeconds: CFTimeInterval = 0
+            var gpuFrames = 0
+            /// The last finished frame's GPU time, from its first GPU work to its last, which
+            /// includes time the system compositor's work ran in between.
+            var lastGPUSeconds: CFTimeInterval = 0
+            /// The longest the main thread went without running its heartbeat.
+            var mainMaxGap: CFTimeInterval = 0
+        #endif
     }
 
     private let device: any MTLDevice
@@ -574,15 +598,17 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     private var multisampleColor: (any MTLTexture)?
     private var multisampleDepth: (any MTLTexture)?
     private var frameIndex = 0
-    private var lastTarget: CFTimeInterval?
-    private var lastLead: CFTimeInterval = 0
-    private var lastEntry: CFTimeInterval = 0
-    private var heartbeat: (any DispatchSourceTimer)?
-    private var windowStart: CFTimeInterval?
-    private var windowFrames = 0
-    private var windowLate = 0
-    private var windowMaxGap: CFTimeInterval = 0
-    private var windowMaxEncode: CFTimeInterval = 0
+    #if BOOKWORMS_DIAGNOSTICS
+        private var lastTarget: CFTimeInterval?
+        private var lastLead: CFTimeInterval = 0
+        private var lastEntry: CFTimeInterval = 0
+        private var heartbeat: (any DispatchSourceTimer)?
+        private var windowStart: CFTimeInterval?
+        private var windowFrames = 0
+        private var windowLate = 0
+        private var windowMaxGap: CFTimeInterval = 0
+        private var windowMaxEncode: CFTimeInterval = 0
+    #endif
 
     private static let sampleCount = 4
     private static let bookStride = MemoryLayout<BookMetalBook>.stride
@@ -699,11 +725,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         self.backdropDepthState = backdropDepthState
 
         link = CAMetalDisplayLink(metalLayer: layer)
-        if !BookMetalWall.followsDisplayRate {
-            link.preferredFrameRateRange = CAFrameRateRange(
-                minimum: 60, maximum: 60, preferred: 60)
-        }
-        link.preferredFrameLatency = BookMetalWall.frameLatency
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        // Two refreshes between a frame's callback and its presentation, which the three
+        // uniform buffers below rely on.
+        link.preferredFrameLatency = 2
         link.isPaused = true
         super.init()
         link.delegate = self
@@ -730,7 +755,9 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             .flatMap { makeTexture($0, mipmapped: false) }
         contactShadow = BookWallBackdropBake.makeShadow(fadesDown: true)
             .flatMap { makeTexture($0, mipmapped: false) }
-        if BookMetalWall.traces { startHeartbeat() }
+        #if BOOKWORMS_DIAGNOSTICS
+            if BookMetalWall.traces { startHeartbeat() }
+        #endif
         thread.name = "Book Wall renderer"
         thread.qualityOfService = .userInteractive
         thread.start()
@@ -745,6 +772,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         // Wakes the run loop so the thread sees the cancellation.
         perform(#selector(resume), on: thread, with: nil, waitUntilDone: false)
         self.thread = nil
+        #if BOOKWORMS_DIAGNOSTICS
+            heartbeat?.cancel()
+            heartbeat = nil
+        #endif
     }
 
     func setActive(_ active: Bool) {
@@ -775,6 +806,30 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
 
     func endDetail() {
         lock.withLock { state.detail = nil }
+        wake()
+    }
+
+    fileprivate func replaceArtwork(
+        of book: Int, spine: (any MTLTexture)?, cover: (any MTLTexture)?, uniforms: BookMetalBook
+    ) {
+        lock.withLock {
+            guard let index = state.page?.items.firstIndex(where: { $0.id == book }) else { return }
+            state.page?.items[index].spine = spine
+            state.page?.items[index].cover = cover
+            state.page?.items[index].uniforms = uniforms
+        }
+        wake()
+    }
+
+    func clear() {
+        lock.withLock {
+            state.page = nil
+            state.falls = false
+            state.focused = nil
+            state.pulls.removeAll()
+            state.decor = BookWallDecor()
+            state.detail = nil
+        }
         wake()
     }
 
@@ -911,14 +966,18 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let active = lock.withLock { state.isActive }
         // Every change on the main thread wakes the link, often while it runs. Leave a running
         // link alone, so those wakes can't disturb its pacing.
-        guard link.isPaused == active || BookMetalWall.pokes else { return }
-        lastTarget = nil
+        guard link.isPaused == active else { return }
+        #if BOOKWORMS_DIAGNOSTICS
+            lastTarget = nil
+        #endif
         link.isPaused = !active
     }
 
     func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update)
     {
-        let encodeStart = CACurrentMediaTime()
+        #if BOOKWORMS_DIAGNOSTICS
+            let encodeStart = CACurrentMediaTime()
+        #endif
         let time = update.targetPresentationTimestamp
         let snapshot = lock.withLock {
             if state.falls, state.fallStart == nil { state.fallStart = time }
@@ -930,6 +989,8 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             return state
         }
         guard let page = snapshot.page else {
+            // A wall with no books shows the wall image alone.
+            drawEmptyWall(into: update.drawable, backdrop: snapshot.backdrop)
             link.isPaused = true
             return
         }
@@ -1020,9 +1081,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         var wallDecals: [Decal] = []
         let decor = snapshot.decor
         let arrival =
-            decor.animates
-            ? Float(time - (snapshot.decorStart ?? time)) - stage.pullOutDuration
-            : BookWallRibbon.settleTime
+            decor.elapsed + Float(time - (snapshot.decorStart ?? time)) - stage.pullOutDuration
         if let model = decor.label,
             let label = decor.labelBook.flatMap({ page.labels[$0] }) ?? page.hint
         {
@@ -1127,17 +1186,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             detailLightPosition: SIMD4(lightPosition, 1),
             detailLightColor: Self.detailLightColor * level)
 
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = targets.color
-        pass.colorAttachments[0].resolveTexture = drawable.texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColor(
-            red: 0.02, green: 0.01, blue: 0.006, alpha: 1)
-        pass.colorAttachments[0].storeAction = .multisampleResolve
-        pass.depthAttachment.texture = targets.depth
-        pass.depthAttachment.loadAction = .clear
-        pass.depthAttachment.clearDepth = 1
-        pass.depthAttachment.storeAction = .dontCare
+        let pass = Self.pass(color: targets.color, depth: targets.depth, into: drawable)
         guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
         /// Draws the wall image, crossfaded toward its detail lighting, at `opacity`.
         func drawBackdrop(opacity: Float, clearsDepth: Bool = false) {
@@ -1209,32 +1258,76 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         }
         encoder.endEncoding()
         buffer.present(drawable)
-        buffer.addCompletedHandler { [weak self] completed in
-            guard let self else { return }
-            let seconds = completed.gpuEndTime - completed.gpuStartTime
-            lock.withLock {
-                state.lastGPUSeconds = seconds
-                state.maxGPUSeconds = max(state.maxGPUSeconds, seconds)
-                state.totalGPUSeconds += seconds
-                state.gpuFrames += 1
+        #if BOOKWORMS_DIAGNOSTICS
+            buffer.addCompletedHandler { [weak self] completed in
+                guard let self else { return }
+                let seconds = completed.gpuEndTime - completed.gpuStartTime
+                lock.withLock {
+                    state.lastGPUSeconds = seconds
+                    state.maxGPUSeconds = max(state.maxGPUSeconds, seconds)
+                    state.totalGPUSeconds += seconds
+                    state.gpuFrames += 1
+                }
             }
-        }
-        let wait = encodeStart + BookMetalWall.commitDelay - CACurrentMediaTime()
-        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        #endif
         buffer.commit()
 
         if snapshot.falls, landed {
             lock.withLock { if state.page?.wallID == page.wallID { state.falls = false } }
             onLanded(page.wallID)
         }
-        record(
-            target: time, entry: encodeStart, encode: CACurrentMediaTime() - encodeStart,
-            books: page.items.count - 1)
+        #if BOOKWORMS_DIAGNOSTICS
+            record(
+                target: time, entry: encodeStart, encode: CACurrentMediaTime() - encodeStart,
+                books: page.items.count - 1)
+        #endif
         // A still wall keeps its last frame until the main thread changes something.
         if !animating, !BookMetalWall.drawsAtRest {
-            lastTarget = nil
+            #if BOOKWORMS_DIAGNOSTICS
+                lastTarget = nil
+            #endif
             link.isPaused = true
         }
+    }
+
+    private func drawEmptyWall(into drawable: any CAMetalDrawable, backdrop: (any MTLTexture)?) {
+        guard
+            let targets = multisampleTargets(
+                width: drawable.texture.width, height: drawable.texture.height),
+            let buffer = queue.makeCommandBuffer()
+        else { return }
+        let pass = Self.pass(color: targets.color, depth: targets.depth, into: drawable)
+        guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        if let backdrop {
+            var mix = SIMD4<Float>(0, 1, 0, 0)
+            encoder.setRenderPipelineState(backdropPipeline)
+            encoder.setDepthStencilState(backdropDepthState)
+            encoder.setFragmentTexture(backdrop, index: 0)
+            encoder.setFragmentTexture(backdrop, index: 1)
+            encoder.setFragmentBytes(&mix, length: MemoryLayout<SIMD4<Float>>.stride, index: 3)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+        encoder.endEncoding()
+        buffer.present(drawable)
+        buffer.commit()
+    }
+
+    /// A pass that clears, draws multisampled, and resolves into `drawable`.
+    private static func pass(
+        color: any MTLTexture, depth: any MTLTexture, into drawable: any CAMetalDrawable
+    ) -> MTLRenderPassDescriptor {
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = color
+        pass.colorAttachments[0].resolveTexture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(
+            red: 0.02, green: 0.01, blue: 0.006, alpha: 1)
+        pass.colorAttachments[0].storeAction = .multisampleResolve
+        pass.depthAttachment.texture = depth
+        pass.depthAttachment.loadAction = .clear
+        pass.depthAttachment.clearDepth = 1
+        pass.depthAttachment.storeAction = .dontCare
+        return pass
     }
 
     private func multisampleTargets(width: Int, height: Int)
@@ -1268,97 +1361,101 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         return (color, depth)
     }
 
-    /// Logs one line a second while frames draw: how many drew, how many arrived more than
-    /// half a refresh late, the longest gap between frames, the longest time this thread spent
-    /// on a frame, and the mean and longest GPU time of a frame.
-    private func record(
-        target: CFTimeInterval, entry: CFTimeInterval, encode: CFTimeInterval, books: Int
-    ) {
-        // How long before its presentation time the callback ran. A late frame with the usual
-        // lead means the system skipped a callback; a short lead means this thread ran late.
-        let lead = target - entry
-        if let lastTarget {
-            let gap = target - lastTarget
-            windowMaxGap = max(windowMaxGap, gap)
-            if gap > 1.5 / 60 {
-                windowLate += 1
-                if BookMetalWall.traces {
-                    let (gpu, main) = lock.withLock {
-                        defer { state.mainMaxGap = 0 }
-                        return (state.lastGPUSeconds, state.mainMaxGap)
+    #if BOOKWORMS_DIAGNOSTICS
+        /// Logs one line a second while frames draw: how many drew, how many arrived more than
+        /// half a refresh late, the longest gap between frames, the longest time this thread spent
+        /// on a frame, and the mean and longest GPU time of a frame.
+        private func record(
+            target: CFTimeInterval, entry: CFTimeInterval, encode: CFTimeInterval, books: Int
+        ) {
+            // How long before its presentation time the callback ran. A late frame with the usual
+            // lead means the system skipped a callback; a short lead means this thread ran late.
+            let lead = target - entry
+            if let lastTarget {
+                let gap = target - lastTarget
+                windowMaxGap = max(windowMaxGap, gap)
+                if gap > 1.5 / 60 {
+                    windowLate += 1
+                    if BookMetalWall.traces {
+                        let (gpu, main) = lock.withLock {
+                            defer { state.mainMaxGap = 0 }
+                            return (state.lastGPUSeconds, state.mainMaxGap)
+                        }
+                        Self.write(
+                            String(
+                                format:
+                                    "BookMetalWallLate gapMS=%.1f leadMS=%.1f previousLeadMS=%.1f "
+                                    + "callbackGapMS=%.1f lastGPUMS=%.2f mainMaxGapMS=%.1f\n",
+                                gap * 1000, lead * 1000, lastLead * 1000,
+                                (entry - lastEntry) * 1000,
+                                gpu * 1000, main * 1000))
                     }
-                    Self.write(
-                        String(
-                            format: "BookMetalWallLate gapMS=%.1f leadMS=%.1f previousLeadMS=%.1f "
-                                + "callbackGapMS=%.1f lastGPUMS=%.2f mainMaxGapMS=%.1f\n",
-                            gap * 1000, lead * 1000, lastLead * 1000, (entry - lastEntry) * 1000,
-                            gpu * 1000, main * 1000))
                 }
             }
-        }
-        lastTarget = target
-        lastLead = lead
-        lastEntry = entry
-        windowFrames += 1
-        windowMaxEncode = max(windowMaxEncode, encode)
-        let start = windowStart ?? target
-        windowStart = start
-        guard target - start >= 1 else { return }
-        let gpu = lock.withLock {
-            defer {
-                state.maxGPUSeconds = 0
-                state.totalGPUSeconds = 0
-                state.gpuFrames = 0
+            lastTarget = target
+            lastLead = lead
+            lastEntry = entry
+            windowFrames += 1
+            windowMaxEncode = max(windowMaxEncode, encode)
+            let start = windowStart ?? target
+            windowStart = start
+            guard target - start >= 1 else { return }
+            let gpu = lock.withLock {
+                defer {
+                    state.maxGPUSeconds = 0
+                    state.totalGPUSeconds = 0
+                    state.gpuFrames = 0
+                }
+                return (
+                    max: state.maxGPUSeconds,
+                    mean: state.totalGPUSeconds / Double(max(1, state.gpuFrames))
+                )
             }
-            return (
-                max: state.maxGPUSeconds,
-                mean: state.totalGPUSeconds / Double(max(1, state.gpuFrames))
-            )
+            let size = multisampleColor.map { "\($0.width)x\($0.height)" } ?? "none"
+            let message =
+                "BookMetalWallPipeline frames=\(windowFrames) late=\(windowLate) "
+                + String(
+                    format: "maxGapMS=%.1f maxThreadMS=%.2f meanGPUMS=%.2f maxGPUMS=%.2f ",
+                    windowMaxGap * 1000, windowMaxEncode * 1000, gpu.mean * 1000, gpu.max * 1000)
+                + String(format: "leadMS=%.1f ", lastLead * 1000)
+                + "size=\(size) books=\(books) stress=\(BookMetalWall.stress)\n"
+            Self.write(message)
+            windowStart = nil
+            windowFrames = 0
+            windowLate = 0
+            windowMaxGap = 0
+            windowMaxEncode = 0
         }
-        let size = multisampleColor.map { "\($0.width)x\($0.height)" } ?? "none"
-        let message =
-            "BookMetalWallPipeline frames=\(windowFrames) late=\(windowLate)"
-            + String(
-                format: "maxGapMS=%.1f maxThreadMS=%.2f meanGPUMS=%.2f maxGPUMS=%.2f ",
-                windowMaxGap * 1000, windowMaxEncode * 1000, gpu.mean * 1000, gpu.max * 1000)
-            + String(format: "leadMS=%.1f ", lastLead * 1000)
-            + "size=\(size) books=\(books) stress=\(BookMetalWall.stress)\n"
-        Self.write(message)
-        windowStart = nil
-        windowFrames = 0
-        windowLate = 0
-        windowMaxGap = 0
-        windowMaxEncode = 0
-    }
 
-    private static let logFile: FileHandle? = {
-        try? FileManager.default.removeItem(at: BookMetalWall.logURL)
-        FileManager.default.createFile(atPath: BookMetalWall.logURL.path, contents: nil)
-        return try? FileHandle(forWritingTo: BookMetalWall.logURL)
-    }()
+        private static let logFile: FileHandle? = {
+            try? FileManager.default.removeItem(at: BookMetalWall.logURL)
+            FileManager.default.createFile(atPath: BookMetalWall.logURL.path, contents: nil)
+            return try? FileHandle(forWritingTo: BookMetalWall.logURL)
+        }()
 
-    /// Writes to standard error and to `BookMetalWall.logURL`. Only the render thread calls it.
-    private static func write(_ message: String) {
-        let data = Data(message.utf8)
-        FileHandle.standardError.write(data)
-        logFile?.write(data)
-    }
-
-    /// Times the main thread with a timer every 4 ms, recording its longest gap.
-    private func startHeartbeat() {
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        var last = CACurrentMediaTime()
-        timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .milliseconds(1))
-        timer.setEventHandler { [weak self] in
-            let now = CACurrentMediaTime()
-            let gap = now - last
-            last = now
-            guard let self else { return }
-            lock.withLock { state.mainMaxGap = max(state.mainMaxGap, gap) }
+        /// Writes to standard error and to `BookMetalWall.logURL`. Only the render thread calls it.
+        private static func write(_ message: String) {
+            let data = Data(message.utf8)
+            FileHandle.standardError.write(data)
+            logFile?.write(data)
         }
-        timer.resume()
-        heartbeat = timer
-    }
+
+        /// Times the main thread with a timer every 4 ms, recording its longest gap.
+        private func startHeartbeat() {
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            var last = CACurrentMediaTime()
+            timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .milliseconds(1))
+            timer.setEventHandler { [weak self] in
+                let now = CACurrentMediaTime()
+                let gap = now - last
+                last = now
+                guard let self else { return }
+                lock.withLock { state.mainMaxGap = max(state.mainMaxGap, gap) }
+            }
+            timer.resume()
+            heartbeat = timer
+        }
+    #endif
 
     /// A right-handed perspective projection onto Metal's 0-to-1 depth range.
     private static func projection(fieldOfView degrees: Float, aspect: Float) -> simd_float4x4 {

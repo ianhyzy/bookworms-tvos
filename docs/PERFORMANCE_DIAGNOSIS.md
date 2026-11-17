@@ -37,7 +37,7 @@ Use the actual generated `.xctestrun` filename for the installed SDK. For an ord
 
 `--view` accepts 0 through 3 for My Shelf, Feed, Compare Shelves, and Book Club, and opens that view from the sidebar before measurement. Keep all views enabled for these sequences.
 
-The Book Wall profiles, isolation variants, and renderer pipeline windows below measure the [RealityKit renderer host](BOOK_WALL.md#realitykit-renderer-host), so pass `--wall-renderer=realitykit` through the launch arguments when using them. The default [Metal renderer](BOOK_WALL.md#metal-renderer) has its own log and switches, and [the frame-rate investigation](investigations/book-wall-frame-rate.md) records how it was measured, including the check for an HDCP retry loop to make before reading any frame pacing from an Apple TV.
+The Book Wall profiles, isolation variants, and renderer pipeline windows below measure the [RealityKit renderer host](BOOK_WALL.md#realitykit-renderer-host), so pass `--wall-renderer=realitykit` through the launch arguments when using them. Measure the default renderer as [Metal renderer](#metal-renderer) describes.
 
 For Book Wall, both drivers accept `--wall-antialiasing off|on` (default `on`, matching the
 app). The baseline renders at 1920 × 1080;
@@ -150,6 +150,19 @@ Use a reduced set when the full recorder crashes or loses providers, then compar
 The renderer emits `BookWallRendererPipeline` windows in diagnostic builds when launched with `--performance-diagnostics`. Each window reports submitted/completed frames, skipped and idle ticks, occupied slots, callback duration, and the actual view/layer scale. The same bounded message is an Instruments point-of-interest event. A slot lifetime includes CPU submission, GPU work, and callback dispatch; it is not GPU execution time or a displayed-frame interval. Use the Display instrument for acceptance.
 
 After confirming slot overlap, compare `--variant wall-no-ibl` and `--variant wall-unlit-shelf` against a matched renderer baseline. The first gives root descendants zero environment-lighting weight and skips the studio environment; the second replaces the shelf's PBR material with a constant unlit tint while retaining geometry and physics. They deliberately change appearance to isolate cost. An unlit tint is not a fitted shelf bake; validate any replacement against resting, opening, and return lighting before adopting it.
+
+## Metal renderer
+
+Build with `SWIFT_ACTIVE_COMPILATION_CONDITIONS=BOOKWORMS_DIAGNOSTICS` to get the [Metal renderer](BOOK_WALL.md#metal-renderer)'s log and switches. Launch with `--start-view=bookWall --wall-metal-continuous` to measure the resting wall, which otherwise stops drawing.
+
+- **Check the HDMI link first.** Record a few seconds with `xcrun xctrace record --instrument os_log --all-processes` and look for repeating `AKE_Init` lines from `IODisplayPortFamily`. They mean the Apple TV is retrying HDCP authentication with the display or receiver, which freezes the display for about 100 ms at each retry, whatever the app draws. Power-cycling the receiver cleared it once.
+- **Check that the app is in front.** `devicectl device process launch --terminate-existing` sometimes leaves the new process behind the Home Screen, where it draws nothing. Terminate the old process, wait a few seconds, launch without that flag, and confirm with `devicectl device capture screenshot`.
+- **Read the log from the device.** Copy `Library/Caches/BookMetalWall.log` from the app's data container with `devicectl device copy from`, so no console needs to stay attached. Two runs with identical lines are the same file.
+- **Read frames on screen from Instruments.** Record the Display and GPU instruments. A composed frame that stays on screen for two refreshes or more shows in `displayed-surfaces-interval`, and its `event-label` names the app's frame, so a repeated or skipped app frame shows there too. The Hitches instrument records nothing for this layer.
+- **Don't count drops with a drawable's `presentedTime`.** It reads zero for whole seconds while Instruments shows those frames on screen.
+- **Read GPU time from Instruments, not from the command buffer.** The time from a buffer's first GPU work to its last includes the system compositor's work that ran in between.
+
+[The frame-rate investigation](investigations/book-wall-frame-rate.md) records what these measurements ruled out.
 
 ## Finish the investigation
 

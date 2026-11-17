@@ -27,8 +27,9 @@ struct Book {
     float4 paper;
     float4 accent;
     float4 lettering;
-    // x: the hinge's middle across the front artwork; y: its half width; both zero for none.
-    float4 hinge;
+    // x: the joint's middle across the front board; y: its half width; z: 1 when the board
+    // shows cover art, 0 when it is plain cloth.
+    float4 cover;
 };
 
 struct VertexIn {
@@ -74,16 +75,14 @@ fragment float4 bookFragment(
     float gloss = 0.03;
     if (part == 1) {
         albedo = spine.sample(trilinear, uv).rgb;
-    } else if (part == 2) {
+    } else if (part == 2 && book.cover.z > 0.5) {
         albedo = cover.sample(trilinear, uv).rgb;
         gloss = 0.08;
         // The joint beside the spine: a soft groove with a faint highlight on its fore-edge side.
-        if (book.hinge.y > 0) {
-            float offset = (in.uv.x - book.hinge.x) / book.hinge.y;
-            float groove = saturate(1 - abs(offset));
-            albedo *= 1 - 0.3 * groove * groove;
-            albedo += 0.03 * saturate(1 - abs(offset - 0.8) * 2.5);
-        }
+        float offset = (in.uv.x - book.cover.x) / book.cover.y;
+        float groove = saturate(1 - abs(offset));
+        albedo *= 1 - 0.3 * groove * groove;
+        albedo += 0.03 * saturate(1 - abs(offset - 0.8) * 2.5);
     } else if (part == 3) {
         albedo = book.paper.rgb * pageEdge.sample(trilinear, uv).rgb;
     } else if (part == 4) {
