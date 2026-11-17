@@ -112,6 +112,30 @@ drawn continuously (Time Profiler, Display, Hitches, GPU).
   Instruments shows those frames on screen, so it can't count drops.
   `preferredFrameLatency` values of 1, 2, and 3 gave the same lead of two refreshes.
 
+### Overlay and no-book controls (2026-11-17)
+
+Seven more 40-second recordings of the resting wall drawn continuously, with the Display and
+GPU instruments only. "Long frames" are composed frames that stayed on screen for two
+refreshes or more.
+
+| Run | Long frames | App frames shown twice / skipped | App GPU per frame | Compositor GPU per frame |
+| --- | --- | --- | --- | --- |
+| Books, overlays (3 runs) | 4, 4, 5 | 5 / 3 to 5 | 4.1 ms | 9.4 ms |
+| No books, overlays (`--wall-metal-stress=0`, 2 runs) | 12, 13 | 5 / 4 to 9 | 3.0 to 4.2 ms | 7.5 ms |
+| Books above every other view (`--wall-metal-bare`, 2 runs) | 145, 170 | 15 to 21 / 79 to 100 | 8.1 ms | 5.7 ms |
+
+- **The books don't cause the hitches.** A wall that draws no books hitches at least as
+  often.
+- **The books are almost free.** The app's GPU time is about the same with no books, so it is
+  the backdrop and the 4× multisample resolve, not the books.
+- **The overlays cost about 3.5 ms of compositor time** (the compute passes disappear without
+  them), but they don't cause the hitches either.
+- **Not explained:** drawing the wall above every other view doubled the app's GPU time per
+  frame at the same 1920 × 1080 size and made hitches about 30 times as frequent. Don't move
+  the wall's layer above the split view without finding out why.
+- **Not done:** the main thread's stacks at rest. The first recording had them and was
+  deleted before they were read.
+
 ## If this is taken up again
 
 - Measure a full page first with `scripts/profile-book-wall.py --capture-set full`, so that

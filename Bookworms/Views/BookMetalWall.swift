@@ -19,13 +19,17 @@ enum BookMetalWall {
     }()
 
     /// Measurement only. `--wall-metal-stress=N` draws and shades every book N times a frame,
-    /// to find how much load a frame holds, and `--wall-metal-continuous` keeps drawing a
+    /// to find how much load a frame holds, or no books at 0, as a control, and `--wall-metal-continuous` keeps drawing a
     /// resting wall, to compare frame pacing with and without activity on the main thread.
-    static let stress = max(1, integer("--wall-metal-stress=") ?? 1)
+    static let stress = max(0, integer("--wall-metal-stress=") ?? 1)
     static let drawsAtRest = ProcessInfo.processInfo.arguments.contains("--wall-metal-continuous")
     /// Measurement only. `--wall-metal-trace` logs each late frame with what preceded it and
     /// times the main thread, which adds a timer there.
     static let traces = ProcessInfo.processInfo.arguments.contains("--wall-metal-trace")
+    /// Measurement only. `--wall-metal-bare` draws the wall above every other view, so the
+    /// system composes nothing over it: no glass, text, or focus targets show.
+    static let coversOverlays =
+        isEnabled && ProcessInfo.processInfo.arguments.contains("--wall-metal-bare")
     /// How many refreshes ahead of its presentation a frame is drawn: 2, or the count
     /// `--wall-metal-latency=` names.
     static let frameLatency = Float(min(4, max(1, integer("--wall-metal-latency=") ?? 2)))
@@ -229,6 +233,10 @@ final class BookMetalWallSurface: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // Core Animation resizes the drawable to the view's pixels when its bounds change.
+        if metalLayer.drawableSize != BookMetalWall.renderSize {
+            metalLayer.drawableSize = BookMetalWall.renderSize
+        }
         host?.viewportChanged(size: bounds.size)
     }
 
