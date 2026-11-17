@@ -151,10 +151,19 @@ Later the same day, every recording of the resting wall showed a freeze of about
   attached.
 - **Between freezes the wall is clean.** One 41-second recording had 16 freezes and one
   other long frame, of 33 ms.
-- **Not found:** what stops the display. Home Assistant reported the Sony TV off and the
-  receiver on throughout, and `audiomxd` used about 30% of a core with AirPlay daemons
-  running. Neither was tested as the cause. Check the HDMI chain and the TV's power before
-  reading any frame-pacing result from this Apple TV.
+- **It is an HDCP authentication loop.** A recording of every process's system log
+  (`os_log` with the Display instrument) shows the Apple TV restarting HDCP 2 authentication
+  with the receiver, a Denon AVR-X1800H between the Apple TV and the TV, at each freeze:
+  `AKE_Init`, the receiver's `AKE_Send_Cert`, `AKE_No_Stored_km`, then `DP_CP_IRQ_Timeout`
+  one second later, from `AppleSEPHDCPManager`, `IODisplayPortFamily`, and `AppleMCDP29XX`.
+  The freeze spans the 100 ms between `AKE_Init` and `AKE_Send_Cert`. The request count dates
+  the loop's start to the Apple TV's last wake.
+- **Ruled out:** the TV being off. Home Assistant reported it off all day, but the TV's own
+  state over ADB was awake with the receiver's input active, and its log has nothing at this
+  period.
+- **Not done:** re-establishing the HDMI link to confirm that the freeze stops.
+- **Before reading frame pacing from this Apple TV,** record `os_log` for a few seconds and
+  check for repeating `AKE_Init` lines.
 
 ### What decides the app's GPU time per frame
 
