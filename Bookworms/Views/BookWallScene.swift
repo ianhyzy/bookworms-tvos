@@ -5,6 +5,51 @@ import RealityKit
 import SwiftUI
 import UIKit
 
+/// One sample of a detail flight: the selected book's pose and the camera's depth.
+struct BookWallFlightFrame: Sendable {
+    var pose: Transform
+    var cameraDepth: Float
+}
+
+/// An open book's slow drift in its detail pose: a sine on each of its sideways and vertical
+/// position and its yaw, eased in from rest.
+struct BookWallDrift: Sendable {
+    /// Sideways and vertical travel in scene units, and yaw in radians.
+    let amplitudes: SIMD3<Float>
+    /// Each axis's period in seconds.
+    let periods: SIMD3<Float>
+    let rampDuration: Float
+
+    /// The offset and its velocity `seconds` after the drift starts. The third component is
+    /// world-Y yaw in radians, not a depth displacement.
+    func motion(at seconds: Float) -> (offset: SIMD3<Float>, velocity: SIMD3<Float>) {
+        let t = min(1, seconds / rampDuration)
+        let ramp = t * t * t * (t * (t * 6 - 15) + 10)
+        let derivative = 30 * t * t * (t - 1) * (t - 1) / rampDuration
+        var offset = SIMD3<Float>.zero
+        var velocity = SIMD3<Float>.zero
+        for axis in 0..<3 {
+            let frequency = 2 * Float.pi / periods[axis]
+            let wave = sin(frequency * seconds)
+            offset[axis] = amplitudes[axis] * wave * ramp
+            velocity[axis] =
+                amplitudes[axis]
+                * (frequency * cos(frequency * seconds) * ramp + wave * derivative)
+        }
+        return (offset, velocity)
+    }
+
+    /// `pose` moved by the drift `seconds` after it starts.
+    func posed(_ pose: Transform, at seconds: Float) -> Transform {
+        let offset = motion(at: seconds).offset
+        var moved = pose
+        moved.translation.x += offset.x
+        moved.translation.y += offset.y
+        moved.rotation = simd_quatf(angle: offset.z, axis: [0, 1, 0]) * pose.rotation
+        return moved
+    }
+}
+
 /// Owns the 3D scene across detail presentations so returning does not replay the fall.
 @MainActor
 final class BookWallScene {
@@ -13,8 +58,9 @@ final class BookWallScene {
     /// The Metal renderer that draws this wall in place of a RealityKit host
     /// (`BookMetalWall.isEnabled`). The scene still owns the layout, framing, and focus frames.
     private weak var metalWall: BookMetalWallHost?
-    /// The resting wall image with its lighting baked in, which the Metal renderer draws.
-    private var bakedRestingWall: CGImage?
+    /// The resting and detail wall images with their lighting baked in, which the Metal
+    /// renderer draws.
+    private var bakedWall: (resting: CGImage, detail: CGImage)?
     private var hostViewportSize = CGSize.zero
     private(set) var environmentResource: EnvironmentResource?
     var ambientExponent: Float {
@@ -195,10 +241,7 @@ final class BookWallScene {
     var shownWall: BookWallPreparedWall?
     private var bodies: [Int: ModelEntity] = [:]
     private var restingTransforms: [Int: Transform] = [:]
-    private struct FlightFrame {
-        var pose: Transform
-        var cameraDepth: Float
-    }
+    private typealias FlightFrame = BookWallFlightFrame
 
     private struct Flight {
         let id: UUID
@@ -353,7 +396,7 @@ final class BookWallScene {
     /// still falling falls from the start, since no physics ran without a RealityKit host.
     func attachMetalWall(_ host: BookMetalWallHost) {
         metalWall = host
-        if let bakedRestingWall { host.setBackdrop(bakedRestingWall) }
+        if let bakedWall { host.setBackdrop(resting: bakedWall.resting, detail: bakedWall.detail) }
         if let shownWall, !shownWall.books.isEmpty {
             host.show(shownWall, stage: stage, falls: !isSettled)
             host.focus(selectedID)
@@ -373,7 +416,8 @@ final class BookWallScene {
                 0, BookWallLayout.stackCenterY + Self.poolHeightOffset,
                 -shelfSize.z / 2 - Self.backdropGap + Self.poolLightDistance,
             ],
-            topLightDirection: Self.topLightDirection)
+            topLightDirection: Self.topLightDirection, wallFadeStart: Self.wallFadeStart,
+            detailAmbientExponent: Self.detailAmbientExponent)
     }
 
     /// Restores hit targets after the host attaches to an already settled wall.
@@ -649,7 +693,9 @@ final class BookWallScene {
         if let selectedID, let body = bodies[selectedID],
             let resting = restingTransforms[selectedID]
         {
-            if reduceMotion {
+            // Without a RealityKit host no animation runs, so the entity takes its pose at once;
+            // the Metal renderer eases the book on screen.
+            if reduceMotion || metalWall != nil {
                 body.transform = resting
             } else {
                 body.move(to: resting, relativeTo: root, duration: 0.18)
@@ -667,7 +713,7 @@ final class BookWallScene {
         showRibbon(for: id, animated: !reduceMotion)
         // Reduce Motion pulls the book out at once, so it stands in front of the ribbon and the
         // contact shadow as it does after the animated pull-out.
-        guard !reduceMotion else {
+        guard !reduceMotion, metalWall == nil else {
             body.transform = lifted
             return
         }
@@ -914,7 +960,7 @@ final class BookWallScene {
     ) async -> Bool {
         hasUndrawnChange = true
         guard !Task.isCancelled, isSettled, !isFlyingOut,
-            renderHost != nil,
+            renderHost != nil || metalWall != nil,
             let body = bodies[book.id], let resting = restingTransforms[book.id],
             let slot = layout.slots.first(where: { $0.book.id == book.id }),
             detailFrame.width > 0, detailFrame.height > 0, renderBounds.width > 0
@@ -996,6 +1042,10 @@ final class BookWallScene {
             body.transform = destination.pose
             setCameraDepth(destination.cameraDepth)
             setDetailLightLevel(1)
+            metalWall?
+                .fly(
+                    book.id, along: [destination], duration: 0, fromLevel: 1, toLevel: 1,
+                    light: detailLight.position, completion: nil)
             return true
         }
         let completed = await playFlight(
@@ -1115,6 +1165,7 @@ final class BookWallScene {
         guard isFlyingOut, let selectedID, let body = bodies[selectedID],
             let resting = restingTransforms[selectedID]
         else { return }
+        syncDriftFromClock()
         let current = body.transform
         let motion = idleMotion
         idlePose = nil
@@ -1159,6 +1210,7 @@ final class BookWallScene {
         setCameraDepth(wallCameraDepth)
         flightFrames.removeAll()
         isFlyingOut = false
+        metalWall?.endDetail()
     }
 
     /// Finishes an interrupted fall while hidden so reentry cannot resume overlapping drops.
@@ -1209,6 +1261,7 @@ final class BookWallScene {
         selectedID = nil
         hideRibbon()
         setCameraDepth(wallCameraDepth)
+        metalWall?.endDetail()
     }
 
     private static let ribbonWidth: Float = 0.28
@@ -1499,8 +1552,8 @@ final class BookWallScene {
                 image: images.detail, options: .init(semantic: .color))
         else { return }
         bakedWallKey = key
-        bakedRestingWall = images.resting
-        metalWall?.setBackdrop(images.resting)
+        bakedWall = (images.resting, images.detail)
+        metalWall?.setBackdrop(resting: images.resting, detail: images.detail)
         // Without tone mapping, the baked image reaches the screen unchanged, which is what
         // the lighting factors were fitted against.
         func wallMaterial(_ texture: TextureResource) -> UnlitMaterial {
@@ -1597,31 +1650,38 @@ final class BookWallScene {
         idlePose = body.transform
         idleElapsed = 0
         idleAmplitude = idleTranslationAmplitude(at: body.transform, cameraDepth: camera.position.z)
-        subscribeToMotion()
+        if let metalWall {
+            // The Metal renderer drifts the book on its own clock, which the return reads.
+            idleStarted = CACurrentMediaTime()
+            metalWall.drift(drift, since: idleStarted)
+        } else {
+            subscribeToMotion()
+        }
+    }
+
+    /// When the Metal renderer started the current drift.
+    private var idleStarted: CFTimeInterval = 0
+
+    /// Moves the drifting book to where the Metal renderer shows it now, as scene updates do
+    /// under RealityKit, so a return starts from the pose on screen.
+    private func syncDriftFromClock() {
+        guard metalWall != nil, let idlePose, let selectedID, let body = bodies[selectedID]
+        else { return }
+        idleElapsed = CACurrentMediaTime() - idleStarted
+        body.transform = drift.posed(idlePose, at: Float(idleElapsed))
+    }
+
+    private var drift: BookWallDrift {
+        BookWallDrift(
+            amplitudes: [idleAmplitude.x, idleAmplitude.y, Self.idleSwayRadians],
+            periods: [Self.idleHorizontalPeriod, Self.idleVerticalPeriod, Self.idleSwayPeriod],
+            rampDuration: Self.idleRampDuration)
     }
 
     /// Shares the analytic position and velocity used by idle rendering and return handoff.
-    /// The third component holds world-Y yaw in radians, not a depth displacement.
     private var idleMotion: (offset: SIMD3<Float>, velocity: SIMD3<Float>) {
         guard idlePose != nil else { return (.zero, .zero) }
-        let seconds = Float(idleElapsed)
-        let t = min(1, seconds / Self.idleRampDuration)
-        let ramp = Self.smootherstep(t)
-        let derivative = 30 * t * t * (t - 1) * (t - 1) / Self.idleRampDuration
-        let amplitudes = SIMD3<Float>(idleAmplitude.x, idleAmplitude.y, Self.idleSwayRadians)
-        let periods = SIMD3<Float>(
-            Self.idleHorizontalPeriod, Self.idleVerticalPeriod, Self.idleSwayPeriod)
-        var offset = SIMD3<Float>.zero
-        var velocity = SIMD3<Float>.zero
-        for axis in 0..<3 {
-            let frequency = 2 * Float.pi / periods[axis]
-            let wave = sin(frequency * seconds)
-            offset[axis] = amplitudes[axis] * wave * ramp
-            velocity[axis] =
-                amplitudes[axis]
-                * (frequency * cos(frequency * seconds) * ramp + wave * derivative)
-        }
-        return (offset, velocity)
+        return drift.motion(at: Float(idleElapsed))
     }
 
     private func subscribeToMotion() {
@@ -1681,13 +1741,7 @@ final class BookWallScene {
             if progress == 1 { stopMotion(completed: true) }
         } else if let idlePose, let selectedID, let body = bodies[selectedID] {
             idleElapsed += delta
-            let motion = idleMotion
-            var pose = idlePose
-            pose.translation.x += motion.offset.x
-            pose.translation.y += motion.offset.y
-            pose.rotation =
-                simd_quatf(angle: motion.offset.z, axis: [0, 1, 0]) * idlePose.rotation
-            body.transform = pose
+            body.transform = drift.posed(idlePose, at: Float(idleElapsed))
         }
         updateDetailShadow()
     }
@@ -1719,7 +1773,23 @@ final class BookWallScene {
                     id: id, body: body, frames: frames, duration: duration,
                     initialLightLevel: detailLightLevel, targetLightLevel: targetLightLevel,
                     completion: completion)
-                subscribeToMotion()
+                guard let metalWall, let selectedID, let last = frames.last else {
+                    subscribeToMotion()
+                    return
+                }
+                // The Metal renderer plays the flight on its own thread. When it ends, the
+                // scene takes the flight's last state, as its own clock would have left it.
+                metalWall.fly(
+                    selectedID, along: frames, duration: duration,
+                    fromLevel: detailLightLevel, toLevel: targetLightLevel,
+                    light: detailLight.position
+                ) { [weak self] in
+                    guard let self, flight?.id == id else { return }
+                    body.transform = last.pose
+                    setCameraDepth(last.cameraDepth)
+                    setDetailLightLevel(targetLightLevel)
+                    stopMotion(completed: true)
+                }
             }
         } onCancel: {
             Task { @MainActor [weak self] in

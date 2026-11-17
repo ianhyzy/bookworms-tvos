@@ -439,9 +439,7 @@ struct BookWallView: View {
 
     private func openDetail(_ book: Book, detailFrame: CGRect) {
         guard isActive, isSettled, openingBookID == nil, detailBook == nil, !isReturning,
-            viewportFrame.width > 0, viewportFrame.height > 0,
-            // The Metal renderer draws the fall and focus only; it has no detail flight yet.
-            !BookMetalWall.isEnabled
+            viewportFrame.width > 0, viewportFrame.height > 0
         else { return }
         transitionRevision &+= 1
         let revision = transitionRevision

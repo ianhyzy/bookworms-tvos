@@ -17,6 +17,8 @@ struct Frame {
     float4 topLightColor;
     float4 ambientTop;
     float4 ambientBottom;
+    float4 detailLightPosition;
+    float4 detailLightColor;
 };
 
 struct Book {
@@ -111,10 +113,19 @@ fragment float4 bookFragment(
     light += frame.poolLightColor.rgb * saturate(dot(normal, toPool / poolDistance))
         / (1 + poolDistance * poolDistance);
 
+    // The detail key light stands 3.2 units from the open book, where its color is its level.
+    float3 toDetail = frame.detailLightPosition.xyz - in.world;
+    float detailDistance = max(length(toDetail), 0.5);
+    float3 detailLight = frame.detailLightColor.rgb * min(4.0, 10.24 / (detailDistance * detailDistance));
+    light += detailLight * saturate(dot(normal, toDetail / detailDistance));
+    shine += detailLight
+        * pow(saturate(dot(normal, normalize(toDetail / detailDistance + view))), 24);
+
     return float4(albedo * light + gloss * shine, 1);
 }
 
-// The wall image behind the shelf, with its lighting already baked in.
+// The wall image behind the shelf, with its lighting already baked in. Drawn again over the
+// wall at partial opacity, it fades the wall out.
 
 struct BackdropOut {
     float4 position [[position]];
@@ -130,8 +141,12 @@ vertex BackdropOut bookBackdropVertex(uint vertexID [[vertex_id]]) {
     return out;
 }
 
+// `mix.x` crossfades the resting wall image toward the detail one, and `mix.y` is the opacity.
 fragment float4 bookBackdropFragment(
-    BackdropOut in [[stage_in]], texture2d<float> wall [[texture(0)]]) {
+    BackdropOut in [[stage_in]], texture2d<float> wall [[texture(0)]],
+    texture2d<float> detailWall [[texture(1)]], constant float4 &mix [[buffer(3)]]) {
     constexpr sampler linearSampler(coord::normalized, address::clamp_to_edge, filter::linear);
-    return float4(wall.sample(linearSampler, in.uv).rgb, 1);
+    float3 resting = wall.sample(linearSampler, in.uv).rgb;
+    float3 detail = detailWall.sample(linearSampler, in.uv).rgb;
+    return float4(resting + (detail - resting) * mix.x, mix.y);
 }

@@ -79,6 +79,10 @@ struct BookWallStage: Sendable {
     let shelfLight: SIMD3<Float>
     let poolLight: SIMD3<Float>
     let topLightDirection: SIMD3<Float>
+    /// The detail light level at which the rest of the wall starts to fade.
+    let wallFadeStart: Float
+    /// The environment light's exponent change at full detail level.
+    let detailAmbientExponent: Float
 }
 
 /// Triangles for one draw call. Each vertex is nine floats: position, normal, texture
@@ -167,6 +171,8 @@ private struct BookMetalFrame {
     var topLightColor: SIMD4<Float>
     var ambientTop: SIMD4<Float>
     var ambientBottom: SIMD4<Float>
+    var detailLightPosition: SIMD4<Float>
+    var detailLightColor: SIMD4<Float>
 }
 
 /// Per-book shader constants. Matches `Book` in BookMetalWall.metal.
@@ -266,17 +272,25 @@ final class BookMetalWallHost {
     private var shown: BookWallPreparedWall?
     private var isAttached = false
     private var isSceneActive = false
+    /// What to run on the main actor when each flight ends, by the renderer's token.
+    private var flightEnds: [UInt64: @MainActor () -> Void] = [:]
+    private var lastFlight: UInt64 = 0
 
     func connect(scene: BookWallScene, surface: BookMetalWallSurface) {
         self.scene = scene
         surface.host = self
         isAttached = surface.window != nil
-        renderer = BookMetalRenderer(layer: surface.metalLayer) { [weak self] wallID in
-            Task { @MainActor [weak self] in
-                guard let self, let shown, shown.id == wallID else { return }
-                self.scene?.finishMetalFall(of: shown)
-            }
-        }
+        renderer = BookMetalRenderer(
+            layer: surface.metalLayer,
+            onLanded: { [weak self] wallID in
+                Task { @MainActor [weak self] in
+                    guard let self, let shown, shown.id == wallID else { return }
+                    self.scene?.finishMetalFall(of: shown)
+                }
+            },
+            onFlightEnded: { [weak self] token in
+                Task { @MainActor [weak self] in self?.flightEnds.removeValue(forKey: token)?() }
+            })
         viewportChanged(size: surface.bounds.size)
         scene.attachMetalWall(self)
     }
@@ -303,11 +317,42 @@ final class BookMetalWallHost {
         renderer?.setActive(isAttached && isSceneActive)
     }
 
-    func setBackdrop(_ image: CGImage) {
-        guard let renderer, let texture = renderer.makeTexture(image, mipmapped: false) else {
+    func setBackdrop(resting: CGImage, detail: CGImage) {
+        guard let renderer, let texture = renderer.makeTexture(resting, mipmapped: false) else {
             return
         }
-        renderer.setBackdrop(texture)
+        renderer.setBackdrop(texture, detail: renderer.makeTexture(detail, mipmapped: false))
+    }
+
+    /// Flies `book` along `frames` while the detail light level moves between the two
+    /// levels, with the detail key light at `light`. `completion` runs when the flight ends,
+    /// unless `endDetail()` or another flight replaces it first. The book holds the last
+    /// frame until then.
+    func fly(
+        _ book: Int, along frames: [BookWallFlightFrame], duration: TimeInterval,
+        fromLevel: Float, toLevel: Float, light: SIMD3<Float>,
+        completion: (@MainActor () -> Void)?
+    ) {
+        flightEnds.removeAll()
+        lastFlight += 1
+        flightEnds[lastFlight] = completion
+        renderer?
+            .fly(
+                BookMetalRenderer.Detail(
+                    book: book, frames: frames, duration: duration, fromLevel: fromLevel,
+                    toLevel: toLevel, light: light, token: lastFlight))
+    }
+
+    /// Drifts the open book about the pose its flight ended at, on the media clock from
+    /// `started`.
+    func drift(_ drift: BookWallDrift, since started: CFTimeInterval) {
+        renderer?.drift(drift, since: started)
+    }
+
+    /// Returns the wall to rest: no open book, the resting light, and the wall's camera.
+    func endDetail() {
+        flightEnds.removeAll()
+        renderer?.endDetail()
     }
 
     func focus(_ id: Int?) {
@@ -400,6 +445,22 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let stage: BookWallStage
     }
 
+    /// A book's flight to or from its details, and its drift once there.
+    fileprivate struct Detail {
+        let book: Int
+        let frames: [BookWallFlightFrame]
+        let duration: TimeInterval
+        let fromLevel: Float
+        let toLevel: Float
+        let light: SIMD3<Float>
+        let token: UInt64
+        /// When the flight started; `nil` until its first frame.
+        var start: CFTimeInterval?
+        var hasEnded = false
+        var drift: BookWallDrift?
+        var driftStart: CFTimeInterval = 0
+    }
+
     private struct Pull {
         var from: Float
         var to: Float
@@ -416,6 +477,8 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         var focused: Int?
         var pulls: [Int: Pull] = [:]
         var isActive = false
+        var detail: Detail?
+        var detailBackdrop: (any MTLTexture)?
         var maxGPUSeconds: CFTimeInterval = 0
         var totalGPUSeconds: CFTimeInterval = 0
         var gpuFrames = 0
@@ -432,8 +495,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     private let backdropPipeline: any MTLRenderPipelineState
     private let depthState: any MTLDepthStencilState
     private let backdropDepthState: any MTLDepthStencilState
+    private let clearingDepthState: any MTLDepthStencilState
     private let link: CAMetalDisplayLink
     private let onLanded: @Sendable (UUID) -> Void
+    private let onFlightEnded: @Sendable (UInt64) -> Void
     private let lock = NSLock()
     private var state = State()
     private var thread: Thread?
@@ -461,9 +526,19 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     private static let topLightColor = SIMD4<Float>(0.2, 0.2, 0.2, 1)
     private static let ambientTop = SIMD4<Float>(0.34, 0.33, 0.32, 1)
     private static let ambientBottom = SIMD4<Float>(0.18, 0.17, 0.16, 1)
+    /// The detail key light's level at its distance from the detail pose.
+    private static let detailLightColor = SIMD4<Float>(0.62, 0.57, 0.50, 1)
+
+    private static func smootherstep(_ value: Float) -> Float {
+        let t = min(1, max(0, value))
+        return t * t * t * (t * (t * 6 - 15) + 10)
+    }
 
     @MainActor
-    init?(layer: CAMetalLayer, onLanded: @escaping @Sendable (UUID) -> Void) {
+    init?(
+        layer: CAMetalLayer, onLanded: @escaping @Sendable (UUID) -> Void,
+        onFlightEnded: @escaping @Sendable (UInt64) -> Void
+    ) {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
             let library = device.makeDefaultLibrary()
         else { return nil }
@@ -471,6 +546,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         self.device = device
         self.queue = queue
         self.onLanded = onLanded
+        self.onFlightEnded = onFlightEnded
 
         let vertex = MTLVertexDescriptor()
         let float = MemoryLayout<Float>.stride
@@ -500,6 +576,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         backdrop.colorAttachments[0].pixelFormat = layer.pixelFormat
         backdrop.depthAttachmentPixelFormat = .depth32Float
         backdrop.rasterSampleCount = Self.sampleCount
+        // The same pass fades the wall out by drawing the backdrop over it.
+        backdrop.colorAttachments[0].isBlendingEnabled = true
+        backdrop.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        backdrop.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
 
         let depth = MTLDepthStencilDescriptor()
         // Under the stress multiplier, each repeated book passes the depth test again, so its
@@ -509,11 +589,18 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let noDepth = MTLDepthStencilDescriptor()
         noDepth.depthCompareFunction = .always
         noDepth.isDepthWriteEnabled = false
+        // The wall image drawn over a fading wall also resets depth to the far plane, so the
+        // open book draws in front of the wall it has left.
+        let clearing = MTLDepthStencilDescriptor()
+        clearing.depthCompareFunction = .always
+        clearing.isDepthWriteEnabled = true
         guard let bookPipeline = try? device.makeRenderPipelineState(descriptor: books),
             let backdropPipeline = try? device.makeRenderPipelineState(descriptor: backdrop),
             let depthState = device.makeDepthStencilState(descriptor: depth),
-            let backdropDepthState = device.makeDepthStencilState(descriptor: noDepth)
+            let backdropDepthState = device.makeDepthStencilState(descriptor: noDepth),
+            let clearingDepthState = device.makeDepthStencilState(descriptor: clearing)
         else { return nil }
+        self.clearingDepthState = clearingDepthState
         self.bookPipeline = bookPipeline
         self.backdropPipeline = backdropPipeline
         self.depthState = depthState
@@ -551,8 +638,29 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         wake()
     }
 
-    func setBackdrop(_ texture: any MTLTexture) {
-        lock.withLock { state.backdrop = texture }
+    func setBackdrop(_ texture: any MTLTexture, detail: (any MTLTexture)?) {
+        lock.withLock {
+            state.backdrop = texture
+            state.detailBackdrop = detail
+        }
+        wake()
+    }
+
+    fileprivate func fly(_ detail: Detail) {
+        lock.withLock { state.detail = detail }
+        wake()
+    }
+
+    func drift(_ drift: BookWallDrift, since started: CFTimeInterval) {
+        lock.withLock {
+            state.detail?.drift = drift
+            state.detail?.driftStart = started
+        }
+        wake()
+    }
+
+    func endDetail() {
+        lock.withLock { state.detail = nil }
         wake()
     }
 
@@ -686,6 +794,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             for id in state.pulls.keys where state.pulls[id]?.start == nil {
                 state.pulls[id]?.start = time
             }
+            if state.detail != nil, state.detail?.start == nil { state.detail?.start = time }
             return state
         }
         guard let page = snapshot.page else {
@@ -727,6 +836,48 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             }
         }
         var animating = snapshot.falls && !landed
+        // The open book's pose, the camera's depth, and the detail light level.
+        var flown: (book: Int, pose: Transform)?
+        var cameraDepth = stage.cameraDepth
+        var level: Float = 0
+        var lightPosition = SIMD3<Float>.zero
+        if let detail = snapshot.detail, let start = detail.start, let last = detail.frames.last {
+            let progress =
+                detail.duration > 0 ? min(1, Float((time - start) / detail.duration)) : 1
+            var pose = last.pose
+            cameraDepth = last.cameraDepth
+            if progress < 1, detail.frames.count > 1 {
+                // The frames are evenly spaced samples of the path, not display frames.
+                let sample = progress * Float(detail.frames.count - 1)
+                let index = min(Int(sample), detail.frames.count - 2)
+                let fraction = sample - Float(index)
+                let (from, to) = (detail.frames[index], detail.frames[index + 1])
+                pose = Transform(
+                    rotation: simd_slerp(from.pose.rotation, to.pose.rotation, fraction),
+                    translation: from.pose.translation
+                        + (to.pose.translation - from.pose.translation) * fraction)
+                cameraDepth = from.cameraDepth + (to.cameraDepth - from.cameraDepth) * fraction
+                animating = true
+            } else if !detail.hasEnded {
+                lock.withLock {
+                    if state.detail?.token == detail.token { state.detail?.hasEnded = true }
+                }
+                onFlightEnded(detail.token)
+            }
+            if let drift = detail.drift {
+                pose = drift.posed(pose, at: Float(time - detail.driftStart))
+                animating = true
+            }
+            level =
+                detail.fromLevel
+                + (detail.toLevel - detail.fromLevel) * Self.smootherstep(progress)
+            lightPosition = detail.light
+            flown = (detail.book, pose)
+        }
+        // The rest of the wall fades out over the later part of the opening.
+        let wallOpacity =
+            1 - Self.smootherstep((level - stage.wallFadeStart) / (1 - stage.wallFadeStart))
+        var flownIndex: Int?
         let ring = page.uniforms[frameIndex % page.uniforms.count]
         frameIndex += 1
         let constants = ring.contents()
@@ -734,7 +885,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         for (index, item) in page.items.enumerated() {
             var pose = item.rest
             pose.translation.y = heights[index]
-            if let id = item.id, let pull = snapshot.pulls[id], let start = pull.start {
+            if let flown, item.id == flown.book {
+                pose = flown.pose
+                flownIndex = index
+            } else if let id = item.id, let pull = snapshot.pulls[id], let start = pull.start {
                 let progress = min(1, Float(time - start) / stage.pullOutDuration)
                 if progress < 1 { animating = true }
                 // Ease out, as the RealityKit wall's pull-out does.
@@ -750,13 +904,21 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let aspect = Float(size.width) / Float(size.height)
         var frame = BookMetalFrame(
             viewProjection: Self.projection(fieldOfView: stage.fieldOfView, aspect: aspect)
-                * Transform(translation: [0, 0, -stage.cameraDepth]).matrix,
-            cameraPosition: [0, 0, stage.cameraDepth, 1],
-            shelfLightPosition: SIMD4(stage.shelfLight, 1), shelfLightColor: Self.shelfLightColor,
-            poolLightPosition: SIMD4(stage.poolLight, 1), poolLightColor: Self.poolLightColor,
+                * Transform(translation: [0, 0, -cameraDepth]).matrix,
+            cameraPosition: [0, 0, cameraDepth, 1],
+            // The stage passes from the shelf and pool lights to the detail key light, the
+            // top light doubles, and the room dims, as on the RealityKit wall.
+            shelfLightPosition: SIMD4(stage.shelfLight, 1),
+            shelfLightColor: Self.shelfLightColor * (1 - level),
+            poolLightPosition: SIMD4(stage.poolLight, 1),
+            poolLightColor: Self.poolLightColor
+                * (1 - Self.smootherstep(level / stage.wallFadeStart)),
             topLightDirection: SIMD4(stage.topLightDirection, 0),
-            topLightColor: Self.topLightColor, ambientTop: Self.ambientTop,
-            ambientBottom: Self.ambientBottom)
+            topLightColor: Self.topLightColor * (1 + level),
+            ambientTop: Self.ambientTop * pow(2, stage.detailAmbientExponent * level),
+            ambientBottom: Self.ambientBottom * pow(2, stage.detailAmbientExponent * level),
+            detailLightPosition: SIMD4(lightPosition, 1),
+            detailLightColor: Self.detailLightColor * level)
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = targets.color
@@ -770,24 +932,23 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         pass.depthAttachment.clearDepth = 1
         pass.depthAttachment.storeAction = .dontCare
         guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
-        if let backdrop = snapshot.backdrop {
+        /// Draws the wall image, crossfaded toward its detail lighting, at `opacity`.
+        func drawBackdrop(opacity: Float, clearsDepth: Bool = false) {
+            guard let backdrop = snapshot.backdrop else { return }
+            var mix = SIMD4<Float>(level, opacity, 0, 0)
             encoder.setRenderPipelineState(backdropPipeline)
-            encoder.setDepthStencilState(backdropDepthState)
+            encoder.setDepthStencilState(clearsDepth ? clearingDepthState : backdropDepthState)
             encoder.setFragmentTexture(backdrop, index: 0)
+            encoder.setFragmentTexture(snapshot.detailBackdrop ?? backdrop, index: 1)
+            encoder.setFragmentBytes(&mix, length: MemoryLayout<SIMD4<Float>>.stride, index: 3)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         }
-        encoder.setRenderPipelineState(bookPipeline)
-        encoder.setDepthStencilState(depthState)
-        encoder.setFrontFacing(.counterClockwise)
-        encoder.setCullMode(.back)
-        encoder.setVertexBuffer(page.vertices, offset: 0, index: 0)
-        encoder.setVertexBytes(&frame, length: MemoryLayout<BookMetalFrame>.stride, index: 1)
-        encoder.setFragmentBytes(&frame, length: MemoryLayout<BookMetalFrame>.stride, index: 1)
-        encoder.setVertexBuffer(ring, offset: 0, index: 2)
-        encoder.setFragmentBuffer(ring, offset: 0, index: 2)
-        encoder.setFragmentTexture(page.pageEdge, index: 2)
-        for _ in 0..<BookMetalWall.stress {
-            for (index, item) in page.items.enumerated() {
+        func drawBooks(_ indices: some Sequence<Int>) {
+            encoder.setRenderPipelineState(bookPipeline)
+            encoder.setDepthStencilState(depthState)
+            encoder.setFragmentTexture(page.pageEdge, index: 2)
+            for index in indices {
+                let item = page.items[index]
                 let offset = index * Self.bookStride
                 encoder.setVertexBufferOffset(offset, index: 2)
                 encoder.setFragmentBufferOffset(offset, index: 2)
@@ -798,6 +959,26 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                     indexBuffer: page.indices,
                     indexBufferOffset: item.indexStart * MemoryLayout<UInt32>.stride)
             }
+        }
+        encoder.setFrontFacing(.counterClockwise)
+        encoder.setCullMode(.back)
+        encoder.setVertexBuffer(page.vertices, offset: 0, index: 0)
+        encoder.setVertexBytes(&frame, length: MemoryLayout<BookMetalFrame>.stride, index: 1)
+        encoder.setFragmentBytes(&frame, length: MemoryLayout<BookMetalFrame>.stride, index: 1)
+        encoder.setVertexBuffer(ring, offset: 0, index: 2)
+        encoder.setFragmentBuffer(ring, offset: 0, index: 2)
+        drawBackdrop(opacity: 1)
+        // While the wall fades, the open book draws after the fade, in front of everything.
+        let fades = wallOpacity < 1 && flownIndex != nil
+        let wall = page.items.indices.filter { !(fades && $0 == flownIndex) }
+        if wallOpacity > 0 || !fades {
+            for _ in 0..<BookMetalWall.stress { drawBooks(wall) }
+        }
+        if fades, let flownIndex {
+            // Drawing the wall image over the wall at the wall's lost opacity is the wall
+            // fading out over that image. The open book has cleared the stacks by now.
+            drawBackdrop(opacity: 1 - wallOpacity, clearsDepth: true)
+            drawBooks(CollectionOfOne(flownIndex))
         }
         encoder.endEncoding()
         buffer.present(drawable)
@@ -954,7 +1135,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
 
     /// A right-handed perspective projection onto Metal's 0-to-1 depth range.
     private static func projection(fieldOfView degrees: Float, aspect: Float) -> simd_float4x4 {
-        let (near, far): (Float, Float) = (0.1, 200)
+        // Nothing comes within a unit of the camera, and a near plane this far out leaves the
+        // depth buffer enough precision to keep a cover's artwork above its board, half a
+        // thousandth of a unit below, after the camera moves back for a flight.
+        let (near, far): (Float, Float) = (1, 200)
         let scale = 1 / tan(degrees * .pi / 360)
         return simd_float4x4(
             [scale / aspect, 0, 0, 0], [0, scale, 0, 0], [0, 0, far / (near - far), -1],
