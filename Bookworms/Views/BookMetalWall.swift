@@ -13,13 +13,21 @@ enum BookMetalWall {
 
     /// The drawable's size in pixels: 1080p, or the height `--wall-metal-height=` names.
     static let renderSize: CGSize = {
-        let prefix = "--wall-metal-height="
-        let height =
-            ProcessInfo.processInfo.arguments.first { $0.hasPrefix(prefix) }
-            .flatMap { Int($0.dropFirst(prefix.count)) } ?? 1080
+        let height = integer("--wall-metal-height=") ?? 1080
         let clamped = min(2160, max(540, height))
         return CGSize(width: clamped * 16 / 9, height: clamped)
     }()
+
+    /// Measurement only. `--wall-metal-stress=N` draws and shades every book N times a frame,
+    /// to find how much load a frame holds, and `--wall-metal-continuous` keeps drawing a
+    /// resting wall, to compare frame pacing with and without activity on the main thread.
+    static let stress = max(1, integer("--wall-metal-stress=") ?? 1)
+    static let drawsAtRest = ProcessInfo.processInfo.arguments.contains("--wall-metal-continuous")
+
+    private static func integer(_ prefix: String) -> Int? {
+        ProcessInfo.processInfo.arguments.first { $0.hasPrefix(prefix) }
+            .flatMap { Int($0.dropFirst(prefix.count)) }
+    }
 }
 
 /// One book's drawn artwork, as the rasterizer made it.
@@ -381,6 +389,8 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         var pulls: [Int: Pull] = [:]
         var isActive = false
         var maxGPUSeconds: CFTimeInterval = 0
+        var totalGPUSeconds: CFTimeInterval = 0
+        var gpuFrames = 0
     }
 
     private let device: any MTLDevice
@@ -456,7 +466,9 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         backdrop.rasterSampleCount = Self.sampleCount
 
         let depth = MTLDepthStencilDescriptor()
-        depth.depthCompareFunction = .less
+        // Under the stress multiplier, each repeated book passes the depth test again, so its
+        // pixels are shaded again.
+        depth.depthCompareFunction = BookMetalWall.stress > 1 ? .lessEqual : .less
         depth.isDepthWriteEnabled = true
         let noDepth = MTLDepthStencilDescriptor()
         noDepth.depthCompareFunction = .always
@@ -731,23 +743,29 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         encoder.setVertexBuffer(ring, offset: 0, index: 2)
         encoder.setFragmentBuffer(ring, offset: 0, index: 2)
         encoder.setFragmentTexture(page.pageEdge, index: 2)
-        for (index, item) in page.items.enumerated() {
-            let offset = index * Self.bookStride
-            encoder.setVertexBufferOffset(offset, index: 2)
-            encoder.setFragmentBufferOffset(offset, index: 2)
-            encoder.setFragmentTexture(item.spine, index: 0)
-            encoder.setFragmentTexture(item.cover, index: 1)
-            encoder.drawIndexedPrimitives(
-                type: .triangle, indexCount: item.indexCount, indexType: .uint32,
-                indexBuffer: page.indices,
-                indexBufferOffset: item.indexStart * MemoryLayout<UInt32>.stride)
+        for _ in 0..<BookMetalWall.stress {
+            for (index, item) in page.items.enumerated() {
+                let offset = index * Self.bookStride
+                encoder.setVertexBufferOffset(offset, index: 2)
+                encoder.setFragmentBufferOffset(offset, index: 2)
+                encoder.setFragmentTexture(item.spine, index: 0)
+                encoder.setFragmentTexture(item.cover, index: 1)
+                encoder.drawIndexedPrimitives(
+                    type: .triangle, indexCount: item.indexCount, indexType: .uint32,
+                    indexBuffer: page.indices,
+                    indexBufferOffset: item.indexStart * MemoryLayout<UInt32>.stride)
+            }
         }
         encoder.endEncoding()
         buffer.present(drawable)
         buffer.addCompletedHandler { [weak self] completed in
             guard let self else { return }
             let seconds = completed.gpuEndTime - completed.gpuStartTime
-            lock.withLock { state.maxGPUSeconds = max(state.maxGPUSeconds, seconds) }
+            lock.withLock {
+                state.maxGPUSeconds = max(state.maxGPUSeconds, seconds)
+                state.totalGPUSeconds += seconds
+                state.gpuFrames += 1
+            }
         }
         buffer.commit()
 
@@ -758,7 +776,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         record(
             target: time, encode: CACurrentMediaTime() - encodeStart, books: page.items.count - 1)
         // A still wall keeps its last frame until the main thread changes something.
-        if !animating {
+        if !animating, !BookMetalWall.drawsAtRest {
             lastTarget = nil
             link.isPaused = true
         }
@@ -797,7 +815,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
 
     /// Logs one line a second while frames draw: how many drew, how many arrived more than
     /// half a refresh late, the longest gap between frames, the longest time this thread spent
-    /// on a frame, and the longest GPU time of a frame.
+    /// on a frame, and the mean and longest GPU time of a frame.
     private func record(target: CFTimeInterval, encode: CFTimeInterval, books: Int) {
         if let lastTarget {
             let gap = target - lastTarget
@@ -811,16 +829,23 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         windowStart = start
         guard target - start >= 1 else { return }
         let gpu = lock.withLock {
-            defer { state.maxGPUSeconds = 0 }
-            return state.maxGPUSeconds
+            defer {
+                state.maxGPUSeconds = 0
+                state.totalGPUSeconds = 0
+                state.gpuFrames = 0
+            }
+            return (
+                max: state.maxGPUSeconds,
+                mean: state.totalGPUSeconds / Double(max(1, state.gpuFrames))
+            )
         }
         let size = multisampleColor.map { "\($0.width)x\($0.height)" } ?? "none"
         let message =
             "BookMetalWallPipeline frames=\(windowFrames) late=\(windowLate) "
             + String(
-                format: "maxGapMS=%.1f maxThreadMS=%.2f maxGPUMS=%.2f ", windowMaxGap * 1000,
-                windowMaxEncode * 1000, gpu * 1000)
-            + "size=\(size) books=\(books)\n"
+                format: "maxGapMS=%.1f maxThreadMS=%.2f meanGPUMS=%.2f maxGPUMS=%.2f ",
+                windowMaxGap * 1000, windowMaxEncode * 1000, gpu.mean * 1000, gpu.max * 1000)
+            + "size=\(size) books=\(books) stress=\(BookMetalWall.stress)\n"
         FileHandle.standardError.write(Data(message.utf8))
         windowStart = nil
         windowFrames = 0
