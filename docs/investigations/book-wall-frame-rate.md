@@ -161,7 +161,8 @@ Later the same day, every recording of the resting wall showed a freeze of about
 - **Ruled out:** the TV being off. Home Assistant reported it off all day, but the TV's own
   state over ADB was awake with the receiver's input active, and its log has nothing at this
   period.
-- **Not done:** re-establishing the HDMI link to confirm that the freeze stops.
+- **Confirmed:** after the receiver was power-cycled, a 12-second `os_log` recording showed
+  no `AKE_` lines and `linkStable`, and the 100 ms freezes were gone.
 - **Before reading frame pacing from this Apple TV,** record `os_log` for a few seconds and
   check for repeating `AKE_Init` lines.
 
@@ -181,6 +182,23 @@ Later the same day, every recording of the resting wall showed a freeze of about
 - **No effect on long frames:** leaving the display link at the display's rate, 59.94 Hz,
   instead of asking for 60 (`--wall-metal-rate=display`), and unpausing the running link on
   every main-thread change (`--wall-metal-poke`).
+
+### The resting wall on a clean HDMI link (2026-11-17, 3 p.m.)
+
+- **With Instruments** (Display and GPU, 40 seconds each): 5, 2, and 8 long frames in three
+  runs, and 5 in one run with `--wall-metal-commit-delay=5`. The wall above every other view
+  still had 108, so its hitches are not the HDCP loop.
+- **With nothing attached,** from the app's log: 3 to 5 late frames a minute once the app has
+  run for a minute, each one repeated refresh, with stretches of 20 to 40 seconds without
+  any. The first minute after launch had 22 in one run, and 4 in one run with the commit
+  delay.
+- **This is no worse than an almost empty layer.** The morning's control that drew no books
+  had more long frames than the wall with books, so the books' drawing isn't what remains.
+- **Not found:** the source of the remaining late frames. One run each is too few to say
+  whether the commit delay or the display's own rate changes them.
+- **Harness fault to fix first:** about every other launch produced no new renderer log or an
+  empty recording, and the cause isn't known. Check that a log is new before trusting it;
+  two runs with identical late-frame patterns are the same file.
 
 ## If this is taken up again
 
