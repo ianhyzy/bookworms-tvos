@@ -79,6 +79,39 @@ These follow from the code and the measurements above. None has its own device m
   later ones, which fits pipeline compilation when the detail light and the opacity fade
   first appear. `wall-warm-light` exists to test the light half of this and has no result.
 
+## Metal prototype on the Apple TV (2026-11-17)
+
+`--wall-renderer=metal` draws the fall and focus with Metal from a display link on its own
+thread (`BookMetalWall.swift`). Measured on the Apple TV with a 29-book page, in a Release
+build, from the renderer's log and one 40-second Instruments recording of the resting wall
+drawn continuously (Time Profiler, Display, Hitches, GPU).
+
+- **The app's share of a frame is small.** The render thread takes about 0.6 ms. The GPU
+  draws the wall in about 0.4 ms of vertex work and 3.4 ms of fragment work at 1080p with 4×
+  multisampling.
+- **The system compositor takes more than the app.** Every frame in which the wall changes,
+  `backboardd` spends about 5.9 ms of GPU time composing the app's surface into the
+  3840 × 2160 screen, and about 2.6 ms more in two compute passes and two small fragment
+  passes that read the composed surface. The wall can't skip the compositor: Instruments
+  reports that its surface "cannot go direct to display due to display rejected".
+- **The two share one GPU.** The app's fragment pass often waits behind the compositor's
+  pass for the previous frame, so the time from a frame's first GPU work to its last reads
+  8 to 9 ms in the app's own log. That figure is not the wall's cost.
+- **Load is not the limit.** Drawing and shading every book 20 times a frame
+  (`--wall-metal-stress=20`) still drew 61 frames a second.
+- **Hitches remain.** In the 40 seconds, five composed frames stayed on screen for two
+  refreshes or more (one for 50 ms), and the compositor showed an app frame twice five times
+  and skipped one. The Hitches instrument recorded no rows for this Metal layer.
+- **What was ruled out for those hitches:** the render thread, whose callbacks kept arriving
+  every 16.7 ms, and the app's GPU work, at a fifth of a frame.
+- **What wasn't separated:** whether the compute passes are the glass on **Drop again** and
+  the sidebar's pill, how many hitches a main-thread stall causes (about half of the late
+  frames in the app's log followed a main-thread gap of 16 ms or more), and how much the
+  recording itself added.
+- **Measurement pitfalls.** A drawable's `presentedTime` reads zero for whole seconds while
+  Instruments shows those frames on screen, so it can't count drops.
+  `preferredFrameLatency` values of 1, 2, and 3 gave the same lead of two refreshes.
+
 ## If this is taken up again
 
 - Measure a full page first with `scripts/profile-book-wall.py --capture-set full`, so that
