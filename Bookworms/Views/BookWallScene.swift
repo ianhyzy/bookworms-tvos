@@ -10,6 +10,11 @@ import UIKit
 final class BookWallScene {
     let hostConfiguration = BookWallHostConfiguration()
     private weak var renderHost: (any BookWallRenderHost)?
+    /// The Metal renderer that draws this wall in place of a RealityKit host
+    /// (`BookMetalWall.isEnabled`). The scene still owns the layout, framing, and focus frames.
+    private weak var metalWall: BookMetalWallHost?
+    /// The resting wall image with its lighting baked in, which the Metal renderer draws.
+    private var bakedRestingWall: CGImage?
     private var hostViewportSize = CGSize.zero
     private(set) var environmentResource: EnvironmentResource?
     var ambientExponent: Float {
@@ -27,6 +32,7 @@ final class BookWallScene {
     /// wall, so a larger gap would show as a lip at the boards' edges.
     private static let spineFaceOffset: Float = 0.002
     private static let fallGravity: Float = 22
+    private static let fallDamping: Float = 0.25
     private static let minimumDropSpacing = 0.10
     /// Far longer than the fall from the drop height takes. A book that hasn't landed this long
     /// after the last one started falling is stuck, so it takes its place.
@@ -343,6 +349,33 @@ final class BookWallScene {
         }
     }
 
+    /// Mirrors the wall to `host`, starting with what the scene shows now. A wall that is
+    /// still falling falls from the start, since no physics ran without a RealityKit host.
+    func attachMetalWall(_ host: BookMetalWallHost) {
+        metalWall = host
+        if let bakedRestingWall { host.setBackdrop(bakedRestingWall) }
+        if let shownWall, !shownWall.books.isEmpty {
+            host.show(shownWall, stage: stage, falls: !isSettled)
+            host.focus(selectedID)
+        }
+    }
+
+    /// The framing, fall, and lights that the Metal renderer shares with this scene.
+    private var stage: BookWallStage {
+        BookWallStage(
+            cameraDepth: wallCameraDepth, fieldOfView: Self.fieldOfView, dropHeight: dropHeight,
+            dropSpacing: dropSpacing, gravity: Self.fallGravity, damping: Self.fallDamping,
+            pullOut: Self.focusPullOut, pullOutDuration: Self.pullOutDuration,
+            shelfSize: shelfSize, shelfCenter: [0, layout.floorY - shelfSize.y / 2, 0],
+            shelfColor: BookWallShelfLabel.wood,
+            shelfLight: SIMD3<Float>(0, BookWallLayout.stackCenterY, 0) + Self.shelfLightOffset,
+            poolLight: [
+                0, BookWallLayout.stackCenterY + Self.poolHeightOffset,
+                -shelfSize.z / 2 - Self.backdropGap + Self.poolLightDistance,
+            ],
+            topLightDirection: Self.topLightDirection)
+    }
+
     /// Restores hit targets after the host attaches to an already settled wall.
     func refreshHostFocusFrames() {
         publishFocusFrames()
@@ -463,12 +496,8 @@ final class BookWallScene {
         continuingCollisionSubscription?.cancel()
         if !reduceMotion { observeLandings() }
         let slots = layout.slots
-        let thickestBook = slots.map(\.collisionThickness).max() ?? 0
-        // Leave enough vertical separation before another book enters the same column.
-        let distanceBetweenBooks = Double(thickestBook + 0.15)
-        let clearanceTime = sqrt(2 * distanceBetweenBooks / Double(Self.fallGravity))
-        let columnSpacing = clearanceTime / Double(layout.columns)
-        let spacing = max(Self.minimumDropSpacing, columnSpacing)
+        let spacing = dropSpacing
+        if let shownWall { metalWall?.show(shownWall, stage: stage, falls: !reduceMotion) }
         dropTask = Task { [weak self] in
             guard let self else { return }
             for (index, slot) in slots.enumerated() {
@@ -492,6 +521,16 @@ final class BookWallScene {
                 seatBooks()
             }
         }
+    }
+
+    /// The time between one book's drop and the next.
+    private var dropSpacing: TimeInterval {
+        let thickestBook = layout.slots.map(\.collisionThickness).max() ?? 0
+        // Leave enough vertical separation before another book enters the same column.
+        let distanceBetweenBooks = Double(thickestBook + 0.15)
+        let clearanceTime = sqrt(2 * distanceBetweenBooks / Double(Self.fallGravity))
+        let columnSpacing = clearanceTime / Double(layout.columns)
+        return max(Self.minimumDropSpacing, columnSpacing)
     }
 
     private func observeLandings() {
@@ -617,6 +656,7 @@ final class BookWallScene {
             }
         }
         selectedID = id
+        metalWall?.focus(id)
         // Both moves last at most the pull-out duration.
         animatingUntil = CACurrentMediaTime() + TimeInterval(Self.pullOutDuration) + 0.1
         showShelfLabel(for: id)
@@ -1459,6 +1499,8 @@ final class BookWallScene {
                 image: images.detail, options: .init(semantic: .color))
         else { return }
         bakedWallKey = key
+        bakedRestingWall = images.resting
+        metalWall?.setBackdrop(images.resting)
         // Without tone mapping, the baked image reaches the screen unchanged, which is what
         // the lighting factors were fitted against.
         func wallMaterial(_ texture: TextureResource) -> UnlitMaterial {
@@ -1744,10 +1786,15 @@ final class BookWallScene {
             translation: from.translation + (to.translation - from.translation) * progress)
     }
 
+    private var shelfSize: SIMD3<Float> {
+        [
+            layout.totalWidth + 1.4, shelfThickness,
+            layout.maxCoverWidth + Self.shelfDepthAllowance,
+        ]
+    }
+
     private func installShelf() {
-        let half = layout.totalWidth / 2
-        let shelfSize = SIMD3<Float>(
-            half * 2 + 1.4, shelfThickness, layout.maxCoverWidth + Self.shelfDepthAllowance)
+        let shelfSize = shelfSize
         let shelfColor = BookWallShelfLabel.wood.uiColor
         let shelfMaterial: any RealityKit.Material
         if PerformanceDiagnostics.isolates("wall-unlit-shelf") {
@@ -1986,7 +2033,7 @@ final class BookWallScene {
         // book, above the height it lands at.
         physics.isTranslationLocked = (x: true, y: false, z: true)
         physics.isRotationLocked = (x: true, y: true, z: true)
-        physics.linearDamping = 0.25
+        physics.linearDamping = fallDamping
         physics.angularDamping = 0.8
         body.physicsBody = physics
         // The spine plane is opaque and shares the case's surface settings, so it shades like
@@ -2026,6 +2073,75 @@ final class BookWallScene {
         }
         body.addChild(coverFace)
         return body
+    }
+
+    /// The same hardcover as `makeBook`, as one mesh for the Metal renderer. Each vertex names
+    /// the surface it belongs to, so a book draws in one call.
+    static func metalMesh(for slot: BookWallLayout.Slot, hasCover: Bool) -> BookMetalMesh {
+        let size = SIMD3<Float>(slot.bookHeight, slot.collisionThickness, slot.coverWidth)
+        let boardThickness: Float = min(0.045, slot.spineThickness * 0.12)
+        let shortSide = min(slot.bookHeight, slot.coverWidth)
+        let foreedgeCornerRadius = shortSide * 0.005
+        let spineCornerRadius = shortSide * 0.0015
+        let boardBevelWidth = shortSide * 0.005
+        let boardBevelDepth = min(boardThickness * 0.18, boardBevelWidth)
+        let pageSize = SIMD3<Float>(
+            slot.bookHeight - 0.06, slot.spineThickness - boardThickness * 2 - 0.015,
+            slot.coverWidth - 0.07)
+        let pageCornerRadius: Float = 0.008
+        var mesh = BookMetalMesh()
+        mesh.append(
+            BookWallHardcoverMesh.casingData(
+                size: size, boardThickness: boardThickness + coverWrapThickness,
+                foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
+                spineWallDepth: (size.z - pageSize.z) / 2,
+                bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
+            as: .cloth)
+        // The exposed page edges: head, tail, and fore edge, with leaves along the thickness.
+        let edgeHeight = pageSize.y - pageCornerRadius * 2
+        let faces: [(width: Float, position: SIMD3<Float>, angle: Float)] = [
+            (pageSize.z, [-pageSize.x / 2 - 0.001, 0, 0], -.pi / 2),
+            (pageSize.z, [pageSize.x / 2 + 0.001, 0, 0], .pi / 2),
+            (pageSize.x, [0, 0, -pageSize.z / 2 - 0.001], .pi),
+        ]
+        for face in faces {
+            mesh.appendPlane(
+                width: face.width - pageCornerRadius * 2, height: edgeHeight, as: .pageEdge,
+                transform: Transform(
+                    rotation: simd_quatf(angle: face.angle, axis: [0, 1, 0]),
+                    translation: face.position))
+        }
+        let headbands = BookWallHardcoverMesh.headbandData(
+            length: pageSize.x, thickness: edgeHeight, depth: pageSize.z, width: headbandWidth,
+            raise: headbandRaise, stripe: headbandStripe)
+        mesh.append(headbands, as: .accent, alternate: .lettering)
+        mesh.appendPlane(
+            width: slot.spineWallWidth, height: slot.spineWallHeight, as: .spine,
+            transform: Transform(translation: [0, 0, slot.coverWidth / 2 + spineFaceOffset]))
+        mesh.append(
+            BookWallHardcoverMesh.coverSurfaceData(
+                width: slot.coverWidth, height: slot.bookHeight,
+                foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
+                bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
+            as: hasCover ? .cover : .cloth,
+            transform: Transform(
+                rotation: simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+                    * simd_quatf(angle: -.pi / 2, axis: [1, 0, 0]),
+                translation: [0, slot.spineThickness / 2 + coverSurfaceOffset, 0]))
+        return mesh
+    }
+
+    /// Where the joint's shading falls across the front artwork, as shares of its width from
+    /// the spine edge: its middle and its half width.
+    static func hinge(of slot: BookWallLayout.Slot) -> SIMD2<Float> {
+        [hingeInset / slot.coverWidth, hingeWidth / 2 / slot.coverWidth]
+    }
+
+    /// Ends a fall that the Metal renderer drew, as landing does under RealityKit.
+    func finishMetalFall(of wall: BookWallPreparedWall) {
+        guard wall.id == shownWall?.id, !isSettled else { return }
+        dropTask?.cancel()
+        seatBooks()
     }
 
     /// How far a stacked book turns at most about the vertical axis, in radians: about
@@ -2131,7 +2247,7 @@ final class BookWallScene {
 extension BookWallLayout {
     /// The deepest book's cover width. Spines sit flush at half of it, and the shelf's depth
     /// follows it.
-    fileprivate var maxCoverWidth: Float { slots.map(\.coverWidth).max() ?? 0.8 }
+    var maxCoverWidth: Float { slots.map(\.coverWidth).max() ?? 0.8 }
 }
 
 /// Fits source art to the front board with a narrow, synthesized casing bleed. Only the joint

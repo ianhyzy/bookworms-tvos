@@ -35,6 +35,9 @@ struct BookWallPreparedWall {
     let drawsWith: [Int: Book]
     let layout: BookWallLayout
     let bodies: [Int: ModelEntity]
+    /// Each book's artwork for the Metal renderer, kept only while it is on
+    /// (`BookMetalWall.isEnabled`), since the RealityKit models hold their own copies.
+    var artwork: [Int: BookWallArtwork] = [:]
     /// Shelf-front lettering for each book and for the resting hint.
     let labels: [Int: BookWallShelfLabel.Prepared]
     let hint: BookWallShelfLabel.Prepared?
@@ -295,6 +298,7 @@ final class BookWallPreparation {
         guard !Task.isCancelled else { return nil }
         var styles: [Int: BookWallLocalSpine.Style] = [:]
         var bodies: [Int: ModelEntity] = [:]
+        var artwork: [Int: BookWallArtwork] = [:]
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
         var missing: [Book] = []
         for source in outside.values where !source.coverURLs.isEmpty {
@@ -341,6 +345,10 @@ final class BookWallPreparation {
             bodies[slot.book.id] = BookWallScene.makeBook(
                 slot: slot, style: images.style, spine: spine, cover: coverTexture,
                 pageEdge: pageEdge)
+            if BookMetalWall.isEnabled, let mips = images.spineMips {
+                artwork[slot.book.id] = BookWallArtwork(
+                    style: images.style, spine: mips, cover: images.cover)
+            }
             if countsProgress { completedCount += 1 }
             await Task.yield()
         }
@@ -355,7 +363,7 @@ final class BookWallPreparation {
             books: books, page: page, pageCount: year.pages.count, sources: year.input.sources,
             designs: year.input.designs, looks: year.input.looks, mates: year.input.mates,
             fontStyle: fontStyle, drawn: drawn, drawsWith: drawsWith, layout: layout,
-            bodies: bodies, labels: labels, hint: hint)
+            bodies: bodies, artwork: artwork, labels: labels, hint: hint)
         return DrawnPage(wall: wall, missing: missing)
     }
 
