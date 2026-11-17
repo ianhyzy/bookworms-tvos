@@ -5,11 +5,13 @@ import SwiftUI
 import UIKit
 import simd
 
-/// A prototype renderer that draws Book Wall's fall and focus with Metal on its own thread,
-/// in place of RealityKit on the main thread. `--wall-renderer=metal` turns it on; it has no
-/// detail flight, ribbon, shadows, or shelf label yet.
+/// Book Wall's renderer: Metal on its own thread, so work on the main thread can't delay a
+/// frame. `BookWallScene` still lays the wall out, plans flights, and places the label,
+/// ribbon, and shadows; this draws them. `--wall-renderer=realitykit` draws the wall with
+/// `BookWallRendererView` instead, for comparison and for the RealityKit diagnostics.
 enum BookMetalWall {
-    static let isEnabled = ProcessInfo.processInfo.arguments.contains("--wall-renderer=metal")
+    static let isEnabled = !ProcessInfo.processInfo.arguments.contains(
+        "--wall-renderer=realitykit")
 
     /// The drawable's size in pixels: 1080p, or the height `--wall-metal-height=` names.
     static let renderSize: CGSize = {
@@ -59,6 +61,13 @@ struct BookWallArtwork {
     let style: BookWallLocalSpine.Style
     let spine: BookWallSpineTexture.Mips
     let cover: CGImage?
+}
+
+/// A wall's artwork by book ID, shared by every copy of the wall, so a cover that downloads
+/// after preparation reaches the wall the scene shows.
+@MainActor
+final class BookWallArtworkBox {
+    var byBook: [Int: BookWallArtwork] = [:]
 }
 
 /// The framing, fall, and lights that the Metal renderer shares with `BookWallScene`.
@@ -208,6 +217,7 @@ extension StyleColor {
 struct BookMetalWallView: UIViewRepresentable {
     @Environment(\.scenePhase) private var scenePhase
     let scene: BookWallScene
+    let status: BookWallRendererStatus
     /// Whether an opaque view covers the surface. A covered surface stops drawing.
     var isCovered = false
 
@@ -215,7 +225,7 @@ struct BookMetalWallView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> BookMetalWallSurface {
         let surface = BookMetalWallSurface(frame: .zero)
-        context.coordinator.connect(scene: scene, surface: surface)
+        context.coordinator.connect(scene: scene, surface: surface, status: status)
         context.coordinator.setSceneActive(scenePhase == .active && !isCovered)
         return surface
     }
@@ -274,6 +284,8 @@ final class BookMetalWallSurface: UIView {
 @MainActor
 final class BookMetalWallHost {
     private weak var scene: BookWallScene?
+    private weak var surface: BookMetalWallSurface?
+    private weak var status: BookWallRendererStatus?
     private var renderer: BookMetalRenderer?
     private var shown: BookWallPreparedWall?
     private var isAttached = false
@@ -282,11 +294,42 @@ final class BookMetalWallHost {
     private var flightEnds: [UInt64: @MainActor () -> Void] = [:]
     private var lastFlight: UInt64 = 0
 
-    func connect(scene: BookWallScene, surface: BookMetalWallSurface) {
+    func connect(
+        scene: BookWallScene, surface: BookMetalWallSurface, status: BookWallRendererStatus
+    ) {
         self.scene = scene
+        self.surface = surface
+        self.status = status
         surface.host = self
         isAttached = surface.window != nil
-        renderer = BookMetalRenderer(
+        status.reconnect = { [weak self] in self?.start() }
+        start()
+    }
+
+    /// Starts a renderer on the surface and shows the scene's wall, or reports why it can't.
+    /// Retry calls this again.
+    private func start() {
+        guard let scene, let surface, let status else { return }
+        renderer?.stop()
+        renderer = nil
+        #if DEBUG && targetEnvironment(simulator)
+            let fails = BookWallRendererStatus.takeScenarioFailure()
+        #else
+            let fails = false
+        #endif
+        if !fails { renderer = makeRenderer(on: surface) }
+        guard let renderer else {
+            status.failure = BookWallRendererStatus.unavailableMetal
+            return
+        }
+        if status.failure != nil { status.failure = nil }
+        renderer.setActive(isAttached && isSceneActive)
+        viewportChanged(size: surface.bounds.size)
+        scene.attachMetalWall(self)
+    }
+
+    private func makeRenderer(on surface: BookMetalWallSurface) -> BookMetalRenderer? {
+        BookMetalRenderer(
             layer: surface.metalLayer,
             onLanded: { [weak self] wallID in
                 Task { @MainActor [weak self] in
@@ -297,8 +340,6 @@ final class BookMetalWallHost {
             onFlightEnded: { [weak self] token in
                 Task { @MainActor [weak self] in self?.flightEnds.removeValue(forKey: token)?() }
             })
-        viewportChanged(size: surface.bounds.size)
-        scene.attachMetalWall(self)
     }
 
     func dispose() {
@@ -394,7 +435,7 @@ final class BookMetalWallHost {
         }
         let hint = wall.hint.flatMap { renderer.makeTexture($0.image, mipmapped: true) }
         for (order, slot) in wall.layout.slots.enumerated() {
-            guard let artwork = wall.artwork[slot.book.id] else { continue }
+            guard let artwork = wall.artwork.byBook[slot.book.id] else { continue }
             let cover = artwork.cover.flatMap { renderer.makeTexture($0, mipmapped: true) }
             let start = mesh.indices.count
             let bookMesh = BookWallScene.metalMesh(for: slot, hasCover: cover != nil)

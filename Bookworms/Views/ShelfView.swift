@@ -299,7 +299,9 @@ struct ShelfView: View {
                             // The wall draws in an overlay above every other view instead.
                             EmptyView()
                         } else if BookMetalWall.isEnabled {
-                            BookMetalWallView(scene: bookWallScene, isCovered: showsDetailFilter)
+                            BookMetalWallView(
+                                scene: bookWallScene, status: wallRenderer,
+                                isCovered: showsDetailFilter)
                         } else {
                             BookWallRendererView(
                                 scene: bookWallScene, status: wallRenderer,
@@ -323,10 +325,12 @@ struct ShelfView: View {
         .overlay(alignment: .top) { if isShowingMainView { exampleCapsule } }
         .overlay {
             if BookMetalWall.coversOverlays, sidebarItem == .view(.bookWall) {
-                BookMetalWallView(scene: bookWallScene, isCovered: showsDetailFilter)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                    .allowsHitTesting(false)
+                BookMetalWallView(
+                    scene: bookWallScene, status: wallRenderer, isCovered: showsDetailFilter
+                )
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
             }
         }
         .sheet(isPresented: exampleConnectionBinding(overDetailFilter: false)) {
@@ -483,7 +487,10 @@ struct ShelfView: View {
                     data.books, sources: data.sources, designs: data.designs, looks: data.looks,
                     mates: data.mates, fontStyle: data.fontStyle, page: key.page)
             }
-            .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
+            .onChange(of: bookWallPreparation.coverRevision) {
+                bookWallScene.setNeedsFrame()
+                bookWallScene.refreshMetalArtwork()
+            }
             // Books that follow a discarded or emptied wall are a wall's first books, which drop.
             .onChange(of: hasWallBooks) { if !hasWallBooks { bookWallScene.shownWall = nil } }
             .onChange(of: coordinator.preferences, initial: true) {

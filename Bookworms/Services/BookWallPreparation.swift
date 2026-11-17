@@ -35,9 +35,9 @@ struct BookWallPreparedWall {
     let drawsWith: [Int: Book]
     let layout: BookWallLayout
     let bodies: [Int: ModelEntity]
-    /// Each book's artwork for the Metal renderer, kept only while it is on
-    /// (`BookMetalWall.isEnabled`), since the RealityKit models hold their own copies.
-    var artwork: [Int: BookWallArtwork] = [:]
+    /// Each book's artwork for the Metal renderer. It is empty when RealityKit draws the wall
+    /// (`BookMetalWall.isEnabled` is false), since the models then hold their own textures.
+    var artwork = BookWallArtworkBox()
     /// Shelf-front lettering for each book and for the resting hint.
     let labels: [Int: BookWallShelfLabel.Prepared]
     let hint: BookWallShelfLabel.Prepared?
@@ -298,7 +298,8 @@ final class BookWallPreparation {
         guard !Task.isCancelled else { return nil }
         var styles: [Int: BookWallLocalSpine.Style] = [:]
         var bodies: [Int: ModelEntity] = [:]
-        var artwork: [Int: BookWallArtwork] = [:]
+        let artwork = BookWallArtworkBox()
+        let drawsModels = !BookMetalWall.isEnabled
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
         var missing: [Book] = []
         for source in outside.values where !source.coverURLs.isEmpty {
@@ -310,7 +311,7 @@ final class BookWallPreparation {
         }
         // One shared page-edge texture serves every book; without it pages stay plain.
         var pageEdge: TextureResource?
-        if let image = BookWallPageTexture.make() {
+        if drawsModels, let image = BookWallPageTexture.make() {
             pageEdge = try? await TextureResource.generate(
                 from: image, options: .init(semantic: .color))
         }
@@ -328,14 +329,24 @@ final class BookWallPreparation {
             guard !Task.isCancelled else { return nil }
             // A texture that can't be made fails the wall, which offers Retry, rather than
             // drawing a book without its spine, cover, or shelf label.
-            guard let spine = try? await images.spineMips?.texture() else { return nil }
+            guard let mips = images.spineMips else { return nil }
+            // RealityKit's textures are made only when RealityKit draws the wall; the Metal
+            // renderer uploads the same images itself when the wall shows.
+            var spine: TextureResource?
             var coverTexture: TextureResource?
-            if let coverImage = images.cover {
-                guard
-                    let texture = try? await TextureResource.generate(
-                        from: coverImage, options: .init(semantic: .color))
-                else { return nil }
-                coverTexture = texture
+            if drawsModels {
+                guard let texture = try? await mips.texture() else { return nil }
+                spine = texture
+                if let coverImage = images.cover {
+                    guard
+                        let texture = try? await TextureResource.generate(
+                            from: coverImage, options: .init(semantic: .color))
+                    else { return nil }
+                    coverTexture = texture
+                }
+            } else {
+                artwork.byBook[slot.book.id] = BookWallArtwork(
+                    style: images.style, spine: mips, cover: images.cover)
             }
             if let label = images.label {
                 guard let prepared = await BookWallShelfLabel.prepare(label) else { return nil }
@@ -345,10 +356,6 @@ final class BookWallPreparation {
             bodies[slot.book.id] = BookWallScene.makeBook(
                 slot: slot, style: images.style, spine: spine, cover: coverTexture,
                 pageEdge: pageEdge)
-            if BookMetalWall.isEnabled, let mips = images.spineMips {
-                artwork[slot.book.id] = BookWallArtwork(
-                    style: images.style, spine: mips, cover: images.cover)
-            }
             if countsProgress { completedCount += 1 }
             await Task.yield()
         }
@@ -409,16 +416,25 @@ final class BookWallPreparation {
             let images = await rasterizer.render(
                 slot: slot, cover: cover, source: source, design: wall.drawn[slot.book.id],
                 fontStyle: fontStyle)
-            guard let spine = try? await images.spineMips?.texture() else { continue }
-            var coverTexture: TextureResource?
-            if let coverImage = images.cover {
-                coverTexture = try? await TextureResource.generate(
-                    from: coverImage, options: .init(semantic: .color))
-                guard coverTexture != nil else { continue }
+            guard let mips = images.spineMips else { continue }
+            if BookMetalWall.isEnabled {
+                guard !Task.isCancelled, prepared?.id == wall.id else { continue }
+                // The view shows the wall's artwork again when `coverRevision` changes.
+                wall.artwork.byBook[slot.book.id] = BookWallArtwork(
+                    style: images.style, spine: mips, cover: images.cover)
+            } else {
+                guard let spine = try? await mips.texture() else { continue }
+                var coverTexture: TextureResource?
+                if let coverImage = images.cover {
+                    coverTexture = try? await TextureResource.generate(
+                        from: coverImage, options: .init(semantic: .color))
+                    guard coverTexture != nil else { continue }
+                }
+                guard !Task.isCancelled, prepared?.id == wall.id else { continue }
+                BookWallScene.applyArtwork(
+                    to: body, book: slot.book, style: images.style, spine: spine,
+                    cover: coverTexture)
             }
-            guard !Task.isCancelled, prepared?.id == wall.id else { continue }
-            BookWallScene.applyArtwork(
-                to: body, book: slot.book, style: images.style, spine: spine, cover: coverTexture)
             restored.insert(slot.book.id)
             coverRevision &+= 1
         }

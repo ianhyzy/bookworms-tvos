@@ -490,6 +490,14 @@ final class BookWallScene {
         return decor
     }
 
+    /// Shows the wall's artwork again after a cover arrives late. A wall with a book open or
+    /// still falling keeps what it shows; its next fall draws the new artwork.
+    func refreshMetalArtwork() {
+        guard let metalWall, let shownWall, isSettled, !isFlyingOut else { return }
+        metalWall.show(shownWall, stage: stage, falls: false)
+        metalWall.focus(selectedID, decor: decor)
+    }
+
     /// The framing, fall, and lights that the Metal renderer shares with this scene.
     private var stage: BookWallStage {
         BookWallStage(
@@ -765,10 +773,12 @@ final class BookWallScene {
             shelfLabel.isEnabled = false
             return
         }
-        var material = UnlitMaterial(texture: label.texture)
-        material.blending = .transparent(opacity: .init(floatLiteral: 1))
-        shelfLabel.model = ModelComponent(
-            mesh: Self.unitPlane, materials: [material])
+        // The Metal renderer draws the label from its image; the entity then only places it.
+        if let texture = label.texture {
+            var material = UnlitMaterial(texture: texture)
+            material.blending = .transparent(opacity: .init(floatLiteral: 1))
+            shelfLabel.model = ModelComponent(mesh: Self.unitPlane, materials: [material])
+        }
         // The label grows with the shelf front, so a taller front letters it larger.
         let scale = shelfThickness / Self.minimumShelfThickness
         shelfLabel.scale = [label.width * scale, BookWallShelfLabel.height * scale, 1]
@@ -2040,6 +2050,14 @@ final class BookWallScene {
         [style.accent, style.foreground].map { surface(color: $0.uiColor, roughness: 0.6) }
     }
 
+    /// The spine's lettered material, or plain cloth for a model the Metal renderer draws from
+    /// the spine's image instead.
+    private static func spineMaterial(_ spine: TextureResource?, style: BookWallLocalSpine.Style)
+        -> PhysicallyBasedMaterial
+    {
+        spine.map(spineMaterial) ?? caseMaterial(style)
+    }
+
     private static func spineMaterial(_ spine: TextureResource) -> PhysicallyBasedMaterial {
         var material = surface(color: .white, roughness: 0.56)
         material.baseColor = .init(texture: .init(spine))
@@ -2092,7 +2110,7 @@ final class BookWallScene {
     /// Builds the hardcover and its collision shape before the wall opens.
     static func makeBook(
         slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style,
-        spine: TextureResource, cover: TextureResource?, pageEdge: TextureResource?
+        spine: TextureResource?, cover: TextureResource?, pageEdge: TextureResource?
     ) -> ModelEntity {
         let size = SIMD3<Float>(slot.bookHeight, slot.collisionThickness, slot.coverWidth)
         let boardThickness: Float = min(0.045, slot.spineThickness * 0.12)
@@ -2176,7 +2194,7 @@ final class BookWallScene {
         let face = ModelEntity(
             mesh: .generatePlane(
                 width: slot.spineWallWidth, height: slot.spineWallHeight),
-            materials: [spineMaterial(spine)])
+            materials: [spineMaterial(spine, style: style)])
         face.name = Self.spineFaceName
         face.position.z = slot.coverWidth / 2 + Self.spineFaceOffset
         body.addChild(face)
@@ -2715,7 +2733,8 @@ enum BookWallPageTexture {
 /// its plane width follows its text.
 enum BookWallShelfLabel {
     struct Prepared {
-        let texture: TextureResource
+        /// The label for RealityKit, or `nil` when the Metal renderer draws the wall.
+        let texture: TextureResource?
         /// The drawn label, which the Metal renderer uploads itself.
         let image: CGImage
         let width: Float
@@ -2771,10 +2790,12 @@ enum BookWallShelfLabel {
     }
 
     static func prepare(_ image: CGImage) async -> Prepared? {
-        guard
-            let texture = try? await TextureResource.generate(
+        var texture: TextureResource?
+        if !BookMetalWall.isEnabled {
+            texture = try? await TextureResource.generate(
                 from: image, options: .init(semantic: .color))
-        else { return nil }
+            guard texture != nil else { return nil }
+        }
         return Prepared(
             texture: texture, image: image, width: Float(CGFloat(image.width) / pixelsPerUnit))
     }
