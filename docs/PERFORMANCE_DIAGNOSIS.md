@@ -37,6 +37,8 @@ Use the actual generated `.xctestrun` filename for the installed SDK. For an ord
 
 `--view` accepts 0 through 3 for My Shelf, Feed, Compare Shelves, and Book Club, and opens that view from the sidebar before measurement. Keep all views enabled for these sequences.
 
+The Book Wall profiles, isolation variants, and renderer pipeline windows below measure the [RealityKit renderer host](BOOK_WALL.md#realitykit-renderer-host), so pass `--wall-renderer=realitykit` through the launch arguments when using them. The default [Metal renderer](BOOK_WALL.md#metal-renderer) has its own log and switches, and [the frame-rate investigation](investigations/book-wall-frame-rate.md) records how it was measured, including the check for an HDCP retry loop to make before reading any frame pacing from an Apple TV.
+
 For Book Wall, both drivers accept `--wall-antialiasing off|on` (default `on`, matching the
 app). The baseline renders at 1920 × 1080;
 add `--variant wall-900p` for 1600 × 900. The Book Wall wrapper enables diagnostics for
