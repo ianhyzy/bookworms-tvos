@@ -136,6 +136,43 @@ refreshes or more.
 - **Not done:** the main thread's stacks at rest. The first recording had them and was
   deleted before they were read.
 
+### A periodic display freeze outside the app (2026-11-17, afternoon)
+
+Later the same day, every recording of the resting wall showed a freeze of about 100 ms
+(six refreshes) every 2.82 seconds, which the morning's recordings did not have.
+
+- **It is not the app.** A Time Profiler recording of the app shows its threads quieter
+  during the freezes than between them, and the main thread idle.
+- **It is not another process's CPU work.** A Time Profiler recording of every process shows
+  the app, `backboardd`, and the kernel all quieter during the freezes.
+- **The display stops asking for frames.** The Display instrument's VSync requests stop for
+  55 to 100 ms at each freeze.
+- **It is not Instruments.** The app's own log shows the same 100 ms gaps with nothing
+  attached.
+- **Between freezes the wall is clean.** One 41-second recording had 16 freezes and one
+  other long frame, of 33 ms.
+- **Not found:** what stops the display. Home Assistant reported the Sony TV off and the
+  receiver on throughout, and `audiomxd` used about 30% of a core with AirPlay daemons
+  running. Neither was tested as the cause. Check the HDMI chain and the TV's power before
+  reading any frame-pacing result from this Apple TV.
+
+### What decides the app's GPU time per frame
+
+- **Two patterns.** When the compositor's 5.9 ms pass reaches the GPU first, the app's
+  fragment work runs after it in 3.4 ms. When the app's work arrives first, the two overlap,
+  the compositor's pass keeps its length, and the app's takes about 8 ms. Alone on the GPU it
+  takes 2.6 ms.
+- **A race decides it.** Both start about 2.5 ms after a refresh. The wall under its overlays
+  arrived second in about 90% of refreshes, and the wall above every other view arrived
+  first in 98%.
+- **Holding the app's work back removes the overlap but not the hitches.**
+  `--wall-metal-commit-delay=5` made the bare wall arrive second in 93% of refreshes, at
+  2.6 ms a frame, with as many long frames as before. The bare wall's hitches, about four a
+  second with two app frames in one refresh, are still unexplained.
+- **No effect on long frames:** leaving the display link at the display's rate, 59.94 Hz,
+  instead of asking for 60 (`--wall-metal-rate=display`), and unpausing the running link on
+  every main-thread change (`--wall-metal-poke`).
+
 ## If this is taken up again
 
 - Measure a full page first with `scripts/profile-book-wall.py --capture-set full`, so that

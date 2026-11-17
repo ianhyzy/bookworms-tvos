@@ -30,6 +30,17 @@ enum BookMetalWall {
     /// system composes nothing over it: no glass, text, or focus targets show.
     static let coversOverlays =
         isEnabled && ProcessInfo.processInfo.arguments.contains("--wall-metal-bare")
+    /// Measurement only. `--wall-metal-commit-delay=MS` holds each frame's GPU work back until
+    /// that long after its callback, so it reaches the GPU behind the system compositor's work
+    /// for the same refresh instead of racing it.
+    static let commitDelay =
+        TimeInterval(min(12, max(0, integer("--wall-metal-commit-delay=") ?? 0))) / 1000
+    /// Measurement only. `--wall-metal-rate=display` leaves the display link at the display's
+    /// own rate instead of asking for exactly 60 frames a second, and `--wall-metal-poke`
+    /// unpauses the running link again on every change from the main thread.
+    static let followsDisplayRate = ProcessInfo.processInfo.arguments.contains(
+        "--wall-metal-rate=display")
+    static let pokes = ProcessInfo.processInfo.arguments.contains("--wall-metal-poke")
     /// How many refreshes ahead of its presentation a frame is drawn: 2, or the count
     /// `--wall-metal-latency=` names.
     static let frameLatency = Float(min(4, max(1, integer("--wall-metal-latency=") ?? 2)))
@@ -509,7 +520,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         self.backdropDepthState = backdropDepthState
 
         link = CAMetalDisplayLink(metalLayer: layer)
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        if !BookMetalWall.followsDisplayRate {
+            link.preferredFrameRateRange = CAFrameRateRange(
+                minimum: 60, maximum: 60, preferred: 60)
+        }
         link.preferredFrameLatency = BookMetalWall.frameLatency
         link.isPaused = true
         super.init()
@@ -656,6 +670,9 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
 
     @objc private func resume() {
         let active = lock.withLock { state.isActive }
+        // Every change on the main thread wakes the link, often while it runs. Leave a running
+        // link alone, so those wakes can't disturb its pacing.
+        guard link.isPaused == active || BookMetalWall.pokes else { return }
         lastTarget = nil
         link.isPaused = !active
     }
@@ -794,6 +811,8 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 state.gpuFrames += 1
             }
         }
+        let wait = encodeStart + BookMetalWall.commitDelay - CACurrentMediaTime()
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
         buffer.commit()
 
         if snapshot.falls, landed {
