@@ -196,9 +196,12 @@ Later the same day, every recording of the resting wall showed a freeze of about
   had more long frames than the wall with books, so the books' drawing isn't what remains.
 - **Not found:** the source of the remaining late frames. One run each is too few to say
   whether the commit delay or the display's own rate changes them.
-- **Harness fault to fix first:** about every other launch produced no new renderer log or an
-  empty recording, and the cause isn't known. Check that a log is new before trusting it;
-  two runs with identical late-frame patterns are the same file.
+- **Harness fault:** about every other launch produced no new renderer log or an empty
+  recording. `devicectl device process launch --terminate-existing` sometimes leaves the new
+  process in the background with the Home Screen showing, where it draws nothing.
+  Terminating the old process first, waiting a few seconds, and launching without that flag
+  brought the app forward. Confirm with `devicectl device capture screenshot` before
+  measuring; two runs with identical late-frame patterns are the same file.
 
 ## If this is taken up again
 
