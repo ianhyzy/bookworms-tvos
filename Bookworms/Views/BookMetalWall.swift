@@ -83,6 +83,12 @@ struct BookWallStage: Sendable {
     let wallFadeStart: Float
     /// The environment light's exponent change at full detail level.
     let detailAmbientExponent: Float
+    /// The wall image's distance behind the camera at the wall's resting camera depth.
+    let backdropDistance: Float
+    /// How much the open book's shadow darkens the wall, and its offset from directly behind
+    /// the book, as a share of the book's outline on the wall.
+    let detailShadowOpacity: Float
+    let detailShadowOffset: SIMD2<Float>
 }
 
 /// Triangles for one draw call. Each vertex is nine floats: position, normal, texture
@@ -355,8 +361,8 @@ final class BookMetalWallHost {
         renderer?.endDetail()
     }
 
-    func focus(_ id: Int?) {
-        renderer?.focus(id)
+    func focus(_ id: Int?, decor: BookWallDecor) {
+        renderer?.focus(id, decor: decor)
     }
 
     /// Shows `wall`, falling from the drop height or at rest.
@@ -375,13 +381,18 @@ final class BookMetalWallHost {
             BookMetalRenderer.Item(
                 id: nil, indexStart: 0, indexCount: mesh.indices.count, spine: nil, cover: nil,
                 uniforms: shelf,
-                rest: Transform(translation: stage.shelfCenter), column: -1,
+                rest: Transform(translation: stage.shelfCenter), halfSize: .zero, column: -1,
                 delay: 0))
 
         let pageEdge = BookWallPageTexture.make()
             .flatMap {
                 renderer.makeTexture($0, mipmapped: true)
             }
+        var labels: [Int: any MTLTexture] = [:]
+        for (id, label) in wall.labels {
+            labels[id] = renderer.makeTexture(label.image, mipmapped: true)
+        }
+        let hint = wall.hint.flatMap { renderer.makeTexture($0.image, mipmapped: true) }
         for (order, slot) in wall.layout.slots.enumerated() {
             guard let artwork = wall.artwork[slot.book.id] else { continue }
             let cover = artwork.cover.flatMap { renderer.makeTexture($0, mipmapped: true) }
@@ -405,12 +416,13 @@ final class BookMetalWallHost {
                     id: slot.book.id, indexStart: start, indexCount: bookMesh.indices.count,
                     spine: renderer.makeTexture(artwork.spine), cover: cover, uniforms: uniforms,
                     rest: BookWallScene.restingTransform(for: slot, in: wall.layout),
+                    halfSize: SIMD3(slot.bookHeight, slot.collisionThickness, slot.coverWidth) / 2,
                     column: slot.column,
                     delay: Double(order) * stage.dropSpacing))
         }
         renderer.show(
-            wallID: wall.id, mesh: mesh, items: items, pageEdge: pageEdge, stage: stage,
-            falls: falls)
+            wallID: wall.id, mesh: mesh, items: items, pageEdge: pageEdge, labels: labels,
+            hint: hint, stage: stage, falls: falls)
     }
 }
 
@@ -427,6 +439,8 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let cover: (any MTLTexture)?
         var uniforms: BookMetalBook
         let rest: Transform
+        /// Half the book's box, for the shadow it casts on the wall when open.
+        let halfSize: SIMD3<Float>
         let column: Int
         /// When the book starts to fall, after the fall starts.
         let delay: TimeInterval
@@ -442,6 +456,9 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let uniforms: [any MTLBuffer]
         let items: [Item]
         let pageEdge: (any MTLTexture)?
+        /// Each book's shelf label, and the hint shown without focus.
+        let labels: [Int: any MTLTexture]
+        let hint: (any MTLTexture)?
         let stage: BookWallStage
     }
 
@@ -479,6 +496,9 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         var isActive = false
         var detail: Detail?
         var detailBackdrop: (any MTLTexture)?
+        var decor = BookWallDecor()
+        /// When the decor's ribbon and shadow started to arrive; `nil` until the next frame.
+        var decorStart: CFTimeInterval?
         var maxGPUSeconds: CFTimeInterval = 0
         var totalGPUSeconds: CFTimeInterval = 0
         var gpuFrames = 0
@@ -496,6 +516,12 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     private let depthState: any MTLDepthStencilState
     private let backdropDepthState: any MTLDepthStencilState
     private let clearingDepthState: any MTLDepthStencilState
+    private let decalPipeline: any MTLRenderPipelineState
+    private let decalDepthState: any MTLDepthStencilState
+    private var white: (any MTLTexture)?
+    private var ribbonTail: (any MTLTexture)?
+    private var softShadow: (any MTLTexture)?
+    private var contactShadow: (any MTLTexture)?
     private let link: CAMetalDisplayLink
     private let onLanded: @Sendable (UUID) -> Void
     private let onFlightEnded: @Sendable (UInt64) -> Void
@@ -526,6 +552,12 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     private static let topLightColor = SIMD4<Float>(0.2, 0.2, 0.2, 1)
     private static let ambientTop = SIMD4<Float>(0.34, 0.33, 0.32, 1)
     private static let ambientBottom = SIMD4<Float>(0.18, 0.17, 0.16, 1)
+    /// The ribbon's red, a little under full brightness, as a lit surface in this room shows.
+    private static let ribbonColor: SIMD4<Float> = {
+        var color = StyleColor(red: 0.84, green: 0.1, blue: 0.12).linearP3 * 0.8
+        color.w = 1
+        return color
+    }()
     /// The detail key light's level at its distance from the detail pose.
     private static let detailLightColor = SIMD4<Float>(0.62, 0.57, 0.50, 1)
 
@@ -589,6 +621,21 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let noDepth = MTLDepthStencilDescriptor()
         noDepth.depthCompareFunction = .always
         noDepth.isDepthWriteEnabled = false
+        // Flat extras, such as the label, the ribbon, and shadows: blended over what is behind
+        // them, hidden by what is in front, and never written to depth.
+        let decals = MTLRenderPipelineDescriptor()
+        decals.label = "Book Wall decals"
+        decals.vertexFunction = library.makeFunction(name: "bookDecalVertex")
+        decals.fragmentFunction = library.makeFunction(name: "bookDecalFragment")
+        decals.colorAttachments[0].pixelFormat = layer.pixelFormat
+        decals.colorAttachments[0].isBlendingEnabled = true
+        decals.colorAttachments[0].sourceRGBBlendFactor = .one
+        decals.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        decals.depthAttachmentPixelFormat = .depth32Float
+        decals.rasterSampleCount = Self.sampleCount
+        let decalDepth = MTLDepthStencilDescriptor()
+        decalDepth.depthCompareFunction = .lessEqual
+        decalDepth.isDepthWriteEnabled = false
         // The wall image drawn over a fading wall also resets depth to the far plane, so the
         // open book draws in front of the wall it has left.
         let clearing = MTLDepthStencilDescriptor()
@@ -598,8 +645,12 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             let backdropPipeline = try? device.makeRenderPipelineState(descriptor: backdrop),
             let depthState = device.makeDepthStencilState(descriptor: depth),
             let backdropDepthState = device.makeDepthStencilState(descriptor: noDepth),
-            let clearingDepthState = device.makeDepthStencilState(descriptor: clearing)
+            let clearingDepthState = device.makeDepthStencilState(descriptor: clearing),
+            let decalPipeline = try? device.makeRenderPipelineState(descriptor: decals),
+            let decalDepthState = device.makeDepthStencilState(descriptor: decalDepth)
         else { return nil }
+        self.decalPipeline = decalPipeline
+        self.decalDepthState = decalDepthState
         self.clearingDepthState = clearingDepthState
         self.bookPipeline = bookPipeline
         self.backdropPipeline = backdropPipeline
@@ -616,6 +667,28 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         super.init()
         link.delegate = self
         let thread = Thread(target: self, selector: #selector(runThread), object: nil)
+        white =
+            Self.image(width: 1, height: 1) { context in
+                context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            .flatMap { makeTexture($0, mipmapped: false) }
+        // The ribbon's last segment, with a swallowtail notch as deep as on the RealityKit wall.
+        ribbonTail =
+            Self.image(width: 64, height: 64) { context in
+                let notch =
+                    64 * CGFloat(BookWallRibbon.width * 0.6 / (BookWallRibbon.segmentLength * 1.08))
+                context.move(to: CGPoint(x: 0, y: 64))
+                context.addLine(to: CGPoint(x: 64, y: 64))
+                context.addLine(to: CGPoint(x: 64, y: 0))
+                context.addLine(to: CGPoint(x: 32, y: notch))
+                context.addLine(to: CGPoint(x: 0, y: 0))
+                context.fillPath()
+            }
+            .flatMap { makeTexture($0, mipmapped: true) }
+        softShadow = BookWallBackdropBake.makeShadow(fadesDown: false)
+            .flatMap { makeTexture($0, mipmapped: false) }
+        contactShadow = BookWallBackdropBake.makeShadow(fadesDown: true)
+            .flatMap { makeTexture($0, mipmapped: false) }
         if BookMetalWall.traces { startHeartbeat() }
         thread.name = "Book Wall renderer"
         thread.qualityOfService = .userInteractive
@@ -664,8 +737,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         wake()
     }
 
-    func focus(_ id: Int?) {
+    func focus(_ id: Int?, decor: BookWallDecor) {
         lock.withLock {
+            state.decor = decor
+            state.decorStart = nil
             guard state.focused != id else { return }
             // Each move starts from where the book is at the next frame, so a book that is
             // still easing out turns back smoothly.
@@ -684,7 +759,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
 
     fileprivate func show(
         wallID: UUID, mesh: BookMetalMesh, items: [Item], pageEdge: (any MTLTexture)?,
-        stage: BookWallStage, falls: Bool
+        labels: [Int: any MTLTexture], hint: (any MTLTexture)?, stage: BookWallStage, falls: Bool
     ) {
         guard !mesh.indices.isEmpty,
             let vertices = device.makeBuffer(
@@ -702,15 +777,30 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         }
         let page = Page(
             wallID: wallID, vertices: vertices, indices: indices, uniforms: uniforms,
-            items: items, pageEdge: pageEdge, stage: stage)
+            items: items, pageEdge: pageEdge, labels: labels, hint: hint, stage: stage)
         lock.withLock {
             state.page = page
             state.falls = falls
             state.fallStart = nil
             state.focused = nil
             state.pulls.removeAll()
+            state.decor = BookWallDecor()
+            state.detail = nil
         }
         wake()
+    }
+
+    /// A small white drawing on a clear ground, for the ribbon's textures.
+    private static func image(width: Int, height: Int, draw: (CGContext) -> Void) -> CGImage? {
+        guard
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.setFillColor(UIColor.white.cgColor)
+        draw(context)
+        return context.makeImage()
     }
 
     /// Uploads a spine's prepared mip chain.
@@ -795,6 +885,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 state.pulls[id]?.start = time
             }
             if state.detail != nil, state.detail?.start == nil { state.detail?.start = time }
+            if state.decorStart == nil { state.decorStart = time }
             return state
         }
         guard let page = snapshot.page else {
@@ -878,6 +969,81 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let wallOpacity =
             1 - Self.smootherstep((level - stage.wallFadeStart) / (1 - stage.wallFadeStart))
         var flownIndex: Int?
+
+        // The wall's flat extras, which arrive with the focused book's pull-out.
+        struct Decal {
+            var model: simd_float4x4
+            var tint: SIMD4<Float>
+            var texture: (any MTLTexture)?
+        }
+        var wallDecals: [Decal] = []
+        let decor = snapshot.decor
+        let arrival =
+            decor.animates
+            ? Float(time - (snapshot.decorStart ?? time)) - stage.pullOutDuration
+            : BookWallRibbon.settleTime
+        if let model = decor.label,
+            let label = decor.labelBook.flatMap({ page.labels[$0] }) ?? page.hint
+        {
+            wallDecals.append(Decal(model: model, tint: [1, 1, 1, 1], texture: label))
+        }
+        if let model = decor.contactShadow {
+            let opacity =
+                decor.contactShadowOpacity * min(1, max(0, 1 + arrival / stage.pullOutDuration))
+            wallDecals.append(
+                Decal(model: model, tint: [1, 1, 1, opacity], texture: contactShadow))
+        }
+        if let anchor = decor.ribbon {
+            let length = BookWallRibbon.segmentLength * 1.08
+            let shape = Transform(
+                scale: [BookWallRibbon.width, length, 1], translation: [0, -length / 2, 0]
+            )
+            .matrix
+            let segments = BookWallRibbon.segments(at: arrival)
+            for (index, segment) in segments.enumerated() {
+                guard let segment else { continue }
+                let pose = Transform(
+                    scale: [1, segment.visible, 1], rotation: segment.rotation,
+                    translation: segment.position
+                )
+                .matrix
+                wallDecals.append(
+                    Decal(
+                        model: anchor.matrix * pose * shape, tint: Self.ribbonColor,
+                        texture: index == segments.count - 1 ? ribbonTail : white))
+            }
+            if arrival < BookWallRibbon.settleTime { animating = true }
+        }
+        // The open book's soft shadow on the wall: its outline as the camera sees it, cast
+        // onto the wall image and shifted away from the key light.
+        var shadow: Decal?
+        if level > 0, let flown, let item = page.items.first(where: { $0.id == flown.book }) {
+            let wall = -(stage.backdropDistance + cameraDepth - stage.cameraDepth) + 0.1
+            var low = SIMD2<Float>(repeating: .greatestFiniteMagnitude)
+            var high = SIMD2<Float>(repeating: -.greatestFiniteMagnitude)
+            let matrix = flown.pose.matrix
+            for corner in 0..<8 {
+                let local = SIMD3<Float>(
+                    corner & 1 == 0 ? -item.halfSize.x : item.halfSize.x,
+                    corner & 2 == 0 ? -item.halfSize.y : item.halfSize.y,
+                    corner & 4 == 0 ? -item.halfSize.z : item.halfSize.z)
+                let world = matrix * SIMD4(local, 1)
+                // The camera looks down -Z, so scaling by depth casts a point onto the wall
+                // along its line of sight.
+                let onWall = SIMD2(world.x, world.y) * (wall / min(world.z - cameraDepth, -0.01))
+                low = simd_min(low, onWall)
+                high = simd_max(high, onWall)
+            }
+            let size = (high - low) * (1 + 2 * BookWallBackdropBake.shadowSoftness)
+            let center = (low + high) / 2 + (high - low) * stage.detailShadowOffset
+            shadow = Decal(
+                model: Transform(
+                    scale: [size.x, size.y, 1],
+                    translation: [center.x, center.y, wall + cameraDepth]
+                )
+                .matrix,
+                tint: [1, 1, 1, stage.detailShadowOpacity * level], texture: softShadow)
+        }
         let ring = page.uniforms[frameIndex % page.uniforms.count]
         frameIndex += 1
         let constants = ring.contents()
@@ -943,9 +1109,24 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             encoder.setFragmentBytes(&mix, length: MemoryLayout<SIMD4<Float>>.stride, index: 3)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         }
+        func drawDecals(_ decals: [Decal]) {
+            guard !decals.isEmpty else { return }
+            encoder.setRenderPipelineState(decalPipeline)
+            encoder.setDepthStencilState(decalDepthState)
+            encoder.setCullMode(.none)
+            for decal in decals {
+                var constants = (decal.model, decal.tint)
+                let length = MemoryLayout.stride(ofValue: constants)
+                encoder.setVertexBytes(&constants, length: length, index: 3)
+                encoder.setFragmentBytes(&constants, length: length, index: 3)
+                encoder.setFragmentTexture(decal.texture, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+            }
+        }
         func drawBooks(_ indices: some Sequence<Int>) {
             encoder.setRenderPipelineState(bookPipeline)
             encoder.setDepthStencilState(depthState)
+            encoder.setCullMode(.back)
             encoder.setFragmentTexture(page.pageEdge, index: 2)
             for index in indices {
                 let item = page.items[index]
@@ -973,11 +1154,16 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let wall = page.items.indices.filter { !(fades && $0 == flownIndex) }
         if wallOpacity > 0 || !fades {
             for _ in 0..<BookMetalWall.stress { drawBooks(wall) }
+            drawDecals(wallDecals)
+            // Before the wall fades, the open book is still among the stacks, which hide
+            // most of its shadow.
+            if !fades, let shadow { drawDecals([shadow]) }
         }
         if fades, let flownIndex {
             // Drawing the wall image over the wall at the wall's lost opacity is the wall
             // fading out over that image. The open book has cleared the stacks by now.
             drawBackdrop(opacity: 1 - wallOpacity, clearsDepth: true)
+            if let shadow { drawDecals([shadow]) }
             drawBooks(CollectionOfOne(flownIndex))
         }
         encoder.endEncoding()

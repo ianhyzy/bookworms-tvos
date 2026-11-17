@@ -50,6 +50,76 @@ struct BookWallDrift: Sendable {
     }
 }
 
+/// The bookmark ribbon's motion: a chain of segments sliding out from under the focused book,
+/// tail first, with a wave that damps out once it hangs free. No renderer simulates cloth, so
+/// the motion is analytic.
+enum BookWallRibbon {
+    static let width: Float = 0.28
+    static let segmentLength: Float = 0.21
+    /// A fixed visible length of about two typical spines' thickness.
+    static let segmentCount = 5
+    static let slideTime: Float = 0.55
+    static let settleTime: Float = 1.0
+
+    /// One segment's pose in the ribbon's space, and the share of its length that shows.
+    struct Segment: Sendable {
+        var position: SIMD3<Float>
+        var rotation: simd_quatf
+        var visible: Float
+    }
+
+    /// The segments `elapsed` seconds after the ribbon starts to slide; `nil` for one still
+    /// inside the book. Only the length below the book's bottom edge shows, so the ribbon never
+    /// appears in front of the book.
+    static func segments(at elapsed: Float) -> [Segment?] {
+        let t = elapsed
+        let length = Float(segmentCount) * segmentLength
+        let eased = min(1, max(0, t / slideTime))
+        let slide = eased * eased * eased * (eased * (eased * 6 - 15) + 10)
+        // Path distance of the ribbon's top below the anchor; negative is inside the book.
+        let offset = -length * (1 - slide)
+        let damping = t >= settleTime ? 0 : t < slideTime ? 1 : exp(-(t - slideTime) / 0.15)
+        var point = SIMD3<Float>.zero
+        var started = false
+        return (0..<segmentCount)
+            .map { index in
+                let top = offset + Float(index) * segmentLength
+                guard top + segmentLength > 0 else { return nil }
+                // The emerging segment shortens to its part below the edge.
+                var visible: Float = 1
+                if !started {
+                    visible = min(1, (top + segmentLength) / segmentLength)
+                    started = true
+                }
+                let freedom = min(1, max(0, top) / 1.2)
+                let phase = 14 * t - 2.6 * top
+                let swing = 0.42 * damping * freedom * sin(phase)
+                let twist = 0.35 * damping * freedom * sin(phase + 1.2)
+                let rotation =
+                    simd_quatf(angle: swing, axis: [0, 0, 1])
+                    * simd_quatf(angle: twist, axis: [0, 1, 0])
+                let segment = Segment(position: point, rotation: rotation, visible: visible)
+                point += simd_act(rotation, SIMD3<Float>(0, -segmentLength * visible, 0))
+                return segment
+            }
+    }
+}
+
+/// Where the wall's flat extras sit for the Metal renderer: the shelf label, the shadow a
+/// pulled-out book casts on the spine below it, and the bookmark ribbon.
+struct BookWallDecor: Sendable {
+    /// The book whose label shows, or `nil` for the hint.
+    var labelBook: Int?
+    /// The label's unit plane in the world, or `nil` when hidden.
+    var label: simd_float4x4?
+    var contactShadow: simd_float4x4?
+    var contactShadowOpacity: Float = 0
+    /// The ribbon's anchor under the focused book, or `nil` when hidden.
+    var ribbon: Transform?
+    /// Whether the ribbon and shadow arrive with the book's pull-out or are already there.
+    var animates = false
+}
+
 /// Owns the 3D scene across detail presentations so returning does not replay the fall.
 @MainActor
 final class BookWallScene {
@@ -399,8 +469,25 @@ final class BookWallScene {
         if let bakedWall { host.setBackdrop(resting: bakedWall.resting, detail: bakedWall.detail) }
         if let shownWall, !shownWall.books.isEmpty {
             host.show(shownWall, stage: stage, falls: !isSettled)
-            host.focus(selectedID)
+            host.focus(selectedID, decor: decor)
         }
+    }
+
+    /// Where the label, contact shadow, and ribbon sit now, read from the entities this scene
+    /// places for RealityKit.
+    private var decor: BookWallDecor {
+        var decor = BookWallDecor(labelBook: selectedID.flatMap { labels[$0] == nil ? nil : $0 })
+        if shelfLabel.isEnabled, shelfLabel.parent != nil {
+            decor.label = shelfLabel.transformMatrix(relativeTo: root)
+        }
+        guard ribbonVisible, ribbon.isEnabled else { return decor }
+        decor.ribbon = Transform(matrix: ribbon.transformMatrix(relativeTo: root))
+        decor.animates = ribbonElapsed < BookWallRibbon.settleTime
+        if contactShadow.isEnabled {
+            decor.contactShadow = contactShadow.transformMatrix(relativeTo: root)
+            decor.contactShadowOpacity = Self.contactShadowOpacity
+        }
+        return decor
     }
 
     /// The framing, fall, and lights that the Metal renderer shares with this scene.
@@ -417,7 +504,9 @@ final class BookWallScene {
                 -shelfSize.z / 2 - Self.backdropGap + Self.poolLightDistance,
             ],
             topLightDirection: Self.topLightDirection, wallFadeStart: Self.wallFadeStart,
-            detailAmbientExponent: Self.detailAmbientExponent)
+            detailAmbientExponent: Self.detailAmbientExponent,
+            backdropDistance: backdropDistance, detailShadowOpacity: Self.detailShadowOpacity,
+            detailShadowOffset: Self.detailShadowOffset)
     }
 
     /// Restores hit targets after the host attaches to an already settled wall.
@@ -655,6 +744,7 @@ final class BookWallScene {
         }
         isSettled = true
         showShelfLabel(for: selectedID)
+        metalWall?.focus(selectedID, decor: decor)
         publishFocusFrames()
     }
 
@@ -690,6 +780,8 @@ final class BookWallScene {
     func highlight(_ id: Int?, reduceMotion: Bool) {
         hasUndrawnChange = true
         guard isSettled, !isFlyingOut, selectedID != id else { return }
+        // The label, ribbon, and shadow below are placed by the time this runs.
+        defer { metalWall?.focus(selectedID, decor: decor) }
         if let selectedID, let body = bodies[selectedID],
             let resting = restingTransforms[selectedID]
         {
@@ -702,7 +794,6 @@ final class BookWallScene {
             }
         }
         selectedID = id
-        metalWall?.focus(id)
         // Both moves last at most the pull-out duration.
         animatingUntil = CACurrentMediaTime() + TimeInterval(Self.pullOutDuration) + 0.1
         showShelfLabel(for: id)
@@ -1264,12 +1355,10 @@ final class BookWallScene {
         metalWall?.endDetail()
     }
 
-    private static let ribbonWidth: Float = 0.28
-    private static let ribbonSegmentLength: Float = 0.21
-    /// A fixed visible length of about two typical spines' thickness.
-    private static let ribbonSegmentCount = 5
-    private static let ribbonSlideTime: Float = 0.55
-    private static let ribbonSettleTime: Float = 1.0
+    private static let ribbonWidth = BookWallRibbon.width
+    private static let ribbonSegmentLength = BookWallRibbon.segmentLength
+    private static let ribbonSegmentCount = BookWallRibbon.segmentCount
+    private static let ribbonSettleTime = BookWallRibbon.settleTime
     private static let ribbonMaterial: PhysicallyBasedMaterial = {
         var material = surface(
             color: UIColor(red: 0.84, green: 0.1, blue: 0.12, alpha: 1), roughness: 0.4,
@@ -1359,41 +1448,15 @@ final class BookWallScene {
         let pulledOut = min(1, max(0, 1 + t / Self.pullOutDuration))
         contactShadow.components.set(
             OpacityComponent(opacity: Self.contactShadowOpacity * pulledOut))
-        let length = Float(Self.ribbonSegmentCount) * Self.ribbonSegmentLength
-        let slide = Self.smootherstep(t / Self.ribbonSlideTime)
-        // Path distance of the ribbon's top below the anchor; negative is inside the book.
-        let offset = -length * (1 - slide)
-        let damping =
-            t >= Self.ribbonSettleTime
-            ? 0 : t < Self.ribbonSlideTime ? 1 : exp(-(t - Self.ribbonSlideTime) / 0.15)
-        var point = SIMD3<Float>.zero
-        var started = false
-        for index in 0..<Self.ribbonSegmentCount {
-            let segment = ribbonSegments[index]
-            let top = offset + Float(index) * Self.ribbonSegmentLength
-            guard top + Self.ribbonSegmentLength > 0 else {
+        for (segment, pose) in zip(ribbonSegments, BookWallRibbon.segments(at: t)) {
+            guard let pose else {
                 segment.isEnabled = false
                 continue
             }
             segment.isEnabled = true
-            // Draw nothing above the book's bottom edge. The emerging segment shortens to its
-            // part below the edge, so the ribbon never depends on the moving book to hide it.
-            var visible: Float = 1
-            if !started {
-                visible = min(1, (top + Self.ribbonSegmentLength) / Self.ribbonSegmentLength)
-                started = true
-            }
-            segment.scale = [1, visible, 1]
-            let freedom = min(1, max(0, top) / 1.2)
-            let phase = 14 * t - 2.6 * top
-            let swing = 0.42 * damping * freedom * sin(phase)
-            let twist = 0.35 * damping * freedom * sin(phase + 1.2)
-            let rotation =
-                simd_quatf(angle: swing, axis: [0, 0, 1])
-                * simd_quatf(angle: twist, axis: [0, 1, 0])
-            segment.position = point
-            segment.orientation = rotation
-            point += simd_act(rotation, SIMD3<Float>(0, -Self.ribbonSegmentLength * visible, 0))
+            segment.scale = [1, pose.visible, 1]
+            segment.position = pose.position
+            segment.orientation = pose.rotation
         }
     }
 
@@ -2653,6 +2716,8 @@ enum BookWallPageTexture {
 enum BookWallShelfLabel {
     struct Prepared {
         let texture: TextureResource
+        /// The drawn label, which the Metal renderer uploads itself.
+        let image: CGImage
         let width: Float
     }
 
@@ -2710,7 +2775,8 @@ enum BookWallShelfLabel {
             let texture = try? await TextureResource.generate(
                 from: image, options: .init(semantic: .color))
         else { return nil }
-        return Prepared(texture: texture, width: Float(CGFloat(image.width) / pixelsPerUnit))
+        return Prepared(
+            texture: texture, image: image, width: Float(CGFloat(image.width) / pixelsPerUnit))
     }
 }
 

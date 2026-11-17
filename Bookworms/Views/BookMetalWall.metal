@@ -150,3 +150,40 @@ fragment float4 bookBackdropFragment(
     float3 detail = detailWall.sample(linearSampler, in.uv).rgb;
     return float4(resting + (detail - resting) * mix.x, mix.y);
 }
+
+// Flat extras: the shelf label, the bookmark ribbon, and soft shadows. Each is a unit square
+// placed by `model`, with a premultiplied texture scaled by `tint`, whose alpha is its opacity.
+
+struct Decal {
+    float4x4 model;
+    float4 tint;
+};
+
+struct DecalOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex DecalOut bookDecalVertex(
+    uint vertexID [[vertex_id]], constant Frame &frame [[buffer(1)]],
+    constant Decal &decal [[buffer(3)]]) {
+    const float2 corners[] = {
+        float2(-0.5, -0.5), float2(0.5, -0.5), float2(0.5, 0.5),
+        float2(-0.5, -0.5), float2(0.5, 0.5), float2(-0.5, 0.5),
+    };
+    float2 corner = corners[vertexID];
+    DecalOut out;
+    out.position = frame.viewProjection * decal.model * float4(corner, 0, 1);
+    // The texture's top row lies along the square's top edge.
+    out.uv = float2(corner.x + 0.5, 0.5 - corner.y);
+    return out;
+}
+
+fragment float4 bookDecalFragment(
+    DecalOut in [[stage_in]], constant Decal &decal [[buffer(3)]],
+    texture2d<float> image [[texture(0)]]) {
+    constexpr sampler trilinear(
+        coord::normalized, address::clamp_to_edge, filter::linear, mip_filter::linear);
+    float4 color = image.sample(trilinear, in.uv);
+    return float4(color.rgb * decal.tint.rgb, color.a) * decal.tint.a;
+}
