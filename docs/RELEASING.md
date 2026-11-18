@@ -154,7 +154,7 @@ Apple documents the selection controls in [Manage availability for your app](htt
 
 | Field | Value |
 | --- | --- |
-| Name | Bookworms - eBook Display |
+| Name | `Bookworms - ebook Display` through 1.2.0. With the next version, 1.2.1, change it to `Bookworms: more social reading` so that it matches the iPhone and Mac listing. App Store Connect accepts a name change only while a version is editable. If it refuses the name because the iPhone and Mac listing already uses it, ask the owner for another name. |
 | Privacy policy URL | https://ian.gay/bookworms-privacy-policy/ |
 | Apple TV privacy policy | Required for tvOS, because Apple TV has no browser. Paste the plain text from [privacy policy text](#privacy-policy-text). App Review reviews it, and the Apple TV App Store displays it. |
 | Support and marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
