@@ -108,7 +108,17 @@ Fill in **Test Information** on the app's TestFlight tab before submitting a bui
 | Contact information | The owner's name, phone number, and email address. Enter them only in App Store Connect. |
 | Sign-in information | The demo Hardcover account from [App Store information](#app-store-information). Enter its credentials only in App Store Connect. |
 | Review notes | The App Review notes in [App Store information](#app-store-information), adjusted to the build. For TestFlight, replace "is in App Review at the same time" with where testers get the iPhone and Mac build. |
-| What to Test | Entered for each build. Use [What to Test for 1.2.0](#what-to-test-for-120). |
+| What to Test | Entered for each build. Use the newest text below: [What to Test for 1.2.1](#what-to-test-for-121), which follows [What to Test for 1.2.0](#what-to-test-for-120). |
+
+### What to Test for 1.2.1
+
+App Store Connect closed 1.2.0 to new builds once that version was approved, so builds after 17 carry 1.2.1. This draft covers the one change since build 17; the owner edits the text.
+
+```text
+New since 1.2.0:
+
+- Book Wall (Apple TV 4K, 2nd generation or later; turn it on in Settings > Views) is drawn a new way and should move more smoothly. Watch the books fall, move focus across the spines, open a book, and press Back. Report any stutter, flicker, or a book that looks wrong.
+```
 
 ### What to Test for 1.2.0
 
