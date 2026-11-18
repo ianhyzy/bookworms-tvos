@@ -12,12 +12,44 @@ enum BookWallHardcoverMesh {
         size: SIMD3<Float>, boardThickness: Float, foreedgeCornerRadius: Float,
         spineCornerRadius: Float, spineWallDepth: Float, bevelWidth: Float, bevelDepth: Float
     ) -> MeshResource {
+        let data = casingData(
+            size: size, boardThickness: boardThickness,
+            foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
+            spineWallDepth: spineWallDepth, bevelWidth: bevelWidth, bevelDepth: bevelDepth)
+        do {
+            return try data.resource(name: "book-wall-hardcover-casing", includesTexture: false)
+        } catch {
+            let roll = rollDepth(
+                size: size, boardThickness: boardThickness, bevelWidth: bevelWidth,
+                bevelDepth: bevelDepth)
+            return .generateBox(
+                size: size, cornerRadius: min(spineCornerRadius, min(size.x, size.z) / 2, roll))
+        }
+    }
+
+    /// How deep a board's edge rolls: no deeper than its bevel is wide or a quarter of the
+    /// board's thickness.
+    private static func rollDepth(
+        size: SIMD3<Float>, boardThickness: Float, bevelWidth: Float, bevelDepth: Float
+    ) -> Float {
+        let bevel = min(bevelWidth, min(size.x, size.z) / 2)
+        return min(bevelDepth, bevel, min(boardThickness, size.y / 2) * 0.25)
+    }
+
+    /// The casing's triangles, in the book's coordinates: X head to tail, Y thickness, and Z
+    /// from the fore edge to the spine.
+    static func casingData(
+        size: SIMD3<Float>, boardThickness: Float, foreedgeCornerRadius: Float,
+        spineCornerRadius: Float, spineWallDepth: Float, bevelWidth: Float, bevelDepth: Float
+    ) -> BookWallMeshData {
         let maximumRadius = min(size.x, size.z) / 2
         let foreedgeRadius = min(foreedgeCornerRadius, maximumRadius)
         let spineRadius = min(spineCornerRadius, maximumRadius)
         let thickness = min(boardThickness, size.y / 2)
         let bevel = min(bevelWidth, maximumRadius)
-        let rollDepth = min(bevelDepth, bevel, thickness * 0.25)
+        let rollDepth = rollDepth(
+            size: size, boardThickness: boardThickness, bevelWidth: bevelWidth,
+            bevelDepth: bevelDepth)
         var geometry = Geometry(
             width: size.x, height: size.z,
             cornerRadii: [foreedgeRadius, foreedgeRadius, spineRadius, spineRadius],
@@ -56,13 +88,9 @@ enum BookWallHardcoverMesh {
 
         // The construction uses an XY outline with thickness on Z. Rotate it into
         // the book's X/Z outline and Y thickness without reversing its winding.
-        geometry.positions = geometry.positions.map { [$0.x, $0.z, -$0.y] }
-        geometry.normals = geometry.normals.map { [$0.x, $0.z, -$0.y] }
-        do {
-            return try geometry.resource(name: "book-wall-hardcover-casing", includesTexture: false)
-        } catch {
-            return .generateBox(size: size, cornerRadius: min(spineRadius, rollDepth))
-        }
+        geometry.data.positions = geometry.data.positions.map { [$0.x, $0.z, -$0.y] }
+        geometry.data.normals = geometry.data.normals.map { [$0.x, $0.z, -$0.y] }
+        return geometry.data
     }
 
     /// Carries the source artwork over the front bevel without adding a painted border.
@@ -71,6 +99,23 @@ enum BookWallHardcoverMesh {
         width: Float, height: Float, foreedgeCornerRadius: Float, spineCornerRadius: Float,
         bevelWidth: Float, bevelDepth: Float
     ) -> MeshResource {
+        let data = coverSurfaceData(
+            width: width, height: height, foreedgeCornerRadius: foreedgeCornerRadius,
+            spineCornerRadius: spineCornerRadius, bevelWidth: bevelWidth, bevelDepth: bevelDepth)
+        do {
+            return try data.resource(name: "book-wall-hardcover-artwork", includesTexture: true)
+        } catch {
+            return .generatePlane(
+                width: width, height: height,
+                cornerRadius: min(foreedgeCornerRadius, spineCornerRadius, min(width, height) / 2))
+        }
+    }
+
+    /// The front artwork surface's triangles, facing +Z with its front at Z = 0.
+    static func coverSurfaceData(
+        width: Float, height: Float, foreedgeCornerRadius: Float, spineCornerRadius: Float,
+        bevelWidth: Float, bevelDepth: Float
+    ) -> BookWallMeshData {
         let maximumRadius = min(width, height) / 2
         let foreedgeRadius = min(foreedgeCornerRadius, maximumRadius)
         let spineRadius = min(spineCornerRadius, maximumRadius)
@@ -91,12 +136,7 @@ enum BookWallHardcoverMesh {
                 outwardNormal: normal.x, faceNormal: normal.y)
         }
         geometry.appendCap(front: true, depth: 0)
-        do {
-            return try geometry.resource(name: "book-wall-hardcover-artwork", includesTexture: true)
-        } catch {
-            return .generatePlane(
-                width: width, height: height, cornerRadius: min(foreedgeRadius, spineRadius))
-        }
+        return geometry.data
     }
 
     /// A hardcover's headbands, as the iPhone draws them: a striped cord across the page
@@ -108,6 +148,21 @@ enum BookWallHardcoverMesh {
     static func headbands(
         length: Float, thickness: Float, depth: Float, width: Float, raise: Float, stripe: Float
     ) -> MeshResource? {
+        let data = headbandData(
+            length: length, thickness: thickness, depth: depth, width: width, raise: raise,
+            stripe: stripe)
+        var descriptor = MeshDescriptor(name: "headbands")
+        descriptor.positions = MeshBuffers.Positions(data.positions)
+        descriptor.normals = MeshBuffers.Normals(data.normals)
+        descriptor.primitives = .triangles(data.indices)
+        descriptor.materials = .perFace(data.faceMaterials)
+        return try? MeshResource.generate(from: [descriptor])
+    }
+
+    /// The headbands' triangles, with each triangle's stripe in `faceMaterials`.
+    static func headbandData(
+        length: Float, thickness: Float, depth: Float, width: Float, raise: Float, stripe: Float
+    ) -> BookWallMeshData {
         let pieces = max(1, Int((thickness / stripe).rounded()))
         var positions: [SIMD3<Float>] = []
         var normals: [SIMD3<Float>] = []
@@ -146,12 +201,8 @@ enum BookWallHardcoverMesh {
                     ], [0, 0, -1], material)
             }
         }
-        var descriptor = MeshDescriptor(name: "headbands")
-        descriptor.positions = MeshBuffers.Positions(positions)
-        descriptor.normals = MeshBuffers.Normals(normals)
-        descriptor.primitives = .triangles(indices)
-        descriptor.materials = .perFace(materials)
-        return try? MeshResource.generate(from: [descriptor])
+        return BookWallMeshData(
+            positions: positions, normals: normals, indices: indices, faceMaterials: materials)
     }
 
     /// Matches the normal to the unequal width and depth of the elliptical edge roll.
@@ -167,10 +218,7 @@ enum BookWallHardcoverMesh {
         let height: Float
         let cornerRadii: SIMD4<Float>
         let spineWallDepth: Float?
-        var positions: [SIMD3<Float>] = []
-        var normals: [SIMD3<Float>] = []
-        var textureCoordinates: [SIMD2<Float>] = []
-        var indices: [UInt32] = []
+        var data = BookWallMeshData()
         private var ringStarts: [UInt32] = []
 
         private var ringCount: Int {
@@ -198,7 +246,7 @@ enum BookWallHardcoverMesh {
             inset: Float, depth: Float, outwardNormal: Float, faceNormal: Float,
             connectsSpine: Bool = true, connectsOtherEdges: Bool = true
         ) {
-            let start = UInt32(positions.count)
+            let start = UInt32(data.positions.count)
             for corner in 0..<4 {
                 // The face roll can be wider than the silhouette's corner radius.
                 // Offset the inner rectangle and let its corner become square.
@@ -211,13 +259,13 @@ enum BookWallHardcoverMesh {
                         (Float(corner) + Float(step) / Float(cornerIntervals)) * .pi / 2
                     let direction = SIMD2<Float>(cos(angle), sin(angle))
                     let point = center + direction * radius
-                    positions.append([point.x, point.y, depth])
-                    normals.append([
+                    data.positions.append([point.x, point.y, depth])
+                    data.normals.append([
                         direction.x * outwardNormal, direction.y * outwardNormal, faceNormal,
                     ])
                     // Match RealityKit's generated-plane UV orientation for the existing
                     // cover texture. The bevel carries edge pixels without stretching the face.
-                    textureCoordinates.append([point.x / width + 0.5, point.y / height + 0.5])
+                    data.textureCoordinates.append([point.x / width + 0.5, point.y / height + 0.5])
                 }
                 if let spineWallDepth, corner == 1 || corner == 3 {
                     // Split the head and tail where the inner spine meets the pages.
@@ -225,9 +273,9 @@ enum BookWallHardcoverMesh {
                     let side: Float = corner == 1 ? -1 : 1
                     let point = SIMD2<Float>(
                         side * (width / 2 - inset), -height / 2 + spineWallDepth)
-                    positions.append([point.x, point.y, depth])
-                    normals.append([side * outwardNormal, 0, faceNormal])
-                    textureCoordinates.append([point.x / width + 0.5, point.y / height + 0.5])
+                    data.positions.append([point.x, point.y, depth])
+                    data.normals.append([side * outwardNormal, 0, faceNormal])
+                    data.textureCoordinates.append([point.x / width + 0.5, point.y / height + 0.5])
                 }
             }
             if let previous = ringStarts.last {
@@ -256,19 +304,19 @@ enum BookWallHardcoverMesh {
             guard let ringStart = ringStarts.first else { return }
             let outline = (spineRange.lowerBound...spineRange.upperBound)
                 .map {
-                    positions[Int(ringStart) + $0]
+                    data.positions[Int(ringStart) + $0]
                 }
             for front in [false, true] {
                 let depth = front ? upperDepth : lowerDepth
-                let center = UInt32(positions.count)
-                positions.append([0, -height / 2 + spineWallDepth / 2, depth])
-                normals.append([0, 0, front ? 1 : -1])
-                textureCoordinates.append(.zero)
-                let start = UInt32(positions.count)
+                let center = UInt32(data.positions.count)
+                data.positions.append([0, -height / 2 + spineWallDepth / 2, depth])
+                data.normals.append([0, 0, front ? 1 : -1])
+                data.textureCoordinates.append(.zero)
+                let start = UInt32(data.positions.count)
                 for point in outline {
-                    positions.append([point.x, point.y, depth])
-                    normals.append([0, 0, front ? 1 : -1])
-                    textureCoordinates.append(.zero)
+                    data.positions.append([point.x, point.y, depth])
+                    data.normals.append([0, 0, front ? 1 : -1])
+                    data.textureCoordinates.append(.zero)
                 }
                 for index in outline.indices {
                     let current = start + UInt32(index)
@@ -280,23 +328,23 @@ enum BookWallHardcoverMesh {
             // Close the inside of the U against the page block. The fore edge remains
             // open, while the two outer bevels flow directly into the spine wall.
             let innerSpine = -height / 2 + spineWallDepth
-            let start = UInt32(positions.count)
-            positions.append(contentsOf: [
+            let start = UInt32(data.positions.count)
+            data.positions.append(contentsOf: [
                 [-width / 2, innerSpine, lowerDepth], [-width / 2, innerSpine, upperDepth],
                 [width / 2, innerSpine, upperDepth], [width / 2, innerSpine, lowerDepth],
             ])
-            normals.append(contentsOf: Array(repeating: [0, 1, 0], count: 4))
-            textureCoordinates.append(contentsOf: Array(repeating: .zero, count: 4))
+            data.normals.append(contentsOf: Array(repeating: [0, 1, 0], count: 4))
+            data.textureCoordinates.append(contentsOf: Array(repeating: .zero, count: 4))
             appendTriangle(start, start + 1, start + 2)
             appendTriangle(start, start + 2, start + 3)
         }
 
         mutating func appendCap(front: Bool, depth: Float) {
             guard let ringStart = front ? ringStarts.last : ringStarts.first else { return }
-            let center = UInt32(positions.count)
-            positions.append([0, 0, depth])
-            normals.append([0, 0, front ? 1 : -1])
-            textureCoordinates.append([0.5, 0.5])
+            let center = UInt32(data.positions.count)
+            data.positions.append([0, 0, depth])
+            data.normals.append([0, 0, front ? 1 : -1])
+            data.textureCoordinates.append([0.5, 0.5])
             for index in 0..<ringCount {
                 let current = ringStart + UInt32(index)
                 let next = ringStart + UInt32((index + 1) % ringCount)
@@ -305,21 +353,33 @@ enum BookWallHardcoverMesh {
         }
 
         private mutating func appendTriangle(_ first: UInt32, _ second: UInt32, _ third: UInt32) {
-            let origin = positions[Int(first)]
-            let cross = simd_cross(positions[Int(second)] - origin, positions[Int(third)] - origin)
+            let origin = data.positions[Int(first)]
+            let cross = simd_cross(
+                data.positions[Int(second)] - origin, data.positions[Int(third)] - origin)
             // Collapsed inner corners and adjacent rim rings can share vertices.
             guard simd_length_squared(cross) > 1e-20 else { return }
-            indices.append(contentsOf: [first, second, third])
+            data.indices.append(contentsOf: [first, second, third])
         }
+    }
+}
 
-        func resource(name: String, includesTexture: Bool) throws -> MeshResource {
-            var descriptor = MeshDescriptor(name: name)
-            descriptor.positions = .init(positions)
-            descriptor.normals = .init(normals)
-            if includesTexture { descriptor.textureCoordinates = .init(textureCoordinates) }
-            descriptor.materials = .allFaces(0)
-            descriptor.primitives = .triangles(indices)
-            return try MeshResource.generate(from: [descriptor])
-        }
+/// A triangle mesh's buffers, which RealityKit and the Metal wall renderer both draw.
+struct BookWallMeshData: Sendable {
+    var positions: [SIMD3<Float>] = []
+    var normals: [SIMD3<Float>] = []
+    var textureCoordinates: [SIMD2<Float>] = []
+    var indices: [UInt32] = []
+    /// Each triangle's material index, for a mesh with more than one material.
+    var faceMaterials: [UInt32] = []
+
+    @MainActor
+    func resource(name: String, includesTexture: Bool) throws -> MeshResource {
+        var descriptor = MeshDescriptor(name: name)
+        descriptor.positions = .init(positions)
+        descriptor.normals = .init(normals)
+        if includesTexture { descriptor.textureCoordinates = .init(textureCoordinates) }
+        descriptor.materials = .allFaces(0)
+        descriptor.primitives = .triangles(indices)
+        return try MeshResource.generate(from: [descriptor])
     }
 }

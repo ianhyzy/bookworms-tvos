@@ -5,11 +5,176 @@ import RealityKit
 import SwiftUI
 import UIKit
 
+/// One sample of a detail flight: the selected book's pose and the camera's depth.
+struct BookWallFlightFrame: Sendable {
+    var pose: Transform
+    var cameraDepth: Float
+}
+
+/// An open book's slow drift in its detail pose: a sine on each of its sideways and vertical
+/// position and its yaw, eased in from rest.
+struct BookWallDrift: Sendable {
+    /// Sideways and vertical travel in scene units, and yaw in radians.
+    let amplitudes: SIMD3<Float>
+    /// Each axis's period in seconds.
+    let periods: SIMD3<Float>
+    let rampDuration: Float
+
+    /// The offset and its velocity `seconds` after the drift starts. The third component is
+    /// world-Y yaw in radians, not a depth displacement.
+    func motion(at seconds: Float) -> (offset: SIMD3<Float>, velocity: SIMD3<Float>) {
+        let t = min(1, seconds / rampDuration)
+        let ramp = t * t * t * (t * (t * 6 - 15) + 10)
+        let derivative = 30 * t * t * (t - 1) * (t - 1) / rampDuration
+        var offset = SIMD3<Float>.zero
+        var velocity = SIMD3<Float>.zero
+        for axis in 0..<3 {
+            let frequency = 2 * Float.pi / periods[axis]
+            let wave = sin(frequency * seconds)
+            offset[axis] = amplitudes[axis] * wave * ramp
+            velocity[axis] =
+                amplitudes[axis]
+                * (frequency * cos(frequency * seconds) * ramp + wave * derivative)
+        }
+        return (offset, velocity)
+    }
+
+    /// `pose` moved by the drift `seconds` after it starts.
+    func posed(_ pose: Transform, at seconds: Float) -> Transform {
+        let offset = motion(at: seconds).offset
+        var moved = pose
+        moved.translation.x += offset.x
+        moved.translation.y += offset.y
+        moved.rotation = simd_quatf(angle: offset.z, axis: [0, 1, 0]) * pose.rotation
+        return moved
+    }
+}
+
+/// A hardcover's part sizes, which both renderers' models are built from.
+struct BookWallBookParts {
+    static let pageCornerRadius: Float = 0.008
+
+    /// The whole book: head to tail, thickness with its covering, and spine to fore edge.
+    let size: SIMD3<Float>
+    let boardThickness: Float
+    let foreedgeCornerRadius: Float
+    let spineCornerRadius: Float
+    let boardBevelWidth: Float
+    let boardBevelDepth: Float
+    let pageSize: SIMD3<Float>
+
+    init(_ slot: BookWallLayout.Slot) {
+        size = [slot.bookHeight, slot.collisionThickness, slot.coverWidth]
+        boardThickness = min(0.045, slot.spineThickness * 0.12)
+        let shortSide = min(slot.bookHeight, slot.coverWidth)
+        foreedgeCornerRadius = shortSide * 0.005
+        spineCornerRadius = shortSide * 0.0015
+        boardBevelWidth = shortSide * 0.005
+        boardBevelDepth = min(boardThickness * 0.18, boardBevelWidth)
+        pageSize = [
+            slot.bookHeight - 0.06, slot.spineThickness - boardThickness * 2 - 0.015,
+            slot.coverWidth - 0.07,
+        ]
+    }
+
+    /// The height of each exposed page edge, which runs along the book's thickness and keeps
+    /// the leaves parallel.
+    var pageEdgeHeight: Float { pageSize.y - Self.pageCornerRadius * 2 }
+
+    /// The exposed page edges, as planes turned about the vertical axis: head, tail, and fore
+    /// edge.
+    var pageEdgeFaces: [(width: Float, position: SIMD3<Float>, angle: Float)] {
+        let inset = Self.pageCornerRadius * 2
+        return [
+            (pageSize.z - inset, [-pageSize.x / 2 - 0.001, 0, 0], -.pi / 2),
+            (pageSize.z - inset, [pageSize.x / 2 + 0.001, 0, 0], .pi / 2),
+            (pageSize.x - inset, [0, 0, -pageSize.z / 2 - 0.001], .pi),
+        ]
+    }
+}
+
+/// The bookmark ribbon's motion: a chain of segments sliding out from under the focused book,
+/// tail first, with a wave that damps out once it hangs free. No renderer simulates cloth, so
+/// the motion is analytic.
+enum BookWallRibbon {
+    static let width: Float = 0.28
+    static let segmentLength: Float = 0.21
+    /// A fixed visible length of about two typical spines' thickness.
+    static let segmentCount = 5
+    static let slideTime: Float = 0.55
+    static let settleTime: Float = 1.0
+
+    /// One segment's pose in the ribbon's space, and the share of its length that shows.
+    struct Segment: Sendable {
+        var position: SIMD3<Float>
+        var rotation: simd_quatf
+        var visible: Float
+    }
+
+    /// The segments `elapsed` seconds after the ribbon starts to slide; `nil` for one still
+    /// inside the book. Only the length below the book's bottom edge shows, so the ribbon never
+    /// appears in front of the book.
+    static func segments(at elapsed: Float) -> [Segment?] {
+        let t = elapsed
+        let length = Float(segmentCount) * segmentLength
+        let eased = min(1, max(0, t / slideTime))
+        let slide = eased * eased * eased * (eased * (eased * 6 - 15) + 10)
+        // Path distance of the ribbon's top below the anchor; negative is inside the book.
+        let offset = -length * (1 - slide)
+        let damping = t >= settleTime ? 0 : t < slideTime ? 1 : exp(-(t - slideTime) / 0.15)
+        var point = SIMD3<Float>.zero
+        var started = false
+        return (0..<segmentCount)
+            .map { index in
+                let top = offset + Float(index) * segmentLength
+                guard top + segmentLength > 0 else { return nil }
+                // The emerging segment shortens to its part below the edge.
+                var visible: Float = 1
+                if !started {
+                    visible = min(1, (top + segmentLength) / segmentLength)
+                    started = true
+                }
+                let freedom = min(1, max(0, top) / 1.2)
+                let phase = 14 * t - 2.6 * top
+                let swing = 0.42 * damping * freedom * sin(phase)
+                let twist = 0.35 * damping * freedom * sin(phase + 1.2)
+                let rotation =
+                    simd_quatf(angle: swing, axis: [0, 0, 1])
+                    * simd_quatf(angle: twist, axis: [0, 1, 0])
+                let segment = Segment(position: point, rotation: rotation, visible: visible)
+                point += simd_act(rotation, SIMD3<Float>(0, -segmentLength * visible, 0))
+                return segment
+            }
+    }
+}
+
+/// Where the wall's flat extras sit for the Metal renderer: the shelf label, the shadow a
+/// pulled-out book casts on the spine below it, and the bookmark ribbon.
+struct BookWallDecor: Sendable {
+    /// The book whose label shows, or `nil` for the hint.
+    var labelBook: Int?
+    /// The label's unit plane in the world, or `nil` when hidden.
+    var label: simd_float4x4?
+    var contactShadow: simd_float4x4?
+    var contactShadowOpacity: Float = 0
+    /// The ribbon's anchor under the focused book, or `nil` when hidden.
+    var ribbon: Transform?
+    /// Seconds since the ribbon and shadow started to arrive with the book's pull-out. The
+    /// default is long past their arrival, for ones already in place.
+    var elapsed: Float = 60
+}
+
 /// Owns the 3D scene across detail presentations so returning does not replay the fall.
 @MainActor
 final class BookWallScene {
     let hostConfiguration = BookWallHostConfiguration()
     private weak var renderHost: (any BookWallRenderHost)?
+    /// The Metal renderer that draws this wall in place of a RealityKit host
+    /// (`BookMetalWall.isEnabled`). The scene still owns the layout, framing, and focus frames.
+    private weak var metalWall: BookMetalWallHost?
+    /// The resting and detail wall images with their lighting baked in, which the Metal
+    /// renderer draws.
+    private var bakedWall: (resting: CGImage, detail: CGImage)?
     private var hostViewportSize = CGSize.zero
     private(set) var environmentResource: EnvironmentResource?
     var ambientExponent: Float {
@@ -27,6 +192,7 @@ final class BookWallScene {
     /// wall, so a larger gap would show as a lip at the boards' edges.
     private static let spineFaceOffset: Float = 0.002
     private static let fallGravity: Float = 22
+    private static let fallDamping: Float = 0.25
     private static let minimumDropSpacing = 0.10
     /// Far longer than the fall from the drop height takes. A book that hasn't landed this long
     /// after the last one started falling is stuck, so it takes its place.
@@ -164,6 +330,9 @@ final class BookWallScene {
     private var ribbonSubscription: Cancellable?
     private var ribbonElapsed: Float = 0
     private var ribbonVisible = false
+    /// When the ribbon started to arrive, or `nil` for one placed at rest. The Metal renderer
+    /// times the ribbon from this, since no scene update advances `ribbonElapsed` for it.
+    private var ribbonShownAt: CFTimeInterval?
     private let shelfLabel = ModelEntity()
     private var labels: [Int: BookWallShelfLabel.Prepared] = [:]
     private var hintLabel: BookWallShelfLabel.Prepared?
@@ -189,10 +358,7 @@ final class BookWallScene {
     var shownWall: BookWallPreparedWall?
     private var bodies: [Int: ModelEntity] = [:]
     private var restingTransforms: [Int: Transform] = [:]
-    private struct FlightFrame {
-        var pose: Transform
-        var cameraDepth: Float
-    }
+    private typealias FlightFrame = BookWallFlightFrame
 
     private struct Flight {
         let id: UUID
@@ -343,6 +509,59 @@ final class BookWallScene {
         }
     }
 
+    /// Mirrors the wall to `host`, starting with what the scene shows now. A wall that is
+    /// still falling falls from the start, since no physics ran without a RealityKit host.
+    func attachMetalWall(_ host: BookMetalWallHost) {
+        metalWall = host
+        if let bakedWall { host.setBackdrop(resting: bakedWall.resting, detail: bakedWall.detail) }
+        if let shownWall, !shownWall.books.isEmpty {
+            host.show(shownWall, stage: stage, falls: !isSettled)
+            host.focus(selectedID, decor: decor)
+        }
+    }
+
+    /// Where the label, contact shadow, and ribbon sit now, read from the entities this scene
+    /// places for RealityKit.
+    private var decor: BookWallDecor {
+        var decor = BookWallDecor(labelBook: selectedID.flatMap { labels[$0] == nil ? nil : $0 })
+        if shelfLabel.isEnabled, shelfLabel.parent != nil {
+            decor.label = shelfLabel.transformMatrix(relativeTo: root)
+        }
+        guard ribbonVisible, ribbon.isEnabled else { return decor }
+        decor.ribbon = Transform(matrix: ribbon.transformMatrix(relativeTo: root))
+        decor.elapsed = ribbonShownAt.map { Float(CACurrentMediaTime() - $0) } ?? decor.elapsed
+        if contactShadow.isEnabled {
+            decor.contactShadow = contactShadow.transformMatrix(relativeTo: root)
+            decor.contactShadowOpacity = Self.contactShadowOpacity
+        }
+        return decor
+    }
+
+    /// Shows the artwork of books whose covers arrived after the wall was prepared, in place.
+    func refreshMetalArtwork() {
+        guard let shownWall else { return }
+        metalWall?.refreshArtwork(of: shownWall)
+    }
+
+    /// The framing, fall, and lights that the Metal renderer shares with this scene.
+    private var stage: BookWallStage {
+        BookWallStage(
+            cameraDepth: wallCameraDepth, fieldOfView: Self.fieldOfView, dropHeight: dropHeight,
+            dropSpacing: dropSpacing, gravity: Self.fallGravity, damping: Self.fallDamping,
+            pullOut: Self.focusPullOut, pullOutDuration: Self.pullOutDuration,
+            shelfSize: shelfSize, shelfCenter: [0, layout.floorY - shelfSize.y / 2, 0],
+            shelfColor: BookWallShelfLabel.wood,
+            shelfLight: SIMD3<Float>(0, BookWallLayout.stackCenterY, 0) + Self.shelfLightOffset,
+            poolLight: [
+                0, BookWallLayout.stackCenterY + Self.poolHeightOffset,
+                -shelfSize.z / 2 - Self.backdropGap + Self.poolLightDistance,
+            ],
+            topLightDirection: Self.topLightDirection, wallFadeStart: Self.wallFadeStart,
+            detailAmbientExponent: Self.detailAmbientExponent,
+            backdropDistance: backdropDistance, detailShadowOpacity: Self.detailShadowOpacity,
+            detailShadowOffset: Self.detailShadowOffset)
+    }
+
     /// Restores hit targets after the host attaches to an already settled wall.
     func refreshHostFocusFrames() {
         publishFocusFrames()
@@ -416,6 +635,7 @@ final class BookWallScene {
         isFlyingOut = false
         guard !prepared.books.isEmpty else {
             isSettled = true
+            metalWall?.clear()
             onFocusFrames([:], true)
             return
         }
@@ -463,12 +683,8 @@ final class BookWallScene {
         continuingCollisionSubscription?.cancel()
         if !reduceMotion { observeLandings() }
         let slots = layout.slots
-        let thickestBook = slots.map(\.collisionThickness).max() ?? 0
-        // Leave enough vertical separation before another book enters the same column.
-        let distanceBetweenBooks = Double(thickestBook + 0.15)
-        let clearanceTime = sqrt(2 * distanceBetweenBooks / Double(Self.fallGravity))
-        let columnSpacing = clearanceTime / Double(layout.columns)
-        let spacing = max(Self.minimumDropSpacing, columnSpacing)
+        let spacing = dropSpacing
+        if let shownWall { metalWall?.show(shownWall, stage: stage, falls: !reduceMotion) }
         dropTask = Task { [weak self] in
             guard let self else { return }
             for (index, slot) in slots.enumerated() {
@@ -492,6 +708,16 @@ final class BookWallScene {
                 seatBooks()
             }
         }
+    }
+
+    /// The time between one book's drop and the next.
+    private var dropSpacing: TimeInterval {
+        let thickestBook = layout.slots.map(\.collisionThickness).max() ?? 0
+        // Leave enough vertical separation before another book enters the same column.
+        let distanceBetweenBooks = Double(thickestBook + 0.15)
+        let clearanceTime = sqrt(2 * distanceBetweenBooks / Double(Self.fallGravity))
+        let columnSpacing = clearanceTime / Double(layout.columns)
+        return max(Self.minimumDropSpacing, columnSpacing)
     }
 
     private func observeLandings() {
@@ -572,6 +798,7 @@ final class BookWallScene {
         }
         isSettled = true
         showShelfLabel(for: selectedID)
+        metalWall?.focus(selectedID, decor: decor)
         publishFocusFrames()
     }
 
@@ -592,10 +819,12 @@ final class BookWallScene {
             shelfLabel.isEnabled = false
             return
         }
-        var material = UnlitMaterial(texture: label.texture)
-        material.blending = .transparent(opacity: .init(floatLiteral: 1))
-        shelfLabel.model = ModelComponent(
-            mesh: Self.unitPlane, materials: [material])
+        // The Metal renderer draws the label from its image; the entity then only places it.
+        if let texture = label.texture {
+            var material = UnlitMaterial(texture: texture)
+            material.blending = .transparent(opacity: .init(floatLiteral: 1))
+            shelfLabel.model = ModelComponent(mesh: Self.unitPlane, materials: [material])
+        }
         // The label grows with the shelf front, so a taller front letters it larger.
         let scale = shelfThickness / Self.minimumShelfThickness
         shelfLabel.scale = [label.width * scale, BookWallShelfLabel.height * scale, 1]
@@ -607,10 +836,14 @@ final class BookWallScene {
     func highlight(_ id: Int?, reduceMotion: Bool) {
         hasUndrawnChange = true
         guard isSettled, !isFlyingOut, selectedID != id else { return }
+        // The label, ribbon, and shadow below are placed by the time this runs.
+        defer { metalWall?.focus(selectedID, decor: decor) }
         if let selectedID, let body = bodies[selectedID],
             let resting = restingTransforms[selectedID]
         {
-            if reduceMotion {
+            // Without a RealityKit host no animation runs, so the entity takes its pose at once;
+            // the Metal renderer eases the book on screen.
+            if reduceMotion || metalWall != nil {
                 body.transform = resting
             } else {
                 body.move(to: resting, relativeTo: root, duration: 0.18)
@@ -627,7 +860,7 @@ final class BookWallScene {
         showRibbon(for: id, animated: !reduceMotion)
         // Reduce Motion pulls the book out at once, so it stands in front of the ribbon and the
         // contact shadow as it does after the animated pull-out.
-        guard !reduceMotion else {
+        guard !reduceMotion, metalWall == nil else {
             body.transform = lifted
             return
         }
@@ -874,7 +1107,7 @@ final class BookWallScene {
     ) async -> Bool {
         hasUndrawnChange = true
         guard !Task.isCancelled, isSettled, !isFlyingOut,
-            renderHost != nil,
+            renderHost != nil || metalWall != nil,
             let body = bodies[book.id], let resting = restingTransforms[book.id],
             let slot = layout.slots.first(where: { $0.book.id == book.id }),
             detailFrame.width > 0, detailFrame.height > 0, renderBounds.width > 0
@@ -956,6 +1189,10 @@ final class BookWallScene {
             body.transform = destination.pose
             setCameraDepth(destination.cameraDepth)
             setDetailLightLevel(1)
+            metalWall?
+                .fly(
+                    book.id, along: [destination], duration: 0, fromLevel: 1, toLevel: 1,
+                    light: detailLight.position, completion: nil)
             return true
         }
         let completed = await playFlight(
@@ -1075,6 +1312,7 @@ final class BookWallScene {
         guard isFlyingOut, let selectedID, let body = bodies[selectedID],
             let resting = restingTransforms[selectedID]
         else { return }
+        syncDriftFromClock()
         let current = body.transform
         let motion = idleMotion
         idlePose = nil
@@ -1119,6 +1357,7 @@ final class BookWallScene {
         setCameraDepth(wallCameraDepth)
         flightFrames.removeAll()
         isFlyingOut = false
+        metalWall?.endDetail()
     }
 
     /// Finishes an interrupted fall while hidden so reentry cannot resume overlapping drops.
@@ -1169,14 +1408,14 @@ final class BookWallScene {
         selectedID = nil
         hideRibbon()
         setCameraDepth(wallCameraDepth)
+        metalWall?.endDetail()
+        metalWall?.focus(nil, decor: decor)
     }
 
-    private static let ribbonWidth: Float = 0.28
-    private static let ribbonSegmentLength: Float = 0.21
-    /// A fixed visible length of about two typical spines' thickness.
-    private static let ribbonSegmentCount = 5
-    private static let ribbonSlideTime: Float = 0.55
-    private static let ribbonSettleTime: Float = 1.0
+    private static let ribbonWidth = BookWallRibbon.width
+    private static let ribbonSegmentLength = BookWallRibbon.segmentLength
+    private static let ribbonSegmentCount = BookWallRibbon.segmentCount
+    private static let ribbonSettleTime = BookWallRibbon.settleTime
     private static let ribbonMaterial: PhysicallyBasedMaterial = {
         var material = surface(
             color: UIColor(red: 0.84, green: 0.1, blue: 0.12, alpha: 1), roughness: 0.4,
@@ -1242,6 +1481,7 @@ final class BookWallScene {
         // Start after the book's 0.2-second pull-out. The ribbon hangs at the pulled-out
         // depth, so sliding earlier would put it in front of a book that has not moved yet.
         ribbonElapsed = animated ? -Self.pullOutDuration : Self.ribbonSettleTime
+        ribbonShownAt = animated ? CACurrentMediaTime() : nil
         poseRibbon()
         guard animated, ribbonSubscription == nil else { return }
         ribbonSubscription = subscribe(to: SceneEvents.Update.self) {
@@ -1266,41 +1506,15 @@ final class BookWallScene {
         let pulledOut = min(1, max(0, 1 + t / Self.pullOutDuration))
         contactShadow.components.set(
             OpacityComponent(opacity: Self.contactShadowOpacity * pulledOut))
-        let length = Float(Self.ribbonSegmentCount) * Self.ribbonSegmentLength
-        let slide = Self.smootherstep(t / Self.ribbonSlideTime)
-        // Path distance of the ribbon's top below the anchor; negative is inside the book.
-        let offset = -length * (1 - slide)
-        let damping =
-            t >= Self.ribbonSettleTime
-            ? 0 : t < Self.ribbonSlideTime ? 1 : exp(-(t - Self.ribbonSlideTime) / 0.15)
-        var point = SIMD3<Float>.zero
-        var started = false
-        for index in 0..<Self.ribbonSegmentCount {
-            let segment = ribbonSegments[index]
-            let top = offset + Float(index) * Self.ribbonSegmentLength
-            guard top + Self.ribbonSegmentLength > 0 else {
+        for (segment, pose) in zip(ribbonSegments, BookWallRibbon.segments(at: t)) {
+            guard let pose else {
                 segment.isEnabled = false
                 continue
             }
             segment.isEnabled = true
-            // Draw nothing above the book's bottom edge. The emerging segment shortens to its
-            // part below the edge, so the ribbon never depends on the moving book to hide it.
-            var visible: Float = 1
-            if !started {
-                visible = min(1, (top + Self.ribbonSegmentLength) / Self.ribbonSegmentLength)
-                started = true
-            }
-            segment.scale = [1, visible, 1]
-            let freedom = min(1, max(0, top) / 1.2)
-            let phase = 14 * t - 2.6 * top
-            let swing = 0.42 * damping * freedom * sin(phase)
-            let twist = 0.35 * damping * freedom * sin(phase + 1.2)
-            let rotation =
-                simd_quatf(angle: swing, axis: [0, 0, 1])
-                * simd_quatf(angle: twist, axis: [0, 1, 0])
-            segment.position = point
-            segment.orientation = rotation
-            point += simd_act(rotation, SIMD3<Float>(0, -Self.ribbonSegmentLength * visible, 0))
+            segment.scale = [1, pose.visible, 1]
+            segment.position = pose.position
+            segment.orientation = pose.rotation
         }
     }
 
@@ -1459,6 +1673,8 @@ final class BookWallScene {
                 image: images.detail, options: .init(semantic: .color))
         else { return }
         bakedWallKey = key
+        bakedWall = (images.resting, images.detail)
+        metalWall?.setBackdrop(resting: images.resting, detail: images.detail)
         // Without tone mapping, the baked image reaches the screen unchanged, which is what
         // the lighting factors were fitted against.
         func wallMaterial(_ texture: TextureResource) -> UnlitMaterial {
@@ -1555,31 +1771,38 @@ final class BookWallScene {
         idlePose = body.transform
         idleElapsed = 0
         idleAmplitude = idleTranslationAmplitude(at: body.transform, cameraDepth: camera.position.z)
-        subscribeToMotion()
+        if let metalWall {
+            // The Metal renderer drifts the book on its own clock, which the return reads.
+            idleStarted = CACurrentMediaTime()
+            metalWall.drift(drift, since: idleStarted)
+        } else {
+            subscribeToMotion()
+        }
+    }
+
+    /// When the Metal renderer started the current drift.
+    private var idleStarted: CFTimeInterval = 0
+
+    /// Moves the drifting book to where the Metal renderer shows it now, as scene updates do
+    /// under RealityKit, so a return starts from the pose on screen.
+    private func syncDriftFromClock() {
+        guard metalWall != nil, let idlePose, let selectedID, let body = bodies[selectedID]
+        else { return }
+        idleElapsed = CACurrentMediaTime() - idleStarted
+        body.transform = drift.posed(idlePose, at: Float(idleElapsed))
+    }
+
+    private var drift: BookWallDrift {
+        BookWallDrift(
+            amplitudes: [idleAmplitude.x, idleAmplitude.y, Self.idleSwayRadians],
+            periods: [Self.idleHorizontalPeriod, Self.idleVerticalPeriod, Self.idleSwayPeriod],
+            rampDuration: Self.idleRampDuration)
     }
 
     /// Shares the analytic position and velocity used by idle rendering and return handoff.
-    /// The third component holds world-Y yaw in radians, not a depth displacement.
     private var idleMotion: (offset: SIMD3<Float>, velocity: SIMD3<Float>) {
         guard idlePose != nil else { return (.zero, .zero) }
-        let seconds = Float(idleElapsed)
-        let t = min(1, seconds / Self.idleRampDuration)
-        let ramp = Self.smootherstep(t)
-        let derivative = 30 * t * t * (t - 1) * (t - 1) / Self.idleRampDuration
-        let amplitudes = SIMD3<Float>(idleAmplitude.x, idleAmplitude.y, Self.idleSwayRadians)
-        let periods = SIMD3<Float>(
-            Self.idleHorizontalPeriod, Self.idleVerticalPeriod, Self.idleSwayPeriod)
-        var offset = SIMD3<Float>.zero
-        var velocity = SIMD3<Float>.zero
-        for axis in 0..<3 {
-            let frequency = 2 * Float.pi / periods[axis]
-            let wave = sin(frequency * seconds)
-            offset[axis] = amplitudes[axis] * wave * ramp
-            velocity[axis] =
-                amplitudes[axis]
-                * (frequency * cos(frequency * seconds) * ramp + wave * derivative)
-        }
-        return (offset, velocity)
+        return drift.motion(at: Float(idleElapsed))
     }
 
     private func subscribeToMotion() {
@@ -1639,13 +1862,7 @@ final class BookWallScene {
             if progress == 1 { stopMotion(completed: true) }
         } else if let idlePose, let selectedID, let body = bodies[selectedID] {
             idleElapsed += delta
-            let motion = idleMotion
-            var pose = idlePose
-            pose.translation.x += motion.offset.x
-            pose.translation.y += motion.offset.y
-            pose.rotation =
-                simd_quatf(angle: motion.offset.z, axis: [0, 1, 0]) * idlePose.rotation
-            body.transform = pose
+            body.transform = drift.posed(idlePose, at: Float(idleElapsed))
         }
         updateDetailShadow()
     }
@@ -1677,7 +1894,23 @@ final class BookWallScene {
                     id: id, body: body, frames: frames, duration: duration,
                     initialLightLevel: detailLightLevel, targetLightLevel: targetLightLevel,
                     completion: completion)
-                subscribeToMotion()
+                guard let metalWall, let selectedID, let last = frames.last else {
+                    subscribeToMotion()
+                    return
+                }
+                // The Metal renderer plays the flight on its own thread. When it ends, the
+                // scene takes the flight's last state, as its own clock would have left it.
+                metalWall.fly(
+                    selectedID, along: frames, duration: duration,
+                    fromLevel: detailLightLevel, toLevel: targetLightLevel,
+                    light: detailLight.position
+                ) { [weak self] in
+                    guard let self, flight?.id == id else { return }
+                    body.transform = last.pose
+                    setCameraDepth(last.cameraDepth)
+                    setDetailLightLevel(targetLightLevel)
+                    stopMotion(completed: true)
+                }
             }
         } onCancel: {
             Task { @MainActor [weak self] in
@@ -1744,10 +1977,15 @@ final class BookWallScene {
             translation: from.translation + (to.translation - from.translation) * progress)
     }
 
+    private var shelfSize: SIMD3<Float> {
+        [
+            layout.totalWidth + 1.4, shelfThickness,
+            layout.maxCoverWidth + Self.shelfDepthAllowance,
+        ]
+    }
+
     private func installShelf() {
-        let half = layout.totalWidth / 2
-        let shelfSize = SIMD3<Float>(
-            half * 2 + 1.4, shelfThickness, layout.maxCoverWidth + Self.shelfDepthAllowance)
+        let shelfSize = shelfSize
         let shelfColor = BookWallShelfLabel.wood.uiColor
         let shelfMaterial: any RealityKit.Material
         if PerformanceDiagnostics.isolates("wall-unlit-shelf") {
@@ -1860,6 +2098,14 @@ final class BookWallScene {
         [style.accent, style.foreground].map { surface(color: $0.uiColor, roughness: 0.6) }
     }
 
+    /// The spine's lettered material, or plain cloth for a model the Metal renderer draws from
+    /// the spine's image instead.
+    private static func spineMaterial(_ spine: TextureResource?, style: BookWallLocalSpine.Style)
+        -> PhysicallyBasedMaterial
+    {
+        spine.map(spineMaterial) ?? caseMaterial(style)
+    }
+
     private static func spineMaterial(_ spine: TextureResource) -> PhysicallyBasedMaterial {
         var material = surface(color: .white, roughness: 0.56)
         material.baseColor = .init(texture: .init(spine))
@@ -1912,21 +2158,15 @@ final class BookWallScene {
     /// Builds the hardcover and its collision shape before the wall opens.
     static func makeBook(
         slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style,
-        spine: TextureResource, cover: TextureResource?, pageEdge: TextureResource?
+        spine: TextureResource?, cover: TextureResource?, pageEdge: TextureResource?
     ) -> ModelEntity {
-        let size = SIMD3<Float>(slot.bookHeight, slot.collisionThickness, slot.coverWidth)
-        let boardThickness: Float = min(0.045, slot.spineThickness * 0.12)
-        let shortSide = min(slot.bookHeight, slot.coverWidth)
-        let foreedgeCornerRadius = shortSide * 0.005
-        let spineCornerRadius = shortSide * 0.0015
-        let boardBevelWidth = shortSide * 0.005
-        let boardBevelDepth = min(boardThickness * 0.18, boardBevelWidth)
-        let pageSize = SIMD3<Float>(
-            slot.bookHeight - 0.06, slot.spineThickness - boardThickness * 2 - 0.015,
-            slot.coverWidth - 0.07)
-        let pageCornerRadius: Float = 0.008
+        let parts = BookWallBookParts(slot)
+        let (size, boardThickness, pageSize) = (parts.size, parts.boardThickness, parts.pageSize)
+        let (foreedgeCornerRadius, spineCornerRadius) =
+            (parts.foreedgeCornerRadius, parts.spineCornerRadius)
+        let (boardBevelWidth, boardBevelDepth) = (parts.boardBevelWidth, parts.boardBevelDepth)
         let body = ModelEntity(
-            mesh: .generateBox(size: pageSize, cornerRadius: pageCornerRadius),
+            mesh: .generateBox(size: pageSize, cornerRadius: BookWallBookParts.pageCornerRadius),
             materials: [
                 pageMaterial(BookWallPageTexture.paperColor, book: slot.book, style: style)
             ])
@@ -1937,16 +2177,9 @@ final class BookWallScene {
             // plane whose height runs along the book's thickness and keeps the leaves parallel.
             var paper = pageMaterial(.white, book: slot.book, style: style)
             paper.baseColor.texture = .init(pageEdge)
-            let edgeHeight = pageSize.y - pageCornerRadius * 2
-            let faces: [(width: Float, position: SIMD3<Float>, angle: Float)] = [
-                (pageSize.z, [-pageSize.x / 2 - 0.001, 0, 0], -.pi / 2),  // Head
-                (pageSize.z, [pageSize.x / 2 + 0.001, 0, 0], .pi / 2),  // Tail
-                (pageSize.x, [0, 0, -pageSize.z / 2 - 0.001], .pi),  // Fore edge
-            ]
-            for face in faces {
+            for face in parts.pageEdgeFaces {
                 let plane = ModelEntity(
-                    mesh: .generatePlane(
-                        width: face.width - pageCornerRadius * 2, height: edgeHeight),
+                    mesh: .generatePlane(width: face.width, height: parts.pageEdgeHeight),
                     materials: [paper])
                 plane.name = Self.pageEdgeName
                 plane.position = face.position
@@ -1956,8 +2189,8 @@ final class BookWallScene {
         }
         if !plain,
             let mesh = BookWallHardcoverMesh.headbands(
-                length: pageSize.x, thickness: pageSize.y - pageCornerRadius * 2,
-                depth: pageSize.z, width: Self.headbandWidth, raise: Self.headbandRaise,
+                length: pageSize.x, thickness: parts.pageEdgeHeight, depth: pageSize.z,
+                width: Self.headbandWidth, raise: Self.headbandRaise,
                 stripe: Self.headbandStripe)
         {
             let headbands = ModelEntity(mesh: mesh, materials: headbandMaterials(style))
@@ -1986,7 +2219,7 @@ final class BookWallScene {
         // book, above the height it lands at.
         physics.isTranslationLocked = (x: true, y: false, z: true)
         physics.isRotationLocked = (x: true, y: true, z: true)
-        physics.linearDamping = 0.25
+        physics.linearDamping = fallDamping
         physics.angularDamping = 0.8
         body.physicsBody = physics
         // The spine plane is opaque and shares the case's surface settings, so it shades like
@@ -1996,7 +2229,7 @@ final class BookWallScene {
         let face = ModelEntity(
             mesh: .generatePlane(
                 width: slot.spineWallWidth, height: slot.spineWallHeight),
-            materials: [spineMaterial(spine)])
+            materials: [spineMaterial(spine, style: style)])
         face.name = Self.spineFaceName
         face.position.z = slot.coverWidth / 2 + Self.spineFaceOffset
         body.addChild(face)
@@ -2026,6 +2259,64 @@ final class BookWallScene {
         }
         body.addChild(coverFace)
         return body
+    }
+
+    /// The same hardcover as `makeBook`, as one mesh for the Metal renderer. Each vertex names
+    /// the surface it belongs to, so a book draws in one call. The front board is the same mesh
+    /// with or without cover art, so a cover that arrives late needs no new mesh.
+    static func metalMesh(for slot: BookWallLayout.Slot) -> BookMetalMesh {
+        let parts = BookWallBookParts(slot)
+        let (size, boardThickness, pageSize) = (parts.size, parts.boardThickness, parts.pageSize)
+        let (foreedgeCornerRadius, spineCornerRadius) =
+            (parts.foreedgeCornerRadius, parts.spineCornerRadius)
+        let (boardBevelWidth, boardBevelDepth) = (parts.boardBevelWidth, parts.boardBevelDepth)
+        var mesh = BookMetalMesh()
+        mesh.append(
+            BookWallHardcoverMesh.casingData(
+                size: size, boardThickness: boardThickness + coverWrapThickness,
+                foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
+                spineWallDepth: (size.z - pageSize.z) / 2,
+                bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
+            as: .cloth)
+        for face in parts.pageEdgeFaces {
+            mesh.appendPlane(
+                width: face.width, height: parts.pageEdgeHeight, as: .pageEdge,
+                transform: Transform(
+                    rotation: simd_quatf(angle: face.angle, axis: [0, 1, 0]),
+                    translation: face.position))
+        }
+        let headbands = BookWallHardcoverMesh.headbandData(
+            length: pageSize.x, thickness: parts.pageEdgeHeight, depth: pageSize.z,
+            width: headbandWidth,
+            raise: headbandRaise, stripe: headbandStripe)
+        mesh.append(headbands, as: .accent, alternate: .lettering)
+        mesh.appendPlane(
+            width: slot.spineWallWidth, height: slot.spineWallHeight, as: .spine,
+            transform: Transform(translation: [0, 0, slot.coverWidth / 2 + spineFaceOffset]))
+        mesh.append(
+            BookWallHardcoverMesh.coverSurfaceData(
+                width: slot.coverWidth, height: slot.bookHeight,
+                foreedgeCornerRadius: foreedgeCornerRadius, spineCornerRadius: spineCornerRadius,
+                bevelWidth: boardBevelWidth, bevelDepth: boardBevelDepth),
+            as: .cover,
+            transform: Transform(
+                rotation: simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+                    * simd_quatf(angle: -.pi / 2, axis: [1, 0, 0]),
+                translation: [0, slot.spineThickness / 2 + coverSurfaceOffset, 0]))
+        return mesh
+    }
+
+    /// Where the joint's shading falls across the front artwork, as shares of its width from
+    /// the spine edge: its middle and its half width.
+    static func hinge(of slot: BookWallLayout.Slot) -> SIMD2<Float> {
+        [hingeInset / slot.coverWidth, hingeWidth / 2 / slot.coverWidth]
+    }
+
+    /// Ends a fall that the Metal renderer drew, as landing does under RealityKit.
+    func finishMetalFall(of wall: BookWallPreparedWall) {
+        guard wall.id == shownWall?.id, !isSettled else { return }
+        dropTask?.cancel()
+        seatBooks()
     }
 
     /// How far a stacked book turns at most about the vertical axis, in radians: about
@@ -2131,7 +2422,7 @@ final class BookWallScene {
 extension BookWallLayout {
     /// The deepest book's cover width. Spines sit flush at half of it, and the shelf's depth
     /// follows it.
-    fileprivate var maxCoverWidth: Float { slots.map(\.coverWidth).max() ?? 0.8 }
+    var maxCoverWidth: Float { slots.map(\.coverWidth).max() ?? 0.8 }
 }
 
 /// Fits source art to the front board with a narrow, synthesized casing bleed. Only the joint
@@ -2466,7 +2757,10 @@ enum BookWallPageTexture {
 /// its plane width follows its text.
 enum BookWallShelfLabel {
     struct Prepared {
-        let texture: TextureResource
+        /// The label for RealityKit, or `nil` when the Metal renderer draws the wall.
+        let texture: TextureResource?
+        /// The drawn label, which the Metal renderer uploads itself.
+        let image: CGImage
         let width: Float
     }
 
@@ -2520,11 +2814,14 @@ enum BookWallShelfLabel {
     }
 
     static func prepare(_ image: CGImage) async -> Prepared? {
-        guard
-            let texture = try? await TextureResource.generate(
+        var texture: TextureResource?
+        if !BookMetalWall.isEnabled {
+            texture = try? await TextureResource.generate(
                 from: image, options: .init(semantic: .color))
-        else { return nil }
-        return Prepared(texture: texture, width: Float(CGFloat(image.width) / pixelsPerUnit))
+            guard texture != nil else { return nil }
+        }
+        return Prepared(
+            texture: texture, image: image, width: Float(CGFloat(image.width) / pixelsPerUnit))
     }
 }
 

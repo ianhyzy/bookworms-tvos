@@ -206,7 +206,7 @@ Use the normal Release device build and install path with `--start-view bookWall
 
 ### Renderer host checks
 
-Book Wall renders through `RealityRenderer`; see its [launch options](BOOK_WALL.md#renderer-host). Launch the Debug Simulator app with `--test-scenario=artwork --start-view=bookWall`. The renderer uses 4× multisampling unless launched with `--wall-antialiasing=off`. Check wall glow, the detail backdrop, contact and detail shadow planes, spine lettering, ribbon, labels, and cover colors.
+Book Wall draws with the [Metal renderer](BOOK_WALL.md#metal-renderer), or through `RealityRenderer` with `--wall-renderer=realitykit`; see that host's [launch options](BOOK_WALL.md#realitykit-renderer-host). Launch the Debug Simulator app with `--test-scenario=artwork --start-view=bookWall`, once with each renderer when a change touches code they share. Both use 4× multisampling; `--wall-antialiasing=off` turns it off for the RealityKit host. Check wall glow, the detail backdrop, contact and detail shadow planes, spine lettering, ribbon, labels, and cover colors.
 
 Record the `BookWallRendererViewport` log, and confirm the configured internal and output dimensions; a launch argument or layer scale alone is insufficient. The renderer renders into one of three slot textures and draws each finished frame into a layer drawable, with bilinear scaling for smaller internal dimensions. GPU completion releases a slot but does not prove that its frame appeared on the display. In a diagnostic build, `BookWallRendererPipeline` windows record submissions, completions, skipped and idle ticks, occupied slots, callback duration, and view/layer scale in stderr and Instruments.
 

@@ -48,16 +48,40 @@ struct BookWallRendererView: UIViewRepresentable {
 final class BookWallRendererStatus {
     /// The renderer's error, or nil while it runs.
     var failure: String?
-    /// The renderer that reports here, which `retry()` reconnects.
-    @ObservationIgnored fileprivate weak var host: BookWallRendererCoordinator?
+    /// Replaces the renderer that reports here, which `retry()` calls.
+    @ObservationIgnored var reconnect: (@MainActor () -> Void)?
 
     /// Connects a new renderer on the current surface before returning, so the press that
     /// calls this knows whether the wall runs again. Returns `true` when it does. A renderer
     /// that fails again sets `failure` and waits for the next Retry.
     func retry() -> Bool {
-        host?.reconnect()
+        reconnect?()
         return failure == nil
     }
+
+    /// Shown when Metal can't supply what a renderer needs to start.
+    nonisolated static let unavailableMetal =
+        "Metal could not create a device, command queue, or render event."
+
+    #if DEBUG && targetEnvironment(simulator)
+        /// Scenario hook: `--test-fail-book-wall-renderer` fails the first connection and
+        /// `--test-fail-book-wall-renderer=N` the first N, so UI tests can reach Retry.
+        /// Returns whether this connection is one that fails.
+        static func takeScenarioFailure() -> Bool {
+            guard scenarioFailures > 0 else { return false }
+            scenarioFailures -= 1
+            return true
+        }
+
+        private static var scenarioFailures: Int = {
+            let arguments = ProcessInfo.processInfo.arguments
+            let prefix = "--test-fail-book-wall-renderer="
+            if let argument = arguments.first(where: { $0.hasPrefix(prefix) }) {
+                return Int(argument.dropFirst(prefix.count)) ?? 0
+            }
+            return arguments.contains("--test-fail-book-wall-renderer") ? 1 : 0
+        }()
+    #endif
 }
 
 /// Keeps the rendering lifecycle inside the representable's noninteractive surface.
@@ -171,7 +195,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         self.scene = scene
         self.surface = surface
         surface.coordinator = self
-        status?.host = self
+        status?.reconnect = { [weak self] in self?.reconnect() }
         if status?.failure != nil { status?.failure = nil }
         isAttached = surface.window != nil
         failed = false
@@ -217,11 +241,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
             }
         #endif
         #if DEBUG && targetEnvironment(simulator)
-            // Scenario hook: fails the first connections so UI tests can reach Retry.
-            if Self.failuresForScenario > 0 {
-                Self.failuresForScenario -= 1
-                throw RendererError.unavailableMetal
-            }
+            if BookWallRendererStatus.takeScenarioFailure() { throw RendererError.unavailableMetal }
         #endif
         guard let device = MTLCreateSystemDefaultDevice() else {
             throw RendererError.unavailableMetal
@@ -278,19 +298,6 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
         realityRenderer.entities.append(scene.root)
         scene.attachHost(self)
     }
-
-    #if DEBUG && targetEnvironment(simulator)
-        /// `--test-fail-book-wall-renderer` fails the first connection;
-        /// `--test-fail-book-wall-renderer=N` fails the first N.
-        private static var failuresForScenario: Int = {
-            let arguments = ProcessInfo.processInfo.arguments
-            let prefix = "--test-fail-book-wall-renderer="
-            if let argument = arguments.first(where: { $0.hasPrefix(prefix) }) {
-                return Int(argument.dropFirst(prefix.count)) ?? 0
-            }
-            return arguments.contains("--test-fail-book-wall-renderer") ? 1 : 0
-        }()
-    #endif
 
     func subscribe<E: RealityKit.Event>(
         to event: E.Type, handler: @escaping (E) -> Void
@@ -634,8 +641,7 @@ final class BookWallRendererCoordinator: NSObject, BookWallRenderHost {
 
         var errorDescription: String? {
             switch self {
-            case .unavailableMetal:
-                "Metal could not create a device, command queue, or render event."
+            case .unavailableMetal: BookWallRendererStatus.unavailableMetal
             case .unavailableTexture: "Metal could not allocate the internal color texture."
             }
         }

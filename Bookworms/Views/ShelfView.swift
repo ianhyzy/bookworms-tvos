@@ -294,9 +294,17 @@ struct ShelfView: View {
                     WoodBackground(palette: palette)
                     // The opaque shelf a detail filter shows covers the wall, which keeps its
                     // last frame and stops drawing until Back reveals it.
-                    BookWallRendererView(
-                        scene: bookWallScene, status: wallRenderer, isCovered: showsDetailFilter
-                    )
+                    Group {
+                        if BookMetalWall.isEnabled {
+                            BookMetalWallView(
+                                scene: bookWallScene, status: wallRenderer,
+                                isCovered: showsDetailFilter)
+                        } else {
+                            BookWallRendererView(
+                                scene: bookWallScene, status: wallRenderer,
+                                isCovered: showsDetailFilter)
+                        }
+                    }
                     .accessibilityHidden(true)
                     .allowsHitTesting(false)
                 }
@@ -466,7 +474,10 @@ struct ShelfView: View {
                     data.books, sources: data.sources, designs: data.designs, looks: data.looks,
                     mates: data.mates, fontStyle: data.fontStyle, page: key.page)
             }
-            .onChange(of: bookWallPreparation.coverRevision) { bookWallScene.setNeedsFrame() }
+            .onChange(of: bookWallPreparation.coverRevision) {
+                bookWallScene.setNeedsFrame()
+                bookWallScene.refreshMetalArtwork()
+            }
             // Books that follow a discarded or emptied wall are a wall's first books, which drop.
             .onChange(of: hasWallBooks) { if !hasWallBooks { bookWallScene.shownWall = nil } }
             .onChange(of: coordinator.preferences, initial: true) {
