@@ -1,7 +1,7 @@
 # Book Wall frame rate on Apple TV
 
 Book Wall draws with a [Metal renderer](../BOOK_WALL.md#metal-renderer) because the RealityKit
-renderer could not hold 60 frames a second on the Apple TV 4K (2nd generation, A12). This
+renderer could not hold 60 frames a second on the Apple TV 4K (2nd generation, A12). The RealityKit renderer has since been removed, so its figures here can't be measured again. This
 note records what was measured and ruled out on the way, and two things that remain
 unexplained. See [performance diagnosis](../PERFORMANCE_DIAGNOSIS.md#metal-renderer) for how
 to repeat the measurements.

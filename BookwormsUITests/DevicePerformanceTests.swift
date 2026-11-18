@@ -128,9 +128,6 @@ final class DevicePerformanceTests: XCTestCase {
                 app.launchArguments.append("--isolate=\(variant)")
             }
         }
-        if let antialiasing = environment["PERF_WALL_ANTIALIASING"], !antialiasing.isEmpty {
-            app.launchArguments.append("--wall-antialiasing=\(antialiasing)")
-        }
         // Opens Book Wall without the sidebar and adds it there if it was hidden.
         app.launchArguments.append("--start-view=bookWall")
         app.launch()

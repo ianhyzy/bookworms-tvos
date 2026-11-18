@@ -6,7 +6,6 @@ from collections import Counter, defaultdict
 from datetime import datetime
 import json
 import math
-import re
 import statistics
 from pathlib import Path
 import subprocess
@@ -87,32 +86,6 @@ def phase_report(args, root, schemas, markers):
                 continue
             frames = [resolve(f).get('name') for f in r['stack'].findall('frame')]
             samples.append((ms(r['time']), ms(r['weight']), frames))
-    # The renderer host's one-second pipeline windows, from Points of Interest. They count
-    # frames the app submitted and display ticks it skipped, not frames shown, and survive
-    # gaps in Instruments' Display and GPU data. The export repeats each event.
-    pipeline = []
-    # Prefer the app's own log, copied from the TV after the run; it has no streaming gaps.
-    log = args.trace.parent/'pipeline.jsonl'
-    if log.exists():
-        for line in log.read_text().splitlines():
-            entry = json.loads(line)
-            if 'submitted' not in entry:
-                continue  # Startup timings share the log.
-            pipeline.append(((entry['epoch']-start)*1000, int(entry['submitted']),
-                             int(entry['skipped']), entry.get('maxTickGapMS')))
-    elif 'os-signpost' in schemas:
-        data, _ = export(args, 'os-signpost')
-        seen = set()
-        for r in data:
-            name = r.get('name')
-            if name is None or (name.text or name.get('fmt')) != 'BookWallRendererPipeline':
-                continue
-            message = r['message'].get('fmt') or r['message'].text or ''
-            fields = dict(re.findall(r'(\w+)=(\S+)', message))
-            if fields.get('reason') != 'window' or (r['time'].text, message) in seen:
-                continue
-            seen.add((r['time'].text, message))
-            pipeline.append((ms(r['time']), int(fields['submitted']), int(fields['skipped']), None))
     report = []
     for name, begin, end in windows:
         inside = lambda t: begin <= t < end
@@ -155,12 +128,6 @@ def phase_report(args, root, schemas, markers):
                            if 'metal-gpu-intervals' in schemas else None,
             'compositor_gpu_ms': round(sum(d for t, d in compositor if inside(t)), 1)
                                  if 'metal-gpu-intervals' in schemas else None,
-            # Submitted frames and skipped ticks per renderer window that ended in this phase.
-            'renderer_submitted_per_second': [n for t, n, _, _ in pipeline if inside(t)] or None,
-            'renderer_skipped_per_second': [k for t, _, k, _ in pipeline if inside(t)] or None,
-            # The longest gap between display-link callbacks, which a main-thread stall widens.
-            'renderer_max_tick_gap_ms': max((g for t, _, _, g in pipeline
-                                             if inside(t) and g is not None), default=None),
             # App and compositor GPU time in each whole second, aligned with frames_per_second.
             'gpu_ms_per_second': [[round(sum(d for t, d in source
                                              if begin+i*1000 <= t < begin+(i+1)*1000), 1)
