@@ -328,6 +328,8 @@ final class BookWallScene {
     /// False only while books fall. A wall with nothing to drop, before preparation or
     /// without books, rests.
     private var isSettled = true
+    /// Settles a wall that Reduce Motion showed at rest.
+    private var placement: Task<Void, Never>?
     /// The book that focus pulled out of its stack, which the ribbon hangs from.
     private var focusedID: Int?
     /// When the focused book's ribbon and shadow started to arrive, or `nil` for ones placed at
@@ -474,7 +476,14 @@ final class BookWallScene {
         #endif
         isSettled = false
         if let shownWall { renderer?.show(shownWall, stage: stage, falls: !reduceMotion) }
-        if reduceMotion { settle() }
+        placement?.cancel()
+        guard reduceMotion else { return }
+        // The view hears that the books rest after the call that showed them returns, as it
+        // does after a fall, so it can first record that they are no longer settled.
+        placement = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            self?.settle()
+        }
     }
 
     /// Ends the fall of `wall`, whose books the renderer has drawn landing.
@@ -485,6 +494,7 @@ final class BookWallScene {
 
     private func settle() {
         guard !isSettled else { return }
+        placement?.cancel()
         isSettled = true
         renderer?.focus(focusedID, decor: decor)
         publishFocusFrames()

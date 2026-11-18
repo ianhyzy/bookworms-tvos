@@ -1071,10 +1071,12 @@ final class BookWallLayoutTests: XCTestCase {
     }
 
     @MainActor
-    func testReduceMotionPlacesTheBooksAtOnce() {
+    func testReduceMotionPlacesTheBooksWithoutAFall() async {
         let wall = wallOfTwelve()
         let shown = scene(showing: wall, reduceMotion: true)
-        XCTAssertTrue(shown.settled())
+        XCTAssertFalse(shown.settled(), "The view hears after the call returns")
+        for _ in 0..<100 where !shown.settled() { await Task.yield() }
+        XCTAssertTrue(shown.settled(), "No renderer has to report a landing")
         XCTAssertEqual(
             shown.frames(),
             BookWallScene.plannedFocusFrames(
