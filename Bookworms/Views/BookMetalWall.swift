@@ -110,24 +110,6 @@ final class BookMetalDevice: @unchecked Sendable {
     }
 }
 
-/// An uploaded texture, which preparation makes off the main actor and the renderer samples.
-struct BookMetalTexture: @unchecked Sendable {
-    let texture: any MTLTexture
-
-    /// Uploads `image`, or returns `nil` when Metal can't make its texture.
-    init?(_ image: CGImage, mipmapped: Bool) {
-        guard let texture = BookMetalDevice.shared?.makeTexture(image, mipmapped: mipmapped)
-        else { return nil }
-        self.texture = texture
-    }
-
-    /// Uploads a spine's mip chain, or returns `nil` when Metal can't make its texture.
-    init?(_ mips: BookWallSpineTexture.Mips) {
-        guard let texture = BookMetalDevice.shared?.makeTexture(mips) else { return nil }
-        self.texture = texture
-    }
-}
-
 /// Triangles for one draw call. Each vertex is nine floats: position, normal, texture
 /// coordinate, and the surface it belongs to, which the fragment shader colors by.
 struct BookMetalMesh: Sendable {
@@ -230,7 +212,7 @@ struct BookMetalMesh: Sendable {
     }
 
     /// Adds a plane facing +Z before `transform`, with the texture's bottom left at its
-    /// bottom left, as RealityKit's generated planes map theirs.
+    /// bottom left.
     mutating func appendPlane(width: Float, height: Float, as part: Part, transform: Transform) {
         var data = BookWallMeshData()
         data.positions = [
@@ -354,7 +336,6 @@ final class BookMetalPage {
         fileprivate let rest: Transform
         /// Half the book's box, for the shadow it casts on the wall when open.
         fileprivate let halfSize: SIMD3<Float>
-        fileprivate let column: Int
 
         init(slot: BookWallLayout.Slot, artwork: Artwork, in layout: BookWallLayout) {
             id = slot.book.id
@@ -362,7 +343,6 @@ final class BookMetalPage {
             self.artwork = artwork
             rest = BookWallScene.restingTransform(for: slot, in: layout)
             halfSize = SIMD3(slot.bookHeight, slot.collisionThickness, slot.coverWidth) / 2
-            column = slot.column
         }
     }
 
@@ -381,7 +361,7 @@ final class BookMetalPage {
         fileprivate let falling: [BookWallFall.Book]
         fileprivate let pageEdge: (any MTLTexture)?
 
-        /// Joins `books`, in the order `layout` drops them, and the shelf they rest on into one
+        /// Joins `books`, one for each of `layout`'s slots in their order, and the shelf they rest on into one
         /// pair of buffers. Returns `nil` when Metal can't make a buffer.
         init?(books: [Book], layout: BookWallLayout) {
             guard let shared = BookMetalDevice.shared else { return nil }
@@ -399,9 +379,7 @@ final class BookMetalPage {
                         translation: BookWallScene.shelfCenter(for: layout, size: shelfSize)),
                     halfSize: .zero)
             ]
-            let spacing = BookWallScene.dropSpacing(for: layout)
-            var falling: [BookWallFall.Book] = []
-            for (order, book) in books.enumerated() {
+            for book in books {
                 items.append(
                     BookMetalRenderer.Item(
                         id: book.id, indexStart: mesh.indices.count,
@@ -409,10 +387,6 @@ final class BookMetalPage {
                         cover: book.artwork.cover, uniforms: book.artwork.uniforms,
                         rest: book.rest, halfSize: book.halfSize))
                 mesh.append(book.mesh)
-                falling.append(
-                    BookWallFall.Book(
-                        rest: book.rest.translation.y, column: book.column,
-                        delay: Double(order) * spacing))
             }
             let device = shared.device
             guard
@@ -434,7 +408,7 @@ final class BookMetalPage {
             self.indices = indices
             self.uniforms = uniforms
             self.items = items
-            self.falling = falling
+            falling = BookWallScene.fallingBooks(of: layout)
             // One shared page-edge texture serves every book; without it pages stay plain.
             pageEdge = BookWallPageTexture.make()
                 .flatMap {
@@ -713,8 +687,8 @@ final class BookMetalWallHost {
         shown = wall
         page.renderer = renderer
         renderer.show(
-            page.contents, labels: wall.labels.mapValues(\.texture.texture),
-            hint: wall.hint?.texture.texture, stage: stage, falls: falls)
+            page.contents, labels: wall.labels.mapValues(\.texture),
+            hint: wall.hint?.texture, stage: stage, falls: falls)
     }
 }
 
@@ -835,7 +809,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
 
     private static let sampleCount = 4
     private static let bookStride = MemoryLayout<BookMetalBook>.stride
-    /// Light levels in linear light, fitted by eye to the RealityKit wall: a spine facing the
+    /// Light levels in linear light, fitted by eye: a spine facing the
     /// camera shows at about nine tenths of its texture's color.
     private static let shelfLightColor = SIMD4<Float>(0.50, 0.44, 0.36, 1)
     private static let poolLightColor = SIMD4<Float>(3.2, 2.5, 1.6, 1)
@@ -957,7 +931,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
             }
             .flatMap { shared.makeTexture($0, mipmapped: false) }
-        // The ribbon's last segment, with a swallowtail notch as deep as on the RealityKit wall.
+        // The ribbon's last segment, with a swallowtail notch.
         ribbonTail =
             Self.image(width: 64, height: 64) { context in
                 let notch =
@@ -1290,7 +1264,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             } else if let id = item.id, let pull = snapshot.pulls[id], let start = pull.start {
                 let progress = min(1, Float(time - start) / stage.pullOutDuration)
                 if progress < 1 { animating = true }
-                // Ease out, as the RealityKit wall's pull-out does.
+                // Ease out.
                 let eased = 1 - (1 - progress) * (1 - progress)
                 let amount = pull.from + (pull.to - pull.from) * eased
                 pose.translation += pose.rotation.act([0, 0, stage.pullOut * amount])
@@ -1306,7 +1280,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 * Transform(translation: [0, 0, -cameraDepth]).matrix,
             cameraPosition: [0, 0, cameraDepth, 1],
             // The stage passes from the shelf and pool lights to the detail key light, the
-            // top light doubles, and the room dims, as on the RealityKit wall.
+            // top light doubles, and the room dims.
             shelfLightPosition: SIMD4(stage.shelfLight, 1),
             shelfLightColor: Self.shelfLightColor * (1 - level),
             poolLightPosition: SIMD4(stage.poolLight, 1),

@@ -1,9 +1,12 @@
+import Metal
 import QuartzCore
 import RealityKit
 import SwiftUI
 import UIKit
 
-/// One sample of a detail flight: the selected book's pose and the camera's depth.
+/// One sample of a detail flight: the selected book's pose and the camera's depth. The pose is
+/// RealityKit's `Transform`, the one RealityKit type the wall uses, for its plain rotation and
+/// translation.
 struct BookWallFlightFrame: Sendable {
     var pose: Transform
     var cameraDepth: Float
@@ -22,7 +25,7 @@ struct BookWallDrift: Sendable {
     /// world-Y yaw in radians, not a depth displacement.
     func motion(at seconds: Float) -> (offset: SIMD3<Float>, velocity: SIMD3<Float>) {
         let t = min(1, seconds / rampDuration)
-        let ramp = t * t * t * (t * (t * 6 - 15) + 10)
+        let ramp = BookWallEasing.smootherstep(t)
         let derivative = 30 * t * t * (t - 1) * (t - 1) / rampDuration
         var offset = SIMD3<Float>.zero
         var velocity = SIMD3<Float>.zero
@@ -130,8 +133,7 @@ enum BookWallRibbon {
     static func segments(at elapsed: Float) -> [Segment?] {
         let t = elapsed
         let length = Float(segmentCount) * segmentLength
-        let eased = min(1, max(0, t / slideTime))
-        let slide = eased * eased * eased * (eased * (eased * 6 - 15) + 10)
+        let slide = BookWallEasing.smootherstep(t / slideTime)
         // Path distance of the ribbon's top below the anchor; negative is inside the book.
         let offset = -length * (1 - slide)
         let damping = t >= settleTime ? 0 : t < slideTime ? 1 : exp(-(t - slideTime) / 0.15)
@@ -1221,8 +1223,19 @@ nonisolated extension BookWallScene {
         [0, layout.floorY - size.y / 2, 0]
     }
 
+    /// `layout`'s books as its fall drops them: one after another in the order of its slots,
+    /// each to the height it rests at.
+    static func fallingBooks(of layout: BookWallLayout) -> [BookWallFall.Book] {
+        let spacing = dropSpacing(for: layout)
+        return layout.slots.enumerated()
+            .map { order, slot in
+                BookWallFall.Book(
+                    rest: slot.restingY, column: slot.column, delay: Double(order) * spacing)
+            }
+    }
+
     /// The time between one book's drop and the next.
-    static func dropSpacing(for layout: BookWallLayout) -> TimeInterval {
+    private static func dropSpacing(for layout: BookWallLayout) -> TimeInterval {
         let thickestBook = layout.slots.map(\.collisionThickness).max() ?? 0
         // Leave enough vertical separation before another book enters the same column.
         let distanceBetweenBooks = Double(thickestBook + 0.15)
@@ -1235,8 +1248,7 @@ nonisolated extension BookWallScene {
     /// 4 degrees, as the iPhone's stacks turn theirs. Most books turn much less.
     static let maximumStackTurn: Float = 0.07
 
-    /// Where `addBook` places a book once it rests. Settling records and republishes the landed
-    /// pose.
+    /// Where a book rests in its stack.
     ///
     /// Each book lies a little off its column's middle and turns a few degrees about the
     /// vertical axis through its spine's middle, so its spine faces a little left or right and
@@ -1412,7 +1424,7 @@ enum BookWallCoverTexture {
                         end: CGPoint(x: imageRect.minX - margin.width, y: 0),
                         caseColor: clothColor, context: cg)
                 }
-                // The artwork's left edge is the joint (`BookWallHardcoverMesh.coverSurface`).
+                // The artwork's left edge is the joint (`BookWallHardcoverMesh.coverSurfaceData`).
                 let fold = CGRect(
                     x: 0, y: 0, width: size.width * CGFloat(foldReach / slot.coverWidth),
                     height: size.height)
@@ -1610,15 +1622,16 @@ enum BookWallPageTexture {
 /// its plane width follows its text.
 enum BookWallShelfLabel {
     /// A drawn label, uploaded for the renderer.
-    struct Prepared: Sendable {
-        let texture: BookMetalTexture
+    struct Prepared: @unchecked Sendable {
+        let texture: any MTLTexture
         /// The label's width in scene units on a front `BookWallScene.minimumShelfThickness`
         /// tall.
         let width: Float
 
         /// Uploads `image`, or returns `nil` when its texture can't be made.
         init?(_ image: CGImage) {
-            guard let texture = BookMetalTexture(image, mipmapped: true) else { return nil }
+            guard let texture = BookMetalDevice.shared?.makeTexture(image, mipmapped: true)
+            else { return nil }
             self.texture = texture
             width = Float(CGFloat(image.width) / BookWallShelfLabel.pixelsPerUnit)
         }

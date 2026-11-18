@@ -6,15 +6,8 @@ import XCTest
 final class BookWallMotionTests: XCTestCase {
     private let fall = BookWallFall(dropHeight: 9, gravity: 22, damping: 0.25)
 
-    /// A laid-out wall's books as its fall drops them, as `BookMetalPage.Contents` lists them.
     private func falling(_ layout: BookWallLayout) -> [BookWallFall.Book] {
-        let spacing = BookWallScene.dropSpacing(for: layout)
-        return layout.slots.enumerated()
-            .map { order, slot in
-                BookWallFall.Book(
-                    rest: BookWallScene.restingTransform(for: slot, in: layout).translation.y,
-                    column: slot.column, delay: Double(order) * spacing)
-            }
+        BookWallScene.fallingBooks(of: layout)
     }
 
     private func wall(_ count: Int) -> BookWallLayout {
@@ -43,8 +36,12 @@ final class BookWallMotionTests: XCTestCase {
         let books = falling(layout)
         let end = fall.heights(of: books, after: 60)
         XCTAssertTrue(end.landed)
-        XCTAssertEqual(end.heights, books.map(\.rest))
         XCTAssertEqual(end.heights, layout.slots.map(\.restingY))
+        // A book rests where its pose puts it.
+        for (slot, height) in zip(layout.slots, end.heights) {
+            XCTAssertEqual(
+                BookWallScene.restingTransform(for: slot, in: layout).translation.y, height)
+        }
     }
 
     func testAFallingBookOnlyMovesDownAndNeverPassesTheOneBelowIt() {

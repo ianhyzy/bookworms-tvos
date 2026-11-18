@@ -207,7 +207,7 @@ enum BookWallHardcoverMesh {
                     data.normals.append([
                         direction.x * outwardNormal, direction.y * outwardNormal, faceNormal,
                     ])
-                    // Match RealityKit's generated-plane UV orientation for the existing
+                    // Put the texture's bottom left at the surface's bottom left, for the existing
                     // cover texture. The bevel carries edge pixels without stretching the face.
                     data.textureCoordinates.append([point.x / width + 0.5, point.y / height + 0.5])
                 }

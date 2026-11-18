@@ -629,37 +629,32 @@ actor BookWallRasterizer {
 
     /// Draws `slot` as `render` does and builds what the renderer draws the book from: its
     /// mesh, its uploaded spine and board, where it rests in `layout`, and its uploaded shelf
-    /// label. Returns `nil` when a texture can't be made.
+    /// label. Returns `nil` when the spine or label can't be drawn or a texture can't be made.
     func prepare(
         slot: BookWallLayout.Slot, in layout: BookWallLayout, cover: CGImage?,
         source: BookWallLocalSpine.Style?, design: SpineDesignV1?, fontStyle: AppFontStyle
-    ) -> (book: BookMetalPage.Book, label: BookWallShelfLabel.Prepared?)? {
+    ) -> (book: BookMetalPage.Book, label: BookWallShelfLabel.Prepared)? {
         let images = render(
             slot: slot, cover: cover, source: source, design: design, fontStyle: fontStyle)
-        guard let artwork = Self.artwork(of: images, for: slot) else { return nil }
-        var label: BookWallShelfLabel.Prepared?
-        if let image = images.label {
-            guard let prepared = BookWallShelfLabel.Prepared(image) else { return nil }
-            label = prepared
-        }
+        guard let artwork = Self.artwork(of: images, for: slot),
+            let label = images.label.flatMap(BookWallShelfLabel.Prepared.init)
+        else { return nil }
         return (BookMetalPage.Book(slot: slot, artwork: artwork, in: layout), label)
     }
 
     /// Joins a page's `books`, in the order `layout` drops them, into the buffers the renderer
     /// draws from, and letters the resting hint. Returns `nil` when Metal can't make a buffer
-    /// or the hint's texture.
+    /// or the hint can't be drawn or uploaded.
     func page(of books: [BookMetalPage.Book], layout: BookWallLayout, fontStyle: AppFontStyle)
-        -> (contents: BookMetalPage.Contents, hint: BookWallShelfLabel.Prepared?)?
+        -> (contents: BookMetalPage.Contents, hint: BookWallShelfLabel.Prepared)?
     {
-        guard let contents = BookMetalPage.Contents(books: books, layout: layout) else {
-            return nil
-        }
-        var hint: BookWallShelfLabel.Prepared?
-        if let image = BookWallShelfLabel.make("Choose a spine to open its book.", style: fontStyle)
-        {
-            guard let prepared = BookWallShelfLabel.Prepared(image) else { return nil }
-            hint = prepared
-        }
+        guard let contents = BookMetalPage.Contents(books: books, layout: layout),
+            let hint =
+                BookWallShelfLabel.make(
+                    "Choose a spine to open its book.", style: fontStyle
+                )
+                .flatMap(BookWallShelfLabel.Prepared.init)
+        else { return nil }
         return (contents, hint)
     }
 }
