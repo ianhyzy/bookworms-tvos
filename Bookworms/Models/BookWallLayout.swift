@@ -45,11 +45,9 @@ struct BookWallLayout: Sendable {
     static let minimumSpineThickness: Float = 0.55
     /// Keeps each spine clearly longer than it is thick, so thick books do not read as blocks.
     static let minimumLengthToThickness: Float = 6
-    /// Scene units per decimeter of real book: a 320-page book's 2.59-unit natural length is
-    /// about the iPhone companion's 18.6 cm. A book's page thickness is its real thickness
-    /// (`SpineView.thickness(of:)`) at this scale, so the thickest, a 1,400-page book's 8.8 cm,
-    /// is 1.23 units.
-    static let unitsPerDecimeter: Float = 1.4
+    /// Very long books stop thickening here (before per-book variety) so one book cannot
+    /// widen its column enough to push the whole wall back.
+    static let maximumPageThickness: Float = 1.3
     /// Thick books keep their thickness but stop lengthening here, so a doorstopper reads as
     /// chunky rather than widening its column.
     static let maximumBookLength: Float = 5.6
@@ -57,8 +55,7 @@ struct BookWallLayout: Sendable {
     static let booksPerColumn = 10
     static let maximumColumns = 4
     /// A year this size always fits one page: `maximumColumns` stacks of the thickest spine
-    /// lettering can ask for, the thickest book's 1.23 units and its covering. It needs no
-    /// measuring.
+    /// lettering can ask for, `maximumPageThickness` and its covering. It needs no measuring.
     static let booksThatAlwaysFit = 36
     /// A little under the scale any full page shows at (`BookWallScene.spinePointsPerUnit(for:)`),
     /// which the screen's height sets, whatever its books' lengths. `pages(of:typographies:)`
@@ -79,8 +76,8 @@ struct BookWallLayout: Sendable {
         let spineThickness: Float
         /// The thinnest spine that still fits the book's lettering at its minimum sizes.
         let textThickness: Float
-        /// The book's page thickness, real or the legible minimum, which the book's shape keeps
-        /// it at least `minimumLengthToThickness` times as long as.
+        /// The page-count thickness with variety, which the book's shape keeps it at least
+        /// `minimumLengthToThickness` times as long as.
         let pageShapeThickness: Float
         let lengthVariety: Float
 
@@ -310,21 +307,26 @@ struct BookWallLayout: Sendable {
         // unchanged ceiling keeps the widest lane, and therefore the camera, where it was.
         let coverScale = min(1.48, max(1.15, sqrt(pages / 500)))
         let naturalHeight = 2.25 * coverScale + (seed - 0.5) * 0.09
-        // A book as thick as the real hardcover, or the thinnest spine that letters well from
-        // the couch, whichever is thicker: about 570 pages and up show their real thickness.
+        let naturalThickness =
+            Self.minimumSpineThickness + max(0, pages - 250) * 0.0009
+            + seed * 0.025
         let pageThickness = max(
-            Self.minimumSpineThickness,
-            Float(SpineView.thickness(of: book)) / 100 * Self.unitsPerDecimeter)
+            Self.minimumSpineThickness, min(naturalThickness, Self.maximumPageThickness))
         let startHeight = max(
             naturalHeight, Self.minimumSpineThickness * Self.minimumLengthToThickness)
         let readable = Self.readableSize(
             for: book, typography: typography, height: startHeight,
             thickness: pageThickness, pointsPerUnit: pointsPerUnit)
+        // Size tracks page count only loosely. A second per-book seed scales each book up by
+        // as much as a quarter, so books of similar length still differ and few sit exactly
+        // on the minimums. Scaling only upward keeps the text-fit sizes valid.
+        let variety =
+            Float((UInt64(bitPattern: Int64(book.id)) &* 40_503 &+ 12_345) % 1_000) / 999
         return Dimensions(
             startHeight: startHeight, readableHeight: readable.height,
-            spineThickness: max(pageThickness, readable.thickness),
+            spineThickness: max(pageThickness, readable.thickness) * (1 + variety * 0.25),
             textThickness: readable.thickness,
-            pageShapeThickness: pageThickness,
+            pageShapeThickness: pageThickness * (1 + variety * 0.25),
             lengthVariety: Float((UInt64(bitPattern: Int64(book.id)) &* 69_069) % 997) / 996)
     }
 
