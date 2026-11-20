@@ -31,7 +31,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = Path(__file__).resolve().parent.relative_to(ROOT)
-DOCUMENTATION = re.compile(r"(^|/)[^/]+\.md$|^docs/|^LICENSE")
+DOCUMENTATION = re.compile(r"(^|/)[^/]+\.md$|^docs/|^screenshots/|^LICENSE")
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)\s]*)?\)")
 
 
