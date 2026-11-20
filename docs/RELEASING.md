@@ -208,7 +208,7 @@ One policy covers Bookworms on Apple TV, iPhone, and Mac. The text below is the 
 ```text
 Bookworms privacy policy
 
-Effective November 13, 2026. Contact: bookworms@ian.gay
+Effective November 20, 2026. Contact: bookworms@ian.gay
 Web version: ian.gay/bookworms-privacy-policy
 
 Summary
@@ -230,6 +230,7 @@ Covers and profile photos download from the addresses Hardcover provides. Fonts 
 
 Sharing and Photos
 On iPhone and Mac, share images and videos are made on your device. Bookworms saves them to Photos only when you ask, with add-only access, and never reads your photo library. Shared images and text can include your Hardcover username and profile and book links; With friends images name the readers they compare. Where Show profile link appears, turning it off leaves your link out. The app you share to receives what you share.
+On iPhone, View in my room uses the camera to show your books in your room. Camera images and the shape of your room stay on your iPhone; Bookworms never stores or uploads them. A photo you take goes only where you share or save it.
 
 Example profile
 Bookworms includes an example profile of the developer's own Hardcover reading from recent years, such as books, ratings, finish dates, and series, with his spine designs, series looks, cover choices, and series choices. It has no reviews, and you can view it without connecting Hardcover. Viewing it downloads its covers and fonts as described above. Bookworms doesn't save it to your Hardcover account or iCloud. On Apple TV, connecting Hardcover or turning on iCloud storage closes it. On iPhone and Mac, Leave example profile or any change to your Hardcover account closes it.
@@ -256,7 +257,7 @@ Changes will be posted here and at ian.gay/bookworms-privacy-policy with a new e
 
 The text relies on the iPhone and Mac app's consent alert, which asks before a third-party provider's first API key, or an OpenAI-compatible endpoint's address, saves on a device (`SpineDesigner.hasConsent(of:)` in that app's repository). Don't release an iPhone or Mac build without the alert while this text is published.
 
-Keep the published policy and this text consistent with both apps' builds. For every app, it describes an iCloud copy that includes the Hardcover username and the time of the last sync. For the Apple TV, it describes Hardcover as the only source, iCloud storage as off by default, the latest sync error kept on the device, no design-model requests, and Google Fonts requests for the fonts of companion designs and series looks (`BookPresentation.showsCompanionSpines`) and the example profile's designs. For the iPhone and Mac, it describes iCloud saves whenever the device is signed in to iCloud, **Keep iCloud Off** when iCloud holds another Hardcover account's data and **Turn on iCloud storage** in the Hardcover settings to undo it, Top Five pins, readers looked up by username, design-model requests and the reader's consent before a third-party provider receives book data, Google Fonts requests, and add-only Photos saves. Update it before enabling CWA (`BookPresentation.offersCWA`) or generated spines (`BookPresentation.showsGeneratedSpines`) on the Apple TV, and whenever either app sends data somewhere new. The iPhone and Mac app's release workflow lists its requests in more detail.
+Keep the published policy and this text consistent with both apps' builds. For every app, it describes an iCloud copy that includes the Hardcover username and the time of the last sync. For the Apple TV, it describes Hardcover as the only source, iCloud storage as off by default, the latest sync error kept on the device, no design-model requests, and Google Fonts requests for the fonts of companion designs and series looks (`BookPresentation.showsCompanionSpines`) and the example profile's designs. For the iPhone and Mac, it describes iCloud saves whenever the device is signed in to iCloud, **Keep iCloud Off** when iCloud holds another Hardcover account's data and **Turn on iCloud storage** in the Hardcover settings to undo it, Top Five pins, readers looked up by username, design-model requests and the reader's consent before a third-party provider receives book data, Google Fonts requests, add-only Photos saves, and the iPhone's camera for **View in my room**, whose images and room shape are never stored or uploaded. Update it before enabling CWA (`BookPresentation.offersCWA`) or generated spines (`BookPresentation.showsGeneratedSpines`) on the Apple TV, and whenever either app sends data somewhere new. The iPhone and Mac app's release workflow lists its requests in more detail.
 
 ## Verify the release candidate
 
