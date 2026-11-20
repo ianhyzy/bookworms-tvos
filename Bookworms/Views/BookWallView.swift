@@ -1,4 +1,3 @@
-import RealityKit
 import SwiftUI
 
 /// Keeps Book Wall's native focus controls aligned with the full-screen 3D wall.
@@ -87,7 +86,7 @@ struct BookWallView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            // RealityKit projects into the full-screen canvas. The page can have a
+            // The wall projects into the full-screen canvas. The page can have a
             // different origin, so convert both hit targets and detail destinations.
             let pageFrame = geometry.frame(in: .global)
             let pageOrigin = CGPoint(
@@ -283,11 +282,6 @@ struct BookWallView: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("book-wall-fall-probe")
-                    Text(String(scene.seatedBooks))
-                        .font(.system(size: 1)).foregroundStyle(.clear)
-                        .frame(width: 1, height: 1)
-                        .allowsHitTesting(false)
-                        .accessibilityIdentifier("book-wall-seated-probe")
                     Text(String(scene.fallsStarted))
                         .font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1)
@@ -462,8 +456,8 @@ struct BookWallView: View {
                 openingFailed = true
                 return
             }
-            scene.showOnlyDetailBook(true, reduceMotion: reduceMotion)
-            // The wall has already faded in the scene; the text fades in after the book lands.
+            scene.startDetailDrift(reduceMotion: reduceMotion)
+            // The wall has already faded behind the book; the text fades in after it lands.
             detailState.frame = detailFrame.offsetBy(
                 dx: viewportFrame.minX, dy: viewportFrame.minY)
             withAnimation(detailFade) {

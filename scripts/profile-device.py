@@ -29,7 +29,7 @@ def capture_configuration(scenario, capture_set, template):
     if scenario == 'longevity':
         instruments.append('Activity Monitor')
     if scenario == 'bookWall':
-        # RealityKit's frame instruments record only on visionOS.
+        # The wall's frames show in the Display and GPU instruments.
         instruments.extend(['Display', 'GPU'])
     if scenario == 'description':
         instruments.append('Display')
@@ -44,8 +44,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--app', type=Path, help='Override with an ordinary Release baseline app')
     parser.add_argument('--diagnostics', action='store_true')
-    parser.add_argument('--variant', help='Isolation name, such as glass, background, or wall-720p; join several with +')
-    parser.add_argument('--wall-antialiasing', choices=['off', 'on'], default='on')
+    parser.add_argument('--variant', help='Isolation name, such as glass, background, or wall-no-ribbon; join several with +')
     parser.add_argument('--sequence', choices=['full', 'details'], default='full',
                         help='Book Wall input: every phase, or only opening and closing details')
     parser.add_argument('--capture-set', choices=['full', 'display', 'cpu'], default='full',
@@ -97,7 +96,6 @@ def main():
                 'PERF_DIAGNOSTICS': '1' if args.diagnostics else '0',
                 'PERF_VARIANT': args.variant or '', 'PERF_SCENARIO': args.scenario,
                 'PERF_VIEW': str(args.view), 'PERF_REPETITIONS': str(args.repetitions),
-                'PERF_WALL_ANTIALIASING': args.wall_antialiasing,
                 'PERF_SEQUENCE': args.sequence,
             })
             if args.app:
@@ -131,12 +129,6 @@ def main():
         manifest['presses'] = ('open details for the first My Shelf book; 3 cycles of Select on Show more '
                                'and Menu, 3 s apart; phases in test.log as PERFORMANCE_PHASE')
     if args.scenario == 'bookWall':
-        variants = set((args.variant or '').split('+'))
-        manifest['wall_antialiasing'] = args.wall_antialiasing
-        manifest['wall_resolution'] = next(
-            (resolution for variant, resolution in [
-                ('wall-720p', '720p'), ('wall-900p', '900p'),
-            ] if variant in variants), '1080p')
         manifest['presses'] = 'direct launch (--start-view=bookWall); 3 select/menu cycles'
         if args.sequence == 'full':
             manifest['presses'] += ('; reposition; 12 bursts of 2-4 presses at 80 ms inside the stacks; '

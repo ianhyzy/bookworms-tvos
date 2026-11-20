@@ -103,9 +103,7 @@ def main():
     parser.add_argument('--diagnostics', action='store_true',
                         help='Build with BOOKWORMS_DIAGNOSTICS into .build-profile-diagnostics and '
                              'launch with --performance-diagnostics')
-    parser.add_argument('--variant', help='Isolation such as wall-720p; implies --diagnostics')
-    parser.add_argument('--wall-antialiasing', choices=['off', 'on'], default='on',
-                        help='Book Wall antialiasing (default: on)')
+    parser.add_argument('--variant', help='Isolation such as wall-no-ribbon; implies --diagnostics')
     parser.add_argument('--capture-set', choices=['full', 'display', 'cpu'], default='display',
                         help='Instruments: Display + Points of Interest (default), full (adds Time '
                              'Profiler, Hitches, and GPU), or Time Profiler + Points of Interest. '
@@ -166,7 +164,6 @@ def main():
         run([sys.executable, 'scripts/profile-device.py', '--device', device,
              '--trace-device', trace_device, '--xctestrun', str(xctestrun),
              '--scenario', 'bookWall', '--output', str(output),
-             '--wall-antialiasing', args.wall_antialiasing,
              '--capture-set', args.capture_set, '--sequence', args.sequence,
              *(['--diagnostics'] if args.diagnostics else []),
              *(['--variant', args.variant] if args.variant else [])])
@@ -176,15 +173,15 @@ def main():
         device_build_module().clean_test_runner(device)
 
     if args.diagnostics:
-        # The app keeps its renderer windows on the TV; streamed Instruments data can have gaps.
+        # The app keeps its renderer's log on the TV; streamed Instruments data can have gaps.
         copied = subprocess.run(
             ['xcrun', 'devicectl', 'device', 'copy', 'from', '--device', device,
              '--domain-type', 'appDataContainer', '--domain-identifier', 'gay.ian.Bookworms',
-             '--source', 'Library/Caches/BookWallPipeline.jsonl',
-             '--destination', str(output / 'pipeline.jsonl')],
+             '--source', 'Library/Caches/BookMetalWall.log',
+             '--destination', str(output / 'BookMetalWall.log')],
             cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if copied.returncode:
-            print('Could not copy the renderer pipeline log from the TV.', file=sys.stderr)
+            print('Could not copy the renderer log from the TV.', file=sys.stderr)
     log = output / 'test.log'
     if log.exists():
         (output / 'phases.json').write_text(json.dumps(phases(log), indent=2) + '\n')

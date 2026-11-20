@@ -206,10 +206,8 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertEqual(second.pageCount, 2)
         XCTAssertEqual(second.books, Array(books.suffix(4)))
         XCTAssertEqual(preparation.totalCount, 4, "Progress counts the page, not the year")
-        for body in second.bodies.values {
-            let locks = try XCTUnwrap(body.physicsBody).isTranslationLocked
-            XCTAssertTrue(locks.x && locks.z && !locks.y, "A book falls straight down")
-        }
+        XCTAssertNotNil(second.resources, "The page's meshes and textures are ready to draw")
+        XCTAssertEqual(Set(second.labels.keys), Set(second.books.map(\.id)))
 
         await preparation.prepare(books, sources: [:], page: 0)
         let first = try XCTUnwrap(preparation.prepared)
@@ -493,7 +491,7 @@ final class BookWallLayoutTests: XCTestCase {
 
     /// Dark lettering on light cloth keeps its weight at the mip level the resting wall shows:
     /// the uploaded level 1 is as dark as a half-size Core Graphics drawing of the spine, and
-    /// darker than the level RealityKit generates, which averages in linear light.
+    /// darker than the level the GPU generates, which averages in linear light.
     @MainActor
     func testSpineMipKeepsDarkLetteringWeight() async throws {
         let book = Book(
@@ -531,33 +529,18 @@ final class BookWallLayoutTests: XCTestCase {
             return sum / Double(bytes.count / 4 * 3)
         }
         let expected = lightness(UnsafeBufferPointer(start: drawn, count: width * height * 4))
-        let ours = try await Self.level(1, of: try await mips.texture(), spine: spine)
-        let generatedTexture = try await TextureResource.generate(
-            from: spine, options: .init(semantic: .color))
-        let generated = try await Self.level(1, of: generatedTexture, spine: spine)
+        let metal = try XCTUnwrap(BookMetalDevice.shared)
+        let ours = try Self.read(
+            1, of: try XCTUnwrap(metal.makeTexture(mips)), device: metal.device, width: width,
+            height: height)
+        let generated = try Self.read(
+            1, of: try XCTUnwrap(metal.makeTexture(spine, mipmapped: true)), device: metal.device,
+            width: width, height: height)
         let oursLightness = ours.withUnsafeBufferPointer(lightness)
         XCTAssertEqual(oursLightness, expected, accuracy: 2)
         XCTAssertLessThan(
             oursLightness, generated.withUnsafeBufferPointer(lightness),
-            "RealityKit's generated level thins the dark lettering")
-    }
-
-    /// `texture`'s mip `level`, read back as sRGB-encoded RGBA bytes.
-    @MainActor
-    private static func level(_ level: Int, of texture: TextureResource, spine: CGImage)
-        async throws -> [UInt8]
-    {
-        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm_srgb, width: spine.width, height: spine.height,
-            mipmapped: true)
-        descriptor.usage = [.shaderRead, .shaderWrite]
-        descriptor.storageMode = .private
-        let target = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
-        try await texture.copy(to: target)
-        return try read(
-            level, of: target, device: device, width: max(1, spine.width >> level),
-            height: max(1, spine.height >> level))
+            "The GPU's generated level thins the dark lettering")
     }
 
     /// `target`'s mip `level`, `width` by `height`, copied into shared memory. It waits for the
@@ -1044,42 +1027,82 @@ final class BookWallLayoutTests: XCTestCase {
     }
 
     @MainActor
-    func testAWallWithNothingToDropStopsDrawingOnceItsChangeIsShown() {
-        let scene = BookWallScene()
-        scene.didDrawFrame()
-        XCTAssertFalse(scene.needsFrame)
-        var settled = false
-        scene.configure(
-            prepared: BookWallPreparedWall(
-                books: [], page: 0, pageCount: 0, sources: [:], designs: [:], looks: [:],
-                mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
-                layout: BookWallLayout(books: []), bodies: [:], artwork: BookWallArtworkBox(),
-                labels: [:], hint: nil),
-            reduceMotion: false, onFocusFrames: { _, isSettled in settled = isSettled })
-        scene.didDrawFrame()
-        XCTAssertTrue(settled)
-        XCTAssertFalse(scene.needsFrame)
-    }
-
-    @MainActor
     private func wall(books: [Book], page: Int = 0, pageCount: Int = 1) -> BookWallPreparedWall {
         BookWallPreparedWall(
             books: books, page: page, pageCount: pageCount, sources: [:], designs: [:], looks: [:],
             mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
-            layout: BookWallLayout(books: []), bodies: [:], artwork: BookWallArtworkBox(),
-            labels: [:], hint: nil)
+            layout: BookWallLayout(books: []), resources: nil, labels: [:], hint: nil)
     }
 
     @MainActor
-    func testShowingAnEmptyWallAgainReportsItSettled() {
+    func testAnEmptyWallReportsItSettledEachTimeItShows() {
         let scene = BookWallScene()
         let empty = wall(books: [], pageCount: 0)
-        scene.configure(prepared: empty, reduceMotion: false, onFocusFrames: { _, _ in })
         var settled = false
         scene.configure(
             prepared: empty, reduceMotion: false,
             onFocusFrames: { _, isSettled in settled = isSettled })
+        XCTAssertTrue(settled, "A wall with nothing to drop rests")
+        settled = false
+        scene.configure(
+            prepared: empty, reduceMotion: false,
+            onFocusFrames: { _, isSettled in settled = isSettled })
         XCTAssertTrue(settled)
+    }
+
+    @MainActor
+    private func scene(showing wall: BookWallPreparedWall, reduceMotion: Bool) -> (
+        scene: BookWallScene, frames: () -> [Int: CGRect], settled: () -> Bool
+    ) {
+        let scene = BookWallScene()
+        scene.updateHostViewport(size: CGSize(width: 1920, height: 1080))
+        var published: (frames: [Int: CGRect], settled: Bool) = ([:], false)
+        scene.configure(prepared: wall, reduceMotion: reduceMotion) { published = ($0, $1) }
+        return (scene, { published.frames }, { published.settled })
+    }
+
+    @MainActor
+    private func wallOfTwelve() -> BookWallPreparedWall {
+        let books = (1...12).map { Book(id: $0, title: "Book \($0)", author: "Author", pages: 300) }
+        return BookWallPreparedWall(
+            books: books, page: 0, pageCount: 1, sources: [:], designs: [:], looks: [:],
+            mates: [:], fontStyle: .serif, drawn: [:], drawsWith: [:],
+            layout: BookWallLayout(books: books), resources: nil, labels: [:], hint: nil)
+    }
+
+    @MainActor
+    func testReduceMotionPlacesTheBooksWithoutAFall() async {
+        let wall = wallOfTwelve()
+        let shown = scene(showing: wall, reduceMotion: true)
+        XCTAssertFalse(shown.settled(), "The view hears after the call returns")
+        for _ in 0..<100 where !shown.settled() { await Task.yield() }
+        XCTAssertTrue(shown.settled(), "No renderer has to report a landing")
+        XCTAssertEqual(
+            shown.frames(),
+            BookWallScene.plannedFocusFrames(
+                for: wall.layout, viewport: CGSize(width: 1920, height: 1080)),
+            "Spines keep the frames they were planned at once the books rest")
+    }
+
+    @MainActor
+    func testAFallEndsWhenItsRendererReportsItOrTheWallHides() async {
+        let wall = wallOfTwelve()
+        let shown = scene(showing: wall, reduceMotion: false)
+        XCTAssertFalse(shown.settled(), "Nothing has drawn the books landing")
+        XCTAssertEqual(shown.frames().count, 12, "Spines can take focus while books fall")
+        XCTAssertFalse(shown.scene.replayFall(reduceMotion: false), "A fall is under way")
+        let opened = await shown.scene.flyToDetail(
+            wall.books[0], detailFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            reduceMotion: false)
+        XCTAssertFalse(opened, "No book opens before the books settle")
+        shown.scene.fallEnded(of: wallOfTwelve())
+        XCTAssertFalse(shown.settled(), "Another wall's fall ended")
+        shown.scene.fallEnded(of: wall)
+        XCTAssertTrue(shown.settled())
+
+        let hidden = scene(showing: wallOfTwelve(), reduceMotion: false)
+        hidden.scene.deactivate()
+        XCTAssertTrue(hidden.settled(), "Leaving during a fall seats the books")
     }
 
     @MainActor
@@ -1115,15 +1138,6 @@ final class BookWallLayoutTests: XCTestCase {
         XCTAssertFalse(
             wall(books: [book], page: 0, pageCount: 1).waits(behind: shown, chosenPage: 2),
             "A shorter year limited the chosen page to the page on screen")
-    }
-
-    @MainActor
-    func testCancelingATransitionLeavesNoUnlitPointLightEnabled() {
-        let scene = BookWallScene()
-        scene.cancelTransition()
-        let lights = scene.root.children.compactMap { $0 as? PointLight }
-        XCTAssertFalse(lights.isEmpty)
-        XCTAssertFalse(lights.contains { $0.isEnabled && $0.light.intensity == 0 })
     }
 
     /// A synthetic year of titles of one to six words and 150 to 1,050 pages, laid out at the

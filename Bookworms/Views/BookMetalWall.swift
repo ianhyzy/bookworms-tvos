@@ -6,13 +6,10 @@ import UIKit
 import simd
 
 /// Book Wall's renderer: Metal on its own thread, so work on the main thread can't delay a
-/// frame. `BookWallScene` still lays the wall out, plans flights, and places the label,
-/// ribbon, and shadows; this draws them. `--wall-renderer=realitykit` draws the wall with
-/// `BookWallRendererView` instead, for comparison and for the RealityKit diagnostics.
+/// frame. `BookWallScene` lays the wall out, plans flights, and places the label, ribbon, and
+/// shadows; preparation builds each page's meshes and uploads its textures (`BookMetalPage`);
+/// this draws them.
 enum BookMetalWall {
-    static let isEnabled = !ProcessInfo.processInfo.arguments.contains(
-        "--wall-renderer=realitykit")
-
     /// The drawable's size in pixels: 1080p, or the height `--wall-metal-height=` names.
     static let renderSize: CGSize = {
         let height = integer("--wall-metal-height=") ?? 1080
@@ -45,55 +42,77 @@ enum BookMetalWall {
     }
 }
 
-/// One book's drawn artwork, as the rasterizer made it.
-struct BookWallArtwork {
-    let style: BookWallLocalSpine.Style
-    let spine: BookWallSpineTexture.Mips
-    let cover: CGImage?
-}
+/// The GPU that draws Book Wall. Preparation uploads a page's meshes and textures through it,
+/// off the main actor, and the renderer draws with the same device.
+final class BookMetalDevice: @unchecked Sendable {
+    /// `nil` when Metal can't supply a device or a command queue.
+    static let shared = BookMetalDevice()
 
-/// A wall's artwork by book ID, shared by every copy of the wall, so a cover that downloads
-/// after preparation reaches the wall the scene shows.
-@MainActor
-final class BookWallArtworkBox {
-    var byBook: [Int: BookWallArtwork] = [:]
-    /// Books whose artwork changed since the renderer last uploaded it.
-    var changed: Set<Int> = []
-}
+    let device: any MTLDevice
+    /// Generates the mip levels of uploaded textures, apart from the renderer's queue, so an
+    /// upload never takes a place among its frames.
+    private let uploads: any MTLCommandQueue
 
-/// The framing, fall, and lights that the Metal renderer shares with `BookWallScene`.
-struct BookWallStage: Sendable {
-    let cameraDepth: Float
-    /// The camera's vertical field of view, in degrees.
-    let fieldOfView: Float
-    let dropHeight: Float
-    /// The time between one book's drop and the next.
-    let dropSpacing: TimeInterval
-    let gravity: Float
-    let damping: Float
-    let pullOut: Float
-    let pullOutDuration: Float
-    let shelfSize: SIMD3<Float>
-    let shelfCenter: SIMD3<Float>
-    let shelfColor: StyleColor
-    let shelfLight: SIMD3<Float>
-    let poolLight: SIMD3<Float>
-    let topLightDirection: SIMD3<Float>
-    /// The detail light level at which the rest of the wall starts to fade.
-    let wallFadeStart: Float
-    /// The environment light's exponent change at full detail level.
-    let detailAmbientExponent: Float
-    /// The wall image's distance behind the camera at the wall's resting camera depth.
-    let backdropDistance: Float
-    /// How much the open book's shadow darkens the wall, and its offset from directly behind
-    /// the book, as a share of the book's outline on the wall.
-    let detailShadowOpacity: Float
-    let detailShadowOffset: SIMD2<Float>
+    private init?() {
+        guard let device = MTLCreateSystemDefaultDevice(), let uploads = device.makeCommandQueue()
+        else { return nil }
+        self.device = device
+        self.uploads = uploads
+    }
+
+    /// Uploads a spine's prepared mip chain.
+    func makeTexture(_ mips: BookWallSpineTexture.Mips) -> (any MTLTexture)? {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm_srgb, width: mips.width, height: mips.height, mipmapped: true)
+        descriptor.mipmapLevelCount = mips.levels.count
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        var (width, height) = (mips.width, mips.height)
+        for (level, data) in mips.levels.enumerated() {
+            data.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                texture.replace(
+                    region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: level,
+                    withBytes: base, bytesPerRow: width * 4)
+            }
+            (width, height) = (max(1, width / 2), max(1, height / 2))
+        }
+        return texture
+    }
+
+    /// Uploads `image` as Display P3 with the sRGB transfer curve. With `mipmapped`, this
+    /// returns once the GPU has made the mip levels, because the renderer's queue doesn't order
+    /// its frames after another queue's work.
+    func makeTexture(_ image: CGImage, mipmapped: Bool) -> (any MTLTexture)? {
+        let (width, height) = (image.width, image.height)
+        guard width > 0, height > 0, let space = CGColorSpace(name: CGColorSpace.displayP3),
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm_srgb, width: width, height: height, mipmapped: mipmapped)
+        guard let bytes = context.data, let texture = device.makeTexture(descriptor: descriptor)
+        else { return nil }
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: bytes,
+            bytesPerRow: width * 4)
+        if mipmapped, let buffer = uploads.makeCommandBuffer(),
+            let blit = buffer.makeBlitCommandEncoder()
+        {
+            blit.generateMipmaps(for: texture)
+            blit.endEncoding()
+            buffer.commit()
+            buffer.waitUntilCompleted()
+        }
+        return texture
+    }
 }
 
 /// Triangles for one draw call. Each vertex is nine floats: position, normal, texture
 /// coordinate, and the surface it belongs to, which the fragment shader colors by.
-struct BookMetalMesh {
+struct BookMetalMesh: Sendable {
     /// Matches the `part` values in BookMetalWall.metal.
     enum Part: Float {
         case cloth, spine, cover, pageEdge, accent, lettering
@@ -102,6 +121,68 @@ struct BookMetalMesh {
     static let floatsPerVertex = 9
     var vertices: [Float] = []
     var indices: [UInt32] = []
+
+    init() {}
+
+    /// A hardcover as one mesh, built from `BookWallBookParts` and `BookWallHardcoverMesh`.
+    /// Each vertex names the surface it belongs to, so a book draws in one call. The front
+    /// board is the same mesh with or without cover art, so a cover that arrives late needs no
+    /// new mesh.
+    init(book slot: BookWallLayout.Slot) {
+        let parts = BookWallBookParts(slot)
+        let (size, pageSize) = (parts.size, parts.pageSize)
+        // Both cover faces flow through the same full-height spine contour. The open fore edge
+        // still exposes the paper block inside the continuous casing.
+        append(
+            BookWallHardcoverMesh.casingData(
+                size: size,
+                boardThickness: parts.boardThickness + BookWallLayout.coverWrapThickness,
+                foreedgeCornerRadius: parts.foreedgeCornerRadius,
+                spineCornerRadius: parts.spineCornerRadius,
+                spineWallDepth: (size.z - pageSize.z) / 2,
+                bevelWidth: parts.boardBevelWidth, bevelDepth: parts.boardBevelDepth),
+            as: .cloth)
+        for face in parts.pageEdgeFaces {
+            appendPlane(
+                width: face.width, height: parts.pageEdgeHeight, as: .pageEdge,
+                transform: Transform(
+                    rotation: simd_quatf(angle: face.angle, axis: [0, 1, 0]),
+                    translation: face.position))
+        }
+        append(
+            BookWallHardcoverMesh.headbandData(
+                length: pageSize.x, thickness: parts.pageEdgeHeight, depth: pageSize.z,
+                width: BookWallBookParts.headbandWidth, raise: BookWallBookParts.headbandRaise,
+                stripe: BookWallBookParts.headbandStripe),
+            as: .accent, alternate: .lettering)
+        // The spine plane covers the flat spine wall, so the cloth's shading and the cover's
+        // fold reach the boards' rounded edges.
+        appendPlane(
+            width: slot.spineWallWidth, height: slot.spineWallHeight, as: .spine,
+            transform: Transform(
+                translation: [0, 0, slot.coverWidth / 2 + BookWallBookParts.spineFaceOffset]))
+        // The spine faces +Z, so the cover's top edge points toward -X on the upper face.
+        append(
+            BookWallHardcoverMesh.coverSurfaceData(
+                width: slot.coverWidth, height: slot.bookHeight,
+                foreedgeCornerRadius: parts.foreedgeCornerRadius,
+                spineCornerRadius: parts.spineCornerRadius,
+                bevelWidth: parts.boardBevelWidth, bevelDepth: parts.boardBevelDepth),
+            as: .cover,
+            transform: Transform(
+                rotation: simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+                    * simd_quatf(angle: -.pi / 2, axis: [1, 0, 0]),
+                translation: [
+                    0, slot.spineThickness / 2 + BookWallBookParts.coverSurfaceOffset, 0,
+                ]))
+    }
+
+    /// Adds `mesh`'s triangles after this mesh's.
+    mutating func append(_ mesh: BookMetalMesh) {
+        let base = UInt32(vertices.count / Self.floatsPerVertex)
+        vertices += mesh.vertices
+        indices += mesh.indices.map { base + $0 }
+    }
 
     /// Adds `data` in `part`. A mesh with face materials, whose quads don't share vertices,
     /// draws its second material's quads in `alternate`.
@@ -131,7 +212,7 @@ struct BookMetalMesh {
     }
 
     /// Adds a plane facing +Z before `transform`, with the texture's bottom left at its
-    /// bottom left, as RealityKit's generated planes map theirs.
+    /// bottom left.
     mutating func appendPlane(width: Float, height: Float, as part: Part, transform: Transform) {
         var data = BookWallMeshData()
         data.positions = [
@@ -206,6 +287,196 @@ extension StyleColor {
     }
 }
 
+/// A wall page as the renderer draws it: every book's mesh in one pair of buffers, with its
+/// uploaded textures and shader constants. Preparation builds a page's books and its
+/// `Contents` off the main actor, so showing a wall builds and uploads nothing.
+@MainActor
+final class BookMetalPage {
+    /// One book's uploaded artwork: its spine and cover textures and its colors.
+    struct Artwork: @unchecked Sendable {
+        fileprivate let spine: any MTLTexture
+        fileprivate let cover: (any MTLTexture)?
+        fileprivate let uniforms: BookMetalBook
+
+        /// Uploads `spine` and `cover`, drawn for `slot`'s book in `style`. Returns `nil` when
+        /// Metal can't make a texture.
+        init?(
+            slot: BookWallLayout.Slot, style: BookWallLocalSpine.Style,
+            spine: BookWallSpineTexture.Mips, cover: CGImage?
+        ) {
+            guard let shared = BookMetalDevice.shared, let spine = shared.makeTexture(spine)
+            else { return nil }
+            var coverTexture: (any MTLTexture)?
+            if let cover {
+                guard let texture = shared.makeTexture(cover, mipmapped: true) else { return nil }
+                coverTexture = texture
+            }
+            var uniforms = BookMetalBook()
+            uniforms.cloth = style.background.linearP3
+            uniforms.paper = BookWallPageEdges.tint(of: slot.book, accent: style.accent).linearP3
+            uniforms.accent = style.accent.linearP3
+            uniforms.lettering = style.foreground.linearP3
+            // Where the joint's shading falls across the front artwork, as shares of its width
+            // from the spine edge: its middle and its half width.
+            uniforms.cover = [
+                BookWallBookParts.hingeInset / slot.coverWidth,
+                BookWallBookParts.hingeWidth / 2 / slot.coverWidth, coverTexture == nil ? 0 : 1, 0,
+            ]
+            self.spine = spine
+            self.cover = coverTexture
+            self.uniforms = uniforms
+        }
+    }
+
+    /// One book, ready to draw: its mesh, its artwork, and where it rests.
+    struct Book: Sendable {
+        fileprivate let id: Int
+        fileprivate let mesh: BookMetalMesh
+        fileprivate let artwork: Artwork
+        fileprivate let rest: Transform
+        /// Half the book's box, for the shadow it casts on the wall when open.
+        fileprivate let halfSize: SIMD3<Float>
+
+        init(slot: BookWallLayout.Slot, artwork: Artwork, in layout: BookWallLayout) {
+            id = slot.book.id
+            mesh = BookMetalMesh(book: slot)
+            self.artwork = artwork
+            rest = BookWallScene.restingTransform(for: slot, in: layout)
+            halfSize = SIMD3(slot.bookHeight, slot.collisionThickness, slot.coverWidth) / 2
+        }
+    }
+
+    /// A page's GPU buffers and what to draw from them.
+    struct Contents: @unchecked Sendable {
+        fileprivate let id = UUID()
+        fileprivate let vertices: any MTLBuffer
+        fileprivate let indices: any MTLBuffer
+        /// One buffer per frame in flight, each holding every item's constants.
+        // Three, since the display link keeps at most two frames in flight at its frame
+        // latency of 2.
+        fileprivate let uniforms: [any MTLBuffer]
+        /// The shelf, then each book in the order books drop.
+        fileprivate var items: [BookMetalRenderer.Item]
+        /// Each book's part in the fall, in the order of `items` after the shelf.
+        fileprivate let falling: [BookWallFall.Book]
+        fileprivate let pageEdge: (any MTLTexture)?
+
+        /// Joins `books`, one for each of `layout`'s slots in their order, and the shelf they rest on into one
+        /// pair of buffers. Returns `nil` when Metal can't make a buffer.
+        init?(books: [Book], layout: BookWallLayout) {
+            guard let shared = BookMetalDevice.shared else { return nil }
+            let shelfSize = BookWallScene.shelfSize(
+                for: layout, thickness: BookWallScene.shelfThickness(for: layout))
+            var mesh = BookMetalMesh()
+            mesh.appendBox(size: shelfSize, as: .cloth)
+            var shelf = BookMetalBook()
+            shelf.cloth = BookWallShelfLabel.wood.linearP3
+            var items = [
+                BookMetalRenderer.Item(
+                    id: nil, indexStart: 0, indexCount: mesh.indices.count, spine: nil, cover: nil,
+                    uniforms: shelf,
+                    rest: Transform(
+                        translation: BookWallScene.shelfCenter(for: layout, size: shelfSize)),
+                    halfSize: .zero)
+            ]
+            for book in books {
+                items.append(
+                    BookMetalRenderer.Item(
+                        id: book.id, indexStart: mesh.indices.count,
+                        indexCount: book.mesh.indices.count, spine: book.artwork.spine,
+                        cover: book.artwork.cover, uniforms: book.artwork.uniforms,
+                        rest: book.rest, halfSize: book.halfSize))
+                mesh.append(book.mesh)
+            }
+            let device = shared.device
+            guard
+                let vertices = device.makeBuffer(
+                    bytes: mesh.vertices, length: mesh.vertices.count * MemoryLayout<Float>.stride),
+                let indices = device.makeBuffer(
+                    bytes: mesh.indices, length: mesh.indices.count * MemoryLayout<UInt32>.stride)
+            else { return nil }
+            var uniforms: [any MTLBuffer] = []
+            for _ in 0..<3 {
+                guard
+                    let buffer = device.makeBuffer(
+                        length: items.count * MemoryLayout<BookMetalBook>.stride,
+                        options: .storageModeShared)
+                else { return nil }
+                uniforms.append(buffer)
+            }
+            self.vertices = vertices
+            self.indices = indices
+            self.uniforms = uniforms
+            self.items = items
+            falling = BookWallScene.fallingBooks(of: layout)
+            // One shared page-edge texture serves every book; without it pages stay plain.
+            pageEdge = BookWallPageTexture.make()
+                .flatMap {
+                    shared.makeTexture($0, mipmapped: true)
+                }
+        }
+    }
+
+    fileprivate private(set) var contents: Contents
+    /// The renderer that last showed this page, which draws a replaced cover at once.
+    fileprivate weak var renderer: BookMetalRenderer?
+
+    init(_ contents: Contents) {
+        self.contents = contents
+    }
+
+    /// Replaces `book`'s artwork, for a cover that arrived after the page was prepared. A
+    /// renderer that is showing the page swaps it in where the book is, without moving
+    /// anything.
+    func replaceArtwork(of book: Int, with artwork: Artwork) {
+        guard let index = contents.items.firstIndex(where: { $0.id == book }) else { return }
+        contents.items[index].show(artwork)
+        renderer?.replaceArtwork(of: book, onPage: contents.id, with: artwork)
+    }
+}
+
+/// Why the wall's renderer stopped, shared with the Retry button on Book Wall's page. The surface
+/// is noninteractive and hidden from accessibility, so the page shows the error.
+@MainActor @Observable
+final class BookWallRendererStatus {
+    /// The renderer's error, or nil while it runs.
+    var failure: String?
+    /// Replaces the renderer that reports here, which `retry()` calls.
+    @ObservationIgnored var reconnect: (@MainActor () -> Void)?
+
+    /// Connects a new renderer on the current surface before returning, so the press that
+    /// calls this knows whether the wall runs again. Returns `true` when it does. A renderer
+    /// that fails again sets `failure` and waits for the next Retry.
+    func retry() -> Bool {
+        reconnect?()
+        return failure == nil
+    }
+
+    /// Shown when Metal can't supply what a renderer needs to start.
+    nonisolated static let unavailableMetal =
+        "Metal could not create a device, command queue, or render pipeline."
+
+    #if DEBUG && targetEnvironment(simulator)
+        /// Scenario hook: `--test-fail-book-wall-renderer` fails the first connection and
+        /// `--test-fail-book-wall-renderer=N` the first N, so UI tests can reach Retry.
+        /// Returns whether this connection is one that fails.
+        static func takeScenarioFailure() -> Bool {
+            guard scenarioFailures > 0 else { return false }
+            scenarioFailures -= 1
+            return true
+        }
+
+        private static var scenarioFailures: Int = {
+            let arguments = ProcessInfo.processInfo.arguments
+            let prefix = "--test-fail-book-wall-renderer="
+            if let argument = arguments.first(where: { $0.hasPrefix(prefix) }) {
+                return Int(argument.dropFirst(prefix.count)) ?? 0
+            }
+            return arguments.contains("--test-fail-book-wall-renderer") ? 1 : 0
+        }()
+    #endif
+}
+
 /// Presents the wall through the Metal renderer.
 struct BookMetalWallView: UIViewRepresentable {
     @Environment(\.scenePhase) private var scenePhase
@@ -240,16 +511,19 @@ final class BookMetalWallSurface: UIView {
     var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
     weak var host: BookMetalWallHost?
 
+    /// Dark wood that fills the surface until the wall image arrives.
+    static let clearColor = UIColor(red: 0.16, green: 0.11, blue: 0.08, alpha: 1)
+
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = BookWallRendererSurface.clearColor
+        backgroundColor = Self.clearColor
         isOpaque = true
         isUserInteractionEnabled = false
         metalLayer.isOpaque = true
         metalLayer.pixelFormat = .bgra8Unorm_srgb
         metalLayer.drawableSize = BookMetalWall.renderSize
-        // Textures and colors are Display P3 with the sRGB transfer curve, as on the
-        // RealityKit wall.
+        // Textures and colors are Display P3 with the sRGB transfer curve. Tagging the layer
+        // as sRGB instead desaturates the wall through the compositor's color conversion.
         metalLayer.colorspace = CGColorSpace(name: CGColorSpace.displayP3)
     }
 
@@ -272,8 +546,7 @@ final class BookMetalWallSurface: UIView {
     }
 }
 
-/// Builds GPU resources from the scene's wall on the main actor and hands them to the
-/// render thread.
+/// Owns the renderer's lifecycle on its surface, and hands it what `BookWallScene` shows.
 @MainActor
 final class BookMetalWallHost {
     private weak var scene: BookWallScene?
@@ -318,16 +591,16 @@ final class BookMetalWallHost {
         if status.failure != nil { status.failure = nil }
         renderer.setActive(isAttached && isSceneActive)
         viewportChanged(size: surface.bounds.size)
-        scene.attachMetalWall(self)
+        scene.attach(self)
     }
 
     private func makeRenderer(on surface: BookMetalWallSurface) -> BookMetalRenderer? {
         BookMetalRenderer(
             layer: surface.metalLayer,
-            onLanded: { [weak self] wallID in
+            onLanded: { [weak self] page in
                 Task { @MainActor [weak self] in
-                    guard let self, let shown, shown.id == wallID else { return }
-                    self.scene?.finishMetalFall(of: shown)
+                    guard let self, let shown, shown.resources?.contents.id == page else { return }
+                    self.scene?.fallEnded(of: shown)
                 }
             },
             onFlightEnded: { [weak self] token in
@@ -358,19 +631,17 @@ final class BookMetalWallHost {
     }
 
     func setBackdrop(resting: CGImage, detail: CGImage) {
-        guard let renderer, let texture = renderer.makeTexture(resting, mipmapped: false) else {
-            return
-        }
-        renderer.setBackdrop(texture, detail: renderer.makeTexture(detail, mipmapped: false))
+        guard let renderer, let shared = BookMetalDevice.shared,
+            let texture = shared.makeTexture(resting, mipmapped: false)
+        else { return }
+        renderer.setBackdrop(texture, detail: shared.makeTexture(detail, mipmapped: false))
     }
 
-    /// Flies `book` along `frames` while the detail light level moves between the two
-    /// levels, with the detail key light at `light`. `completion` runs when the flight ends,
-    /// unless `endDetail()` or another flight replaces it first. The book holds the last
-    /// frame until then.
+    /// Flies `book` along `flight`, with the detail key light at `light`. `completion` runs when
+    /// the flight ends, unless `endDetail()` or another flight replaces it first. The book holds
+    /// the last frame until then.
     func fly(
-        _ book: Int, along frames: [BookWallFlightFrame], duration: TimeInterval,
-        fromLevel: Float, toLevel: Float, light: SIMD3<Float>,
+        _ book: Int, _ flight: BookWallFlight, light: SIMD3<Float>,
         completion: (@MainActor () -> Void)?
     ) {
         flightEnds.removeAll()
@@ -379,8 +650,7 @@ final class BookMetalWallHost {
         renderer?
             .fly(
                 BookMetalRenderer.Detail(
-                    book: book, frames: frames, duration: duration, fromLevel: fromLevel,
-                    toLevel: toLevel, light: light, token: lastFlight))
+                    book: book, flight: flight, light: light, token: lastFlight))
     }
 
     /// Drifts the open book about the pose its flight ended at, on the media clock from
@@ -399,37 +669,6 @@ final class BookMetalWallHost {
         renderer?.focus(id, decor: decor)
     }
 
-    /// A book's colors, and where its front board's joint is shaded when it has cover art.
-    private static func uniforms(
-        for slot: BookWallLayout.Slot, artwork: BookWallArtwork, hasCover: Bool
-    ) -> BookMetalBook {
-        let style = artwork.style
-        var uniforms = BookMetalBook()
-        uniforms.cloth = style.background.linearP3
-        uniforms.paper = BookWallPageEdges.tint(of: slot.book, accent: style.accent).linearP3
-        uniforms.accent = style.accent.linearP3
-        uniforms.lettering = style.foreground.linearP3
-        let hinge = BookWallScene.hinge(of: slot)
-        uniforms.cover = [hinge.x, hinge.y, hasCover ? 1 : 0, 0]
-        return uniforms
-    }
-
-    /// Uploads the artwork of each book whose cover arrived after the wall was prepared, and
-    /// swaps it in where the book is, without moving anything.
-    func refreshArtwork(of wall: BookWallPreparedWall) {
-        guard let renderer, wall.id == shown?.id else { return }
-        for id in wall.artwork.changed {
-            guard let artwork = wall.artwork.byBook[id],
-                let slot = wall.layout.slots.first(where: { $0.book.id == id })
-            else { continue }
-            let cover = artwork.cover.flatMap { renderer.makeTexture($0, mipmapped: true) }
-            renderer.replaceArtwork(
-                of: id, spine: renderer.makeTexture(artwork.spine), cover: cover,
-                uniforms: Self.uniforms(for: slot, artwork: artwork, hasCover: cover != nil))
-        }
-        wall.artwork.changed.removeAll()
-    }
-
     /// Clears the wall, leaving the wall image, for a wall with no books.
     func clear() {
         shown = nil
@@ -437,55 +676,19 @@ final class BookMetalWallHost {
         renderer?.clear()
     }
 
-    /// Shows `wall`, falling from the drop height or at rest.
-    // Meshes are built and textures uploaded here, on the main actor, when the wall appears,
-    // so a large page can hold the main thread for a moment before its fall starts.
+    /// Puts every book that is still falling in its place.
+    func seat() {
+        renderer?.seat()
+    }
+
+    /// Shows `wall`'s prepared page, falling from the drop height or at rest.
     func show(_ wall: BookWallPreparedWall, stage: BookWallStage, falls: Bool) {
-        guard let renderer else { return }
+        guard let renderer, let page = wall.resources else { return }
         shown = wall
-        var mesh = BookMetalMesh()
-        var items: [BookMetalRenderer.Item] = []
-
-        mesh.appendBox(size: stage.shelfSize, as: .cloth)
-        var shelf = BookMetalBook()
-        shelf.cloth = stage.shelfColor.linearP3
-        items.append(
-            BookMetalRenderer.Item(
-                id: nil, indexStart: 0, indexCount: mesh.indices.count, spine: nil, cover: nil,
-                uniforms: shelf,
-                rest: Transform(translation: stage.shelfCenter), halfSize: .zero, column: -1,
-                delay: 0))
-
-        let pageEdge = BookWallPageTexture.make()
-            .flatMap {
-                renderer.makeTexture($0, mipmapped: true)
-            }
-        var labels: [Int: any MTLTexture] = [:]
-        for (id, label) in wall.labels {
-            labels[id] = renderer.makeTexture(label.image, mipmapped: true)
-        }
-        let hint = wall.hint.flatMap { renderer.makeTexture($0.image, mipmapped: true) }
-        for (order, slot) in wall.layout.slots.enumerated() {
-            guard let artwork = wall.artwork.byBook[slot.book.id] else { continue }
-            let cover = artwork.cover.flatMap { renderer.makeTexture($0, mipmapped: true) }
-            let start = mesh.indices.count
-            let bookMesh = BookWallScene.metalMesh(for: slot)
-            let base = UInt32(mesh.vertices.count / BookMetalMesh.floatsPerVertex)
-            mesh.vertices += bookMesh.vertices
-            mesh.indices += bookMesh.indices.map { base + $0 }
-            let uniforms = Self.uniforms(for: slot, artwork: artwork, hasCover: cover != nil)
-            items.append(
-                BookMetalRenderer.Item(
-                    id: slot.book.id, indexStart: start, indexCount: bookMesh.indices.count,
-                    spine: renderer.makeTexture(artwork.spine), cover: cover, uniforms: uniforms,
-                    rest: BookWallScene.restingTransform(for: slot, in: wall.layout),
-                    halfSize: SIMD3(slot.bookHeight, slot.collisionThickness, slot.coverWidth) / 2,
-                    column: slot.column,
-                    delay: Double(order) * stage.dropSpacing))
-        }
+        page.renderer = renderer
         renderer.show(
-            wallID: wall.id, mesh: mesh, items: items, pageEdge: pageEdge, labels: labels,
-            hint: hint, stage: stage, falls: falls)
+            page.contents, labels: wall.labels.mapValues(\.texture),
+            hint: wall.hint?.texture, stage: stage, falls: falls)
     }
 }
 
@@ -504,21 +707,17 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         let rest: Transform
         /// Half the book's box, for the shadow it casts on the wall when open.
         let halfSize: SIMD3<Float>
-        let column: Int
-        /// When the book starts to fall, after the fall starts.
-        let delay: TimeInterval
+
+        mutating func show(_ artwork: BookMetalPage.Artwork) {
+            spine = artwork.spine
+            cover = artwork.cover
+            uniforms = artwork.uniforms
+        }
     }
 
+    /// The page on screen: its prepared contents, its labels, and how the scene frames it.
     private struct Page {
-        let wallID: UUID
-        let vertices: any MTLBuffer
-        let indices: any MTLBuffer
-        /// One buffer per frame in flight, each holding every item's constants.
-        // Three, since the display link keeps at most two frames in flight at its frame
-        // latency of 2.
-        let uniforms: [any MTLBuffer]
-        var items: [Item]
-        let pageEdge: (any MTLTexture)?
+        var contents: BookMetalPage.Contents
         /// Each book's shelf label, and the hint shown without focus.
         let labels: [Int: any MTLTexture]
         let hint: (any MTLTexture)?
@@ -528,10 +727,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     /// A book's flight to or from its details, and its drift once there.
     fileprivate struct Detail {
         let book: Int
-        let frames: [BookWallFlightFrame]
-        let duration: TimeInterval
-        let fromLevel: Float
-        let toLevel: Float
+        let flight: BookWallFlight
         let light: SIMD3<Float>
         let token: UInt64
         /// When the flight started; `nil` until its first frame.
@@ -588,6 +784,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     private var softShadow: (any MTLTexture)?
     private var contactShadow: (any MTLTexture)?
     private let link: CAMetalDisplayLink
+    /// Reports the page whose books have all landed.
     private let onLanded: @Sendable (UUID) -> Void
     private let onFlightEnded: @Sendable (UInt64) -> Void
     private let lock = NSLock()
@@ -612,7 +809,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
 
     private static let sampleCount = 4
     private static let bookStride = MemoryLayout<BookMetalBook>.stride
-    /// Light levels in linear light, fitted by eye to the RealityKit wall: a spine facing the
+    /// Light levels in linear light, fitted by eye: a spine facing the
     /// camera shows at about nine tenths of its texture's color.
     private static let shelfLightColor = SIMD4<Float>(0.50, 0.44, 0.36, 1)
     private static let poolLightColor = SIMD4<Float>(3.2, 2.5, 1.6, 1)
@@ -628,19 +825,15 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     /// The detail key light's level at its distance from the detail pose.
     private static let detailLightColor = SIMD4<Float>(0.62, 0.57, 0.50, 1)
 
-    private static func smootherstep(_ value: Float) -> Float {
-        let t = min(1, max(0, value))
-        return t * t * t * (t * (t * 6 - 15) + 10)
-    }
-
     @MainActor
     init?(
         layer: CAMetalLayer, onLanded: @escaping @Sendable (UUID) -> Void,
         onFlightEnded: @escaping @Sendable (UInt64) -> Void
     ) {
-        guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
-            let library = device.makeDefaultLibrary()
+        guard let shared = BookMetalDevice.shared, let queue = shared.device.makeCommandQueue(),
+            let library = shared.device.makeDefaultLibrary()
         else { return nil }
+        let device = shared.device
         layer.device = device
         self.device = device
         self.queue = queue
@@ -737,8 +930,8 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             Self.image(width: 1, height: 1) { context in
                 context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
             }
-            .flatMap { makeTexture($0, mipmapped: false) }
-        // The ribbon's last segment, with a swallowtail notch as deep as on the RealityKit wall.
+            .flatMap { shared.makeTexture($0, mipmapped: false) }
+        // The ribbon's last segment, with a swallowtail notch.
         ribbonTail =
             Self.image(width: 64, height: 64) { context in
                 let notch =
@@ -750,11 +943,11 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 context.addLine(to: CGPoint(x: 0, y: 0))
                 context.fillPath()
             }
-            .flatMap { makeTexture($0, mipmapped: true) }
+            .flatMap { shared.makeTexture($0, mipmapped: true) }
         softShadow = BookWallBackdropBake.makeShadow(fadesDown: false)
-            .flatMap { makeTexture($0, mipmapped: false) }
+            .flatMap { shared.makeTexture($0, mipmapped: false) }
         contactShadow = BookWallBackdropBake.makeShadow(fadesDown: true)
-            .flatMap { makeTexture($0, mipmapped: false) }
+            .flatMap { shared.makeTexture($0, mipmapped: false) }
         #if BOOKWORMS_DIAGNOSTICS
             if BookMetalWall.traces { startHeartbeat() }
         #endif
@@ -810,14 +1003,20 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     }
 
     fileprivate func replaceArtwork(
-        of book: Int, spine: (any MTLTexture)?, cover: (any MTLTexture)?, uniforms: BookMetalBook
+        of book: Int, onPage page: UUID, with artwork: BookMetalPage.Artwork
     ) {
         lock.withLock {
-            guard let index = state.page?.items.firstIndex(where: { $0.id == book }) else { return }
-            state.page?.items[index].spine = spine
-            state.page?.items[index].cover = cover
-            state.page?.items[index].uniforms = uniforms
+            guard state.page?.contents.id == page,
+                let index = state.page?.contents.items.firstIndex(where: { $0.id == book })
+            else { return }
+            state.page?.contents.items[index].show(artwork)
         }
+        wake()
+    }
+
+    /// Ends the fall with every book in its place.
+    func seat() {
+        lock.withLock { state.falls = false }
         wake()
     }
 
@@ -854,28 +1053,11 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     }
 
     fileprivate func show(
-        wallID: UUID, mesh: BookMetalMesh, items: [Item], pageEdge: (any MTLTexture)?,
-        labels: [Int: any MTLTexture], hint: (any MTLTexture)?, stage: BookWallStage, falls: Bool
+        _ contents: BookMetalPage.Contents, labels: [Int: any MTLTexture],
+        hint: (any MTLTexture)?, stage: BookWallStage, falls: Bool
     ) {
-        guard !mesh.indices.isEmpty,
-            let vertices = device.makeBuffer(
-                bytes: mesh.vertices, length: mesh.vertices.count * MemoryLayout<Float>.stride),
-            let indices = device.makeBuffer(
-                bytes: mesh.indices, length: mesh.indices.count * MemoryLayout<UInt32>.stride)
-        else { return }
-        var uniforms: [any MTLBuffer] = []
-        for _ in 0..<3 {
-            guard
-                let buffer = device.makeBuffer(
-                    length: items.count * Self.bookStride, options: .storageModeShared)
-            else { return }
-            uniforms.append(buffer)
-        }
-        let page = Page(
-            wallID: wallID, vertices: vertices, indices: indices, uniforms: uniforms,
-            items: items, pageEdge: pageEdge, labels: labels, hint: hint, stage: stage)
         lock.withLock {
-            state.page = page
+            state.page = Page(contents: contents, labels: labels, hint: hint, stage: stage)
             state.falls = falls
             state.fallStart = nil
             state.focused = nil
@@ -897,52 +1079,6 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         context.setFillColor(UIColor.white.cgColor)
         draw(context)
         return context.makeImage()
-    }
-
-    /// Uploads a spine's prepared mip chain.
-    func makeTexture(_ mips: BookWallSpineTexture.Mips) -> (any MTLTexture)? {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm_srgb, width: mips.width, height: mips.height, mipmapped: true)
-        descriptor.mipmapLevelCount = mips.levels.count
-        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
-        var (width, height) = (mips.width, mips.height)
-        for (level, data) in mips.levels.enumerated() {
-            data.withUnsafeBytes { bytes in
-                guard let base = bytes.baseAddress else { return }
-                texture.replace(
-                    region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: level,
-                    withBytes: base, bytesPerRow: width * 4)
-            }
-            (width, height) = (max(1, width / 2), max(1, height / 2))
-        }
-        return texture
-    }
-
-    /// Uploads `image` as Display P3 with the sRGB transfer curve.
-    func makeTexture(_ image: CGImage, mipmapped: Bool) -> (any MTLTexture)? {
-        let (width, height) = (image.width, image.height)
-        guard width > 0, height > 0, let space = CGColorSpace(name: CGColorSpace.displayP3),
-            let context = CGContext(
-                data: nil, width: width, height: height, bitsPerComponent: 8,
-                bytesPerRow: width * 4, space: space,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return nil }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm_srgb, width: width, height: height, mipmapped: mipmapped)
-        guard let bytes = context.data, let texture = device.makeTexture(descriptor: descriptor)
-        else { return nil }
-        texture.replace(
-            region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: bytes,
-            bytesPerRow: width * 4)
-        if mipmapped, let buffer = queue.makeCommandBuffer(),
-            let blit = buffer.makeBlitCommandEncoder()
-        {
-            blit.generateMipmaps(for: texture)
-            blit.endEncoding()
-            buffer.commit()
-        }
-        return texture
     }
 
     private func wake() {
@@ -1002,31 +1138,14 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         else { return }
 
         // Poses.
-        var heights = page.items.map(\.rest.translation.y)
+        let items = page.contents.items
+        var heights = items.map(\.rest.translation.y)
         var landed = true
         if snapshot.falls, let fallStart = snapshot.fallStart {
-            // How far the last book of each column still is above its place.
-            var above: [Int: Float] = [:]
-            for (index, item) in page.items.enumerated() where item.id != nil {
-                let seconds = Float(time - fallStart - item.delay)
-                let rest = item.rest.translation.y
-                var height = stage.dropHeight
-                if seconds > 0 {
-                    // A drop from rest under gravity `g` with linear damping `k` has fallen
-                    // (g / k) · (t − (1 − e^(−kt)) / k) after `t` seconds.
-                    let damping = stage.damping
-                    let fallen =
-                        stage.gravity / damping
-                        * (seconds - (1 - exp(-damping * seconds)) / damping)
-                    height = stage.dropHeight - fallen
-                }
-                // A book stops on its place, or on the book below it while that one still
-                // falls, so it lands the moment its support has.
-                height = max(height, rest + (above[item.column] ?? 0))
-                above[item.column] = height - rest
-                heights[index] = height
-                if height > rest { landed = false }
-            }
+            let fall = stage.fall.heights(of: page.contents.falling, after: time - fallStart)
+            // The shelf comes first and doesn't fall.
+            heights.replaceSubrange(1..., with: fall.heights)
+            landed = fall.landed
         }
         var animating = snapshot.falls && !landed
         // The open book's pose, the camera's depth, and the detail light level.
@@ -1034,22 +1153,12 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         var cameraDepth = stage.cameraDepth
         var level: Float = 0
         var lightPosition = SIMD3<Float>.zero
-        if let detail = snapshot.detail, let start = detail.start, let last = detail.frames.last {
-            let progress =
-                detail.duration > 0 ? min(1, Float((time - start) / detail.duration)) : 1
-            var pose = last.pose
-            cameraDepth = last.cameraDepth
-            if progress < 1, detail.frames.count > 1 {
-                // The frames are evenly spaced samples of the path, not display frames.
-                let sample = progress * Float(detail.frames.count - 1)
-                let index = min(Int(sample), detail.frames.count - 2)
-                let fraction = sample - Float(index)
-                let (from, to) = (detail.frames[index], detail.frames[index + 1])
-                pose = Transform(
-                    rotation: simd_slerp(from.pose.rotation, to.pose.rotation, fraction),
-                    translation: from.pose.translation
-                        + (to.pose.translation - from.pose.translation) * fraction)
-                cameraDepth = from.cameraDepth + (to.cameraDepth - from.cameraDepth) * fraction
+        if let detail = snapshot.detail, let start = detail.start,
+            let sample = detail.flight.sample(at: time - start)
+        {
+            var pose = sample.pose
+            cameraDepth = sample.cameraDepth
+            if !sample.isOver {
                 animating = true
             } else if !detail.hasEnded {
                 lock.withLock {
@@ -1061,15 +1170,14 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 pose = drift.posed(pose, at: Float(time - detail.driftStart))
                 animating = true
             }
-            level =
-                detail.fromLevel
-                + (detail.toLevel - detail.fromLevel) * Self.smootherstep(progress)
+            level = sample.level
             lightPosition = detail.light
             flown = (detail.book, pose)
         }
         // The rest of the wall fades out over the later part of the opening.
         let wallOpacity =
-            1 - Self.smootherstep((level - stage.wallFadeStart) / (1 - stage.wallFadeStart))
+            1
+            - BookWallEasing.smootherstep((level - stage.wallFadeStart) / (1 - stage.wallFadeStart))
         var flownIndex: Int?
 
         // The wall's flat extras, which arrive with the focused book's pull-out.
@@ -1117,7 +1225,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         // The open book's soft shadow on the wall: its outline as the camera sees it, cast
         // onto the wall image and shifted away from the key light.
         var shadow: Decal?
-        if level > 0, let flown, let item = page.items.first(where: { $0.id == flown.book }) {
+        if level > 0, let flown, let item = items.first(where: { $0.id == flown.book }) {
             let wall = -(stage.backdropDistance + cameraDepth - stage.cameraDepth) + 0.1
             var low = SIMD2<Float>(repeating: .greatestFiniteMagnitude)
             var high = SIMD2<Float>(repeating: -.greatestFiniteMagnitude)
@@ -1144,11 +1252,10 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 .matrix,
                 tint: [1, 1, 1, stage.detailShadowOpacity * level], texture: softShadow)
         }
-        let ring = page.uniforms[frameIndex % page.uniforms.count]
+        let ring = page.contents.uniforms[frameIndex % page.contents.uniforms.count]
         frameIndex += 1
-        let constants = ring.contents()
-            .bindMemory(to: BookMetalBook.self, capacity: page.items.count)
-        for (index, item) in page.items.enumerated() {
+        let constants = ring.contents().bindMemory(to: BookMetalBook.self, capacity: items.count)
+        for (index, item) in items.enumerated() {
             var pose = item.rest
             pose.translation.y = heights[index]
             if let flown, item.id == flown.book {
@@ -1157,7 +1264,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             } else if let id = item.id, let pull = snapshot.pulls[id], let start = pull.start {
                 let progress = min(1, Float(time - start) / stage.pullOutDuration)
                 if progress < 1 { animating = true }
-                // Ease out, as the RealityKit wall's pull-out does.
+                // Ease out.
                 let eased = 1 - (1 - progress) * (1 - progress)
                 let amount = pull.from + (pull.to - pull.from) * eased
                 pose.translation += pose.rotation.act([0, 0, stage.pullOut * amount])
@@ -1173,12 +1280,12 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 * Transform(translation: [0, 0, -cameraDepth]).matrix,
             cameraPosition: [0, 0, cameraDepth, 1],
             // The stage passes from the shelf and pool lights to the detail key light, the
-            // top light doubles, and the room dims, as on the RealityKit wall.
+            // top light doubles, and the room dims.
             shelfLightPosition: SIMD4(stage.shelfLight, 1),
             shelfLightColor: Self.shelfLightColor * (1 - level),
             poolLightPosition: SIMD4(stage.poolLight, 1),
             poolLightColor: Self.poolLightColor
-                * (1 - Self.smootherstep(level / stage.wallFadeStart)),
+                * (1 - BookWallEasing.smootherstep(level / stage.wallFadeStart)),
             topLightDirection: SIMD4(stage.topLightDirection, 0),
             topLightColor: Self.topLightColor * (1 + level),
             ambientTop: Self.ambientTop * pow(2, stage.detailAmbientExponent * level),
@@ -1217,9 +1324,9 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             encoder.setRenderPipelineState(bookPipeline)
             encoder.setDepthStencilState(depthState)
             encoder.setCullMode(.back)
-            encoder.setFragmentTexture(page.pageEdge, index: 2)
+            encoder.setFragmentTexture(page.contents.pageEdge, index: 2)
             for index in indices {
-                let item = page.items[index]
+                let item = items[index]
                 let offset = index * Self.bookStride
                 encoder.setVertexBufferOffset(offset, index: 2)
                 encoder.setFragmentBufferOffset(offset, index: 2)
@@ -1227,13 +1334,13 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 encoder.setFragmentTexture(item.cover, index: 1)
                 encoder.drawIndexedPrimitives(
                     type: .triangle, indexCount: item.indexCount, indexType: .uint32,
-                    indexBuffer: page.indices,
+                    indexBuffer: page.contents.indices,
                     indexBufferOffset: item.indexStart * MemoryLayout<UInt32>.stride)
             }
         }
         encoder.setFrontFacing(.counterClockwise)
         encoder.setCullMode(.back)
-        encoder.setVertexBuffer(page.vertices, offset: 0, index: 0)
+        encoder.setVertexBuffer(page.contents.vertices, offset: 0, index: 0)
         encoder.setVertexBytes(&frame, length: MemoryLayout<BookMetalFrame>.stride, index: 1)
         encoder.setFragmentBytes(&frame, length: MemoryLayout<BookMetalFrame>.stride, index: 1)
         encoder.setVertexBuffer(ring, offset: 0, index: 2)
@@ -1241,7 +1348,7 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         drawBackdrop(opacity: 1)
         // While the wall fades, the open book draws after the fade, in front of everything.
         let fades = wallOpacity < 1 && flownIndex != nil
-        let wall = page.items.indices.filter { !(fades && $0 == flownIndex) }
+        let wall = items.indices.filter { !(fades && $0 == flownIndex) }
         if wallOpacity > 0 || !fades {
             for _ in 0..<BookMetalWall.stress { drawBooks(wall) }
             drawDecals(wallDecals)
@@ -1273,13 +1380,13 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         buffer.commit()
 
         if snapshot.falls, landed {
-            lock.withLock { if state.page?.wallID == page.wallID { state.falls = false } }
-            onLanded(page.wallID)
+            lock.withLock { if state.page?.contents.id == page.contents.id { state.falls = false } }
+            onLanded(page.contents.id)
         }
         #if BOOKWORMS_DIAGNOSTICS
             record(
                 target: time, entry: encodeStart, encode: CACurrentMediaTime() - encodeStart,
-                books: page.items.count - 1)
+                books: items.count - 1)
         #endif
         // A still wall keeps its last frame until the main thread changes something.
         if !animating, !BookMetalWall.drawsAtRest {

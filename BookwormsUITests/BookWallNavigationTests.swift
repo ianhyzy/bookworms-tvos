@@ -494,7 +494,6 @@ final class BookWallNavigationTests: XCTestCase {
         let secondPage = shownBooks(app)
         XCTAssertEqual(
             secondPage, Array((firstPage.count + 1)...100), "No book is lost or repeated")
-        XCTAssertEqual(app.staticTexts["book-wall-seated-probe"].label, "0")
         capture(app, name: "Book-Wall-page-2")
 
         // Landing moves no focus, and Drop again drops the same page.
@@ -507,7 +506,6 @@ final class BookWallNavigationTests: XCTestCase {
         replayAndWaitToLand(app)
         XCTAssertEqual(shownBooks(app), secondPage)
         XCTAssertEqual(menu.value as? String, "2 of 2")
-        XCTAssertEqual(app.staticTexts["book-wall-seated-probe"].label, "0")
 
         // Down enters the new page's spines, and every spine stays on screen.
         RemoteNavigation.press(.left, in: app, expecting: menu)
@@ -719,7 +717,7 @@ final class BookWallNavigationTests: XCTestCase {
         try app.auditAccessibility {
             [
                 "scenario-probe", "focus-transition-probe", "book-wall-fall-probe",
-                "book-wall-design-probe", "book-wall-seated-probe", "book-wall-books-probe",
+                "book-wall-design-probe", "book-wall-books-probe",
                 "book-wall-drops-probe", "book-wall-cut-falls-probe", "book-wall-id-probe",
             ]
             .contains($0.element?.identifier ?? "")

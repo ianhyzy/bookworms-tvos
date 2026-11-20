@@ -2,13 +2,12 @@ import CoreGraphics
 import CoreText
 import Foundation
 import Observation
-import RealityKit
 import UIKit
 
 /// Artwork and layout that are ready before the 3D wall starts its falling animation.
 @MainActor
 struct BookWallPreparedWall {
-    /// Distinguishes rebuilt walls whose books are equal, so the scene shows the entities that
+    /// Distinguishes rebuilt walls whose books are equal, so the scene shows the page that
     /// later cover recovery updates.
     let id = UUID()
     /// The books of the page this wall shows, earliest finish first.
@@ -34,10 +33,9 @@ struct BookWallPreparedWall {
     /// The series source each book's spine draws with. Other books draw their own.
     let drawsWith: [Int: Book]
     let layout: BookWallLayout
-    let bodies: [Int: ModelEntity]
-    /// Each book's artwork for the Metal renderer. It is empty when RealityKit draws the wall
-    /// (`BookMetalWall.isEnabled` is false), since the models then hold their own textures.
-    let artwork: BookWallArtworkBox
+    /// The books' meshes and uploaded textures, which the renderer draws from, or `nil` for a
+    /// wall without books.
+    let resources: BookMetalPage?
     /// Shelf-front lettering for each book and for the resting hint.
     let labels: [Int: BookWallShelfLabel.Prepared]
     let hint: BookWallShelfLabel.Prepared?
@@ -98,16 +96,13 @@ final class BookWallPreparation {
         var missing: [Book]
     }
 
-    /// Each page's models and textures stay in memory while the page is kept.
+    /// Each page's meshes and textures stay in memory while the page is kept.
     private static let maximumDrawnPages = 3
 
     private(set) var prepared: BookWallPreparedWall?
     private(set) var completedCount = 0
     private(set) var totalCount = 0
     private(set) var failure: String?
-    /// Increments when a recovered cover replaces a prepared book's artwork, so the visible
-    /// scene can draw again.
-    private(set) var coverRevision = 0
     @ObservationIgnored private var year: Year?
     /// The current year's drawn pages, most recently shown first.
     @ObservationIgnored private var drawnPages: [DrawnPage] = []
@@ -254,10 +249,10 @@ final class BookWallPreparation {
             drawsWith: drawsWith, typographies: typographies)
     }
 
-    /// Draws every book of `page` of `year`, adding each drawn book to `completedCount` when
-    /// `countsProgress` is true. Returns `nil` when the task is cancelled or a book's spine, cover,
-    /// or shelf label texture can't be made, and otherwise the page and the books whose covers it
-    /// was drawn without.
+    /// Draws every book of `page` of `year` and builds what the renderer draws it from, off the
+    /// main actor, adding each drawn book to `completedCount` when `countsProgress` is true.
+    /// Returns `nil` when the task is cancelled or a book's spine, cover, or shelf label texture
+    /// can't be made, and otherwise the page and the books whose covers it was drawn without.
     private func build(page: Int, of year: Year, countsProgress: Bool = true) async -> DrawnPage? {
         let books = year.books(onPage: page)
         let drawn = year.drawn
@@ -297,9 +292,7 @@ final class BookWallPreparation {
         }
         guard !Task.isCancelled else { return nil }
         var styles: [Int: BookWallLocalSpine.Style] = [:]
-        var bodies: [Int: ModelEntity] = [:]
-        let artwork = BookWallArtworkBox()
-        let drawsModels = !BookMetalWall.isEnabled
+        var parts: [BookMetalPage.Book] = []
         var labels: [Int: BookWallShelfLabel.Prepared] = [:]
         var missing: [Book] = []
         for source in outside.values where !source.coverURLs.isEmpty {
@@ -309,12 +302,6 @@ final class BookWallPreparation {
                 missing.append(source)
             }
         }
-        // One shared page-edge texture serves every book; without it pages stay plain.
-        var pageEdge: TextureResource?
-        if drawsModels, let image = BookWallPageTexture.make() {
-            pageEdge = try? await TextureResource.generate(
-                from: image, options: .init(semantic: .color))
-        }
         for slot in layout.slots {
             guard !Task.isCancelled else { return nil }
             let cover = try? await ArtworkStore.shared.detailImage(
@@ -323,63 +310,42 @@ final class BookWallPreparation {
             if cover == nil, !slot.book.coverURLs.isEmpty { missing.append(slot.book) }
             let source = await sourceStyle(
                 for: slot.book, drawsWith: drawsWith, designs: drawn, cache: &styles)
-            let images = await rasterizer.render(
-                slot: slot, cover: cover, source: source, design: drawn[slot.book.id],
-                fontStyle: fontStyle)
-            guard !Task.isCancelled else { return nil }
             // A texture that can't be made fails the wall, which offers Retry, rather than
             // drawing a book without its spine, cover, or shelf label.
-            guard let mips = images.spineMips else { return nil }
-            // RealityKit's textures are made only when RealityKit draws the wall; the Metal
-            // renderer uploads the same images itself when the wall shows.
-            var spine: TextureResource?
-            var coverTexture: TextureResource?
-            if drawsModels {
-                guard let texture = try? await mips.texture() else { return nil }
-                spine = texture
-                if let coverImage = images.cover {
-                    guard
-                        let texture = try? await TextureResource.generate(
-                            from: coverImage, options: .init(semantic: .color))
-                    else { return nil }
-                    coverTexture = texture
-                }
-            } else {
-                artwork.byBook[slot.book.id] = BookWallArtwork(
-                    style: images.style, spine: mips, cover: images.cover)
-            }
-            if let label = images.label {
-                guard let prepared = await BookWallShelfLabel.prepare(label) else { return nil }
-                labels[slot.book.id] = prepared
-            }
-            guard !Task.isCancelled else { return nil }
-            bodies[slot.book.id] = BookWallScene.makeBook(
-                slot: slot, style: images.style, spine: spine, cover: coverTexture,
-                pageEdge: pageEdge)
+            guard
+                let made = await rasterizer.prepare(
+                    slot: slot, in: layout, cover: cover, source: source,
+                    design: drawn[slot.book.id], fontStyle: fontStyle),
+                !Task.isCancelled
+            else { return nil }
+            parts.append(made.book)
+            labels[slot.book.id] = made.label
             if countsProgress { completedCount += 1 }
-            await Task.yield()
         }
-        guard !Task.isCancelled else { return nil }
+        var resources: BookMetalPage?
         var hint: BookWallShelfLabel.Prepared?
-        if let image = BookWallShelfLabel.make("Choose a spine to open its book.", style: fontStyle)
-        {
-            guard let prepared = await BookWallShelfLabel.prepare(image) else { return nil }
-            hint = prepared
+        if !books.isEmpty {
+            guard
+                let made = await rasterizer.page(of: parts, layout: layout, fontStyle: fontStyle),
+                !Task.isCancelled
+            else { return nil }
+            resources = BookMetalPage(made.contents)
+            hint = made.hint
         }
         let wall = BookWallPreparedWall(
             books: books, page: page, pageCount: year.pages.count, sources: year.input.sources,
             designs: year.input.designs, looks: year.input.looks, mates: year.input.mates,
             fontStyle: fontStyle, drawn: drawn, drawsWith: drawsWith, layout: layout,
-            bodies: bodies, artwork: artwork, labels: labels, hint: hint)
+            resources: resources, labels: labels, hint: hint)
         return DrawnPage(wall: wall, missing: missing)
     }
 
     /// Downloads missing covers again after 30 seconds, as the shelf does after a failure. A
-    /// recovered cover replaces the materials in place of its book and of every wall book that
+    /// recovered cover replaces the artwork in place of its book and of every wall book that
     /// draws in its series design, since the source's cover sets their colors; each slot keeps
     /// the proportions it was laid out with. A redrawn book that was drawn without a cover of its
     /// own keeps its plain board in the new colors; one drawn with a cover whose cached copy can't
-    /// be read keeps its materials. Covers that still fail wait for the next preparation pass.
+    /// be read keeps its artwork. Covers that still fail wait for the next preparation pass.
     private func retryMissingCovers(in wall: BookWallPreparedWall, fontStyle: AppFontStyle)
         async
     {
@@ -405,7 +371,6 @@ final class BookWallPreparation {
         var restored = recovered.subtracting(wall.layout.slots.map(\.book.id))
         for slot in redrawn {
             guard !Task.isCancelled, prepared?.id == wall.id else { return }
-            guard let body = wall.bodies[slot.book.id] else { continue }
             let cover = try? await ArtworkStore.shared.detailImage(
                 for: slot.book, maximumPixelSize: 400, allowsNetwork: false)
             // Only a book that was drawn without its cover may draw a plain board.
@@ -413,31 +378,14 @@ final class BookWallPreparation {
             else { continue }
             let source = await sourceStyle(
                 for: slot.book, drawsWith: wall.drawsWith, designs: wall.drawn, cache: &styles)
-            let images = await rasterizer.render(
-                slot: slot, cover: cover, source: source, design: wall.drawn[slot.book.id],
-                fontStyle: fontStyle)
-            guard let mips = images.spineMips else { continue }
-            if BookMetalWall.isEnabled {
-                guard !Task.isCancelled, prepared?.id == wall.id else { continue }
-                // The view shows the wall's artwork again when `coverRevision` changes.
-                wall.artwork.byBook[slot.book.id] = BookWallArtwork(
-                    style: images.style, spine: mips, cover: images.cover)
-                wall.artwork.changed.insert(slot.book.id)
-            } else {
-                guard let spine = try? await mips.texture() else { continue }
-                var coverTexture: TextureResource?
-                if let coverImage = images.cover {
-                    coverTexture = try? await TextureResource.generate(
-                        from: coverImage, options: .init(semantic: .color))
-                    guard coverTexture != nil else { continue }
-                }
-                guard !Task.isCancelled, prepared?.id == wall.id else { continue }
-                BookWallScene.applyArtwork(
-                    to: body, book: slot.book, style: images.style, spine: spine,
-                    cover: coverTexture)
-            }
+            guard
+                let artwork = await rasterizer.artwork(
+                    slot: slot, cover: cover, source: source, design: wall.drawn[slot.book.id],
+                    fontStyle: fontStyle),
+                !Task.isCancelled, prepared?.id == wall.id
+            else { continue }
+            wall.resources?.replaceArtwork(of: slot.book.id, with: artwork)
             restored.insert(slot.book.id)
-            coverRevision &+= 1
         }
         guard prepared?.id == wall.id else { return }
         guard let index = drawnPages.firstIndex(where: { $0.wall.id == wall.id }) else { return }
@@ -595,7 +543,7 @@ actor BookWallRasterizer {
         let style: BookWallLocalSpine.Style
         /// The lettered cloth spine with the cover's fold.
         let spine: CGImage?
-        /// `spine`'s mip chain, from which preparation makes its texture.
+        /// `spine`'s mip chain, which is uploaded as its texture.
         let spineMips: BookWallSpineTexture.Mips?
         let cover: CGImage?
         let label: CGImage?
@@ -657,5 +605,56 @@ actor BookWallRasterizer {
         return Images(
             style: style, spine: spine, spineMips: spine.flatMap(BookWallSpineTexture.Mips.init),
             cover: board, label: label)
+    }
+
+    /// Draws `slot` as `render` does and uploads its spine and board for the renderer. Returns
+    /// `nil` when a texture can't be made.
+    func artwork(
+        slot: BookWallLayout.Slot, cover: CGImage?, source: BookWallLocalSpine.Style?,
+        design: SpineDesignV1?, fontStyle: AppFontStyle
+    ) -> BookMetalPage.Artwork? {
+        Self.artwork(
+            of: render(
+                slot: slot, cover: cover, source: source, design: design, fontStyle: fontStyle),
+            for: slot)
+    }
+
+    private static func artwork(of images: Images, for slot: BookWallLayout.Slot)
+        -> BookMetalPage.Artwork?
+    {
+        images.spineMips.flatMap {
+            BookMetalPage.Artwork(slot: slot, style: images.style, spine: $0, cover: images.cover)
+        }
+    }
+
+    /// Draws `slot` as `render` does and builds what the renderer draws the book from: its
+    /// mesh, its uploaded spine and board, where it rests in `layout`, and its uploaded shelf
+    /// label. Returns `nil` when the spine or label can't be drawn or a texture can't be made.
+    func prepare(
+        slot: BookWallLayout.Slot, in layout: BookWallLayout, cover: CGImage?,
+        source: BookWallLocalSpine.Style?, design: SpineDesignV1?, fontStyle: AppFontStyle
+    ) -> (book: BookMetalPage.Book, label: BookWallShelfLabel.Prepared)? {
+        let images = render(
+            slot: slot, cover: cover, source: source, design: design, fontStyle: fontStyle)
+        guard let artwork = Self.artwork(of: images, for: slot),
+            let label = images.label.flatMap(BookWallShelfLabel.Prepared.init)
+        else { return nil }
+        return (BookMetalPage.Book(slot: slot, artwork: artwork, in: layout), label)
+    }
+
+    /// Joins a page's `books`, in the order `layout` drops them, into the buffers the renderer
+    /// draws from, and letters the resting hint. Returns `nil` when Metal can't make a buffer
+    /// or the hint can't be drawn or uploaded.
+    func page(of books: [BookMetalPage.Book], layout: BookWallLayout, fontStyle: AppFontStyle)
+        -> (contents: BookMetalPage.Contents, hint: BookWallShelfLabel.Prepared)?
+    {
+        guard let contents = BookMetalPage.Contents(books: books, layout: layout),
+            let hint =
+                BookWallShelfLabel.make(
+                    "Choose a spine to open its book.", style: fontStyle
+                )
+                .flatMap(BookWallShelfLabel.Prepared.init)
+        else { return nil }
+        return (contents, hint)
     }
 }

@@ -37,20 +37,13 @@ Use the actual generated `.xctestrun` filename for the installed SDK. For an ord
 
 `--view` accepts 0 through 3 for My Shelf, Feed, Compare Shelves, and Book Club, and opens that view from the sidebar before measurement. Keep all views enabled for these sequences.
 
-The Book Wall profiles, isolation variants, and renderer pipeline windows below measure the [RealityKit renderer host](BOOK_WALL.md#realitykit-renderer-host), so pass `--wall-renderer=realitykit` through the launch arguments when using them. Measure the default renderer as [Metal renderer](#metal-renderer) describes.
+The Book Wall profiles and isolation variants below drive the [Metal renderer](BOOK_WALL.md#metal-renderer); see [its own measurements](#metal-renderer) for the renderer's log and switches.
 
-For Book Wall, both drivers accept `--wall-antialiasing off|on` (default `on`, matching the
-app). The baseline renders at 1920 × 1080;
-add `--variant wall-900p` for 1600 × 900. The Book Wall wrapper enables diagnostics for
-variants; add `--diagnostics` explicitly for matching baselines. Change one render setting
-at a time, and keep diagnostics and the input sequence fixed for each
-baseline–variant–baseline comparison.
-The manifest records these requested settings as `wall_antialiasing` and `wall_resolution`;
-check the app's `BookWallRendererViewport` log to confirm the actual render surface.
+The Book Wall wrapper enables diagnostics for variants; add `--diagnostics` explicitly for matching baselines. Change one setting at a time, and keep diagnostics and the input sequence fixed for each baseline–variant–baseline comparison. With diagnostics, the wrapper copies the renderer's log from the TV to the run's folder as `BookMetalWall.log`.
 
 ```sh
-python3 scripts/profile-book-wall.py --diagnostics --label renderer-1080p
-python3 scripts/profile-book-wall.py --skip-build --variant wall-900p --label renderer-900p
+python3 scripts/profile-book-wall.py --diagnostics --label baseline
+python3 scripts/profile-book-wall.py --skip-build --variant wall-no-ribbon --label no-ribbon
 ```
 
 The driver removes checker injection from its copied test configuration. It sets `PreferredScreenCaptureFormat` to `screenshots` and `SystemAttachmentLifetime` to `keepNever` to disable automatic test video and attachments. Do not compare a screen-recorded capture with a capture-disabled run as if their measurement overhead were equal. Each scenario performs three repetitions of 20 steady and 20 burst directional presses. It does not poll accessibility or take screenshots during the measured sequence. Its setup and final assertions do query accessibility. XCTest adds transport overhead; command durations are not input-to-display latency.
@@ -75,24 +68,16 @@ Use a separate derived-data directory to preserve the ordinary Release app. A
 manual capture uses a plain build and does not require a test runner. Launch with
 `--console`, `--start-view=bookWall`, and `--performance-diagnostics`.
 
-The diagnostic build writes `BOOK_WALL_MOTION` summaries to standard error. Each summary covers at most 240
-scene updates or two seconds, with separate flight and idle phases. The summaries
-report scene-update intervals and the app's transform-callback cost. They do not
-measure frame presentation or input-to-display latency. `BookWallPlan` reports
-the synchronous flight-planning time; `BookWallRendererViewport` records the
-viewport, output, and internal sizes. No book titles or reader data are logged.
+The diagnostic build writes `BookWallPlan`, the synchronous flight-planning time, to standard error. No book titles or reader data are logged.
 
-Open a book, leave its detail view visible, then return to the wall. Compare the
-renderer's pipeline windows with the callback measurements to distinguish rendering
-cost from app animation work. Capture screenshots separately from the measured movement. Restore the ordinary
-Release app when the investigation finishes.
+Open a book, leave its detail view visible, then return to the wall. Compare the [renderer's log](#metal-renderer) with the main thread's time to distinguish rendering cost from app work. Capture screenshots separately from the measured movement. Restore the ordinary Release app when the investigation finishes.
 
 To inspect transition rendering frame by frame, run
 `BookwormsUITests/DevicePerformanceTests/testBookWallTransitionFrames` with `--only-testing` and
 `TEST_RUNNER_VERIFY_DEVICE_PERFORMANCE=1`. It opens and closes one book while taking
 screenshots as fast as XCTest allows; it is not a timing measurement. Optional variables:
 `TEST_RUNNER_PERF_EXTRA_ARGUMENTS` adds space-separated launch arguments, such as
-`--performance-diagnostics --isolate=wall-720p`; `TEST_RUNNER_PERF_BOOK_TITLE` selects the
+`--performance-diagnostics --isolate=wall-no-ribbon`; `TEST_RUNNER_PERF_BOOK_TITLE` selects the
 book by title prefix; and `TEST_RUNNER_PERF_CAPTURE=video` takes no screenshots, for a separate
 screen recording, and runs three cycles followed by **Drop again**.
 
@@ -104,13 +89,8 @@ Pass one `--variant` with `--diagnostics`. `profile-device.py` accepts several B
 | --- | --- |
 | `glass` | Uses native bordered buttons instead of glass for Settings controls, the Compare Shelves and Book Club header menus, and Book Club review actions. Native style geometry and focus animation may differ. |
 | `background` | Reads cached data but suppresses source refresh, social transport, and CloudKit sync. Artwork and font restoration remain active. |
-| `wall-no-fill-lights` | Turns off Book Wall's shelf and pool point lights. The detail key light still works. |
 | `wall-raw-backdrop` | Shows Book Wall's backdrop image without baked lighting, for refitting the lighting factors against Simulator captures. |
-| `wall-720p` | Caps Book Wall's 3D rendering at 1280 × 720 pixels instead of 1920 × 1080. |
-| `wall-no-details` | Builds books without page-edge planes and hinge decals, removing four of eight meshes per book. |
-| `wall-900p` | Caps Book Wall's 3D rendering at 1600 × 900 pixels. |
 | `wall-no-ribbon` | Never shows the bookmark ribbon on the focused book. |
-| `wall-warm-light` | Keeps the detail key light enabled at zero intensity, so opening a book does not change the scene's light count. |
 | `wall-no-replay` | Hides Book Wall's glass **Drop again** button. |
 | `wall-no-detail-panel` | Hides the SwiftUI book details while a Book Wall book is open. The wall, Back button, and Menu handling remain. |
 | `wall-no-detail-corner` | Hides the wood corner that covers the collapsed sidebar while a Book Wall book is open. The Back button remains. |
@@ -119,7 +99,6 @@ Pass one `--variant` with `--diagnostics`. `profile-device.py` accepts several B
 | `wall-show-more-glass`, `wall-show-more-bordered` | Draws Book Wall's **Show more** with glass or the native bordered style instead of its flat platter. |
 | `wall-instant-panel-exit`, `wall-instant-cover-exit` | Removes Book Wall's detail text, or its Back overlay, at once when details close, instead of fading it out. |
 | `wall-late-replay` | Shows **Drop again** only after a returning book lands, instead of fading it in as the return starts. |
-| `wall-detail-30` | Skips every other display-link tick while an open book only drifts, rendering that state at 30 fps. |
 
 These variants are experiments, not approved fixes. Run baseline–variant–baseline comparisons. Attribute a cause only when the traces and repeatable behavior agree.
 
@@ -141,15 +120,9 @@ Prioritize sidebar movement, Settings sections, and action activation. Compare i
 
 ## Reduced Book Wall recordings
 
-Both profiling entry points accept `--capture-set full|display|cpu`. `full` keeps Time Profiler, Points of Interest, Hitches, Display, and GPU for Book Wall; `display` selects only Display and Points of Interest; `cpu` selects Time Profiler and Points of Interest. `scripts/profile-book-wall.py` defaults to `display`, because Instruments streams kernel-trace data from the TV over the network and loses less of it with fewer instruments; `scripts/profile-device.py` defaults to `full`. Book Wall profiles also accept `--sequence details`, which records only the three detail open/close cycles. With diagnostics, the app writes its one-second renderer windows to `Library/Caches/BookWallPipeline.jsonl`, and the script copies that file into the run folder as `pipeline.jsonl` so the counts do not depend on streamed data. Reduced sets require the Book Wall scenario and keep its input sequence unchanged. The manifest records the effective set, template, and instruments.
+Both profiling entry points accept `--capture-set full|display|cpu`. `full` keeps Time Profiler, Points of Interest, Hitches, Display, and GPU for Book Wall; `display` selects only Display and Points of Interest; `cpu` selects Time Profiler and Points of Interest. `scripts/profile-book-wall.py` defaults to `display`, because Instruments streams kernel-trace data from the TV over the network and loses less of it with fewer instruments; `scripts/profile-device.py` defaults to `full`. Book Wall profiles also accept `--sequence details`, which records only the three detail open/close cycles. With diagnostics, the app writes its renderer's one-second windows to `Library/Caches/BookMetalWall.log`, and the script copies that file into the run folder so the counts do not depend on streamed data. Reduced sets require the Book Wall scenario and keep its input sequence unchanged. The manifest records the effective set, template, and instruments.
 
 Use a reduced set when the full recorder crashes or loses providers, then compare the same app variants with the same capture set. Different instrumentation overhead makes cross-set timing comparisons unreliable. A successful recorder exit is insufficient: inspect required phases for actual samples, gaps, and truncated intervals. Per-phase `observations` distinguishes an absent schema, no samples, and samples present, and records the first/last display-swap offsets. Sample presence does not establish complete phase coverage. Omitted CPU/GPU/hitch providers produce null metrics; empty or interrupted providers are not evidence of zero work.
-
-## Renderer pipeline and lighting diagnostics
-
-The renderer emits `BookWallRendererPipeline` windows in diagnostic builds when launched with `--performance-diagnostics`. Each window reports submitted/completed frames, skipped and idle ticks, occupied slots, callback duration, and the actual view/layer scale. The same bounded message is an Instruments point-of-interest event. A slot lifetime includes CPU submission, GPU work, and callback dispatch; it is not GPU execution time or a displayed-frame interval. Use the Display instrument for acceptance.
-
-After confirming slot overlap, compare `--variant wall-no-ibl` and `--variant wall-unlit-shelf` against a matched renderer baseline. The first gives root descendants zero environment-lighting weight and skips the studio environment; the second replaces the shelf's PBR material with a constant unlit tint while retaining geometry and physics. They deliberately change appearance to isolate cost. An unlit tint is not a fitted shelf bake; validate any replacement against resting, opening, and return lighting before adopting it.
 
 ## Metal renderer
 

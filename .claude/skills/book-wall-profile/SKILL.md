@@ -29,8 +29,8 @@ python3 scripts/profile-book-wall.py --label baseline
   exits. Run it when an analysis that used `--keep-trace` is done.
 - `--diagnostics` builds with `BOOKWORMS_DIAGNOSTICS` into `.build-profile-diagnostics` and
   launches with markers.
-- `--variant NAME` runs one diagnostic isolation, such as `wall-720p`, `wall-no-fill-lights`,
-  or `wall-no-details` (see `docs/PERFORMANCE_DIAGNOSIS.md`). Bracket variants with
+- `--variant NAME` runs one diagnostic isolation, such as `wall-no-ribbon` or
+  `wall-no-detail-panel` (see `docs/PERFORMANCE_DIAGNOSIS.md`). Bracket variants with
   `--diagnostics` baselines, not the ordinary build: diagnostic markers add their own cost.
   Build once, then pass `--skip-build` and `--keep-test-build` to the runs in between.
 
@@ -83,20 +83,15 @@ For each phase, report:
   partway through the run; a later phase reading exactly 0 ms means missing data, not idle.
 - `gpu_ms_per_second`: app and compositor GPU time in each second of the phase, as two lists
   aligned with `frames_per_second`. Divide by that second's frames for time per frame.
-- `renderer_max_tick_gap_ms`: the longest gap between display-link callbacks in the phase; well over 17 ms means the main thread stalled.
-- `renderer_submitted_per_second`, `renderer_skipped_per_second`: with diagnostics, the frames the app submitted and the display ticks it skipped in each one-second
-  pipeline window. They come from `pipeline.jsonl`, which the app writes on the TV, or else from
-  its Points of Interest events, so they survive Display and GPU data gaps. They measure app throughput, not frames shown: tvOS has no presented-frame
-  callback.
 - `main_thread_ms`, `main_self_top`, `app_inclusive_top`: where the main thread spent its time.
-  `re::` symbols are RealityKit; `BookWall` symbols are app code.
+  `BookWall` and `BookMetal` symbols are app code. With `--diagnostics`, the run's folder also
+  holds `BookMetalWall.log`, the renderer's own one-second windows.
 
 Compare runs phase by phase with the same label scheme, and repeat a run before calling a
 difference real. State the conditions: build, TV, and that XCTest drives input.
 
 ## Known limits
 
-- The RealityKit Frames and Metrics instruments record only on visionOS. Use Display and GPU.
 - `devicectl device capture screen-record` is not supported on this Apple TV, so there is no
   video. Use the frame data, or ask the user for a QuickTime or phone slow-motion recording.
 - Attach by process ID. Attaching by name is ambiguous because of the Top Shelf extension.
