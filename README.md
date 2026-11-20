@@ -1,8 +1,8 @@
 # Bookworms for Apple TV
 
-Bookworms for Apple TV is a beautiful app that helps make e-reading more social IRL.
+[![Download on the App Store for Apple TV](https://img.shields.io/badge/App_Store-Apple_TV-0D96F6?style=for-the-badge&logo=apple&logoColor=white)](https://apps.apple.com/us/app/bookworms-ebook-display/id6813137450)
 
-[View on the App Store](https://apps.apple.com/us/app/bookworms-ebook-display/id6813137450)
+Bookworms for Apple TV is a beautiful app that helps make e-reading more social IRL.
 
 Bookworms displays your digital library and reading activity on the big screen. In leiu of a bookshelf guests can snoop the spines of, they can look at your TV when it's not in use.
 
