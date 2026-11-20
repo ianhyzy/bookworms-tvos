@@ -26,7 +26,7 @@ Run `python3 scripts/premerge.py` on a pull request's head commit before it merg
 | `test` | The Unit plan through `scripts/test-local.py`, on the one slim simulator that the runner creates and deletes. The step fails without starting a simulator when ten are booted (four without simslim) or less than 15 percent of memory is free. |
 | `links` | Every relative link in the changed Markdown files leads to a file. |
 
-A change that touches only Markdown files, `docs/`, and `LICENSE` skips `lint`, `build Apple TV`, and `test`. `--base BRANCH` compares with another branch than `origin/main`.
+A change that touches only Markdown files, `docs/`, the README's `screenshots/`, and `LICENSE` skips `lint`, `build Apple TV`, and `test`. `--base BRANCH` compares with another branch than `origin/main`.
 
 When every step passes, the script writes `premerge/<commit>.json` to the repository's shared Git folder (`git rev-parse --git-common-dir`), which every worktree uses. The workspace's merge gate, a `PreToolUse` hook on `Bash` (`.claude/hooks/merge-gate.py` in the workspace folder), refuses `gh pr merge` until the pull request's head commit has that file, so a new commit needs a new run. A branch that predates the script merges `main` first. The pass also lists the views the change touches (`scripts/visual-check.py --list`); when it lists any, the script's last line names the [visual check](#visual-check), which the gate doesn't require.
 
