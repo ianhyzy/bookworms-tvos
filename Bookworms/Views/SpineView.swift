@@ -133,7 +133,7 @@ struct SpineView: View {
 
     /// The thinnest book, in millimeters from back to front cover, whose spine has
     /// blind-stamped bands: about 700 pages. A thinner spine draws them too small to read.
-    nonisolated static let stampedThickness = 32
+    nonisolated static let stampedThickness = 48
 
     /// Whether `book`'s spine has blind-stamped bands. It depends on the book alone, so the
     /// shelf, Book Wall, and the iPhone companion agree whatever size each draws the spine.
@@ -141,28 +141,14 @@ struct SpineView: View {
         thickness(of: book) >= stampedThickness
     }
 
-    /// The book's thickness in millimeters, as the iPhone companion's `BookShape` sizes it:
-    /// 7 mm at 100 pages plus 0.035 mm a page, up to 40 mm, thickened by none, half, or all of
-    /// 25 percent as the book's ID decides, and rounded to 4 mm. Page counts count from 100 to
-    /// 1,400, and a book without one counts as 320 pages. The arithmetic follows the
+    /// The book's thickness in millimeters, as the iPhone companion's `BookShape` sizes it: a
+    /// real hardcover's 6.5 mm plus 0.0575 mm a page, rounded to 4 mm. Page counts count from
+    /// 100 to 1,400, and a book without one counts as 320 pages. The arithmetic follows the
     /// companion's single-precision decimeters, so both apps round a borderline book alike.
     nonisolated static func thickness(of book: Book) -> Int {
         let pages = Float(min(1_400, max(100, book.pages ?? 320)))
-        let variety = (Float(unit(book.id, salt: 41)) * 2).rounded(.toNearestOrAwayFromZero) / 2
-        let decimeters = min(0.4, 0.07 + (pages - 100) * 0.00035) * (1 + variety * 0.25)
+        let decimeters = 0.065 + pages * 0.000_575
         return Int((decimeters / 0.04).rounded()) * 4
-    }
-
-    /// A number from 0 to 1 that `id` and `salt` decide, as the iPhone companion's
-    /// `ShareStyle.unit(0, id, salt)` computes it.
-    nonisolated private static func unit(_ id: Int, salt: UInt64) -> Double {
-        var z =
-            UInt64(bitPattern: Int64(id)) &* 0x9E37_79B9_7F4A_7C15 &+ salt
-            &* 0xD1B5_4A32_D192_ED03
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        z ^= z >> 31
-        return Double(z >> 11) / Double(UInt64(1) << 53)
     }
 
     /// The blind-stamped bands on a spine `length` long and `thickness` across: each line's

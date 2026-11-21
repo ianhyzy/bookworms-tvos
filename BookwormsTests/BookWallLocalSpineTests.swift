@@ -79,34 +79,28 @@ final class BookWallLocalSpineTests: XCTestCase {
     }
 
     @MainActor
-    func testOnlyBooksAtLeast32MillimetersThickHaveStampedBands() {
-        for id in 1...40 {
-            let doorstopper = Book(id: id, title: "Book", author: "Author", pages: 1_100)
-            let novel = Book(id: id, title: "Book", author: "Author", pages: 320)
-            let unknown = Book(id: id, title: "Book", author: "Author")
-            XCTAssertTrue(SpineView.stamps(doorstopper), "\(id)")
-            XCTAssertFalse(SpineView.stamps(novel), "\(id)")
-            XCTAssertFalse(SpineView.stamps(unknown), "\(id)")
-            for pages in [100, 500, 700, 900, 1_400] {
-                let book = Book(id: id, title: "Book", author: "Author", pages: pages)
-                XCTAssertEqual(SpineView.thickness(of: book) % 4, 0)
-            }
+    func testOnlyBooksAtLeast48MillimetersThickHaveStampedBands() {
+        for pages in [100, 320, 500, 700, 900, 1_100, 1_400] {
+            let book = Book(id: 1, title: "Book", author: "Author", pages: pages)
+            XCTAssertEqual(SpineView.thickness(of: book) % 4, 0, "\(pages)")
         }
         // The thicknesses the iPhone companion's `BookShape` gives these books, near the band
-        // threshold. Book 2 has no variety, book 1 half of it, and book 9 all of it.
-        let expected: [(id: Int, pages: Int?, millimeters: Int, stamps: Bool)] = [
-            (2, nil, 16, false), (2, 721, 28, false), (2, 760, 32, true), (1, 640, 28, false),
-            (1, 700, 32, true), (9, 500, 28, false), (9, 600, 32, true), (9, 1_400, 52, true),
+        // threshold. A 686-page book is 45.9 mm thick, which rounds to 44 mm, and a 687-page
+        // book 46 mm, which rounds to 48 mm.
+        let expected: [(pages: Int?, millimeters: Int, stamps: Bool)] = [
+            (nil, 24, false), (500, 36, false), (686, 44, false), (687, 48, true),
+            (700, 48, true), (1_400, 88, true),
         ]
         for row in expected {
-            let book = Book(id: row.id, title: "Book", author: "Author", pages: row.pages)
+            let book = Book(id: 1, title: "Book", author: "Author", pages: row.pages)
             XCTAssertEqual(SpineView.thickness(of: book), row.millimeters, "\(row)")
             XCTAssertEqual(SpineView.stamps(book), row.stamps, "\(row)")
         }
-        // Without variety, a 721-page book is 28.7 mm thick, which rounds to 28 mm.
-        let thicknesses = (1...200)
-            .map { SpineView.thickness(of: Book(id: $0, title: "B", author: "A", pages: 721)) }
-        XCTAssertEqual(thicknesses.min(), 28)
+        // A book's ID never changes its thickness.
+        let thicknesses = Set(
+            (1...200)
+                .map { SpineView.thickness(of: Book(id: $0, title: "B", author: "A", pages: 721)) })
+        XCTAssertEqual(thicknesses, [48])
     }
 
     /// The owner's standing rule: no spine ever uses Impact, in any spelling, from any source.

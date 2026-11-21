@@ -307,6 +307,9 @@ struct BookWallLayout: Sendable {
         // unchanged ceiling keeps the widest lane, and therefore the camera, where it was.
         let coverScale = min(1.48, max(1.15, sqrt(pages / 500)))
         let naturalHeight = 2.25 * coverScale + (seed - 0.5) * 0.09
+        // Deliberately not the real hardcover thickness the iPhone and Mac draw (`BookShape`):
+        // the owner chose to keep Book Wall legible from the couch, so thickness grows from the
+        // legible minimum rather than from a real book's, and per-book variety stays.
         let naturalThickness =
             Self.minimumSpineThickness + max(0, pages - 250) * 0.0009
             + seed * 0.025
