@@ -208,7 +208,7 @@ One policy covers Bookworms on Apple TV, iPhone, and Mac. The text below is the 
 ```text
 Bookworms privacy policy
 
-Effective November 20, 2026. Contact: bookworms@ian.gay
+Effective November 23, 2026. Contact: bookworms@ian.gay
 Web version: ian.gay/bookworms-privacy-policy
 
 Summary
