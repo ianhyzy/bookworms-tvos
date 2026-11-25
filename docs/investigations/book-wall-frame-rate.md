@@ -2,13 +2,14 @@
 
 Book Wall draws with a [Metal renderer](../BOOK_WALL.md#metal-renderer) because the RealityKit
 renderer could not hold 60 frames a second on the Apple TV 4K (2nd generation, A12). The RealityKit renderer has since been removed, so its figures here can't be measured again. This
-note records what was measured and ruled out on the way, and two things that remain
-unexplained. See [performance diagnosis](../PERFORMANCE_DIAGNOSIS.md#metal-renderer) for how
+note records what was measured and ruled out on the way, what caused the Metal renderer's
+remaining late frames, and one thing that remains unexplained. See [performance diagnosis](../PERFORMANCE_DIAGNOSIS.md#metal-renderer) for how
 to repeat the measurements.
 
 The figures up to 2026-11-04 come from session transcripts, whose summaries were deleted, so
-treat them as reported. The rest were measured on 2026-11-17 on that Apple TV, connected
-through a Denon AVR-X1800H to a 3840 × 2160 display at 59.94 Hz, with a 29-book page.
+treat them as reported. The rest were measured on 2026-11-17 and 2026-11-25 on that Apple TV,
+connected through a Denon AVR-X1800H to a 3840 × 2160 display at 59.94 Hz, with a 29-book page.
+On 2026-11-25 it ran tvOS 27.2.1 (24K157).
 
 ## Ruled out for the RealityKit renderer
 
@@ -75,13 +76,13 @@ instruments.
 
 ## Ruled out for the Metal renderer's remaining late frames
 
-With nothing attached, the resting wall has 3 to 5 late frames a minute once the app has run
-for a minute, each one repeated refresh, with stretches of 20 to 40 seconds without any. With
-Instruments attached, three 40-second recordings had 5, 2, and 8 composed frames that stayed
-on screen for two refreshes or more.
+Before [the fix](#the-fix), the resting wall, drawn continuously with nothing attached, had 3
+to 9 late frames a minute, each one repeated refresh, often in clusters a few seconds apart.
+With Instruments attached, three 40-second recordings had 5, 2, and 8 composed frames that
+stayed on screen for two refreshes or more.
 
 - **The books.** A wall that drew no books had 12 and 13 such frames in two recordings.
-- **The render thread.** Its callbacks kept arriving every 16.7 ms.
+- **The render thread.** It ran every callback it got on time, with its usual lead.
 - **Overlays on the wall.** Drawing the wall above every other view removed the compositor's
   extra passes and made long frames about 30 times as frequent; see the next section.
 - **The race for the GPU.** Holding the app's GPU work back 5 ms made it arrive second in 93%
@@ -93,11 +94,60 @@ on screen for two refreshes or more.
 - **The display link's frame latency.** Values of 1, 2, and 3 gave the same lead of two
   refreshes.
 
+## What caused the remaining late frames
+
+The system compositor repeated those frames, because the kernel handled the end of its GPU
+work late. Measured on the resting wall drawn continuously, with the renderer's log and with
+Instruments recordings of the Display, GPU, and System Trace instruments:
+
+- **The app's frames were on time.** At each late frame, the display link skipped one
+  callback: the next one came 33 ms after the last, with the usual lead of two refreshes.
+- **So was the compositor's GPU work.** It ended about 3.5 ms before the refresh it was for,
+  as on any other frame.
+- **The completion reached the CPU late.** The compositor's command buffers normally report
+  completion 0.3 to 0.4 ms after their GPU work ends. For the frame that missed, the report
+  came 3.8 ms after it, 0.25 ms after the refresh. The app's command buffer, whose GPU work
+  ended 0.5 ms earlier, reported at the same moment, 4.4 ms late. In a 60-second recording,
+  completions came more than 1.5 ms late 6 times, and a frame repeated once, when the delay
+  crossed a refresh.
+- **The system's audio thread held it.** `audiomxd`'s real-time audio thread (`audio IO: VAD
+  [vdef] AggDev 79`, priority 97) ran a burst of 6.3 ms (at most 6.9 ms) every 20 ms, mostly
+  on CPU 0, with no sound playing. In a 40-second System Trace, all 6 of the compositor's
+  delayed completions came while a burst ran; none of the 1,720 that ended between bursts was
+  delayed, and 715 of the 721 that ended during one weren't. In one of the 6, the GPU finished
+  at 10,955.1 ms, CPU 0 ran the audio thread from 10,954.0 to 10,959.5 ms, and the other five
+  cores slept. The kernel's GPU work loop (`AGXHardwareWorkLoop`) ran at 10,958.9 ms, on CPU
+  3, just after an interrupt woke the other cores, and `backboardd` saw the completion at
+  10,959.2 ms.
+- **Why the frames come in clusters.** The audio runs at 50 Hz and the display at 59.94 Hz, so
+  their timing lines up again every 3.3 seconds. The delayed completions, and the late frames
+  in the renderer's log, all fell at one point of a 20 ms cycle of the wall clock.
+- **What hides it.** Any thread in the app that wakes every 4 ms prevents the delays. A 4 ms
+  timer on the main thread, or on a background queue, left no late frames after launch in two
+  189-second runs, against 18 and 27 in runs of about the same length without one. The
+  `--wall-metal-trace` switch used to add such a timer on the main thread, so it hid the late
+  frames it was meant to log.
+
+Only this Apple TV, receiver, and audio setup were measured. Another HDMI audio format might
+run the audio thread for longer or shorter bursts.
+
+## The fix
+
+While its display link draws, the render thread wakes at least every 4 ms
+(`BookMetalRenderer.wakeInterval`). It sleeps as before while the link is paused, so a resting
+wall costs nothing. That the wake works by keeping a core awake for the kernel's GPU work loop
+is inferred from the trace above; Apple doesn't document how the kernel picks that core. In four
+alternating runs of about 190 seconds each, of the resting wall drawn continuously with nothing
+attached, the renderer had 0 and 0 late frames with the wake, and 21 and 22 with
+`--wall-metal-sleeps`, which turns it off. The renderer's longest time on a frame in each
+second (median 0.8 ms) and its mean GPU time (9.7 ms) didn't change.
+
+The runs measured the resting wall, not motion. During a fall, a flight, or a focus move, the
+link draws the same way, so the same collision could repeat a frame there; that wasn't
+measured separately.
+
 ## Not explained
 
-- **The remaining late frames' source.** The first minute after launch had 22 in one run and
-  4 in one run with the 5 ms hold-back; one run each is too few to say that the hold-back
-  helps.
 - **Why the wall hitches when drawn above every other view.** At the same drawable size, the
   app's work then arrives first in 98% of refreshes, and about four times a second two app
   frames land in one refresh. Don't move the wall's layer above the split view without
