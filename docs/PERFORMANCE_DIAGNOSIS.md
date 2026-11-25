@@ -134,6 +134,7 @@ Build with `SWIFT_ACTIVE_COMPILATION_CONDITIONS=BOOKWORMS_DIAGNOSTICS` to get th
 - **Read frames on screen from Instruments.** Record the Display and GPU instruments. A composed frame that stays on screen for two refreshes or more shows in `displayed-surfaces-interval`, and its `event-label` names the app's frame, so a repeated or skipped app frame shows there too. The Hitches instrument records nothing for this layer.
 - **Don't count drops with a drawable's `presentedTime`.** It reads zero for whole seconds while Instruments shows those frames on screen.
 - **Read GPU time from Instruments, not from the command buffer.** The time from a buffer's first GPU work to its last includes the system compositor's work that ran in between.
+- **Find what held a late frame.** `--wall-metal-trace` logs each late frame with its wall-clock time (`epoch=`), which lines it up with a recording through the trace's start date. Compare when each command buffer's GPU work ends (`metal-gpu-intervals`) with when it reports completion (`metal-command-buffer-completed`), and use a System Trace's `cpu-state` table to see what each core ran meanwhile. Attach `xctrace` by the TV's Instruments name and the process ID; the UDID didn't find the process. `--wall-metal-sleeps` turns off the render thread's wakes, which brings back the late frames that the system's audio thread caused.
 
 [The frame-rate investigation](investigations/book-wall-frame-rate.md) records what these measurements ruled out.
 

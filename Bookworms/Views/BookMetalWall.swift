@@ -25,15 +25,18 @@ enum BookMetalWall {
         /// measured.
         static let drawsAtRest = ProcessInfo.processInfo.arguments.contains(
             "--wall-metal-continuous")
-        /// `--wall-metal-trace` logs each late frame with what preceded it and times the main
-        /// thread, which adds a timer there.
+        /// `--wall-metal-trace` logs each late frame with what preceded it.
         static let traces = ProcessInfo.processInfo.arguments.contains("--wall-metal-trace")
+        /// `--wall-metal-sleeps` lets the render thread sleep between frames, to show the late
+        /// frames that `BookMetalRenderer.wakeInterval` prevents.
+        static let wakes = !ProcessInfo.processInfo.arguments.contains("--wall-metal-sleeps")
         /// The renderer's log in the app's caches, replaced at launch, so a run can be read
         /// from the Apple TV afterward without a console attached.
         static let logURL = URL.cachesDirectory.appending(path: "BookMetalWall.log")
     #else
         static let stress = 1
         static let drawsAtRest = false
+        static let wakes = true
     #endif
 
     private static func integer(_ prefix: String) -> Int? {
@@ -765,8 +768,6 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             /// The last finished frame's GPU time, from its first GPU work to its last, which
             /// includes time the system compositor's work ran in between.
             var lastGPUSeconds: CFTimeInterval = 0
-            /// The longest the main thread went without running its heartbeat.
-            var mainMaxGap: CFTimeInterval = 0
         #endif
     }
 
@@ -799,7 +800,6 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         private var lastTarget: CFTimeInterval?
         private var lastLead: CFTimeInterval = 0
         private var lastEntry: CFTimeInterval = 0
-        private var heartbeat: (any DispatchSourceTimer)?
         private var windowStart: CFTimeInterval?
         private var windowFrames = 0
         private var windowLate = 0
@@ -808,6 +808,14 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
     #endif
 
     private static let sampleCount = 4
+    /// The longest the render thread sleeps while the link draws, though it has nothing to do
+    /// between frames. The system compositor's GPU work for a frame ends about 3.5 ms before
+    /// its refresh. On the Apple TV 4K (2nd generation), the kernel can leave that completion
+    /// waiting behind the system's real-time audio thread, which runs about 6 ms of every
+    /// 20 ms, even in silence, while the other cores sleep; a completion that waits past the
+    /// refresh repeats a frame on screen. Waking this often prevents that. See
+    /// docs/investigations/book-wall-frame-rate.md.
+    private static let wakeInterval: TimeInterval = 0.004
     private static let bookStride = MemoryLayout<BookMetalBook>.stride
     /// Light levels in linear light, fitted by eye: a spine facing the
     /// camera shows at about nine tenths of its texture's color.
@@ -948,9 +956,6 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             .flatMap { shared.makeTexture($0, mipmapped: false) }
         contactShadow = BookWallBackdropBake.makeShadow(fadesDown: true)
             .flatMap { shared.makeTexture($0, mipmapped: false) }
-        #if BOOKWORMS_DIAGNOSTICS
-            if BookMetalWall.traces { startHeartbeat() }
-        #endif
         thread.name = "Book Wall renderer"
         thread.qualityOfService = .userInteractive
         thread.start()
@@ -965,10 +970,6 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         // Wakes the run loop so the thread sees the cancellation.
         perform(#selector(resume), on: thread, with: nil, waitUntilDone: false)
         self.thread = nil
-        #if BOOKWORMS_DIAGNOSTICS
-            heartbeat?.cancel()
-            heartbeat = nil
-        #endif
     }
 
     func setActive(_ active: Bool) {
@@ -1093,7 +1094,11 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
         // A paused link alone may not keep the run loop alive.
         RunLoop.current.add(Port(), forMode: .default)
         while !Thread.current.isCancelled {
-            RunLoop.current.run(mode: .default, before: .distantFuture)
+            // The link's callbacks and wakes run on this thread, so the limit follows the link.
+            let limit =
+                link.isPaused || !BookMetalWall.wakes
+                ? Date.distantFuture : Date(timeIntervalSinceNow: Self.wakeInterval)
+            RunLoop.current.run(mode: .default, before: limit)
         }
         link.invalidate()
     }
@@ -1484,18 +1489,15 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
                 if gap > 1.5 / 60 {
                     windowLate += 1
                     if BookMetalWall.traces {
-                        let (gpu, main) = lock.withLock {
-                            defer { state.mainMaxGap = 0 }
-                            return (state.lastGPUSeconds, state.mainMaxGap)
-                        }
+                        let gpu = lock.withLock { state.lastGPUSeconds }
+                        // The wall-clock time lines a late frame up with an Instruments trace.
                         Self.write(
                             String(
                                 format:
-                                    "BookMetalWallLate gapMS=%.1f leadMS=%.1f previousLeadMS=%.1f "
-                                    + "callbackGapMS=%.1f lastGPUMS=%.2f mainMaxGapMS=%.1f\n",
-                                gap * 1000, lead * 1000, lastLead * 1000,
-                                (entry - lastEntry) * 1000,
-                                gpu * 1000, main * 1000))
+                                    "BookMetalWallLate epoch=%.3f gapMS=%.1f leadMS=%.1f "
+                                    + "previousLeadMS=%.1f callbackGapMS=%.1f lastGPUMS=%.2f\n",
+                                Date().timeIntervalSince1970, gap * 1000, lead * 1000,
+                                lastLead * 1000, (entry - lastEntry) * 1000, gpu * 1000))
                     }
                 }
             }
@@ -1545,22 +1547,6 @@ final class BookMetalRenderer: NSObject, CAMetalDisplayLinkDelegate, @unchecked 
             let data = Data(message.utf8)
             FileHandle.standardError.write(data)
             logFile?.write(data)
-        }
-
-        /// Times the main thread with a timer every 4 ms, recording its longest gap.
-        private func startHeartbeat() {
-            let timer = DispatchSource.makeTimerSource(queue: .main)
-            var last = CACurrentMediaTime()
-            timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .milliseconds(1))
-            timer.setEventHandler { [weak self] in
-                let now = CACurrentMediaTime()
-                let gap = now - last
-                last = now
-                guard let self else { return }
-                lock.withLock { state.mainMaxGap = max(state.mainMaxGap, gap) }
-            }
-            timer.resume()
-            heartbeat = timer
         }
     #endif
 
