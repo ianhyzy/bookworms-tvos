@@ -160,7 +160,7 @@ Apple documents the selection controls in [Manage availability for your app](htt
 | Support and marketing URL | https://ian.gay/bookworms-an-app-to-show-off-your-e-books/ |
 | Contact | bookworms@ian.gay |
 | Version | Same as `MARKETING_VERSION` in `project.yml` |
-| What's New in This Version | Required for every version after the first; at most 4,000 characters. The owner approves it. Use the newest text below: [What's New for 1.2.1](#whats-new-for-121), a draft that the owner hasn't approved yet. |
+| What's New in This Version | Required for every version after the first; at most 4,000 characters. The owner approves it. Use the newest text below: [What's New for 1.2.1](#whats-new-for-121), which the owner approved. |
 | Price | Free, with no in-app purchases. Bookworms is free and open source. |
 | Availability | All current storefronts except China mainland; automatic availability in future storefronts is off. Follow [public storefront availability](#public-storefront-availability). |
 | Apple TV screenshots | 1920×1080 or 3840×2160 only. The README images in `screenshots/` are 2560×1440 and are rejected; create the output folder with `mkdir -p .local/app-store-screenshots`, then resize them with `sips -z 1080 1920 screenshots/*.jpg --out .local/app-store-screenshots` |
@@ -171,7 +171,7 @@ Apple documents the selection controls in [Manage availability for your app](htt
 
 ### What's New for 1.2.1
 
-Draft for the owner's approval:
+The owner approved this text on 2026-11-25:
 
 ```text
 - Book Wall is drawn a new way, so books fall, slide out, and open more smoothly.
