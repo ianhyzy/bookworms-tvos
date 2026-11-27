@@ -4,9 +4,9 @@
 
 Bookworms for Apple TV is a beautiful app that helps make e-reading more social IRL.
 
-Bookworms displays your digital library and reading activity on the big screen. In leiu of a bookshelf guests can snoop the spines of, they can look at your TV when it's not in use.
+Bookworms displays your digital library and reading activity on the big screen. In lieu of a bookshelf guests can snoop the spines of, they can look at your TV when it's not in use.
 
-Bookworms also supports comparing your reading activity and history with a user your follow on Hardcover, so you can compare each other's top rated reads, book reviews, and ~~argue~~ talk about your reading tastes.
+Bookworms also supports comparing your reading activity and history with a user you follow on Hardcover, so you can compare each other's top rated reads, book reviews, and ~~argue~~ talk about your reading tastes.
 
 Currently, Bookworms can pull data from Hardcover and Calibre Web Automated.
 
