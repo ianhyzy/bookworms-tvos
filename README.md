@@ -1,6 +1,6 @@
 # Bookworms for Apple TV
 
-[![Download on the App Store for Apple TV](https://img.shields.io/badge/App_Store-Apple_TV-0D96F6?style=for-the-badge&logo=apple&logoColor=white)](https://apps.apple.com/us/app/bookworms-ebook-display/id6813137450)
+<a href="https://apps.apple.com/us/app/bookworms-more-social-reading/id6832390609"><img src="badges/app-store.svg" alt="Download on the App Store" height="40"></a> <a href="https://apps.apple.com/us/app/bookworms-more-social-reading/id6832390609"><img src="badges/mac-app-store.svg" alt="Download on the Mac App Store" height="40"></a> <a href="https://apps.apple.com/us/app/bookworms-ebook-display/id6813137450"><img src="badges/apple-tv.svg" alt="Download on Apple TV" height="40"></a>
 
 Bookworms for Apple TV is a beautiful app that helps make e-reading more social IRL.
 
